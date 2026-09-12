@@ -100,26 +100,36 @@ func (p *MicrosandboxProvider) Available(ctx context.Context) error {
 
 // SetNetworkPolicy implements [Networked].
 //
-// It currently refuses every policy except [NetworkAllowAll]. microsandbox can
-// enforce a domain allow-list — it is the only backend that can — but this
-// adapter does not yet pass the policy to `msb`, and a stored policy that
-// nothing applies is worse than no policy at all: the operator believes egress
-// is blocked while it is wide open.
+// Every mode is enforced. msb applies a network policy when a sandbox is
+// created, and this adapter passes the configured policy through as create
+// flags:
 //
-// Wiring this up is T-013. Until then the refusal is the honest answer, and it
-// is loud rather than silent.
+//	allow-all  → no flags, the msb default: egress to the public internet
+//	deny-all   → --no-net
+//	allow-list → --no-net --net-rule allow@<host> for each host
+//
+// A policy is a property of the sandbox, not of the handle. `msb modify`
+// cannot change network rules, so a sandbox that already exists keeps the
+// policy it was created with. Open verifies the live policy still matches
+// the configured one and returns [ErrPolicyMismatch] when it does not:
+// an operator who tightened the policy and restarted the host must hear
+// that the old sandbox keeps the old rules, not find out from a leak.
 func (p *MicrosandboxProvider) SetNetworkPolicy(policy NetworkPolicy) error {
 	switch policy.Mode {
-	case NetworkAllowAll:
-		p.policy = policy
-		return nil
-	case NetworkDenyAll, NetworkAllowList:
-		return fmt.Errorf("%w: the microsandbox adapter does not yet apply a "+
-			"network policy to msb (see docs/TASKS.md T-013); use the docker "+
-			"backend for deny-all", ErrPolicyUnsupported)
+	case NetworkAllowAll, NetworkDenyAll:
+	case NetworkAllowList:
+		for _, host := range policy.Allow {
+			if strings.TrimSpace(host) == "" {
+				return fmt.Errorf("bonnie: sandbox: network policy allow-list has an empty host")
+			}
+		}
 	default:
 		return fmt.Errorf("%w: unknown mode %q", ErrPolicyUnsupported, policy.Mode)
 	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.policy = policy
+	return nil
 }
 
 // Open implements [Provider].
@@ -183,9 +193,21 @@ func (p *MicrosandboxProvider) Open(ctx context.Context, runID string) (Sandbox,
 func (p *MicrosandboxProvider) ensureRunning(ctx context.Context, sb *cliSandbox) error {
 	if p.exists(ctx, sb.name) {
 		p.start(ctx, sb.name)
+		// After start, not before: `msb inspect` reports no active config
+		// for a stopped sandbox, so the policy check needs the sandbox up.
+		// On a mismatch Open fails with the sandbox running, which is the
+		// same leftover every Open failure leaves; reclaiming those is
+		// T-012's reconciler.
+		if err := p.checkPolicy(ctx, sb); err != nil {
+			return err
+		}
 		return p.ensureWorkspace(ctx, sb)
 	}
 
+	net, err := netArgs(p.policy)
+	if err != nil {
+		return err
+	}
 	args := []string{"create", "--name", sb.name}
 	if p.memory > 0 {
 		args = append(args, "--memory", fmt.Sprint(p.memory))
@@ -193,6 +215,7 @@ func (p *MicrosandboxProvider) ensureRunning(ctx context.Context, sb *cliSandbox
 	if p.cpus > 0 {
 		args = append(args, "--cpus", fmt.Sprint(p.cpus))
 	}
+	args = append(args, net...)
 	args = append(args, p.image)
 
 	if _, stderr, code, err := runCLI(ctx, nil, p.bin, args...); err != nil || code != 0 {
@@ -211,6 +234,147 @@ func (p *MicrosandboxProvider) ensureRunning(ctx context.Context, sb *cliSandbox
 // promise. Only the guest command that follows proves the sandbox is usable.
 func (p *MicrosandboxProvider) start(ctx context.Context, name string) {
 	_, _, _, _ = runCLI(ctx, nil, p.bin, "start", name)
+}
+
+// netArgs maps a policy onto the create flags msb understands.
+//
+// `--no-net` is sugar for a default-deny policy, and msb composes it with
+// `--net-rule` entries into an allow-list: without rules the guest has no
+// reachability at all, with rules only the listed hosts. Both behaviors were
+// verified against msb 0.6.18, not read from documentation alone.
+func netArgs(policy NetworkPolicy) ([]string, error) {
+	switch policy.Mode {
+	case NetworkAllowAll:
+		return nil, nil
+	case NetworkDenyAll:
+		return []string{"--no-net"}, nil
+	case NetworkAllowList:
+		args := []string{"--no-net"}
+		for _, host := range policy.Allow {
+			args = append(args, "--net-rule", "allow@"+host)
+		}
+		return args, nil
+	default:
+		return nil, fmt.Errorf("%w: unknown mode %q", ErrPolicyUnsupported, policy.Mode)
+	}
+}
+
+// msbRule is one network rule as `msb inspect --format json` reports it.
+type msbRule struct {
+	Action      string `json:"action"`
+	Direction   string `json:"direction"`
+	Destination struct {
+		Domain       string `json:"domain"`
+		DomainSuffix string `json:"domain_suffix"`
+	} `json:"destination"`
+}
+
+// msbNetworkPolicy is the policy object under `active_config.network.policy`.
+// A null policy means no policy was set at create time, which is the msb
+// default: egress to the public internet.
+type msbNetworkPolicy struct {
+	DefaultEgress string    `json:"default_egress"`
+	Rules         []msbRule `json:"rules"`
+}
+
+// checkPolicy verifies that an existing sandbox carries the configured
+// network policy.
+//
+// The sandbox must be running: a stopped one reports no active config, so
+// this runs after start. When the policy differs from the configured one the
+// error says what to do, because the two remedies are both destructive in
+// different ways — restore the old policy, or delete the sandbox and lose
+// the workspace.
+func (p *MicrosandboxProvider) checkPolicy(ctx context.Context, sb *cliSandbox) error {
+	stdout, stderr, code, err := runCLI(ctx, nil, p.bin, "inspect", "--format", "json", sb.name)
+	if err != nil {
+		return err
+	}
+	if code != 0 {
+		return fmt.Errorf("bonnie: sandbox: inspect %s: %s", sb.name, firstLine(stderr))
+	}
+	var report struct {
+		ActiveConfig struct {
+			Network struct {
+				Policy *msbNetworkPolicy `json:"policy"`
+			} `json:"network"`
+		} `json:"active_config"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &report); err != nil {
+		return fmt.Errorf("bonnie: sandbox: inspect %s: %w", sb.name, err)
+	}
+	if policyMatches(report.ActiveConfig.Network.Policy, p.policy) {
+		return nil
+	}
+	return fmt.Errorf("%w: %s was created with a different network policy and "+
+		"msb fixes policy at create time; restore the matching policy, or "+
+		"delete the sandbox and lose the workspace",
+		ErrPolicyMismatch, sb.name)
+}
+
+// policyMatches reports whether the policy msb reports for a sandbox is the
+// one this provider would create it with.
+//
+// The shapes below are the ones `msb inspect --format json` produces for each
+// mode, recorded from msb 0.6.18:
+//
+//	allow-all  → policy is null
+//	deny-all   → default_egress "deny" and no rules
+//	allow-list → default_egress "deny" and one egress allow rule per host;
+//	             a plain domain reports {"domain": host}, a wildcard
+//	             (*.example.com) reports {"domain_suffix": "example.com"}
+func policyMatches(got *msbNetworkPolicy, want NetworkPolicy) bool {
+	switch want.Mode {
+	case NetworkAllowAll:
+		return got == nil
+	case NetworkDenyAll:
+		return got != nil && strings.EqualFold(got.DefaultEgress, "deny") && len(got.Rules) == 0
+	case NetworkAllowList:
+		if got == nil || !strings.EqualFold(got.DefaultEgress, "deny") || len(got.Rules) != len(want.Allow) {
+			return false
+		}
+		balance := make(map[string]int, len(want.Allow))
+		for _, host := range want.Allow {
+			balance[allowKey(host)]++
+		}
+		for _, r := range got.Rules {
+			if r.Action != "allow" || r.Direction != "egress" {
+				return false
+			}
+			var key string
+			switch {
+			case r.Destination.Domain != "":
+				key = "domain=" + strings.ToLower(r.Destination.Domain)
+			case r.Destination.DomainSuffix != "":
+				key = "suffix=" + strings.ToLower(r.Destination.DomainSuffix)
+			default:
+				return false
+			}
+			balance[key]--
+			if balance[key] < 0 {
+				return false
+			}
+		}
+		for _, n := range balance {
+			if n != 0 {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
+}
+
+// allowKey normalises one Allow entry to the comparison key. A plain domain
+// and a wildcard are different rules in msb — example.com is a domain rule,
+// *.example.com is a suffix rule — so the two must not collide.
+func allowKey(host string) string {
+	h := strings.ToLower(strings.TrimSpace(host))
+	if rest, ok := strings.CutPrefix(h, "*."); ok {
+		return "suffix=" + rest
+	}
+	return "domain=" + h
 }
 
 // ensureWorkspace creates the workspace directory inside the guest.

@@ -263,18 +263,25 @@ func TestLiveParkedRunHoldsNoCompute(t *testing.T) {
 		t.Fatalf("state = %q", run.State)
 	}
 
-	// No tool ran, so no container should exist for this run.
-	d, ok := provider.(*DockerProvider)
-	if !ok {
-		t.Skip("container check needs the docker provider")
-	}
-	state, err := d.inspectState(ctx, safeName("bonnie-", runID))
-	if err != nil {
-		t.Fatalf("inspect: %v", err)
-	}
-	if state != "" {
-		t.Fatalf("a container exists (%s) for a run that never called a tool: "+
-			"the sandbox is not opening lazily", state)
+	// No tool ran, so no sandbox should exist for this run.
+	name := safeName("bonnie-", runID)
+	switch d := provider.(type) {
+	case *DockerProvider:
+		state, err := d.inspectState(ctx, name)
+		if err != nil {
+			t.Fatalf("inspect: %v", err)
+		}
+		if state != "" {
+			t.Fatalf("a container exists (%s) for a run that never called a tool: "+
+				"the sandbox is not opening lazily", state)
+		}
+	case *MicrosandboxProvider:
+		if d.exists(ctx, name) {
+			t.Fatalf("a microVM exists (%s) for a run that never called a tool: "+
+				"the sandbox is not opening lazily", name)
+		}
+	default:
+		t.Skip("sandbox existence check needs a CLI provider")
 	}
 }
 

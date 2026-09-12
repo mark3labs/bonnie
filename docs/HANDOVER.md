@@ -234,7 +234,8 @@ was verified about Kit and where, so a changed assumption is findable.
 
 - Sandboxing is opt-in. Without it, tool calls run as the host process.
 - Docker is namespaces, not a guest kernel.
-- microsandbox is unverified and cannot apply a network policy yet.
+- microsandbox is verified on Linux/KVM only, and its network policy is fixed
+  at create time; a reattach under a different policy fails loudly.
 - The HTTP channel carries a `Principal` and does not verify it.
 - One process must own a run. The file journal takes no cross-process lock.
 - Events are not durable; the journal is the record of truth.

@@ -277,9 +277,11 @@ run inside a container rooted at `/workspace`.
 
 All three drive a CLI, so BONNIE stays a single static binary.
 
-> The microsandbox adapter is written but **has not been verified on real
-> hardware yet**, and it cannot apply a network policy. Use Docker when you
-> need `deny-all` today.
+> The microsandbox adapter is **verified on Linux with KVM** (`msb` 0.6.18,
+> all 18 conformance cases, network policies enforced with real egress). It
+> has not been run on macOS with Apple Silicon, and its network policy is
+> fixed at create time: reattaching under a different policy fails with
+> `ErrPolicyMismatch` rather than silently using the old rules.
 
 Lock down the network:
 
@@ -475,8 +477,10 @@ Stated plainly, because the failure modes are not obvious:
 
 - **Sandboxing is opt-in.** Without it, tool calls run as your process.
 - **Docker is namespaces, not a kernel.** Use microsandbox for hostile code.
-- **microsandbox is unverified** — written but never run, and it cannot apply a
-  network policy yet, so it refuses one rather than pretending.
+- **microsandbox is verified on Linux/KVM only** — not on macOS with Apple
+  Silicon. Every network policy mode is enforced, but the policy is fixed at
+  create time; reattaching under a different policy fails with
+  `ErrPolicyMismatch`.
 - **Sandbox egress is open** unless you set a policy.
 - **No auth verification.** The HTTP channel carries a `Principal`; it does not
   check one. Authenticate in front of it.

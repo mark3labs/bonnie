@@ -38,7 +38,7 @@ bonnie serve --sandbox docker --sandbox-image python:3.12-slim
 |---|---|---|---|---|
 | `Local()` | **none** | — | 0 | none |
 | `Docker()` | container namespaces | Docker | 0 | allow-all, deny-all |
-| `Microsandbox()` | microVM, guest kernel | `msb` | 0 | allow-all only — see below |
+| `Microsandbox()` | microVM, guest kernel | `msb` | 0 | allow-all, deny-all, allow-list |
 
 All three are in the main module and add no dependency: they drive a CLI
 through `os/exec`.
@@ -46,11 +46,14 @@ through `os/exec`.
 `Local()` provides **no isolation**. It exists so a developer can work without
 Docker and so the seam is testable with no daemon. Do not use it in production.
 
-> **microsandbox network policy is not wired up yet.** The runtime can enforce
-> a domain allow-list — it is the only backend that can — but this adapter
-> does not yet pass the policy to `msb`, so it **refuses** anything except
-> `allow-all` with `ErrPolicyUnsupported`. Use the Docker backend when you need
-> `deny-all` today. Tracked as T-013.
+> **microsandbox network policy is fixed at create time.** Every mode is
+> enforced — `--no-net` for deny-all, `--no-net --net-rule allow@<host>` for
+> an allow-list — and verified with real egress on Linux with KVM (msb
+> 0.6.18). But `msb modify` cannot change network rules, so a sandbox that
+> already exists keeps the policy it was created with. When a host
+> reconfigures its policy and reattaches, `Open` returns `ErrPolicyMismatch`
+> instead of silently running under the old rules. The operator then decides:
+> restore the matching policy, or delete the sandbox and lose the workspace.
 
 ### Choosing at runtime
 
@@ -135,8 +138,11 @@ policy, because the operator believes they are protected.
 
 BONNIE broke this rule once, in its own code. The microsandbox adapter used to
 accept `deny-all`, store it in a field, and never read that field again: the
-caller got a `nil` error and full network access. It now refuses. The rule
-applies to this repository exactly as much as to a third-party adapter.
+caller got a `nil` error and full network access. It was found while writing
+the docs, and the same rule now governs the reattach path: a sandbox that
+exists under a different policy than the host configured produces
+`ErrPolicyMismatch`, not a silent reattach. The rule applies to this
+repository exactly as much as to a third-party adapter.
 
 ## The exit-code problem
 
@@ -196,6 +202,12 @@ go test -race ./sandbox                      # local + any backend present
 go test -race -tags integration ./sandbox    # live model, needs a key
 ```
 
+The live suite runs against Docker by default. Set
+`BONNIE_TEST_SANDBOX=microsandbox` to run it inside microVMs; `local` is not
+on the menu because a backend that shares the host filesystem cannot test the
+isolation claims. `BONNIE_TEST_MODEL` overrides the model, and the suite skips
+— rather than fails — when the credential or the backend is missing.
+
 The live tests cover the claims that matter:
 
 | Test | Claim |
@@ -214,8 +226,10 @@ The live tests cover the claims that matter:
   pass with `msb` 0.6.18 on Linux with KVM (2026-09-12). It has not been run
   on macOS with Apple Silicon, and the live suite has not been run against it.
   See T-013.
-- **microsandbox cannot apply a network policy yet.** It refuses one rather
-  than pretending.
+- **microsandbox network policy is fixed at create time.** `msb modify`
+  cannot change network rules, so a reattached sandbox keeps its create-time
+  policy; `Open` reports a mismatch with `ErrPolicyMismatch` rather than
+  silently reattaching.
 - **Network is open by default.** Set a policy explicitly for untrusted work.
 - **No resource limits by default.** Pass `WithDockerMemory` or the
   microsandbox equivalents.

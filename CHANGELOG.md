@@ -16,6 +16,16 @@ yet, so everything under 0.1.0 is still unreleased until it is.
   `overlays.default`, and a `devShells.default` with Go 1.27, `golangci-lint`,
   `goreleaser`, and the microsandbox CLI
 - The `bonnie` Nix package wraps the binary so `msb` is on its PATH
+- microsandbox: every network policy mode is now enforced. `SetNetworkPolicy`
+  maps `deny-all` to `msb create --no-net` and an allow-list to
+  `--net-rule allow@<host>`, verified with real egress. Previously every mode
+  except allow-all was refused with `ErrPolicyUnsupported`
+- `ErrPolicyMismatch`: `Open` returns it when an existing microsandbox
+  carries a different network policy than the host configured, because `msb`
+  fixes policy at create time and a silent reattach would run under the old
+  rules
+- The live sandbox suite can run against any isolated backend:
+  `BONNIE_TEST_SANDBOX=microsandbox` selects it (Docker remains the default)
 
 ### Fixed
 

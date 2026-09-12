@@ -215,32 +215,35 @@ defects. What remains is the network policy, the live suite, and macOS.
      content and a missing path the way the adapter assumes.
    - `exists()` matches a name in `msb ps --format json`. Confirm the field
      shape, and that a name match cannot produce a false positive.
-5. Implement `SetNetworkPolicy` for real. The provider currently **accepts**
-   an allow-list and stores it, but nothing applies it to a sandbox. Either
-   wire it to the `msb` network configuration or make it return
-   `ErrPolicyUnsupported` until it is wired. Accepting a policy and not
-   enforcing it is the exact failure the honesty rule exists to prevent.
+5. Implement `SetNetworkPolicy` for real. **Done.** The provider maps every
+   mode onto `msb create` flags (`--no-net`, `--net-rule allow@<host>`) and
+   verifies on reattach that an existing sandbox still carries the configured
+   policy, returning `ErrPolicyMismatch` otherwise, because `msb modify`
+   cannot change network rules. Enforcement is proven with real egress in
+   `TestMicrosandboxEnforcesNetworkPolicy`.
 
 ### Acceptance criteria
 
 - [x] All conformance cases pass for `microsandbox`, none skipped
       (18/18, Linux + KVM, `msb` 0.6.18, 2026-09-12)
 - [ ] The live sandbox suite passes against microsandbox
+      (selectable with `BONNIE_TEST_SANDBOX=microsandbox`; attempted twice,
+      blocked by provider quota — Anthropic 429 on the shared workspace, and
+      the OpenAI key is a ChatGPT/Codex account that rejects `gpt-4.1`)
 - [x] `msb cp` confirmed for binary content and missing paths
       (`TestBinaryFileRoundTrip`, `TestReadMissingFile`)
 - [x] `SetNetworkPolicy` either enforces the policy or refuses it
-      (it refuses; enforcing it is still open)
+      (it enforces every mode; the refusal test was replaced by
+      `TestMicrosandboxEnforcesNetworkPolicy`, per its own instruction)
 - [x] `docs/SANDBOX.md` records what was verified and on what hardware
 - [ ] Verified on macOS with Apple Silicon
-- [ ] `SetNetworkPolicy` actually enforces an allow-list
+- [x] `SetNetworkPolicy` actually enforces an allow-list
+      (real egress: the listed host answers, an unlisted one does not)
 
 ### Watch for
 
-The remaining work is the network policy. Until it is wired, microsandbox has
-no advantage over Docker for egress control, which is the main reason to
-choose it.
-
-Do not let the docs imply the live path or macOS is proven. Neither has run.
+What remains is the live suite against microsandbox and macOS on Apple
+Silicon. Neither has run, so do not let the docs imply either is proven.
 
 ---
 

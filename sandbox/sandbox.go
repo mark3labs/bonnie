@@ -58,6 +58,12 @@ var (
 	// network policy. It is never returned for a policy a backend can
 	// enforce more strictly than asked.
 	ErrPolicyUnsupported = errors.New("bonnie: sandbox cannot enforce this network policy")
+
+	// ErrPolicyMismatch means a sandbox already exists with a different
+	// network policy than the one configured now. Network policy is fixed at
+	// create time in every CLI backend, so the operator must decide: restore
+	// the matching policy, or delete the sandbox and lose the workspace.
+	ErrPolicyMismatch = errors.New("bonnie: sandbox exists with a different network policy")
 )
 
 // Command is one command to run inside a sandbox.

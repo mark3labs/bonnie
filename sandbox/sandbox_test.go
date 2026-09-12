@@ -2,7 +2,9 @@ package sandbox
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -269,29 +271,164 @@ func TestDockerRefusesAllowList(t *testing.T) {
 	}
 }
 
-// TestMicrosandboxRefusesUnenforcedPolicy is the honesty rule applied to
-// BONNIE's own adapter. microsandbox is the one backend that *can* enforce a
-// domain allow-list, but this adapter does not yet pass the policy to msb. An
-// earlier version stored the policy and returned nil, so an operator who asked
-// for deny-all got a success and full egress.
-//
-// Delete this test when T-013 wires the policy up — and replace it with one
-// that proves egress is actually blocked.
-func TestMicrosandboxRefusesUnenforcedPolicy(t *testing.T) {
+// TestMicrosandboxAcceptsEveryPolicy pins the acceptance side of the
+// honesty contract. The adapter now enforces every mode, so it must accept
+// every mode; the enforcement side is TestMicrosandboxEnforcesNetworkPolicy.
+func TestMicrosandboxAcceptsEveryPolicy(t *testing.T) {
 	t.Parallel()
 	p := Microsandbox()
 
-	if err := p.SetNetworkPolicy(NetworkPolicy{Mode: NetworkAllowAll}); err != nil {
-		t.Fatalf("allow-all is the default and must be accepted: %v", err)
-	}
-	for _, mode := range []NetworkMode{NetworkDenyAll, NetworkAllowList} {
-		err := p.SetNetworkPolicy(NetworkPolicy{Mode: mode})
-		if !errors.Is(err, ErrPolicyUnsupported) {
-			t.Fatalf("mode %q returned %v, want ErrPolicyUnsupported: accepting a "+
-				"policy this adapter cannot apply tells an operator they are "+
-				"protected when they are not", mode, err)
+	for _, mode := range []NetworkMode{NetworkAllowAll, NetworkDenyAll, NetworkAllowList} {
+		policy := NetworkPolicy{Mode: mode}
+		if mode == NetworkAllowList {
+			policy.Allow = []string{"example.com", "*.github.com"}
+		}
+		if err := p.SetNetworkPolicy(policy); err != nil {
+			t.Fatalf("mode %q must be accepted: %v", mode, err)
 		}
 	}
+	// An empty host in an allow-list is a caller bug, not a policy the
+	// backend could apply, so it is rejected before any sandbox exists.
+	err := p.SetNetworkPolicy(NetworkPolicy{Mode: NetworkAllowList, Allow: []string{"example.com", " "}})
+	if !strings.Contains(err.Error(), "empty host") {
+		t.Fatalf("err = %v, want empty-host rejection", err)
+	}
+	if err := p.SetNetworkPolicy(NetworkPolicy{Mode: NetworkMode("nope")}); !errors.Is(err, ErrPolicyUnsupported) {
+		t.Fatalf("err = %v, want ErrPolicyUnsupported", err)
+	}
+}
+
+// TestNetArgs pins the create flags each policy maps to. These flags are the
+// enforcement itself, so the mapping is tested on its own, cheaply, on every
+// machine — not only where msb is installed.
+func TestNetArgs(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		policy NetworkPolicy
+		want   []string
+	}{
+		{
+			name:   "allow-all adds no flags",
+			policy: NetworkPolicy{Mode: NetworkAllowAll},
+			want:   nil,
+		},
+		{
+			name:   "deny-all",
+			policy: NetworkPolicy{Mode: NetworkDenyAll},
+			want:   []string{"--no-net"},
+		},
+		{
+			name: "allow-list keeps no-net and adds a rule per host",
+			policy: NetworkPolicy{
+				Mode:  NetworkAllowList,
+				Allow: []string{"example.com", "*.github.com"},
+			},
+			want: []string{"--no-net", "--net-rule", "allow@example.com",
+				"--net-rule", "allow@*.github.com"},
+		},
+		{
+			name:   "an allow-list with no hosts permits nothing",
+			policy: NetworkPolicy{Mode: NetworkAllowList},
+			want:   []string{"--no-net"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := netArgs(tc.policy)
+			if err != nil {
+				t.Fatalf("netArgs: %v", err)
+			}
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("netArgs = %v, want %v", got, tc.want)
+			}
+		})
+	}
+	if _, err := netArgs(NetworkPolicy{Mode: NetworkMode("nope")}); !errors.Is(err, ErrPolicyUnsupported) {
+		t.Fatal("an unknown mode must be refused, not silently treated as allow-all")
+	}
+}
+
+// TestPolicyMatches pins the shapes `msb inspect --format json` produces for
+// each policy. The fixtures below are recorded output from msb 0.6.18, not
+// documentation paraphrase: if msb changes the shape, this test says so and
+// checkPolicy is the code to revisit.
+func TestPolicyMatches(t *testing.T) {
+	t.Parallel()
+
+	// From a sandbox created with no network flags.
+	const nullPolicy = `null`
+	// From `msb create --no-net`.
+	const denyAll = `{"default_egress":"deny","default_ingress":"deny","rules":[]}`
+	// From `msb create --no-net --net-rule allow@example.com`.
+	const allowPlain = `{"default_egress":"deny","default_ingress":"deny","rules":[` +
+		`{"action":"allow","destination":{"domain":"example.com"},` +
+		`"direction":"egress","ports":[],"protocols":[]}]}`
+	// From `msb create --no-net --net-rule 'allow@*.github.com'`.
+	const allowWildcard = `{"default_egress":"deny","default_ingress":"deny","rules":[` +
+		`{"action":"allow","destination":{"domain_suffix":"github.com"},` +
+		`"direction":"egress","ports":[],"protocols":[]}]}`
+
+	decode := func(t *testing.T, raw string) *msbNetworkPolicy {
+		t.Helper()
+		var got *msbNetworkPolicy
+		if err := json.Unmarshal([]byte(raw), &got); err != nil {
+			t.Fatalf("fixture does not decode: %v", err)
+		}
+		return got
+	}
+
+	allowList := func(hosts ...string) NetworkPolicy {
+		return NetworkPolicy{Mode: NetworkAllowList, Allow: hosts}
+	}
+
+	t.Run("allow-all matches only a null policy", func(t *testing.T) {
+		t.Parallel()
+		if !policyMatches(decode(t, nullPolicy), NetworkPolicy{Mode: NetworkAllowAll}) {
+			t.Fatal("a sandbox created with no flags must match allow-all")
+		}
+		if policyMatches(decode(t, denyAll), NetworkPolicy{Mode: NetworkAllowAll}) {
+			t.Fatal("a deny-all sandbox must not pass as allow-all")
+		}
+	})
+
+	t.Run("deny-all matches empty rules and deny egress", func(t *testing.T) {
+		t.Parallel()
+		if !policyMatches(decode(t, denyAll), NetworkPolicy{Mode: NetworkDenyAll}) {
+			t.Fatal("the real deny-all shape must match")
+		}
+		if policyMatches(decode(t, allowPlain), NetworkPolicy{Mode: NetworkDenyAll}) {
+			t.Fatal("a sandbox with rules must not pass as deny-all")
+		}
+		if policyMatches(decode(t, nullPolicy), NetworkPolicy{Mode: NetworkDenyAll}) {
+			t.Fatal("a default sandbox must not pass as deny-all")
+		}
+	})
+
+	t.Run("allow-list matches the same host set", func(t *testing.T) {
+		t.Parallel()
+		if !policyMatches(decode(t, allowPlain), allowList("example.com")) {
+			t.Fatal("the real plain-domain shape must match")
+		}
+		if !policyMatches(decode(t, allowWildcard), allowList("*.github.com")) {
+			t.Fatal("the real wildcard shape must match")
+		}
+		// A wildcard and a plain domain are different rules in msb, so one
+		// must never satisfy the other.
+		if policyMatches(decode(t, allowWildcard), allowList("github.com")) {
+			t.Fatal("a suffix rule must not pass as a plain-domain allow")
+		}
+		// Same count, different hosts.
+		if policyMatches(decode(t, allowPlain), allowList("github.com")) {
+			t.Fatal("a different host must not pass")
+		}
+		// Fewer rules than hosts.
+		if policyMatches(decode(t, allowPlain), allowList("example.com", "github.com")) {
+			t.Fatal("a missing host must not pass")
+		}
+	})
 }
 
 // TestSelectNeverFallsBackToLocal is a security property, not a convenience.
@@ -426,5 +563,106 @@ func TestMsbMissingPathSeparatesAbsentFileFromAbsentSandbox(t *testing.T) {
 	// A failure naming a different path is not this path going missing.
 	if msbMissingPath("error: stat /workspace/other.txt\n", path) {
 		t.Fatal("a failure on another path was read as this one missing")
+	}
+}
+
+// requireMsb returns the microsandbox provider and skips when msb cannot run
+// here. The policy tests below need real hardware: enforcement is a property
+// of a running microVM, not of the argv that requests it.
+func requireMsb(t *testing.T) *MicrosandboxProvider {
+	t.Helper()
+	p := Microsandbox()
+	if err := p.Available(context.Background()); err != nil {
+		t.Skipf("microsandbox unavailable: %v", err)
+	}
+	return p
+}
+
+// TestMicrosandboxEnforcesNetworkPolicy proves the enforcement claim with real
+// egress, on real hardware. It replaced a test that proved only the refusal.
+//
+// A control sandbox runs first: when this host has no egress at all, no
+// policy can be verified here, and the test skips rather than report a block
+// it did not see.
+func TestMicrosandboxEnforcesNetworkPolicy(t *testing.T) {
+	t.Parallel()
+	p := requireMsb(t)
+	ctx := testCtx(t)
+
+	fetch := func(sb Sandbox, url string) *Result {
+		t.Helper()
+		res, err := sb.Exec(ctx, Shell("wget -q -T 10 -O /dev/null "+url))
+		if err != nil {
+			t.Fatalf("exec %s: %v", url, err)
+		}
+		return res
+	}
+
+	// Control: the default policy must reach the internet.
+	control := openSandbox(t, p, "net-control")
+	if res := fetch(control, "http://example.com"); res.ExitCode != 0 {
+		t.Skipf("no egress from this host through msb (exit %d, stderr %q): "+
+			"cannot verify policy enforcement here", res.ExitCode, res.Stderr)
+	}
+
+	// deny-all: no reachability at all.
+	deny := Microsandbox()
+	if err := deny.SetNetworkPolicy(NetworkPolicy{Mode: NetworkDenyAll}); err != nil {
+		t.Fatalf("SetNetworkPolicy deny-all: %v", err)
+	}
+	denied := openSandbox(t, deny, "net-deny")
+	if res := fetch(denied, "http://example.com"); res.ExitCode == 0 {
+		t.Fatal("a deny-all sandbox reached the internet: the policy is not enforced")
+	}
+
+	// allow-list: the listed host answers, an unlisted one does not.
+	allow := Microsandbox()
+	if err := allow.SetNetworkPolicy(NetworkPolicy{
+		Mode:  NetworkAllowList,
+		Allow: []string{"example.com"},
+	}); err != nil {
+		t.Fatalf("SetNetworkPolicy allow-list: %v", err)
+	}
+	allowed := openSandbox(t, allow, "net-allow")
+	if res := fetch(allowed, "http://example.com"); res.ExitCode != 0 {
+		t.Fatalf("the allowed host must be reachable (exit %d, stderr %q)",
+			res.ExitCode, res.Stderr)
+	}
+	if res := fetch(allowed, "http://github.com"); res.ExitCode == 0 {
+		t.Fatal("the sandbox reached a host that is not on the allow-list")
+	}
+}
+
+// TestMicrosandboxRefusesReattachPolicyMismatch covers the one way a policy
+// can silently stop applying: the sandbox already exists, and network policy
+// is fixed at create time. A host that reconfigured its policy must hear
+// about the divergence, not reattach as if nothing differed.
+func TestMicrosandboxRefusesReattachPolicyMismatch(t *testing.T) {
+	t.Parallel()
+	requireMsb(t)
+	ctx := testCtx(t)
+
+	// Create the sandbox under a strict policy.
+	strict := Microsandbox()
+	if err := strict.SetNetworkPolicy(NetworkPolicy{Mode: NetworkDenyAll}); err != nil {
+		t.Fatalf("SetNetworkPolicy: %v", err)
+	}
+	openSandbox(t, strict, "net-mismatch") // cleanup deletes with the same policy
+
+	// A host configured allow-all now must not silently reattach to a
+	// sandbox that was created deny-all.
+	open := Microsandbox()
+	if _, err := open.Open(ctx, "net-mismatch"); !errors.Is(err, ErrPolicyMismatch) {
+		t.Fatalf("err = %v, want ErrPolicyMismatch: reattaching under a different "+
+			"policy must be loud, not silent", err)
+	}
+
+	// The same policy reattaches without complaint.
+	same := Microsandbox()
+	if err := same.SetNetworkPolicy(NetworkPolicy{Mode: NetworkDenyAll}); err != nil {
+		t.Fatalf("SetNetworkPolicy: %v", err)
+	}
+	if _, err := same.Open(ctx, "net-mismatch"); err != nil {
+		t.Fatalf("reattach with the same policy must work: %v", err)
 	}
 }

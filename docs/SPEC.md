@@ -390,11 +390,32 @@ question this section raised.
 
 Still unverified, so T-013 stays open:
 
-- The live sandbox suite (`-tags integration`) has not been run against
-  microsandbox.
-- `SetNetworkPolicy` still refuses every policy except allow-all. Wiring it to
-  `msb` for real is the remaining work.
+- The live sandbox suite (`-tags integration`) has not completed against
+  microsandbox. It was attempted twice on 2026-09-12 and blocked by
+  environment, not code: the Anthropic account returned 429 on every agent
+  call (a single small curl succeeded, so the limit sits on the shared
+  workspace, not the key), and the available OpenAI key is a ChatGPT/Codex
+  account that rejects `gpt-4.1`. Run it with
+  `BONNIE_TEST_SANDBOX=microsandbox` when quota allows, and record the result
+  here.
 - Verified on Linux/KVM only, not macOS on Apple Silicon.
+
+**Update, same day: the network policy is wired and enforced.** `msb create`
+carries `--no-net` and `--net-rule allow@<host>`, so `SetNetworkPolicy` maps
+every mode onto create flags instead of refusing. Enforcement was verified
+with real egress (`TestMicrosandboxEnforcesNetworkPolicy`): a control sandbox
+reaches the internet, a deny-all sandbox does not, and an allow-list sandbox
+reaches the listed host and nothing else.
+
+One constraint the wiring exposed: `msb modify` cannot change network rules,
+so policy is fixed at create time. A host that reconfigures its policy and
+reattaches to an existing sandbox would silently run under the old rules —
+the honesty trap again. `Open` therefore inspects the live policy
+(`active_config.network.policy`) and returns the new `ErrPolicyMismatch`
+when it differs from the configured one (`TestMicrosandboxRefusesReattachPolicyMismatch`).
+The inspect shapes the comparison relies on are pinned as fixtures in
+`TestPolicyMatches`, recorded from msb 0.6.18, so an msb upgrade that changes
+them fails a test instead of breaking reattach quietly.
 
 A related bug was found and fixed while writing this section originally: the
 adapter accepted `deny-all` and an allow-list, stored the policy in a field,
