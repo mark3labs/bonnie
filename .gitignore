@@ -11,6 +11,9 @@
 /.direnv/
 /.env
 
+# go-task cache
+/.task/
+
 # Go workspace — BONNIE and Kit are separate repos. Keep go.work out of both;
 # put it in the parent directory that holds them. CI runs with GOWORK=off so
 # it builds against the Kit version pinned in go.mod.

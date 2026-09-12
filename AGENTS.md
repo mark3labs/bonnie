@@ -12,6 +12,7 @@ If you learn something that contradicts the spec, **correct the spec in the
 same commit**. A stale spec is worse than none.
 
 ## Build/Test Commands
+- **Shortcut**: `task` — `task check` (fmt, lint, test), `task ci` (CI parity, GOWORK=off), `task dev -- serve` (Taskfile.yml mirrors everything below)
 - **Build**: `go build ./...`
 - **Test all**: `go test -race ./...`
 - **Test single**: `go test -race ./runtime -run TestResumeAcrossProcessBoundary`

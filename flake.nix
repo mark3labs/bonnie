@@ -96,6 +96,7 @@
               # The commands AGENTS.md documents.
               pkgs.golangci-lint
               pkgs.goreleaser
+              pkgs.go-task # task lint, task dev -- serve, ...
 
               # The sandbox backend BONNIE drives as a subprocess.
               microsandbox

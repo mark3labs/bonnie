@@ -1,0 +1,163 @@
+version: "3"
+
+vars:
+  BINARY: bonnie
+  OUTPUT_DIR: output
+  BUILD_FLAGS: -o {{.OUTPUT_DIR}}/{{.BINARY}}
+  # Same shape goreleaser injects at release. In a dev build this makes
+  # `bonnie --version` report the tag and dirty state instead of nothing.
+  VERSION:
+    sh: git describe --tags --always --dirty 2>/dev/null || echo dev
+  LDFLAGS: -s -w -X main.version={{.VERSION}}
+
+tasks:
+  default:
+    desc: Show available tasks
+    cmds:
+      - task --list-all
+
+  # -----------------------------------------------------------------------
+  # Build
+  # -----------------------------------------------------------------------
+
+  build:
+    desc: Build the bonnie binary
+    cmds:
+      - go build {{.BUILD_FLAGS}} -ldflags "{{.LDFLAGS}}" ./cmd/bonnie
+    sources:
+      - "**/*.go"
+      - go.mod
+      - go.sum
+    generates:
+      - "{{.OUTPUT_DIR}}/{{.BINARY}}"
+
+  install:
+    desc: Install bonnie to $GOPATH/bin
+    cmds:
+      - go install -ldflags "{{.LDFLAGS}}" ./cmd/bonnie
+
+  # -----------------------------------------------------------------------
+  # Run
+  # -----------------------------------------------------------------------
+
+  dev:
+    desc: "Build and run the CLI (usage: task dev -- serve --journal .bonnie)"
+    cmds:
+      - task: build
+      - "{{.OUTPUT_DIR}}/{{.BINARY}} {{.CLI_ARGS}}"
+
+  serve:
+    desc: "Build and start bonnie serve (usage: task serve -- --addr :8080)"
+    cmds:
+      - task: build
+      - "{{.OUTPUT_DIR}}/{{.BINARY}} serve {{.CLI_ARGS}}"
+
+  # -----------------------------------------------------------------------
+  # Test
+  # -----------------------------------------------------------------------
+
+  test:
+    desc: Run all tests with race detector
+    cmds:
+      - go test -race ./...
+
+  test-v:
+    desc: Run all tests (verbose)
+    cmds:
+      - go test -race -v ./...
+
+  test-pkg:
+    desc: "Run tests for a specific package (usage: task test-pkg -- ./runtime)"
+    cmds:
+      - go test -race -v {{.CLI_ARGS}}
+
+  test-run:
+    desc: "Run a single test by name (usage: task test-run -- TestResumeAcrossProcessBoundary)"
+    cmds:
+      - go test -race -v ./... -run {{.CLI_ARGS}}
+
+  # The live suites skip cleanly without a provider key, and they must skip,
+  # never fail — a CI-less machine has to be able to run everything else.
+  test-live:
+    desc: "Run the integration-tagged tests against a live model (needs a provider key)"
+    cmds:
+      - go test -race -tags integration ./runtime ./sandbox
+
+  test-cover:
+    desc: Run tests with a coverage report
+    cmds:
+      - mkdir -p {{.OUTPUT_DIR}}
+      - go test -race -coverprofile={{.OUTPUT_DIR}}/coverage.out ./...
+      - go tool cover -html={{.OUTPUT_DIR}}/coverage.out -o {{.OUTPUT_DIR}}/coverage.html
+      - echo "Coverage report written to {{.OUTPUT_DIR}}/coverage.html"
+
+  # -----------------------------------------------------------------------
+  # Code quality
+  # -----------------------------------------------------------------------
+
+  lint:
+    desc: Run golangci-lint and go vet
+    cmds:
+      - golangci-lint run ./...
+      - go vet ./...
+
+  fmt:
+    desc: Format all Go files
+    cmds:
+      - go fmt ./...
+
+  fmt-check:
+    desc: Check formatting (fails if files need formatting)
+    cmds:
+      # git ls-files, never `gofmt -l .` — the latter walks .direnv/ and
+      # reports vendored files. See docs/HANDOVER.md §9.
+      - test -z "$(gofmt -l $(git ls-files '*.go'))" || (echo "Files need formatting:" && gofmt -l $(git ls-files '*.go') && exit 1)
+
+  tidy:
+    desc: Tidy go.mod and go.sum
+    cmds:
+      - go mod tidy
+
+  check:
+    desc: Run the quality loop a developer actually wants (fmt, lint, test)
+    cmds:
+      - task: fmt-check
+      - task: lint
+      - task: test
+
+  # CI parity, including GOWORK=off: CI must build against the Kit version
+  # pinned in go.mod, not a local checkout. Run this before pushing.
+  ci:
+    desc: Run exactly what CI runs (GOWORK=off build, vet, test, lint)
+    env:
+      GOWORK: "off"
+    cmds:
+      - task: fmt-check
+      - go build ./...
+      - go vet ./...
+      - go vet -tags integration ./...
+      - go test -race ./...
+      - golangci-lint run ./...
+
+  # -----------------------------------------------------------------------
+  # Release
+  # -----------------------------------------------------------------------
+
+  release-check:
+    desc: Validate the goreleaser config
+    cmds:
+      - goreleaser check
+
+  release-snapshot:
+    desc: Build a release snapshot (no publish)
+    cmds:
+      - goreleaser release --snapshot --clean
+
+  # -----------------------------------------------------------------------
+  # Cleanup
+  # -----------------------------------------------------------------------
+
+  clean:
+    desc: Remove build artifacts
+    cmds:
+      - rm -rf {{.OUTPUT_DIR}}

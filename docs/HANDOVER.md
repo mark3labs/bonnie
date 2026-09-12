@@ -44,6 +44,9 @@ go build ./...
 go test -race ./...          # hermetic, no credentials needed
 golangci-lint run            # must be 0 issues
 
+# All of it is wrapped in the Taskfile: `task check` runs this loop, and
+# `task ci` runs it with GOWORK=off for CI parity.
+
 # Live model. Skips cleanly with no key.
 export ANTHROPIC_API_KEY=sk-ant-...
 go test -race -tags integration ./runtime ./sandbox

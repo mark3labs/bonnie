@@ -531,6 +531,8 @@ go test -race ./...
 golangci-lint run
 ```
 
+Or run the same loop with `task check`, and CI parity with `task ci`.
+
 The live-model tests are behind a build tag and need a provider key:
 
 ```bash
