@@ -21,7 +21,6 @@ the known risks, and the invariants every task must preserve.
 |---|---|---|---|---|
 | T-011 | Tag and release `v0.1.0` | P2 | S | — |
 | T-013 | Verify the microsandbox adapter on real hardware | P1 | S | — |
-| T-015 | `channel` package has no tests | P2 | S | — |
 
 ### Shipped after `v0.1.0`
 
@@ -29,6 +28,7 @@ the known risks, and the invariants every task must preserve.
 |---|---|---|
 | T-012 | The sandbox lifecycle is journalled: `RecordSandbox`, a resume note when a workspace is gone, `runs show` timeline, `bonnie sandbox prune` | `runtime/journal.go`, `runtime/session.go`, `sandbox/lifecycle.go`, `cmd/bonnie/sandbox.go` |
 | T-014 | Cross-process run ownership: `flock` per run, `ErrRunOwnedElsewhere` on a second writer, reads unlocked, per-host limit stated | `runtime/filejournal.go`, `filejournal_test.go` |
+| T-015 | `channeltest` conformance suite; compile-time assertions in `channel`; unknown `TurnPolicy` refused, not guessed | `channeltest/`, `channel/channel_test.go` |
 
 ### Resolved by upstream
 
