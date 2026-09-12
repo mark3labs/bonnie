@@ -269,12 +269,27 @@ func TestDockerRefusesAllowList(t *testing.T) {
 	}
 }
 
-func TestMicrosandboxAcceptsAllowList(t *testing.T) {
+// TestMicrosandboxRefusesUnenforcedPolicy is the honesty rule applied to
+// BONNIE's own adapter. microsandbox is the one backend that *can* enforce a
+// domain allow-list, but this adapter does not yet pass the policy to msb. An
+// earlier version stored the policy and returned nil, so an operator who asked
+// for deny-all got a success and full egress.
+//
+// Delete this test when T-013 wires the policy up — and replace it with one
+// that proves egress is actually blocked.
+func TestMicrosandboxRefusesUnenforcedPolicy(t *testing.T) {
 	t.Parallel()
 	p := Microsandbox()
-	for _, mode := range []NetworkMode{NetworkAllowAll, NetworkDenyAll, NetworkAllowList} {
-		if err := p.SetNetworkPolicy(NetworkPolicy{Mode: mode}); err != nil {
-			t.Fatalf("mode %q rejected: %v", mode, err)
+
+	if err := p.SetNetworkPolicy(NetworkPolicy{Mode: NetworkAllowAll}); err != nil {
+		t.Fatalf("allow-all is the default and must be accepted: %v", err)
+	}
+	for _, mode := range []NetworkMode{NetworkDenyAll, NetworkAllowList} {
+		err := p.SetNetworkPolicy(NetworkPolicy{Mode: mode})
+		if !errors.Is(err, ErrPolicyUnsupported) {
+			t.Fatalf("mode %q returned %v, want ErrPolicyUnsupported: accepting a "+
+				"policy this adapter cannot apply tells an operator they are "+
+				"protected when they are not", mode, err)
 		}
 	}
 }

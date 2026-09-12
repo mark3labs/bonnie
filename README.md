@@ -248,6 +248,10 @@ run inside a container rooted at `/workspace`.
 
 All three drive a CLI, so BONNIE stays a single static binary.
 
+> The microsandbox adapter is written but **has not been verified on real
+> hardware yet**, and it cannot apply a network policy. Use Docker when you
+> need `deny-all` today.
+
 Lock down the network:
 
 ```go
@@ -442,6 +446,8 @@ Stated plainly, because the failure modes are not obvious:
 
 - **Sandboxing is opt-in.** Without it, tool calls run as your process.
 - **Docker is namespaces, not a kernel.** Use microsandbox for hostile code.
+- **microsandbox is unverified** — written but never run, and it cannot apply a
+  network policy yet, so it refuses one rather than pretending.
 - **Sandbox egress is open** unless you set a policy.
 - **No auth verification.** The HTTP channel carries a `Principal`; it does not
   check one. Authenticate in front of it.
@@ -468,8 +474,10 @@ See [`examples/README.md`](examples/README.md) for copy-pasteable commands.
 
 | Document | Purpose |
 |---|---|
+| [`docs/HANDOVER.md`](docs/HANDOVER.md) | Picking up the project: state, pitfalls, what to do next |
 | [`docs/SANDBOX.md`](docs/SANDBOX.md) | Sandbox backends and the contracts an adapter must honour |
 | [`docs/SPEC.md`](docs/SPEC.md) | Specification: scope, verified Kit facts, known risks, invariants |
+| [`docs/TASKS.md`](docs/TASKS.md) | Open work, and an archive of what shipped |
 | [`docs/UPSTREAM.md`](docs/UPSTREAM.md) | Changes BONNIE asks of Kit, with evidence |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Boundary rule, workspace setup, commands |
 | [`SECURITY.md`](SECURITY.md) | Disclosure, and what v0.1.0 does not protect you from |

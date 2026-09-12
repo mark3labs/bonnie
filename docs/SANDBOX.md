@@ -38,13 +38,19 @@ bonnie serve --sandbox docker --sandbox-image python:3.12-slim
 |---|---|---|---|---|
 | `Local()` | **none** | — | 0 | none |
 | `Docker()` | container namespaces | Docker | 0 | allow-all, deny-all |
-| `Microsandbox()` | microVM, guest kernel | `msb` | 0 | allow-all, deny-all, allow-list |
+| `Microsandbox()` | microVM, guest kernel | `msb` | 0 | allow-all only — see below |
 
 All three are in the main module and add no dependency: they drive a CLI
 through `os/exec`.
 
 `Local()` provides **no isolation**. It exists so a developer can work without
 Docker and so the seam is testable with no daemon. Do not use it in production.
+
+> **microsandbox network policy is not wired up yet.** The runtime can enforce
+> a domain allow-list — it is the only backend that can — but this adapter
+> does not yet pass the policy to `msb`, so it **refuses** anything except
+> `allow-all` with `ErrPolicyUnsupported`. Use the Docker backend when you need
+> `deny-all` today. Tracked as T-013.
 
 ### Choosing at runtime
 
@@ -127,6 +133,11 @@ default, not as an option.
 running with open egress. A policy that silently does nothing is worse than no
 policy, because the operator believes they are protected.
 
+BONNIE broke this rule once, in its own code. The microsandbox adapter used to
+accept `deny-all`, store it in a field, and never read that field again: the
+caller got a `nil` error and full network access. It now refuses. The rule
+applies to this repository exactly as much as to a third-party adapter.
+
 ## The exit-code problem
 
 `docker exec` and `msb exec` both exit with the **guest command's** code. So
@@ -199,8 +210,14 @@ The live tests cover the claims that matter:
 - **`Local` is not a sandbox.** It is named honestly and documented loudly.
 - **Docker is namespaces, not a kernel.** Use microsandbox when the threat
   model includes hostile code.
+- **microsandbox is unverified.** It is written but has never run: `msb` was
+  not installed on the development machine, so every microsandbox conformance
+  case skipped. See T-013.
+- **microsandbox cannot apply a network policy yet.** It refuses one rather
+  than pretending.
 - **Network is open by default.** Set a policy explicitly for untrusted work.
 - **No resource limits by default.** Pass `WithDockerMemory` or the
   microsandbox equivalents.
 - **Sandbox lifecycle is not journalled yet.** A deleted container leaves a run
   whose files are gone; the conversation survives, the workspace does not.
+  See T-012.

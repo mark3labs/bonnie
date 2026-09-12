@@ -106,3 +106,18 @@ func TestUnavailableSandboxFailsAtStartup(t *testing.T) {
 		t.Fatalf("err = %v, want ErrUnavailable", err)
 	}
 }
+
+// TestPrefixedAddsExactlyOnePrefix guards the terminal output. Library errors
+// already carry "bonnie:" by convention, so prefixing unconditionally produced
+// "bonnie: bonnie: ..." for every error raised inside the framework.
+func TestPrefixedAddsExactlyOnePrefix(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"bonnie: sandbox: boom", "bonnie: sandbox: boom"},
+		{"unknown sandbox \"frob\"", "bonnie: unknown sandbox \"frob\""},
+	}
+	for _, c := range cases {
+		if got := prefixed(errors.New(c.in)); got != c.want {
+			t.Errorf("prefixed(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}

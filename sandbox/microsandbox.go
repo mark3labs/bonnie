@@ -97,13 +97,25 @@ func (p *MicrosandboxProvider) Available(ctx context.Context) error {
 	return nil
 }
 
-// SetNetworkPolicy implements [Networked]. microsandbox supports every mode,
-// including a domain allow-list.
+// SetNetworkPolicy implements [Networked].
+//
+// It currently refuses every policy except [NetworkAllowAll]. microsandbox can
+// enforce a domain allow-list — it is the only backend that can — but this
+// adapter does not yet pass the policy to `msb`, and a stored policy that
+// nothing applies is worse than no policy at all: the operator believes egress
+// is blocked while it is wide open.
+//
+// Wiring this up is T-013. Until then the refusal is the honest answer, and it
+// is loud rather than silent.
 func (p *MicrosandboxProvider) SetNetworkPolicy(policy NetworkPolicy) error {
 	switch policy.Mode {
-	case NetworkAllowAll, NetworkDenyAll, NetworkAllowList:
+	case NetworkAllowAll:
 		p.policy = policy
 		return nil
+	case NetworkDenyAll, NetworkAllowList:
+		return fmt.Errorf("%w: the microsandbox adapter does not yet apply a "+
+			"network policy to msb (see docs/TASKS.md T-013); use the docker "+
+			"backend for deny-all", ErrPolicyUnsupported)
 	default:
 		return fmt.Errorf("%w: unknown mode %q", ErrPolicyUnsupported, policy.Mode)
 	}

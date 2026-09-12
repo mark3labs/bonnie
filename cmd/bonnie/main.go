@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"runtime/debug"
+	"strings"
 )
 
 // version is set by the linker at release time.
@@ -36,9 +37,23 @@ func main() {
 	}
 
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "bonnie:", err)
+		fmt.Fprintln(os.Stderr, prefixed(err))
 		os.Exit(1)
 	}
+}
+
+// prefixed renders an error for the terminal with exactly one "bonnie:" on
+// the front.
+//
+// Library errors are already wrapped `bonnie: context: ...` by convention, so
+// prefixing unconditionally produced "bonnie: bonnie: ...". Errors raised by
+// the CLI itself carry no prefix and need one.
+func prefixed(err error) string {
+	msg := err.Error()
+	if strings.HasPrefix(msg, "bonnie:") {
+		return msg
+	}
+	return "bonnie: " + msg
 }
 
 func buildVersion() string {

@@ -1,6 +1,6 @@
 # BONNIE MVP Specification
 
-**Status:** draft · **Target:** `v0.1.0` · **Audience:** implementing agent
+**Status:** `v0.1.0` scope complete, not yet tagged · **Audience:** implementing agent
 
 This document is the authoritative specification for BONNIE's first release. It
 records what is built, what must be built, the facts about Kit that the design
@@ -35,7 +35,14 @@ L3  channel/    inbound transports     channel/http implemented
 L2  discovery   agent/ tree + codegen  planned, NOT in MVP
 L1  runtime/    durable run executor   implemented, memory + file journals
 L0  kit/pkg/kit                        upstream, unmodified
+
+    sandbox/    isolated tool calls    implemented; local + docker verified,
+                                       microsandbox written but unrun
 ```
+
+`sandbox/` sits beside L1 rather than inside it. It depends on `runtime` for
+`AgentFactory` and nothing depends on it, so a host that wants durable runs
+without isolation never compiles it.
 
 Each layer must stay usable alone. That property is what makes BONNIE a
 framework rather than a monolith. Do not introduce an L1 → L3 dependency.
@@ -343,9 +350,29 @@ Consequences:
 
 The fix is a `RecordSandbox` entry carrying the backend name and the sandbox
 ID, written when a sandbox opens, plus a reconciler that deletes the sandboxes
-of terminal runs. That is a v0.2 item: it needs the lifecycle semantics that
-only a second backend teaches, and microsandbox is not yet exercised on a
-machine with KVM.
+of terminal runs. That is T-012.
+
+### 4.11 OPEN — the microsandbox adapter has never run
+
+`sandbox/microsandbox.go` is written and compiles. It has never executed:
+`msb` was not installed on the development machine, so every microsandbox
+conformance case skipped rather than passed.
+
+It is the strongest isolation BONNIE offers, so shipping it unverified is a
+promise the project has not tested. Two decisions inside it were made without
+being able to check them, and both need confirming:
+
+- File I/O uses `msb cp` rather than exec-with-stdin, because `cp` is
+  documented and stdin byte handling is not.
+- `exists()` matches a name in `msb ps --format json`, which assumes a field
+  shape and that a name match cannot be a false positive.
+
+A related bug was found and fixed while writing this section: the adapter
+accepted `deny-all` and an allow-list, stored the policy in a field, and never
+read that field again. A caller asking for no egress received a nil error and
+full network access — the exact failure `ErrPolicyUnsupported` exists to
+prevent. It now refuses any policy it cannot apply. Wiring the policy to `msb`
+for real is part of T-013.
 
 ---
 
@@ -370,16 +397,25 @@ If the release cannot do those three things, it is not worth tagging.
 | `channel/http` — start, send, respond, NDJSON stream | T-006 ✅ |
 | `bonnie serve` / `bonnie runs` | T-007 ✅ |
 | Runnable examples | T-008 ✅ |
-| Release mechanics | T-009 … T-011 |
+| Isolated tool execution (`sandbox/`) | ✅ added after the original scope |
+| Upstream Kit issues | T-009 — drafted, not filed |
+| Release mechanics | T-010 ✅ · T-011 — config ready, not tagged |
 
 ### Out of scope — deliberately
 
 L2 discovery and codegen · evals · OpenTelemetry · Slack/GitHub/Discord/
-Telegram channels · scheduler · memory providers · sandbox · multi-tenancy ·
+Telegram channels · scheduler · memory providers · multi-tenancy ·
 subagent orchestration · structured output · web client SDK.
 
 All are valuable. None is load-bearing for the claim. A narrow true v0.1 beats
 a broad shaky one.
+
+**Sandboxing was originally on this list and came off it.** The live-model
+test in T-001 gave a real model Kit's core tools in the repository working
+directory, and it wrote Terraform into the checkout (§4.9). A framework that
+executes model-chosen tool calls and ships no way to contain them is not
+narrow, it is incomplete. `sandbox/` adds no dependency, so the cost of
+including it was close to zero.
 
 ---
 
@@ -473,6 +509,13 @@ Any change must preserve these. Each has, or must gain, a test.
 9. **Reserved runs stay out of operator listings.** A transport that keeps
    bookkeeping in the journal uses [`runtime.ReservedRunPrefix`], and anything
    operator-facing filters with `runtime.IsReservedRun`.
+10. **A sandbox never caches a tool call.** Every `Exec` must really run the
+    command. A memoizing backend makes a repeated side effect invisible to the
+    model. `TestEveryCallExecutes` enforces this for every adapter.
+11. **A backend that cannot enforce a security control refuses it.** Returning
+    success for a network policy nothing applies tells an operator they are
+    protected when they are not. BONNIE broke this rule once, in
+    `sandbox/microsandbox.go`, and §4.11 records it.
 
 ---
 
