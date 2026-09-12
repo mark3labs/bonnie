@@ -11,11 +11,19 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
 // ErrInvalidRunID is returned when a run ID cannot become a file name safely.
 var ErrInvalidRunID = errors.New("bonnie: invalid run ID")
+
+// ErrRunOwnedElsewhere is returned when a write targets a run whose journal
+// file is locked by another owner — another process, or another journal
+// instance in this one. Reads still work: the journal is append-only, so
+// replaying a run this process does not own is safe, which keeps `runs show`
+// and a second server's read paths usable.
+var ErrRunOwnedElsewhere = errors.New("bonnie: run is owned by another process")
 
 // FsyncPolicy decides how hard a [FileJournal] works to get a record onto the
 // platter before it reports success.
@@ -43,10 +51,16 @@ const maxRecordLine = 64 << 20
 // state is derived from the last [RecordState] record rather than kept in a
 // sidecar, so there is only one file to keep consistent.
 //
-// One process owns a run at a time. FileJournal serialises writes within a
-// process, but it takes no cross-process lock: two processes appending to the
-// same run will interleave records. Cross-process ownership is out of scope
-// for v0.1.0.
+// One process owns a run at a time. The first write to a run takes an
+// exclusive flock on <root>/runs/<run-id>.lock and holds it until [Close] or
+// process death; another owner's write is refused with [ErrRunOwnedElsewhere]
+// rather than allowed to interleave records and reuse sequence numbers. Reads
+// never take the lock. The kernel releases the lock when a process dies, so
+// there is no stale-lock recovery: the crash itself is the release.
+//
+// The lock is per host. It does nothing on a network filesystem without
+// working flock support, so a shared-filesystem deployment needs a journal
+// backed by something that can lock for real.
 type FileJournal struct {
 	root     string
 	policy   FsyncPolicy
@@ -112,6 +126,9 @@ type runFile struct {
 	exists bool
 	loaded bool
 	synced time.Time
+	// lockFile holds the cross-process flock. Non-nil from the first write
+	// until Close; the kernel drops the lock when the process dies.
+	lockFile *os.File
 }
 
 // run returns the handle for a run, creating the in-memory entry but not the
@@ -197,6 +214,33 @@ func (rf *runFile) writerLocked() (*os.File, error) {
 	return f, nil
 }
 
+// ownLocked takes the cross-process lock for a run, once, and holds it. The
+// caller must hold rf.mu.
+//
+// flock is per file descriptor, so a second journal instance in the same
+// process is refused too — and must be: two instances keep independent
+// sequence counters and buffered state, and appending from both corrupts the
+// run exactly as two processes would. Close the first instance first; that
+// is what a dead process looks like.
+func (j *FileJournal) ownLocked(rf *runFile, runID string) error {
+	if rf.lockFile != nil {
+		return nil
+	}
+	lf, err := os.OpenFile(filepath.Join(j.runsDir(), runID+".lock"), os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return fmt.Errorf("bonnie: open lock for run %s: %w", runID, err)
+	}
+	if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		_ = lf.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return fmt.Errorf("%w: %s", ErrRunOwnedElsewhere, runID)
+		}
+		return fmt.Errorf("bonnie: lock run %s: %w", runID, err)
+	}
+	rf.lockFile = lf
+	return nil
+}
+
 // appendLocked writes one record. The caller must hold rf.mu.
 func (j *FileJournal) appendLocked(rf *runFile, rec Record) (int, error) {
 	if err := rf.loadLocked(); err != nil {
@@ -251,6 +295,9 @@ func (j *FileJournal) Append(_ context.Context, rec Record) (int, error) {
 	}
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+	if err := j.ownLocked(rf, rec.RunID); err != nil {
+		return 0, err
+	}
 	return j.appendLocked(rf, rec)
 }
 
@@ -287,6 +334,9 @@ func (j *FileJournal) AppendStep(_ context.Context, recs []Record) ([]int, error
 	}
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+	if err := j.ownLocked(rf, recs[0].RunID); err != nil {
+		return nil, err
+	}
 
 	if err := rf.loadLocked(); err != nil {
 		return nil, err
@@ -368,6 +418,9 @@ func (j *FileJournal) Checkpoint(_ context.Context, runID string, state RunState
 	}
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+	if err := j.ownLocked(rf, runID); err != nil {
+		return err
+	}
 
 	_, err = j.appendLocked(rf, Record{
 		RunID: runID, Kind: RecordState, State: state, Timestamp: now(),
@@ -443,6 +496,14 @@ func (j *FileJournal) Close() error {
 				errs = append(errs, err)
 			}
 			rf.file = nil
+		}
+		if rf.lockFile != nil {
+			// Closing the lock file releases the flock; a run that was
+			// refused while this journal held it becomes writable.
+			if err := rf.lockFile.Close(); err != nil {
+				errs = append(errs, err)
+			}
+			rf.lockFile = nil
 		}
 		rf.mu.Unlock()
 	}

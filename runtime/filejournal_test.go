@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -245,5 +246,104 @@ func TestFileJournalFsyncIntervalPolicy(t *testing.T) {
 	}
 	if _, err := j.Append(context.Background(), Record{RunID: "r", Kind: RecordMessage, Text: "hi"}); err != nil {
 		t.Fatalf("Append: %v", err)
+	}
+}
+
+// TestFileJournalOwnershipIsCrossProcess is the T-014 contract: a second
+// owner cannot write to a run this journal owns. The failure is a clear
+// error, never silent interleaving, and it must cover every write path —
+// Append, AppendStep, and Checkpoint — because the corruption they prevent
+// (interleaved records, reused sequence numbers) does not care which one
+// wrote.
+//
+// Reads stay open on purpose: the journal is append-only, so replaying a run
+// another process owns is safe, and that is what keeps `bonnie runs show`
+// working from anywhere.
+func TestFileJournalOwnershipIsCrossProcess(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	owner, err := OpenFileJournal(dir)
+	if err != nil {
+		t.Fatalf("open owner: %v", err)
+	}
+	defer func() { _ = owner.Close() }()
+
+	const runID = "owned"
+	if _, err := owner.Append(ctx, Record{RunID: runID, Kind: RecordMessage, Text: "one"}); err != nil {
+		t.Fatalf("owner Append: %v", err)
+	}
+
+	// A second journal instance over the same store. flock is per file
+	// descriptor, so this is refused inside one process too — and must be:
+	// two instances keep separate sequence counters, and interleaving them
+	// corrupts the run exactly as two processes would.
+	second, err := OpenFileJournal(dir)
+	if err != nil {
+		t.Fatalf("open second: %v", err)
+	}
+	defer func() { _ = second.Close() }()
+
+	if _, err := second.Append(ctx, Record{RunID: runID, Kind: RecordMessage, Text: "two"}); !errors.Is(err, ErrRunOwnedElsewhere) {
+		t.Fatalf("Append err = %v, want ErrRunOwnedElsewhere", err)
+	}
+	if _, err := second.AppendStep(ctx, []Record{{RunID: runID, Kind: RecordMessage}}); !errors.Is(err, ErrRunOwnedElsewhere) {
+		t.Fatalf("AppendStep err = %v, want ErrRunOwnedElsewhere", err)
+	}
+	if err := second.Checkpoint(ctx, runID, RunCompleted); !errors.Is(err, ErrRunOwnedElsewhere) {
+		t.Fatalf("Checkpoint err = %v, want ErrRunOwnedElsewhere", err)
+	}
+
+	// The refused writes left nothing behind.
+	recs, err := second.Replay(ctx, runID)
+	if err != nil {
+		t.Fatalf("Replay: %v", err)
+	}
+	if len(recs) != 1 {
+		t.Fatalf("%d records after refused writes, want the owner's 1", len(recs))
+	}
+
+	// Another run is unaffected: the lock is per run, not per journal.
+	if _, err := second.Append(ctx, Record{RunID: "free", Kind: RecordMessage, Text: "mine"}); err != nil {
+		t.Fatalf("Append to an unowned run: %v", err)
+	}
+
+	// Death releases. Closing the owner is what a dead process looks like;
+	// the same run becomes writable, and the sequence continues where the
+	// owner left it.
+	if err := owner.Close(); err != nil {
+		t.Fatalf("owner Close: %v", err)
+	}
+	seq, err := second.Append(ctx, Record{RunID: runID, Kind: RecordMessage, Text: "two"})
+	if err != nil {
+		t.Fatalf("Append after the owner went away: %v", err)
+	}
+	if seq != 2 {
+		t.Fatalf("seq = %d, want 2: the resumed owner must continue, not restart", seq)
+	}
+}
+
+// TestFileJournalLockFileIsNotARun pins that the lock file stays invisible to
+// Runs: a run listing must not grow a phantom entry per lock.
+func TestFileJournalLockFileIsNotARun(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	j, err := OpenFileJournal(t.TempDir())
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer func() { _ = j.Close() }()
+
+	if _, err := j.Append(ctx, Record{RunID: "listed", Kind: RecordMessage, Text: "x"}); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	runs, err := j.Runs(ctx, "")
+	if err != nil {
+		t.Fatalf("Runs: %v", err)
+	}
+	if !slices.Equal(runs, []string{"listed"}) {
+		t.Fatalf("Runs = %v, want only [listed]", runs)
 	}
 }

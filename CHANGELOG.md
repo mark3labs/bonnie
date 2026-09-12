@@ -33,6 +33,12 @@ yet, so everything under 0.1.0 is still unreleased until it is.
 - `PrepareStepResult.Tools`, `ToolOutput.Halt`/`FinalValue` as contract, and
   the `SessionManager` freeze are available from Kit but not yet used by
   BONNIE (L2 will want per-step tools)
+- Cross-process run ownership: the file journal takes an exclusive `flock`
+  per run on first write and refuses a second writer with
+  `runtime.ErrRunOwnedElsewhere` instead of letting records interleave and
+  sequence numbers collide. Reads stay unlocked, so `runs list` and
+  `runs show` work from any process. The lock is per host and says nothing on
+  a network filesystem
 - The `channeltest` package: the conformance suite a channel adapter joins
   instead of writing its own tests. The HTTP adapter is the first member.
   An unknown `TurnPolicy` is now refused with `channel.ErrUnknownTurnPolicy`

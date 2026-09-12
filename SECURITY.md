@@ -96,15 +96,31 @@ Do not commit the journal to version control.
 
 One process must own a run at a time.
 
-The file journal takes no cross-process lock. Two processes that write the same
-run interleave their records and give the same sequence number to different
-records. The file stays readable, but the replay is then wrong, and the run can
-repeat work it already did.
+The file journal enforces this on one host. The first write to a run takes an
+exclusive `flock` on `<root>/runs/<run-id>.lock`; another process — or another
+journal instance in the same process — that writes the same run is refused
+with `ErrRunOwnedElsewhere` instead of being allowed to interleave records and
+give the same sequence number to different ones. The kernel releases the lock
+when a process dies, so a crash needs no lock recovery.
 
-Examples of unsafe patterns:
+Reads are never locked: any process can list runs or replay a run it does not
+own, which is what keeps `bonnie runs show` working everywhere.
 
-- Two load-balanced instances each resuming the same run.
-- One process resuming while another is still in a turn.
+Limits:
+
+- The lock is per host. On a network filesystem without working `flock`
+  support it enforces nothing.
+- Refusing a write is not coordination. Two load-balanced instances that both
+  need to write the same run still need one owner in front.
+
+Examples of what the lock now prevents, and what it does not:
+
+- Two load-balanced instances each resuming the same run — the second is
+  **refused loudly** with `ErrRunOwnedElsewhere`. Route the request to the
+  instance that owns the run, or share a journal that can coordinate.
+- A shared network filesystem — the lock says nothing there; use a journal
+  backed by a database or a coordinator (etcd, Redis) to elect one owner.
+- One process resuming while another is still in a turn — refused, as above.
 
 Safer patterns:
 

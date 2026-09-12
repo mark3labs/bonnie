@@ -316,14 +316,42 @@ interface. `Session.IsPersisted` delegates to it and asserts nothing.
 that documents it under one lock, so a reader never sees a state with no
 record behind it.
 
-### 4.7 OPEN — one process must own a run
+### 4.7 RESOLVED — one process must own a run
 
-`FileJournal` serialises writes inside a process with a per-run mutex. It
-takes no cross-process lock. Two processes that append to the same run
-interleave records, and the sequence numbers they assign collide.
+**Resolved by T-014 with a lock file per run.** The first write a
+`FileJournal` makes to a run takes an exclusive `flock` on
+`<root>/runs/<run-id>.lock` and holds it until [FileJournal.Close] or process
+death. A second owner's write — `Append`, `AppendStep`, or `Checkpoint` — is
+refused with `ErrRunOwnedElsewhere` instead of interleaving records and
+colliding sequence numbers. Reads never take the lock, so `bonnie runs list`,
+`bonnie runs show`, and a second server's read paths keep working against a
+run they do not own.
 
-This is a deployment constraint for `v0.1.0`, stated in `README.md` and
-`SECURITY.md`. A lock file, or a journal backed by a database, removes it.
+Decisions worth knowing:
+
+- **flock, not a create-the-file lock.** The kernel releases a `flock` when
+  the process dies, so a crash is its own stale-lock recovery. There is no
+  lock table to reconcile and no timestamp heuristic to get wrong.
+- **Two journal instances in one process are refused too, and that is
+  correct.** `flock` is per file descriptor, and two `FileJournal` instances
+  keep independent sequence counters and buffered state — appending from both
+  corrupts a run exactly as two processes would. Closing the first instance
+  is what a dead process looks like, which is how the process-boundary tests
+  simulate death.
+- **The lock is per run, not per journal.** Two processes can work different
+  runs on the same store concurrently; only the same run conflicts.
+- **Refusing, not blocking.** A blocked write would turn a misconfigured
+  second server into a hung one. The error is immediate and names the run.
+
+Limits, stated plainly: the lock is **per host**. It does nothing on a network
+filesystem without working `flock` support, and it does not help two servers
+that want to write the same run — that deployment still needs one owner, or a
+journal backed by a database. `README.md` and `SECURITY.md` say so.
+
+Test: `TestFileJournalOwnershipIsCrossProcess`, which covers every write path,
+per-run granularity, reader access, and release on close.
+`TestFileJournalLockFileIsNotARun` pins that the lock file never appears in
+`Runs`.
 
 ### 4.8 OPEN — events are not durable
 

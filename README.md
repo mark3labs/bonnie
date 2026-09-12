@@ -485,7 +485,10 @@ Stated plainly, because the failure modes are not obvious:
 - **Sandbox egress is open** unless you set a policy.
 - **No auth verification.** The HTTP channel carries a `Principal`; it does not
   check one. Authenticate in front of it.
-- **One process per run.** The file journal takes no cross-process lock.
+- **Run ownership is per host.** The file journal locks each run with
+  `flock`, so a second writer to the same run is refused rather than allowed
+  to corrupt it. That lock does not work on a network filesystem, and it does
+  not make two writers coordinate — one process still owns each run.
 - **Events are not durable.** The bus keeps a bounded in-memory backlog; the
   journal is the record of truth.
 - **Sandbox lifecycle is not journalled.** Delete a container and the run's

@@ -22,8 +22,13 @@ the known risks, and the invariants every task must preserve.
 | T-011 | Tag and release `v0.1.0` | P2 | S | — |
 | T-012 | Journal the sandbox lifecycle | P1 | M | — |
 | T-013 | Verify the microsandbox adapter on real hardware | P1 | S | — |
-| T-014 | Cross-process run ownership | P2 | M | — |
 | T-015 | `channel` package has no tests | P2 | S | — |
+
+### Shipped after `v0.1.0`
+
+| ID | Delivered | Where |
+|---|---|---|
+| T-014 | Cross-process run ownership: `flock` per run, `ErrRunOwnedElsewhere` on a second writer, reads unlocked, per-host limit stated | `runtime/filejournal.go`, `filejournal_test.go` |
 
 ### Resolved by upstream
 
@@ -273,6 +278,10 @@ Silicon. Neither has run, so do not let the docs imply either is proven.
 
 ## T-014 — Cross-process run ownership
 
+**RESOLVED.** A lock file per run, chosen over a database journal. The
+design, decisions, and limits are in `docs/SPEC.md` §4.7. The text below is
+the task as it was written.
+
 **Priority** P2 · **Size** M · **Spec** §4.7
 
 ### Why
@@ -302,10 +311,15 @@ where the new implementation proves itself.
 
 ### Acceptance criteria
 
-- [ ] Two processes cannot corrupt one run
-- [ ] The failure is a clear error, not silent interleaving
-- [ ] The chosen approach and its limits are documented in `docs/SPEC.md` §4.7
-- [ ] Any new journal passes the shared conformance suite
+- [x] Two processes cannot corrupt one run — the second owner's write is
+      refused
+- [x] The failure is a clear error, not silent interleaving
+      (`ErrRunOwnedElsewhere`, all three write paths, per-run granularity,
+      release on close)
+- [x] The chosen approach and its limits are documented in `docs/SPEC.md` §4.7
+      — lock file per run; per host only; refusing is not coordinating
+- [x] Any new journal passes the shared conformance suite (the built-ins
+      still do; ownership is `FileJournal`-specific and tested beside it)
 
 ---
 

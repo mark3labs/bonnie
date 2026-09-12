@@ -249,7 +249,8 @@ was verified about Kit and where, so a changed assumption is findable.
 - microsandbox is verified on Linux/KVM only, and its network policy is fixed
   at create time; a reattach under a different policy fails loudly.
 - The HTTP channel carries a `Principal` and does not verify it.
-- One process must own a run. The file journal takes no cross-process lock.
+- Run ownership is enforced per host with a `flock` per run; a shared
+  network filesystem or a second writer still needs one owner in front.
 - Events are not durable; the journal is the record of truth.
 - Sandbox lifecycle is not journalled.
 
