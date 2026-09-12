@@ -111,17 +111,24 @@ was deliberately left undone.
 - [x] `go.work` is not committed
 - [ ] `goreleaser build --snapshot --clean` produces working binaries
 - [ ] All CI jobs green on `master`, including `boundary`
+      (`lint` was failing on every commit; fixed, pending confirmation)
 - [ ] Release notes state both the claims and the limits
 - [ ] Tag pushed and artifacts published
 - [ ] A downloaded binary prints the injected version
 
 ### Watch for
 
-- CI has never run. The first push is the first real test of the hermetic
-  build, because everything local was verified with `GOWORK=off` but with a
-  Kit checkout sitting next door.
+- **CI was broken from the first commit and nobody had looked.** Every run on
+  `master` failed. The `lint` job pinned golangci-lint `v2.1.0`, which is
+  built with go1.24, against a `go.mod` that asks for 1.27; golangci-lint
+  refuses to load its config when its own toolchain is older than the target
+  and exits 3. `test` and `boundary` were green throughout, so only `lint` was
+  ever failing. Fixed by pinning `v2.13.2` (built with go1.27.0). Raise that
+  pin whenever the `go` line in `go.mod` moves.
 - The sandbox conformance suite **skips** Docker and microsandbox on a bare
-  runner. CI green does not mean those adapters were exercised.
+  runner. CI green does not mean those adapters were exercised. The
+  microsandbox defects fixed in T-013 were invisible to CI for exactly this
+  reason.
 
 ---
 
