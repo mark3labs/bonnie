@@ -266,10 +266,10 @@ defects. What remains is the network policy, the live suite, and macOS.
 
 - [x] All conformance cases pass for `microsandbox`, none skipped
       (18/18, Linux + KVM, `msb` 0.6.18, 2026-09-12)
-- [ ] The live sandbox suite passes against microsandbox
-      (selectable with `BONNIE_TEST_SANDBOX=microsandbox`; attempted twice,
-      blocked by provider quota — Anthropic 429 on the shared workspace, and
-      the OpenAI key is a ChatGPT/Codex account that rejects `gpt-4.1`)
+- [x] The live sandbox suite passes against microsandbox
+      (4/4, with `BONNIE_TEST_SANDBOX=microsandbox`; first blocked five
+      attempts by Anthropic workspace quota, then passed against
+      `opencode/kimi-k2.5`, which is the live suites' default now)
 - [x] `msb cp` confirmed for binary content and missing paths
       (`TestBinaryFileRoundTrip`, `TestReadMissingFile`)
 - [x] `SetNetworkPolicy` either enforces the policy or refuses it
@@ -282,8 +282,13 @@ defects. What remains is the network policy, the live suite, and macOS.
 
 ### Watch for
 
-What remains is the live suite against microsandbox and macOS on Apple
-Silicon. Neither has run, so do not let the docs imply either is proven.
+The only open box is hardware: macOS on Apple Silicon. Everything code-side
+was verified on Linux with KVM (`msb` 0.6.18), including the live suite.
+
+Also worth keeping: the live suites default to `opencode/kimi-k2.5` because a
+test model must not share a quota with a busy workspace — the Anthropic
+workspace behind us returned 429 for agent-sized requests all day while a
+single small curl succeeded, which is exactly the trap a shared quota sets.
 
 ---
 

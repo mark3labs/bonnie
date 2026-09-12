@@ -476,16 +476,28 @@ cases pass for the microsandbox backend, none skipped. `msb cp` carries binary
 content unaltered (`TestBinaryFileRoundTrip`), which settles the file I/O
 question this section raised.
 
-Still unverified, so T-013 stays open:
+Resolved, same day. The live sandbox suite ran against microsandbox and
+**all four tests passed**:
 
-- The live sandbox suite (`-tags integration`) has not completed against
-  microsandbox. It was attempted twice on 2026-09-12 and blocked by
-  environment, not code: the Anthropic account returned 429 on every agent
-  call (a single small curl succeeded, so the limit sits on the shared
-  workspace, not the key), and the available OpenAI key is a ChatGPT/Codex
-  account that rejects `gpt-4.1`. Run it with
-  `BONNIE_TEST_SANDBOX=microsandbox` when quota allows, and record the result
-  here.
+- `TestLiveAgentWorksInsideTheSandbox` — a real model wrote a file, catted it,
+  and reported its content, from inside the microVM, with nothing on the host.
+- `TestLiveAgentCannotReachTheHost` — the §4.9 regression: the model could
+  not read a host file.
+- `TestLiveSandboxSurvivesSuspendAndResume` — park on a question, release the
+  compute, resume in a second Runner sharing only the journal, files intact.
+- `TestLiveParkedRunHoldsNoCompute` — no tool call, no microVM.
+
+The model was `opencode/kimi-k2.5`, not Anthropic. The Anthropic account
+returned 429 on every agent-sized request across five attempts (a single
+small curl succeeded each time, so the limit sits on the shared workspace,
+not the key), and the available OpenAI key is a ChatGPT/Codex account that
+rejects `gpt-4.1`. The opencode gateway answered in seconds, and it is now
+the live suites' first choice — a test model must not share a quota with a
+busy workspace. Both live suites passed again with the new default and no
+explicit override.
+
+What is left for T-013 is hardware, not code:
+
 - Verified on Linux/KVM only, not macOS on Apple Silicon.
 
 **Update, same day: the network policy is wired and enforced.** `msb create`

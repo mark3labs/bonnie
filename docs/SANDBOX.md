@@ -205,8 +205,10 @@ go test -race -tags integration ./sandbox    # live model, needs a key
 The live suite runs against Docker by default. Set
 `BONNIE_TEST_SANDBOX=microsandbox` to run it inside microVMs; `local` is not
 on the menu because a backend that shares the host filesystem cannot test the
-isolation claims. `BONNIE_TEST_MODEL` overrides the model, and the suite skips
-— rather than fails — when the credential or the backend is missing.
+isolation claims. The model is `opencode/kimi-k2.5` when an opencode key is
+present, falling back to Anthropic, OpenAI, and Google; `BONNIE_TEST_MODEL`
+overrides all of it, and the suite skips — rather than fails — when the
+credential or the backend is missing.
 
 The live tests cover the claims that matter:
 
@@ -223,9 +225,10 @@ The live tests cover the claims that matter:
 - **Docker is namespaces, not a kernel.** Use microsandbox when the threat
   model includes hostile code.
 - **microsandbox is verified on Linux/KVM only.** All 18 conformance cases
-  pass with `msb` 0.6.18 on Linux with KVM (2026-09-12). It has not been run
-  on macOS with Apple Silicon, and the live suite has not been run against it.
-  See T-013.
+  pass with `msb` 0.6.18 (2026-09-12), every network policy mode is enforced
+  with real egress, and the live suite — a real model working, suspending,
+  and resuming inside the microVM — passes. It has not been run on macOS with
+  Apple Silicon. See T-013.
 - **microsandbox network policy is fixed at create time.** `msb modify`
   cannot change network rules, so a reattached sandbox keeps its create-time
   policy; `Open` reports a mismatch with `ErrPolicyMismatch` rather than

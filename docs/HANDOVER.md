@@ -246,8 +246,10 @@ was verified about Kit and where, so a changed assumption is findable.
 
 - Sandboxing is opt-in. Without it, tool calls run as the host process.
 - Docker is namespaces, not a guest kernel.
-- microsandbox is verified on Linux/KVM only, and its network policy is fixed
-  at create time; a reattach under a different policy fails loudly.
+- **microsandbox is verified on Linux/KVM only, and its network policy is
+  fixed at create time; a reattach under a different policy fails loudly.**
+  The live suites run against `opencode/kimi-k2.5` by default, after the
+  Anthropic workspace quota blocked every agent-sized request for a day.
 - The HTTP channel carries a `Principal` and does not verify it.
 - Run ownership is enforced per host with a `flock` per run; a shared
   network filesystem or a second writer still needs one owner in front.

@@ -54,10 +54,20 @@ yet, so everything under 0.1.0 is still unreleased until it is.
   instead of writing its own tests. The HTTP adapter is the first member.
   An unknown `TurnPolicy` is now refused with `channel.ErrUnknownTurnPolicy`
   (HTTP: 400) rather than silently queueing
-- microsandbox: every network policy mode is now enforced. `SetNetworkPolicy`
-  maps `deny-all` to `msb create --no-net` and an allow-list to
-  `--net-rule allow@<host>`, verified with real egress. Previously every mode
-  except allow-all was refused with `ErrPolicyUnsupported`
+- microsandbox: every network policy mode is now enforced.
+  `SetNetworkPolicy` maps `deny-all` to `msb create --no-net` and an
+  allow-list to `--net-rule allow@<host>`, verified with real egress.
+  Previously every mode except allow-all was refused with
+  `ErrPolicyUnsupported`
+- microsandbox is verified end to end on Linux/KVM (`msb` 0.6.18): all 18
+  conformance cases, every network policy mode enforced with real egress,
+  and the live suite — a real model working, suspending, and resuming inside
+  the microVM. macOS on Apple Silicon remains unverified
+- The live suites default to `opencode/kimi-k2.5` (`BONNIE_TEST_MODEL`
+  still overrides). The Anthropic workspace behind the previous default
+  returned 429 for agent-sized requests while small requests passed, which
+  is what a shared workspace quota does — a test model must not share a
+  quota with a busy workspace
 - `ErrPolicyMismatch`: `Open` returns it when an existing microsandbox
   carries a different network policy than the host configured, because `msb`
   fixes policy at create time and a silent reattach would run under the old
