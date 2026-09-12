@@ -19,7 +19,6 @@ the known risks, and the invariants every task must preserve.
 
 | ID | Title | Priority | Size | Blocks |
 |---|---|---|---|---|
-| T-011 | Tag and release `v0.1.0` | P2 | S | — |
 | T-013 | Verify the microsandbox adapter on real hardware (macOS box only) | P1 | S | — |
 | T-017 | L2 core: the manifest, `bonnie init`, `serve --agent` | P1 | M | T-018 |
 | T-018 | L2 codegen: tool discovery, `bonnie dev`, `bonnie build` | P1 | M | T-019 |
@@ -52,7 +51,8 @@ what each ask became, and `docs/SPEC.md` §3 was re-verified against
 
 ### Shipped in `v0.1.0`
 
-T-001 … T-008 and T-010, plus the `sandbox` package. See
+T-001 … T-008 and T-010, plus the `sandbox` package — and T-011, which
+tagged and published the release itself. See
 [Archive](#archive-shipped) for what each one delivered.
 
 Sizes: S ≈ half a day · M ≈ 1–2 days · L ≈ 3–4 days.
@@ -121,6 +121,13 @@ re-verify that section and update it in the same commit.
 ---
 
 ## T-011 — Tag and release `v0.1.0`
+
+**RESOLVED.** `v0.1.0` was tagged at `15e1727` and published on 2026-09-12;
+`release.yml` completed successfully. Verified post-publish, not assumed:
+a downloaded `linux_amd64` artifact prints `bonnie 0.1.0` (the injected
+version, not `dev`), and the GitHub release notes lead with the three claims
+and the limits — the auto-generated notes had only the commit list, so the
+notes were edited to the required form.
 
 **Priority** P2 · **Size** S
 
@@ -565,5 +572,6 @@ All three are verified, against a live model, in this order:
    `TestLiveSuspendAndResume`.
 3. `bonnie runs show` renders the timeline and valid `--json`.
 
-What remains before tagging is T-011. T-009 resolved itself: Kit `v0.106.0`
+T-011 closed the release: `v0.1.0` was tagged and published, and the
+artifact check passed. T-009 resolved itself: Kit `v0.106.0`
 answered the asks, and BONNIE adopted the seams.

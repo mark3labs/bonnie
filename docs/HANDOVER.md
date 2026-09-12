@@ -31,9 +31,10 @@ master @ b3ec7b2 (+ this session's work)  →  github.com/mark3labs/bonnie
 | `cmd/bonnie/` | `serve`, `runs list`, `runs show`. |
 | `examples/` | `minimal`, `hitl-restart`. |
 
-**Not done, one human decision:** tag `v0.1.0` (T-011). T-009 resolved
-itself — Kit `v0.106.0` answered all four upstream asks, and BONNIE adopted
-the seams the same day.
+**Not done:** nothing blocking. T-011 closed — `v0.1.0` is tagged and
+published, verified by a downloaded artifact printing the injected version.
+T-009 resolved itself — Kit `v0.106.0` answered all four upstream asks, and
+BONNIE adopted the seams the same day.
 
 ## 3. Start here
 
@@ -53,8 +54,8 @@ go test -race -tags integration ./runtime ./sandbox
 ```
 
 `docs/TASKS.md` has the open work at the top, shipped work archived at the
-bottom. Highest value first: **T-011** (tag the release) and the L2 program
-**T-017/T-018** — spec in [`docs/L2.md`](L2.md).
+bottom. Highest value first: the L2 program **T-017/T-018** — spec in
+[`docs/L2.md`](L2.md). The only other open box is T-013's macOS case.
 
 ## 4. The one rule that matters
 
