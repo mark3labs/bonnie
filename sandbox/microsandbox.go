@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -152,8 +153,18 @@ func (p *MicrosandboxProvider) Open(ctx context.Context, runID string) (Sandbox,
 			return err
 		},
 		deleteFn: func(ctx context.Context, c *cliSandbox) error {
-			_, _, _, err := runCLI(ctx, nil, c.bin, "rm", c.name)
-			return err
+			// -f stops the sandbox first. Without it msb refuses to remove
+			// a running sandbox ("still running"), and because a delete
+			// failure is usually ignored by the caller, the microVM is
+			// leaked in silence along with its memory.
+			_, stderr, code, err := runCLI(ctx, nil, c.bin, "rm", "--force", c.name)
+			if err != nil {
+				return err
+			}
+			if code != 0 {
+				return fmt.Errorf("bonnie: sandbox: rm %s: %s", c.name, firstLine(stderr))
+			}
+			return nil
 		},
 		// msb has a documented `cp`. Exec-with-stdin is not documented to
 		// carry bytes, so file I/O goes through cp, which is.
@@ -171,9 +182,7 @@ func (p *MicrosandboxProvider) Open(ctx context.Context, runID string) (Sandbox,
 // ensureRunning creates the sandbox when absent and starts it when stopped.
 func (p *MicrosandboxProvider) ensureRunning(ctx context.Context, sb *cliSandbox) error {
 	if p.exists(ctx, sb.name) {
-		// Starting an already-running sandbox is not an error worth
-		// failing on: the goal is only that it is up.
-		_, _, _, _ = runCLI(ctx, nil, p.bin, "start", sb.name)
+		p.start(ctx, sb.name)
 		return p.ensureWorkspace(ctx, sb)
 	}
 
@@ -190,10 +199,18 @@ func (p *MicrosandboxProvider) ensureRunning(ctx context.Context, sb *cliSandbox
 		return fmt.Errorf("bonnie: sandbox: create microsandbox from %s: %s",
 			p.image, firstLine(stderr))
 	}
-	if _, _, _, err := runCLI(ctx, nil, p.bin, "start", sb.name); err != nil {
-		return fmt.Errorf("bonnie: sandbox: start %s: %w", sb.name, err)
-	}
+	p.start(ctx, sb.name)
 	return p.ensureWorkspace(ctx, sb)
+}
+
+// start brings a sandbox up and tolerates one that is already up.
+//
+// `msb create` starts the sandbox it creates, so the start that follows a
+// create reports "already running". That is the wanted state, not a failure,
+// and the call is kept because nothing documents create-implies-start as a
+// promise. Only the guest command that follows proves the sandbox is usable.
+func (p *MicrosandboxProvider) start(ctx context.Context, name string) {
+	_, _, _, _ = runCLI(ctx, nil, p.bin, "start", name)
 }
 
 // ensureWorkspace creates the workspace directory inside the guest.
@@ -206,15 +223,46 @@ func (p *MicrosandboxProvider) ensureWorkspace(ctx context.Context, sb *cliSandb
 	return nil
 }
 
-// exists reports whether a named sandbox is known to msb.
+// exists reports whether a named sandbox is known to msb, running or not.
+//
+// --all is required. Without it msb lists only running sandboxes, so a
+// sandbox that Stop released looks absent, Open tries to create it again, and
+// msb refuses with "sandbox already exists" — which strands a run that did
+// nothing wrong but park between turns.
+//
+// The listing is decoded rather than searched as text. A substring match also
+// hits the image, command, and status fields, so a run whose ID resembles a
+// value in any of them would be reported as existing when it does not.
 func (p *MicrosandboxProvider) exists(ctx context.Context, name string) bool {
-	stdout, _, code, err := runCLI(ctx, nil, p.bin, "ps", "--format", "json")
+	stdout, _, code, err := runCLI(ctx, nil, p.bin, "ps", "--all", "--format", "json")
 	if err != nil || code != 0 {
 		return false
 	}
-	// A name match in the JSON listing is enough: names are unique, and the
-	// worst case is one redundant create that msb itself rejects.
-	return strings.Contains(stdout, `"`+name+`"`)
+	var entries []struct {
+		Name string `json:"name"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &entries); err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if e.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// msbMissingPath reports whether an `msb cp` failure means the guest path is
+// absent, rather than any other failure.
+//
+// msb words this as `error: stat <path>`, which shares no wording with the
+// shell shapes [isMissingPath] knows, so the generic helper never fires here.
+// It must also stay clear of `error: sandbox not found: <name>`: that means
+// the workspace itself is gone, which is a different condition and must not
+// reach the model as a plain missing file. Anchoring on the path keeps the
+// two apart.
+func msbMissingPath(stderr, guestPath string) bool {
+	return strings.Contains(stderr, "stat "+guestPath)
 }
 
 // copyOut reads a guest file through `msb cp`.
@@ -231,7 +279,7 @@ func (p *MicrosandboxProvider) copyOut(ctx context.Context, c *cliSandbox, guest
 		return nil, err
 	}
 	if code != 0 {
-		if isMissingPath(stderr) {
+		if msbMissingPath(stderr, guestPath) {
 			return nil, fmt.Errorf("%w: %s", ErrNotFound, guestPath)
 		}
 		return nil, fmt.Errorf("bonnie: sandbox: read %s: %s", guestPath, firstLine(stderr))

@@ -37,7 +37,7 @@ L1  runtime/    durable run executor   implemented, memory + file journals
 L0  kit/pkg/kit                        upstream, unmodified
 
     sandbox/    isolated tool calls    implemented; local + docker verified,
-                                       microsandbox written but unrun
+                                       microsandbox verified on Linux/KVM
 ```
 
 `sandbox/` sits beside L1 rather than inside it. It depends on `runtime` for
@@ -352,27 +352,59 @@ The fix is a `RecordSandbox` entry carrying the backend name and the sandbox
 ID, written when a sandbox opens, plus a reconciler that deletes the sandboxes
 of terminal runs. That is T-012.
 
-### 4.11 OPEN — the microsandbox adapter has never run
+### 4.11 PARTLY RESOLVED — the microsandbox adapter now runs
 
-`sandbox/microsandbox.go` is written and compiles. It has never executed:
+`sandbox/microsandbox.go` was written and compiled but had never executed:
 `msb` was not installed on the development machine, so every microsandbox
 conformance case skipped rather than passed.
 
-It is the strongest isolation BONNIE offers, so shipping it unverified is a
-promise the project has not tested. Two decisions inside it were made without
-being able to check them, and both need confirming:
+Adding `msb` to the Nix flake (`44116e3`) put the binary on the PATH, so the
+cases stopped skipping and started running. **Three of the 18 failed at once.**
+The adapter had shipped with two defects that only execution could find, both
+in the assumptions this section told the reader to confirm:
 
-- File I/O uses `msb cp` rather than exec-with-stdin, because `cp` is
-  documented and stdin byte handling is not.
-- `exists()` matches a name in `msb ps --format json`, which assumes a field
-  shape and that a name match cannot be a false positive.
+- **`msb` reports an absent path as `error: stat <path>`.** The shared
+  `isMissingPath` looks for `no such file` or `not found`, so `ReadFile` never
+  returned `ErrNotFound` for a missing file. Fixed by `msbMissingPath`, which
+  anchors the match on the path. Anchoring matters: `error: sandbox not
+  found: <name>` *does* satisfy the generic helper, so a **vanished workspace**
+  would have been reported to the model as an ordinary missing file. Guard
+  test: `TestMsbMissingPathSeparatesAbsentFileFromAbsentSandbox`.
+- **`msb ps` lists only running sandboxes.** `exists()` therefore answered
+  false for a sandbox that `Stop` had released, `Open` tried to create it
+  again, and `msb` refused with `sandbox already exists`. A run that did
+  nothing worse than park between turns was stranded. Fixed with `--all`, and
+  the listing is now JSON-decoded on the `name` field instead of substring
+  matched, so a value in the image, command, or status field cannot produce a
+  false positive.
 
-A related bug was found and fixed while writing this section: the adapter
-accepted `deny-all` and an allow-list, stored the policy in a field, and never
-read that field again. A caller asking for no egress received a nil error and
-full network access — the exact failure `ErrPolicyUnsupported` exists to
-prevent. It now refuses any policy it cannot apply. Wiring the policy to `msb`
-for real is part of T-013.
+A third defect surfaced in the same run: `msb rm` refuses to remove a running
+sandbox, and `Delete` failures are usually ignored, so the conformance suite
+leaked **18 running microVMs, about 9 GiB, per run**, in silence. `Delete` now
+passes `--force`. After the fix three consecutive suite runs leave zero.
+
+Verified on Linux with KVM, `msb` 0.6.18, on 2026-09-12: all 18 conformance
+cases pass for the microsandbox backend, none skipped. `msb cp` carries binary
+content unaltered (`TestBinaryFileRoundTrip`), which settles the file I/O
+question this section raised.
+
+Still unverified, so T-013 stays open:
+
+- The live sandbox suite (`-tags integration`) has not been run against
+  microsandbox.
+- `SetNetworkPolicy` still refuses every policy except allow-all. Wiring it to
+  `msb` for real is the remaining work.
+- Verified on Linux/KVM only, not macOS on Apple Silicon.
+
+A related bug was found and fixed while writing this section originally: the
+adapter accepted `deny-all` and an allow-list, stored the policy in a field,
+and never read that field again. A caller asking for no egress received a nil
+error and full network access — the exact failure `ErrPolicyUnsupported` exists
+to prevent. It now refuses any policy it cannot apply.
+
+The general lesson is worth keeping: an adapter that compiles and skips is not
+an adapter that works. Three real defects sat behind a green suite because the
+only thing proving them absent was a skip.
 
 ---
 

@@ -184,11 +184,16 @@ code that writes it belongs in `sandbox`.
 
 ### Why
 
-`sandbox/microsandbox.go` is **written but never executed**. `msb` was not
+`sandbox/microsandbox.go` was **written but never executed**. `msb` was not
 installed on the development machine, so every microsandbox conformance
 subtest skipped. It is the strongest isolation BONNIE offers and the only
 backend that can enforce a domain allow-list, so shipping it unverified is a
 promise BONNIE has not tested.
+
+**Update 2026-09-12.** The Nix flake put `msb` on the PATH, the cases stopped
+skipping, and three of the 18 failed immediately. All three are fixed and all
+18 now pass on Linux with KVM (`msb` 0.6.18). See `docs/SPEC.md` §4.11 for the
+defects. What remains is the network policy, the live suite, and macOS.
 
 ### Do
 
@@ -211,16 +216,24 @@ promise BONNIE has not tested.
 
 ### Acceptance criteria
 
-- [ ] All conformance cases pass for `microsandbox`, none skipped
+- [x] All conformance cases pass for `microsandbox`, none skipped
+      (18/18, Linux + KVM, `msb` 0.6.18, 2026-09-12)
 - [ ] The live sandbox suite passes against microsandbox
-- [ ] `msb cp` confirmed for binary content and missing paths
-- [ ] `SetNetworkPolicy` either enforces the policy or refuses it
-- [ ] `docs/SANDBOX.md` records what was verified and on what hardware
+- [x] `msb cp` confirmed for binary content and missing paths
+      (`TestBinaryFileRoundTrip`, `TestReadMissingFile`)
+- [x] `SetNetworkPolicy` either enforces the policy or refuses it
+      (it refuses; enforcing it is still open)
+- [x] `docs/SANDBOX.md` records what was verified and on what hardware
+- [ ] Verified on macOS with Apple Silicon
+- [ ] `SetNetworkPolicy` actually enforces an allow-list
 
 ### Watch for
 
-This is the highest-value open task for anyone with the hardware. Until it is
-done, `docs/SANDBOX.md` should not imply the microsandbox path is proven.
+The remaining work is the network policy. Until it is wired, microsandbox has
+no advantage over Docker for egress control, which is the main reason to
+choose it.
+
+Do not let the docs imply the live path or macOS is proven. Neither has run.
 
 ---
 

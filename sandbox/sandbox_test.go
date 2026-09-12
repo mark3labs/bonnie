@@ -398,3 +398,33 @@ func TestRenderResultShowsExitCodeOnlyOnFailure(t *testing.T) {
 		t.Fatalf("empty result rendered as %q", got)
 	}
 }
+
+// TestMsbMissingPathSeparatesAbsentFileFromAbsentSandbox pins a distinction
+// the microsandbox adapter got wrong.
+//
+// msb reports an absent guest path as "error: stat <path>", which the generic
+// isMissingPath does not recognise, so ReadFile returned a bare error instead
+// of ErrNotFound and no caller could tell the two apart. The opposite mistake
+// is worse: "sandbox not found" contains "not found" and so satisfies the
+// generic helper, which would report a vanished workspace to the model as an
+// ordinary missing file.
+func TestMsbMissingPathSeparatesAbsentFileFromAbsentSandbox(t *testing.T) {
+	t.Parallel()
+	const path = "/workspace/does/not/exist.txt"
+
+	if !msbMissingPath("error: stat "+path+"\n", path) {
+		t.Fatal("the real msb wording for an absent path was not recognised")
+	}
+	// A gone workspace is a different failure and must not be flattened
+	// into ErrNotFound, even though the generic helper matches its wording.
+	if msbMissingPath("error: sandbox not found: bonnie-run-1\n", path) {
+		t.Fatal("an absent sandbox was reported as an absent file")
+	}
+	if !isMissingPath("error: sandbox not found: bonnie-run-1") {
+		t.Skip("generic helper no longer matches; the guard above is moot")
+	}
+	// A failure naming a different path is not this path going missing.
+	if msbMissingPath("error: stat /workspace/other.txt\n", path) {
+		t.Fatal("a failure on another path was read as this one missing")
+	}
+}

@@ -17,6 +17,19 @@ yet, so everything under 0.1.0 is still unreleased until it is.
   `goreleaser`, and the microsandbox CLI
 - The `bonnie` Nix package wraps the binary so `msb` is on its PATH
 
+### Fixed
+
+- microsandbox: a missing guest file now returns `ErrNotFound`. `msb` words
+  this as `error: stat <path>`, which the shared shell matcher did not
+  recognise. The new matcher anchors on the path, so `sandbox not found` — a
+  vanished workspace — is no longer flattened into an ordinary missing file
+- microsandbox: a run that parked between turns could not be resumed. `msb ps`
+  lists only running sandboxes, so a stopped one looked absent and `Open`
+  tried to create it again, which `msb` refused. It now lists with `--all` and
+  decodes the JSON `name` field rather than substring matching it
+- microsandbox: `Delete` passes `--force`, so it no longer leaks a running
+  microVM per sandbox. The conformance suite leaked about 9 GiB per run
+
 ## [0.1.0] — 2026-09-12
 
 ### Added

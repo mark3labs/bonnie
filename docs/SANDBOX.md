@@ -210,9 +210,10 @@ The live tests cover the claims that matter:
 - **`Local` is not a sandbox.** It is named honestly and documented loudly.
 - **Docker is namespaces, not a kernel.** Use microsandbox when the threat
   model includes hostile code.
-- **microsandbox is unverified.** It is written but has never run: `msb` was
-  not installed on the development machine, so every microsandbox conformance
-  case skipped. See T-013.
+- **microsandbox is verified on Linux/KVM only.** All 18 conformance cases
+  pass with `msb` 0.6.18 on Linux with KVM (2026-09-12). It has not been run
+  on macOS with Apple Silicon, and the live suite has not been run against it.
+  See T-013.
 - **microsandbox cannot apply a network policy yet.** It refuses one rather
   than pretending.
 - **Network is open by default.** Set a policy explicitly for untrusted work.
