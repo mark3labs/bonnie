@@ -20,7 +20,6 @@ the known risks, and the invariants every task must preserve.
 | ID | Title | Priority | Size | Blocks |
 |---|---|---|---|---|
 | T-011 | Tag and release `v0.1.0` | P2 | S | — |
-| T-012 | Journal the sandbox lifecycle | P1 | M | — |
 | T-013 | Verify the microsandbox adapter on real hardware | P1 | S | — |
 | T-015 | `channel` package has no tests | P2 | S | — |
 
@@ -28,6 +27,7 @@ the known risks, and the invariants every task must preserve.
 
 | ID | Delivered | Where |
 |---|---|---|
+| T-012 | The sandbox lifecycle is journalled: `RecordSandbox`, a resume note when a workspace is gone, `runs show` timeline, `bonnie sandbox prune` | `runtime/journal.go`, `runtime/session.go`, `sandbox/lifecycle.go`, `cmd/bonnie/sandbox.go` |
 | T-014 | Cross-process run ownership: `flock` per run, `ErrRunOwnedElsewhere` on a second writer, reads unlocked, per-host limit stated | `runtime/filejournal.go`, `filejournal_test.go` |
 
 ### Resolved by upstream
@@ -163,6 +163,10 @@ was deliberately left undone.
 
 ## T-012 — Journal the sandbox lifecycle
 
+**RESOLVED.** The design — a `RecordSandbox` kind, a resume note that is
+never silent, a prune command rather than a sweep — is in `docs/SPEC.md`
+§4.10. The text below is the task as it was written.
+
 **Priority** P1 · **Size** M · **Spec** §4.10
 
 ### Why
@@ -199,18 +203,25 @@ Today that produces three distinct failures:
 
 ### Acceptance criteria
 
-- [ ] `RecordSandbox` is written when a sandbox opens
-- [ ] `bonnie runs show` displays the backend and sandbox ID
-- [ ] A resumed run whose workspace is gone reports that, and does not
-      silently present an empty one
-- [ ] Terminal runs can have their sandboxes reclaimed
-- [ ] A test covers the missing-workspace path
+- [x] `RecordSandbox` is written when a sandbox opens
+      (`LazyOpener`, retried until the journal takes it)
+- [x] `bonnie runs show` displays the backend and sandbox ID
+- [x] A resumed run whose workspace is gone reports that, and does not
+      silently present an empty one — the decision was a note in the
+      conversation, not a failure, and it is documented in §4.10
+- [x] Terminal runs can have their sandboxes reclaimed
+      (`bonnie sandbox prune`, with `--dry-run`; a `serve` sweep is future work)
+- [x] A test covers the missing-workspace path
+      (`TestCheckRecordedSandboxNotesTheLoss`, and the prune test end to end)
 
 ### Watch for
 
 Do not let `runtime/` import `sandbox/` (invariant 7 is about `channel/`, but
 the same layering logic applies). The record kind belongs in `runtime`; the
-code that writes it belongs in `sandbox`.
+code that writes it belongs in `sandbox`. That held: `LazyOpener` takes the
+`*runtime.Session` and calls its record methods, and the resume check lives
+in `sandbox.Agent`'s factory, which is the only place that can ask a provider
+whether its sandbox is still there.
 
 ---
 

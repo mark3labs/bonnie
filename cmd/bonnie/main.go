@@ -30,6 +30,8 @@ func main() {
 		err = runServe(os.Args[2:])
 	case "runs":
 		err = runRuns(os.Args[2:])
+	case "sandbox":
+		err = runSandbox(os.Args[2:])
 	default:
 		fmt.Fprintf(os.Stderr, "bonnie: unknown command %q\n\n", os.Args[1])
 		usage()
@@ -75,6 +77,7 @@ Usage:
 Commands:
   serve      Mount the HTTP channel and serve durable runs
   runs       List and inspect durable runs
+  sandbox    Reclaim the sandboxes of finished runs
   version    Print the BONNIE version
   help       Show this message
 

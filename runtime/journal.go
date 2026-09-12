@@ -64,6 +64,12 @@ const (
 	// RecordRepair records that a restore dropped an incomplete trailing
 	// tool-calling step. See docs/SPEC.md §4.2.
 	RecordRepair RecordKind = "repair"
+	// RecordSandbox records that a sandbox opened for a run: which backend,
+	// which sandbox. It is the only record of a run's workspace, so a
+	// resumed run can tell a vanished workspace from a live one, and a
+	// reconciler can find the sandboxes of terminal runs. See
+	// docs/SPEC.md §4.10.
+	RecordSandbox RecordKind = "sandbox"
 )
 
 // Record is one durable entry in a run's journal. Records are append-only and
@@ -80,6 +86,8 @@ const (
 //   - [RecordModelChange]: the provider and model.
 //   - [RecordSuspend] and [RecordStep]: the [SuspendRequest].
 //   - [RecordRepair]: the entry IDs a torn-write repair dropped.
+//   - [RecordSandbox]: the backend and sandbox ID, and whether the sandbox
+//     was seen to be gone.
 //
 // Every record that carries an EntryID takes part in the conversation tree, so
 // each one must be journalled. An entry that reaches the tree but not the

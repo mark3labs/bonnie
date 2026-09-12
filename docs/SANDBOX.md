@@ -233,6 +233,8 @@ The live tests cover the claims that matter:
 - **Network is open by default.** Set a policy explicitly for untrusted work.
 - **No resource limits by default.** Pass `WithDockerMemory` or the
   microsandbox equivalents.
-- **Sandbox lifecycle is not journalled yet.** A deleted container leaves a run
-  whose files are gone; the conversation survives, the workspace does not.
-  See T-012.
+- **Sandbox lifecycle is journalled.** A sandbox that opens for a run writes
+  a record naming the backend and the sandbox, so `bonnie runs show` can say
+  what held its compute, a resumed run is told when its workspace was
+  pruned, and `bonnie sandbox prune` can delete the sandboxes of terminal
+  runs. The sweep in `serve` does not exist yet — reclaiming is manual.

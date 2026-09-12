@@ -491,8 +491,9 @@ Stated plainly, because the failure modes are not obvious:
   not make two writers coordinate — one process still owns each run.
 - **Events are not durable.** The bus keeps a bounded in-memory backlog; the
   journal is the record of truth.
-- **Sandbox lifecycle is not journalled.** Delete a container and the run's
-  conversation survives but its workspace does not.
+- **Sandbox lifecycle is journalled, and reclaiming is manual.**
+  `bonnie sandbox prune` deletes the sandboxes of terminal runs; `serve`
+  does not sweep them on its own yet.
 
 ## Examples
 

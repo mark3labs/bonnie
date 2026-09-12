@@ -36,6 +36,11 @@ type Session struct {
 
 	provider string
 	modelID  string
+
+	sandboxBackend string
+	sandboxID      string
+	sandboxGone    bool
+	sandboxNoted   bool
 }
 
 type sessionEntry struct {
@@ -96,6 +101,22 @@ func Restore(ctx context.Context, runID string, j Journal) (*Session, error) {
 	s := NewSession(runID, j)
 	maxSeq := 0
 	for _, rec := range recs {
+		// A sandbox record is run metadata, not a tree entry: the latest one
+		// decides what LastSandbox reports. A journalled loss counts as
+		// already noted, so a resumed run does not note it twice.
+		if rec.Kind == RecordSandbox {
+			if len(rec.Payload) > 0 {
+				var p sandboxPayload
+				if err := json.Unmarshal(rec.Payload, &p); err != nil {
+					return nil, fmt.Errorf("bonnie: decode sandbox record: %w", err)
+				}
+				s.mu.Lock()
+				s.sandboxBackend, s.sandboxID, s.sandboxGone = p.Backend, p.SandboxID, p.Gone
+				s.sandboxNoted = p.Gone
+				s.mu.Unlock()
+			}
+			continue
+		}
 		// A record with no entry ID is run metadata, not a tree entry.
 		// Treating one as an entry would give the tree a node keyed by the
 		// empty string, and every later message would hang off it.
@@ -201,6 +222,107 @@ type repairPayload struct {
 	DroppedEntryIDs []string `json:"dropped_entry_ids,omitempty"`
 }
 
+// sandboxPayload is the durable form of a sandbox record.
+type sandboxPayload struct {
+	Backend   string `json:"backend"`
+	SandboxID string `json:"sandbox_id,omitempty"`
+	// Gone records that this sandbox was checked and is no longer there —
+	// a pruned container, a removed microVM. The conversation note that
+	// tells the model its files vanished is journalled alongside it.
+	Gone bool `json:"gone,omitempty"`
+}
+
+func encodeSandbox(p sandboxPayload) json.RawMessage {
+	b, err := json.Marshal(p)
+	if err != nil {
+		return nil
+	}
+	return b
+}
+
+// RecordSandboxOpen journals that a sandbox opened for this run. The sandbox
+// is not part of the conversation tree, so the record carries no entry ID —
+// it is run metadata, like a state transition, and [Restore] keeps the latest
+// one for [Session.LastSandbox].
+//
+// Without this record a run's workspace exists nowhere: a resumed run whose
+// container was pruned silently came back empty, and nothing could tell the
+// operator which backend a run used, or what is still holding its compute.
+func (s *Session) RecordSandboxOpen(ctx context.Context, backend, sandboxID string) error {
+	s.mu.Lock()
+	s.sandboxBackend, s.sandboxID = backend, sandboxID
+	s.sandboxGone, s.sandboxNoted = false, false
+	s.mu.Unlock()
+
+	_, err := s.journal.Append(ctx, Record{
+		RunID: s.runID, Kind: RecordSandbox, Timestamp: now(),
+		Text:    fmt.Sprintf("sandbox opened: backend %s, id %s", backend, sandboxID),
+		Payload: encodeSandbox(sandboxPayload{Backend: backend, SandboxID: sandboxID}),
+	})
+	return err
+}
+
+// LastSandbox returns the backend and sandbox ID from the most recent sandbox
+// record, and whether that sandbox was last seen gone. ok is false when the
+// run never opened a sandbox.
+func (s *Session) LastSandbox() (backend, sandboxID string, gone, ok bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.sandboxBackend == "" {
+		return "", "", false, false
+	}
+	return s.sandboxBackend, s.sandboxID, s.sandboxGone, true
+}
+
+// NoteSandboxUnavailable reports the loss of a run's workspace into the
+// journal and the conversation, so a model that comes back to a pruned
+// workspace knows why its files vanished instead of watching an empty
+// directory in silence.
+//
+// verified says how the loss is known: true when a backend reported the
+// sandbox missing, false when the run's record points at a backend this host
+// no longer uses. Only a verified loss writes a gone record — an unverified
+// one is a note, not a fact.
+//
+// The note is a user-role message with a fixed prefix. A system-role message
+// mid-conversation is rejected by some providers, and a note that never
+// reached the model would defeat the point. It is written once per
+// discovery; a second call about the same loss appends nothing.
+func (s *Session) NoteSandboxUnavailable(ctx context.Context, backend, sandboxID string, verified bool) error {
+	s.mu.RLock()
+	noted := s.sandboxNoted && s.sandboxID == sandboxID
+	s.mu.RUnlock()
+	if noted {
+		return nil
+	}
+
+	if verified {
+		s.mu.Lock()
+		s.sandboxGone, s.sandboxNoted = true, true
+		s.mu.Unlock()
+		if _, err := s.journal.Append(ctx, Record{
+			RunID: s.runID, Kind: RecordSandbox, Timestamp: now(),
+			Text:    fmt.Sprintf("sandbox gone: backend %s, id %s", backend, sandboxID),
+			Payload: encodeSandbox(sandboxPayload{Backend: backend, SandboxID: sandboxID, Gone: true}),
+		}); err != nil {
+			return err
+		}
+	} else {
+		s.mu.Lock()
+		s.sandboxNoted = true
+		s.mu.Unlock()
+	}
+
+	_, err := s.AppendMessage(kit.NewLLMUserMessage(
+		"[bonnie] The sandbox workspace of this run (backend " + backend +
+			", id " + sandboxID + ") is no longer available. It was removed while " +
+			"the run was not running, or this host now uses a different backend. " +
+			"The workspace is empty: files from earlier turns are gone. Mention " +
+			"this when it matters, and re-create any file you need before you " +
+			"rely on it."))
+	return err
+}
+
 func encodeRepair(p repairPayload) json.RawMessage {
 	b, err := json.Marshal(p)
 	if err != nil {
@@ -283,6 +405,10 @@ func restoreEntry(rec Record) (*sessionEntry, error) {
 		base.Type = kit.EntryTypeModelChange
 		base.Provider, base.Model = p.Provider, p.Model
 		return &sessionEntry{meta: base}, nil
+
+	case RecordSandbox:
+		// Not a tree entry; Restore applies it to the session fields.
+		return nil, nil
 
 	case RecordBranchSummary:
 		base.Type = kit.EntryTypeBranchSummary

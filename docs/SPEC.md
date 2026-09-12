@@ -395,24 +395,50 @@ The residual risk is that sandboxing is opt-in. A host that does not pass
 `--sandbox`, or does not call `sandbox.Agent`, runs tool calls as its own
 process. `README.md` and `SECURITY.md` both say so.
 
-### 4.10 OPEN — sandbox lifecycle is not journalled
+### 4.10 RESOLVED — sandbox lifecycle is journalled
 
-A run's conversation is durable; its sandbox workspace is not recorded
-anywhere. Nothing writes a journal record when a sandbox is created, stopped,
-or deleted.
+**Resolved by T-012.** A `RecordSandbox` entry now carries the backend name,
+the sandbox ID, and — when a loss was verified — a `gone` flag. Three
+consumers read it:
 
-Consequences:
+- `bonnie runs show` prints the record in the timeline, so an operator can
+  see which backend a run used and what held its compute. The raw payload is
+  in `--json`.
+- A resumed run whose workspace vanished gets **a note in the conversation**
+  (`Session.NoteSandboxUnavailable`), written once per discovery, before the
+  first step of the resumed turn. The decision: a vanished workspace is not a
+  failure — a run whose container an operator pruned can still do useful
+  work — but it must never be silent. The model watched its files vanish;
+  the note tells it why, and tells it to re-create what it needs. The note is
+  user-role with a `[bonnie]` prefix, because some providers reject a
+  system-role message mid-conversation.
+- `bonnie sandbox prune` walks the journal, finds runs in a terminal state,
+  and deletes each one's sandbox through `sandbox.RunDeleter` — a delete that
+  never opens, because opening would create. `--dry-run` reports without
+  deleting.
 
-- `bonnie runs show` does not say which backend a run used, or whether its
-  workspace still exists.
-- A run whose container was pruned resumes with an empty workspace and no
-  explanation. The model sees its files vanish between turns.
-- Nothing cleans up the container of a completed run, so a long-lived server
-  accumulates them.
+Where the code sits, and why: the record kind and the note live in
+`runtime/`, the code that writes them lives in `sandbox/` — the same layering
+invariant 7 states for `channel/`. `sandbox.LazyOpener` takes the session now
+and journals the open, retrying the record on every call until the journal
+takes it; a bookkeeping failure fails the tool call that saw it, so the model
+retries, and the record lands when the journal recovers. It is never silent
+and never permanent.
 
-The fix is a `RecordSandbox` entry carrying the backend name and the sandbox
-ID, written when a sandbox opens, plus a reconciler that deletes the sandboxes
-of terminal runs. That is T-012.
+Unverified losses are reported differently from verified ones. A backend that
+says the sandbox is gone produces a gone record plus the note. A record that
+points at a backend this host no longer uses — BONNIE cannot ask the other
+backend — produces the note only, because nothing verified the loss.
+
+The reconciler is a command, not a background sweep. The sweep in `serve` is
+the complete answer for a long-lived server; the command is the same code an
+operator can run from cron, and it is deliberately the first step.
+
+Tests: `runtime/sandbox_record_test.go` (the record survives restore; the
+note is written once; an unverified loss writes no gone record; the record
+never joins the conversation tree), `sandbox/agent_test.go` (the opener
+journals once, the retry, the four resume-check shapes), and
+`cmd/bonnie/runs_test.go` (the timeline, and prune end to end).
 
 ### 4.11 PARTLY RESOLVED — the microsandbox adapter now runs
 

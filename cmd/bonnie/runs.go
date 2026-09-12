@@ -152,6 +152,11 @@ func detail(rec runtime.Record) string {
 	switch rec.Kind {
 	case runtime.RecordState:
 		return string(rec.State)
+	case runtime.RecordSandbox:
+		// The Text projection carries what the timeline needs: "sandbox
+		// opened: backend docker, id bonnie-x". The payload behind it is
+		// machine-readable in --json.
+		return rec.Text
 	case runtime.RecordMessage:
 		if rec.Role != "" {
 			return rec.Role + ": " + rec.Text

@@ -252,7 +252,8 @@ was verified about Kit and where, so a changed assumption is findable.
 - Run ownership is enforced per host with a `flock` per run; a shared
   network filesystem or a second writer still needs one owner in front.
 - Events are not durable; the journal is the record of truth.
-- Sandbox lifecycle is not journalled.
+- Sandbox lifecycle is journalled; reclaiming is a `bonnie sandbox prune`
+  command, not a background sweep.
 
 All of these are in `README.md` and `SECURITY.md` too. Keep them there. A
 framework that hides its limits gets deployed into situations it cannot

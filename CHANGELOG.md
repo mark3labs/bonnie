@@ -33,6 +33,17 @@ yet, so everything under 0.1.0 is still unreleased until it is.
 - `PrepareStepResult.Tools`, `ToolOutput.Halt`/`FinalValue` as contract, and
   the `SessionManager` freeze are available from Kit but not yet used by
   BONNIE (L2 will want per-step tools)
+- The sandbox lifecycle is journalled: a sandbox that opens for a run writes
+  a `RecordSandbox` naming the backend and the sandbox. `bonnie runs show`
+  prints it in the timeline. A resumed run whose workspace was pruned gets a
+  note in its conversation — never an empty workspace in silence.
+  `bonnie sandbox prune [--dry-run]` deletes the sandboxes of terminal runs
+- New provider capabilities behind optional interfaces, mirroring Kit's
+  pattern: `sandbox.ExistenceChecker` reports whether a run's sandbox still
+  exists without opening one, and `sandbox.RunDeleter` deletes it without
+  opening (opening would create). All three built-in backends implement both
+- `sandbox.LazyOpener` takes the run's `*runtime.Session` instead of a run ID,
+  so it can journal the open. Breaking at v0.x
 - Cross-process run ownership: the file journal takes an exclusive `flock`
   per run on first write and refuses a second writer with
   `runtime.ErrRunOwnedElsewhere` instead of letting records interleave and

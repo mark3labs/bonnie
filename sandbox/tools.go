@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/mark3labs/bonnie/runtime"
 	kit "github.com/mark3labs/kit/pkg/kit"
 )
 
@@ -24,16 +25,40 @@ type Opener func(ctx context.Context) (Sandbox, error)
 // LazyOpener returns an [Opener] that opens the sandbox once, on first use,
 // and returns the same one afterwards. A run that never calls a sandbox tool
 // never starts a container.
-func LazyOpener(p Provider, runID string) Opener {
+func LazyOpener(p Provider, s *runtime.Session) Opener {
 	var (
-		once sync.Once
-		sb   Sandbox
-		err  error
+		openOnce sync.Once
+		sb       Sandbox
+		err      error
+
+		recMu    sync.Mutex
+		recorded bool
 	)
+	runID := s.RunID()
 	return func(ctx context.Context) (Sandbox, error) {
-		once.Do(func() { sb, err = p.Open(ctx, runID) })
+		openOnce.Do(func() {
+			sb, err = p.Open(ctx, runID)
+		})
 		if err != nil {
 			return nil, err
+		}
+
+		// The record of the workspace's existence. Without it a resumed
+		// run cannot tell a live workspace from a pruned one, and nothing
+		// can find the sandboxes of finished runs to reclaim them.
+		//
+		// The record is retried on every call until the journal takes it,
+		// and a call that could not land it fails: the model sees the
+		// error, retries the tool, and the record lands when the journal
+		// recovers. A bookkeeping failure must not be silent, and it must
+		// not be permanent.
+		recMu.Lock()
+		defer recMu.Unlock()
+		if !recorded {
+			if rerr := s.RecordSandboxOpen(ctx, p.Name(), sb.ID()); rerr != nil {
+				return nil, fmt.Errorf("bonnie: sandbox: record open: %w", rerr)
+			}
+			recorded = true
 		}
 		return sb, nil
 	}
