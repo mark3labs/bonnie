@@ -353,16 +353,43 @@ per-run granularity, reader access, and release on close.
 `TestFileJournalLockFileIsNotARun` pins that the lock file never appears in
 `Runs`.
 
-### 4.8 OPEN — events are not durable
+### 4.8 RESOLVED — events survive a reconnect past the backlog
 
-`EventBus` keeps a bounded in-memory backlog per run (`DefaultEventBuffer`,
-1024 events) so a client that drops its connection can reconnect with a cursor
-and lose nothing. A client that reconnects after more than that many events
-sees a gap.
+**Resolved by T-016 with journal-backed catch-up.** The design that made the
+old gap a fact of life was a split: the journal was the durable record, the
+event stream a live view over a bounded in-memory backlog, and a client whose
+cursor had fallen off the backlog edge saw the gap with nothing to do about
+it. eve closes the same problem by making the stream itself the durable
+record — "every event is recorded before a step completes" — with stable
+`evt_` ids, an absolute `startIndex` cursor, and replay that returns the same
+id for the same event.
 
-This is the right split — the journal is the durable record, events are a live
-view — but a consumer that needs every event must read the journal, not the
-stream.
+BONNIE adopted the contract, not the substrate. Every event now carries the
+**journal position it is anchored to**: a state event the Seq of its
+`RecordState`, a suspend or resume event the Seq of its record, and a
+response the Seq of the message record the turn's last text belongs to. Live
+events forwarded from Kit mid-turn anchor to the journal position at publish
+time; they are ephemeral by nature and are never replayed. The seqs are
+therefore not dense — messages sit between the state records — but they rise,
+never repeat, and mean the same thing on every path.
+
+On reconnect, [Runner.StreamEvents] — the only path `channel/http`'s stream
+uses — first subscribes to the bus, then replays the run's journal when the
+cursor has fallen behind, and joins the live stream by dropping events whose
+Seq the replay already covered. Because both paths derive from the same
+records, the handoff is a filter, not a negotiation. A **process restart** is
+covered too: a fresh Runner's bus remembers nothing, and the replay comes
+entirely from the journal.
+
+What replay cannot revive, it says so: Kit's mid-turn deltas are live-only,
+and the response text of a turn whose agent journaled no assistant message
+has no anchor to replay from. Both are documented on [Event], and neither
+hides a gap in the durable events.
+
+Tests: `runtime/events_test.go` (replay past a shrunken backlog, the restart
+replay, the handoff without gap or duplicate), the stream tests in
+`channel/http` (anchors on the wire, reconnect past the backlog at 18 events),
+and the bus tests updated to the anchored contract.
 
 ### 4.9 PARTLY RESOLVED — no sandbox, observed in practice
 

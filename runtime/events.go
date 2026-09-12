@@ -22,12 +22,20 @@ const (
 	EventResponse = "run_response"
 )
 
-// Event is one observable moment in a run's life. It is the unit of BONNIE's
-// streaming surface: one JSON object, one line on the wire.
+// Event is one observable moment in a run's life. It is the unit of
+// BONNIE's streaming surface: one JSON object, one line on the wire.
 //
-// Seq is monotonic per run and starts at 1. A client that reconnects passes
-// the last Seq it saw as a cursor, and the bus replays everything after it
-// that is still buffered.
+// Seq is the journal position the event is anchored to, per run. Durable
+// events — state, suspend, resume, response — anchor to the record they
+// came from, so reconnecting from a cursor, rewinding to 0, or replaying a
+// finished run all produce the same event at the same Seq. Live-only events
+// (agent deltas forwarded from Kit) anchor to the journal position at the
+// moment they were published; they are never replayed, and a cursor that
+// only counts durable events never misses one of those on reconnect.
+//
+// A client's cursor is the last Seq it saw. The stream serves every event
+// past it — from the backlog when it still reaches, from the journal when it
+// does not.
 type Event struct {
 	RunID string          `json:"run_id"`
 	Seq   int             `json:"seq"`
@@ -42,18 +50,23 @@ type Event struct {
 // clients.
 const DefaultEventBuffer = 1024
 
-// EventBus fans run events out to subscribers and keeps a bounded backlog per
-// run so a client that drops its connection can catch up.
+// EventBus fans run events out to subscribers and keeps a bounded backlog
+// per run so a client that drops its connection can catch up.
 //
-// The backlog is in memory only. Events are a live view, not a durable record:
-// the journal is the durable record. A client that reconnects after more than
-// [DefaultEventBuffer] events have passed sees a gap, and should replay the
-// journal instead.
+// The backlog is in memory only, and it is not the record of truth — the
+// journal is. Every event carries the journal position it is anchored to, so
+// a reconnect whose cursor has fallen off the backlog edge is served from
+// the journal: [Runner.StreamEvents] replays the records and joins the live
+// stream without a gap. The anchor is wired by the [Runner]; a standalone
+// bus leaves events unstamped, and they then behave as live-only.
 type EventBus struct {
 	capacity int
 
+	// anchor reports the current journal position for a run. Nil means
+	// events publish unstamped.
+	anchor func(runID string) int
+
 	mu      sync.Mutex
-	seq     map[string]int
 	backlog map[string][]Event
 	subs    map[string]map[int]*subscriber
 	nextSub int
@@ -67,20 +80,30 @@ func NewEventBus(capacity int) *EventBus {
 	}
 	return &EventBus{
 		capacity: capacity,
-		seq:      make(map[string]int),
 		backlog:  make(map[string][]Event),
 		subs:     make(map[string]map[int]*subscriber),
 	}
 }
 
-// Publish stamps an event with the next sequence number for its run and
-// delivers it to every subscriber. It returns the stamped event.
+// Anchor wires the journal-position function that stamps events which do not
+// carry a Seq of their own. The [Runner] sets it from the journal it holds.
+func (b *EventBus) Anchor(fn func(runID string) int) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.anchor = fn
+}
+
+// Publish stamps an event and delivers it to every subscriber. An event that
+// carries no Seq of its own is anchored to the current journal position.
+// Callers that know the record an event belongs to set Seq themselves and
+// win.
 func (b *EventBus) Publish(ev Event) Event {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	b.seq[ev.RunID]++
-	ev.Seq = b.seq[ev.RunID]
+	if ev.Seq == 0 && b.anchor != nil {
+		ev.Seq = b.anchor(ev.RunID)
+	}
 	if ev.Time.IsZero() {
 		ev.Time = now()
 	}
@@ -108,6 +131,19 @@ func (b *EventBus) PublishData(runID, typ string, text string, payload any) Even
 		}
 	}
 	return b.Publish(ev)
+}
+
+// Oldest returns the Seq of the oldest event still buffered for a run, or 0
+// when nothing is buffered. A cursor below Oldest-1 has fallen off the edge
+// of the backlog and must be served from the journal.
+func (b *EventBus) Oldest(runID string) int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	buf := b.backlog[runID]
+	if len(buf) == 0 {
+		return 0
+	}
+	return buf[0].Seq
 }
 
 // Subscribe returns a channel of events for a run, starting after the given

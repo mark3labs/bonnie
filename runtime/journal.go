@@ -156,6 +156,20 @@ type Journal interface {
 	Close() error
 }
 
+// Positioner is an optional interface a [Journal] may implement to report
+// how many records a run has without replaying them.
+//
+// The event stream uses it as its anchor: every [Event] carries the journal
+// position the event belongs to, so a client that reconnects can be served
+// from the journal itself when the in-memory backlog has moved past its
+// cursor. [FileJournal] and [MemoryJournal] implement it. Without it the
+// stream degrades to the live backlog only.
+type Positioner interface {
+	// Position returns the number of records a run has. It reports 0 with a
+	// nil error for a run that does not exist.
+	Position(ctx context.Context, runID string) (int, error)
+}
+
 // StepJournal is an optional interface a [Journal] may implement to commit a
 // whole agent step as one unit.
 //

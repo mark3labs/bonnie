@@ -33,6 +33,13 @@ yet, so everything under 0.1.0 is still unreleased until it is.
 - `PrepareStepResult.Tools`, `ToolOutput.Halt`/`FinalValue` as contract, and
   the `SessionManager` freeze are available from Kit but not yet used by
   BONNIE (L2 will want per-step tools)
+- Events are journal-anchored and survive a reconnect past the backlog:
+  every event carries the journal position it belongs to, the stream replays
+  the records when the in-memory backlog has moved past the cursor, and the
+  stream survives a process restart. Kit's mid-turn deltas stay live-only,
+  marked as ephemeral
+- `runtime.RunnerOption` and `runtime.WithEventBuffer` tune the reconnect
+  backlog; a smaller buffer now costs memory, not correctness
 - The sandbox lifecycle is journalled: a sandbox that opens for a run writes
   a `RecordSandbox` naming the backend and the sandbox. `bonnie runs show`
   prints it in the timeline. A resumed run whose workspace was pruned gets a

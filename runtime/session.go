@@ -48,6 +48,11 @@ type sessionEntry struct {
 	msg        *kit.LLMMessage
 	compaction *kit.CompactionEntry
 	extData    *kit.ExtensionDataEntry
+	// journalSeq is the journal record this entry was written to. It is
+	// what anchors an Event to durable state: a response event carries the
+	// Seq of the message record it belongs to, so a stream that reconnects
+	// past the backlog can replay the journal and land on the same event.
+	journalSeq int
 }
 
 // Compile-time proof that BONNIE satisfies the public Kit contract. If Kit
@@ -492,7 +497,7 @@ func (s *Session) AppendMessage(msg kit.LLMMessage) (string, error) {
 	s.leaf = id
 	s.mu.Unlock()
 
-	_, err = s.journal.Append(context.Background(), Record{
+	seq, err := s.journal.Append(context.Background(), Record{
 		RunID:     s.runID,
 		Kind:      RecordMessage,
 		Timestamp: ts,
@@ -502,7 +507,23 @@ func (s *Session) AppendMessage(msg kit.LLMMessage) (string, error) {
 		Text:      text,
 		Payload:   payload,
 	})
+	// The record's sequence is what the event stream anchors to.
+	e.journalSeq = seq
 	return id, err
+}
+
+// LastMessageSeq returns the journal sequence of the last message appended
+// to the current branch, or 0 when the conversation is empty. The runner
+// stamps a response event with it, and the replay projection derives the
+// same value from the records, so a reconnecting client sees the same event
+// at the same Seq whichever path served it.
+func (s *Session) LastMessageSeq() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if leaf, ok := s.entries[s.leaf]; ok {
+		return leaf.journalSeq
+	}
+	return 0
 }
 
 // AppendStep implements [kit.StepAppender]. It receives every message of
@@ -596,29 +617,41 @@ func (s *Session) AppendStep(ctx context.Context, msgs []kit.LLMMessage) ([]stri
 	// A completed step must survive an interrupted turn: keep the values,
 	// drop the cancellation. See the Cancellation section above.
 	writeCtx := context.WithoutCancel(ctx)
-	if err := s.journalStep(writeCtx, recs); err != nil {
+	seqs, err := s.journalStep(writeCtx, recs)
+	if err != nil {
 		return ids, err
 	}
+	// The records' sequences are what the event stream anchors to.
+	s.mu.Lock()
+	for i := range recs {
+		if e, ok := s.entries[ids[i]]; ok && i < len(seqs) {
+			e.journalSeq = seqs[i]
+		}
+	}
+	s.mu.Unlock()
 	return ids, nil
 }
 
 // journalStep writes one step's records through [StepJournal] when the
-// journal provides it, and one [Journal.Append] per record when it does not.
+// journal provides it, and one [Journal.Append] per record when it does not,
+// returning the sequence each record received.
 //
 // The fallback has the same crash window the pre-v0.106 per-message writes
 // had; a host that wants crash-safe steps should implement [StepJournal].
 // Both paths keep the step a unit in the tree regardless.
-func (s *Session) journalStep(ctx context.Context, recs []Record) error {
+func (s *Session) journalStep(ctx context.Context, recs []Record) ([]int, error) {
 	if sj, ok := s.journal.(StepJournal); ok {
-		_, err := sj.AppendStep(ctx, recs)
-		return err
+		return sj.AppendStep(ctx, recs)
 	}
+	seqs := make([]int, 0, len(recs))
 	for i := range recs {
-		if _, err := s.journal.Append(ctx, recs[i]); err != nil {
-			return fmt.Errorf("bonnie: append record %d of step: %w", i+1, err)
+		seq, err := s.journal.Append(ctx, recs[i])
+		if err != nil {
+			return seqs, fmt.Errorf("bonnie: append record %d of step: %w", i+1, err)
 		}
+		seqs = append(seqs, seq)
 	}
-	return nil
+	return seqs, nil
 }
 
 // branchLocked walks from the current leaf to the root and returns the path in

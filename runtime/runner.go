@@ -169,21 +169,52 @@ var ErrRunNotActive = errors.New("bonnie: run is not active")
 // ErrNotWaiting is returned when Resume targets a run that is not suspended.
 var ErrNotWaiting = errors.New("bonnie: run is not waiting for input")
 
+// RunnerOption configures a [Runner].
+type RunnerOption func(*Runner)
+
 // NewRunner returns a runner. A nil journal defaults to [MemoryJournal]; a nil
 // factory defaults to [KitAgent] with no extra options.
-func NewRunner(j Journal, f AgentFactory) *Runner {
+func NewRunner(j Journal, f AgentFactory, opts ...RunnerOption) *Runner {
 	if j == nil {
 		j = NewMemoryJournal()
 	}
 	if f == nil {
 		f = KitAgent()
 	}
-	return &Runner{
+	r := &Runner{
 		journal: j,
 		factory: f,
 		bus:     NewEventBus(DefaultEventBuffer),
 		active:  make(map[string]*activeTurn),
 	}
+	for _, opt := range opts {
+		opt(r)
+	}
+	return r
+}
+
+// durableSeq reports the journal position for a run, or 0 when the journal
+// cannot say. It is what anchors events to records; a journal without
+// [Positioner] leaves its events unstamped, and the stream then serves the
+// live backlog only.
+func (r *Runner) durableSeq(runID string) int {
+	p, ok := r.journal.(Positioner)
+	if !ok {
+		return 0
+	}
+	n, err := p.Position(context.Background(), runID)
+	if err != nil {
+		return 0
+	}
+	return n
+}
+
+// WithEventBuffer sets how many recent events per run the bus keeps for
+// reconnecting clients. The default is [DefaultEventBuffer]. A cursor that
+// has fallen further behind is served from the journal, so a smaller buffer
+// costs memory, not correctness.
+func WithEventBuffer(n int) RunnerOption {
+	return func(r *Runner) { r.bus = NewEventBus(n) }
 }
 
 // Journal exposes the underlying journal.
@@ -192,6 +223,135 @@ func (r *Runner) Journal() Journal { return r.journal }
 // Events exposes the run event bus. Transports subscribe to it to stream a
 // run; nothing in L1 requires a subscriber.
 func (r *Runner) Events() *EventBus { return r.bus }
+
+// StreamEvents yields a run's events after the given cursor, with no gap.
+//
+// When the cursor still reaches the in-memory backlog, this is the bus and
+// nothing else. When it has fallen off the edge — the client was away longer
+// than [DefaultEventBuffer] events, or the whole process restarted — the
+// journal is replayed first and the live stream is joined afterwards,
+// dropping events whose Seq the replay already covered. Every event is
+// anchored to a journal position, so the two paths produce the same event at
+// the same Seq and the handoff is a filter, not a negotiation.
+//
+// What replay cannot revive is ephemeral by nature: the deltas and
+// progress events forwarded from Kit mid-turn are live-only. A client that
+// needs the conversation reads it from the run or the journal; the events
+// tell it where the run stands.
+//
+// The returned function unsubscribes and closes the channel.
+func (r *Runner) StreamEvents(runID string, after int) (<-chan Event, func()) {
+	out := make(chan Event)
+	live, unsubscribe := r.bus.Subscribe(runID, after)
+
+	// Journal-backed catch-up only applies when the journal can anchor a
+	// position; otherwise this is the live backlog, exactly as before.
+	position := r.durableSeq(runID)
+	oldest := r.bus.Oldest(runID)
+	needReplay := position > after && (oldest == 0 || after+1 < oldest)
+
+	go func() {
+		defer close(out)
+		emitted := after
+
+		if needReplay {
+			if err := r.replayEvents(runID, after, out, &emitted); err != nil {
+				// The journal could not be read; degrade to the live
+				// backlog rather than fail a stream that may still
+				// deliver everything from here on. Observability, not
+				// truth, is what a lost event costs.
+				_ = err
+			}
+		}
+
+		// The live channel holds everything the bus pushed since
+		// Subscribe — including events the replay already covered, and
+		// ephemeral ones anchored before the replay's end. Seq decides
+		// each one's fate: past means already delivered or ephemeral.
+		for ev := range live {
+			if ev.Seq > emitted {
+				emitted = ev.Seq
+				out <- ev
+			}
+		}
+	}()
+
+	return out, unsubscribe
+}
+
+// replayEvents projects journal records into events and pushes them to out,
+// advancing *emitted past every record covered. It stops at the journal's
+// current end; the live stream takes over from there.
+//
+// The projection is the durable counterpart of the runner's own publishes:
+// a state record becomes an EventState; a suspend record becomes
+// EventSuspend with its payload; a resume record becomes EventResume. A
+// response is emitted where the runner publishes it — at the end of a
+// completed turn — as the last assistant text before the closing state
+// record, anchored to the last message record of the turn. Everything else
+// in the journal is conversation state, not an event.
+func (r *Runner) replayEvents(runID string, after int, out chan<- Event, emitted *int) error {
+	recs, err := r.journal.Replay(context.Background(), runID)
+	if err != nil {
+		return err
+	}
+
+	var (
+		lastMsgSeq   int
+		lastResponse string
+	)
+	for i := range recs {
+		rec := recs[i]
+		switch rec.Kind {
+		case RecordMessage:
+			if rec.Seq > *emitted {
+				lastMsgSeq = rec.Seq
+			}
+			if string(rec.Role) == "assistant" {
+				msg, derr := decodeMessage(rec)
+				if derr != nil {
+					return derr
+				}
+				lastResponse = messageText(msg)
+			}
+
+		case RecordSuspend:
+			if rec.Seq <= *emitted {
+				continue
+			}
+			ev := Event{
+				RunID: runID, Type: EventSuspend, Seq: rec.Seq,
+				Text: rec.Text, Data: rec.Payload,
+			}
+			out <- ev
+			*emitted = rec.Seq
+
+		case RecordResume:
+			if rec.Seq <= *emitted {
+				continue
+			}
+			ev := Event{RunID: runID, Type: EventResume, Seq: rec.Seq, Text: rec.Text}
+			out <- ev
+			*emitted = rec.Seq
+
+		case RecordState:
+			// The response of a completed turn is published just before
+			// its closing state, anchored to the last message record —
+			// replay reproduces that order and those Seqs exactly.
+			if rec.State == RunCompleted && lastResponse != "" && lastMsgSeq > *emitted {
+				out <- Event{RunID: runID, Type: EventResponse, Seq: lastMsgSeq, Text: lastResponse}
+				*emitted = lastMsgSeq
+			}
+			if rec.Seq > *emitted {
+				ev := Event{RunID: runID, Type: EventState, Seq: rec.Seq, State: rec.State}
+				out <- ev
+				*emitted = rec.Seq
+			}
+			lastResponse = ""
+		}
+	}
+	return nil
+}
 
 // Start begins a run, or continues an existing one that is not suspended. If
 // runID is already known to the journal, its conversation is replayed first,
@@ -232,12 +392,13 @@ func (r *Runner) Resume(ctx context.Context, runID string, responses []InputResp
 	}
 
 	answer := renderResponses(responses)
-	if _, err := r.journal.Append(turnCtx, Record{
+	seq, err := r.journal.Append(turnCtx, Record{
 		RunID: runID, Kind: RecordResume, Timestamp: now(), Text: answer,
-	}); err != nil {
+	})
+	if err != nil {
 		return nil, err
 	}
-	r.bus.PublishData(runID, EventResume, answer, responses)
+	r.bus.Publish(Event{RunID: runID, Type: EventResume, Seq: seq, Text: answer})
 	return r.turn(turnCtx, act, s, answer)
 }
 
@@ -351,13 +512,18 @@ func (r *Runner) turn(ctx context.Context, act *activeTurn, s *Session, prompt s
 	}
 
 	if sus, ok := suspensionFrom(res); ok {
-		if _, aerr := r.journal.Append(book, Record{
+		sseq, aerr := r.journal.Append(book, Record{
 			RunID: runID, Kind: RecordSuspend, Timestamp: now(),
 			Text: sus.Prompt, Payload: encodeSuspend(sus),
-		}); aerr != nil {
+		})
+		if aerr != nil {
 			return nil, aerr
 		}
-		r.bus.PublishData(runID, EventSuspend, sus.Prompt, sus)
+		susData, _ := json.Marshal(sus)
+		r.bus.Publish(Event{
+			RunID: runID, Type: EventSuspend, Seq: sseq,
+			Text: sus.Prompt, Data: susData,
+		})
 		if cerr := r.checkpoint(book, runID, RunWaiting); cerr != nil {
 			return nil, cerr
 		}
@@ -367,7 +533,14 @@ func (r *Runner) turn(ctx context.Context, act *activeTurn, s *Session, prompt s
 		}, nil
 	}
 
-	r.bus.PublishData(runID, EventResponse, res.Response, nil)
+	// The response anchors to the message record the turn's last text
+	// belongs to. The replay projection derives the same event from that
+	// record, so a reconnecting client sees the same response at the same
+	// Seq whichever path served it.
+	r.bus.Publish(Event{
+		RunID: runID, Type: EventResponse,
+		Seq: s.LastMessageSeq(), Text: res.Response,
+	})
 	if err := r.checkpoint(book, runID, RunCompleted); err != nil {
 		return nil, err
 	}
@@ -377,12 +550,13 @@ func (r *Runner) turn(ctx context.Context, act *activeTurn, s *Session, prompt s
 	}, nil
 }
 
-// checkpoint moves the run state in the journal and announces it.
+// checkpoint moves the run state in the journal and announces it. The state
+// event anchors to the state record, so a replay lands on the same event.
 func (r *Runner) checkpoint(ctx context.Context, runID string, state RunState) error {
 	if err := r.journal.Checkpoint(ctx, runID, state); err != nil {
 		return err
 	}
-	r.bus.Publish(Event{RunID: runID, Type: EventState, State: state})
+	r.bus.Publish(Event{RunID: runID, Type: EventState, Seq: r.durableSeq(runID), State: state})
 	return nil
 }
 

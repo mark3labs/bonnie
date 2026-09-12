@@ -237,13 +237,14 @@ func TestRunnerPublishesLifecycleEvents(t *testing.T) {
 }
 
 // TestEventBusReplaysFromCursor is the reconnect contract: a client that drops
-// and comes back with its cursor sees no gap and no duplicate.
+// and comes back with its cursor sees no gap and no duplicate. The events
+// carry their journal anchors, which is what the cursor counts.
 func TestEventBusReplaysFromCursor(t *testing.T) {
 	t.Parallel()
 	bus := NewEventBus(16)
 
-	for _, text := range []string{"one", "two", "three"} {
-		bus.PublishData("r", EventResponse, text, nil)
+	for i, text := range []string{"one", "two", "three"} {
+		bus.Publish(Event{RunID: "r", Type: EventResponse, Seq: i + 1, Text: text})
 	}
 
 	events, unsubscribe := bus.Subscribe("r", 1)
@@ -299,7 +300,7 @@ func TestEventBusSlowSubscriberKeepsEvents(t *testing.T) {
 
 	const n = 500
 	for i := range n {
-		bus.PublishData("r", EventResponse, itoa(i+1), nil)
+		bus.Publish(Event{RunID: "r", Type: EventResponse, Seq: i + 1, Text: itoa(i + 1)})
 	}
 	for i := range n {
 		select {

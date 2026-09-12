@@ -489,8 +489,9 @@ Stated plainly, because the failure modes are not obvious:
   `flock`, so a second writer to the same run is refused rather than allowed
   to corrupt it. That lock does not work on a network filesystem, and it does
   not make two writers coordinate — one process still owns each run.
-- **Events are not durable.** The bus keeps a bounded in-memory backlog; the
-  journal is the record of truth.
+- **Events are journal-anchored.** The stream replays the journal past the
+  in-memory backlog, so a reconnect — even after a restart — has no gap.
+  Live-only deltas are the exception, marked as such.
 - **Sandbox lifecycle is journalled, and reclaiming is manual.**
   `bonnie sandbox prune` deletes the sandboxes of terminal runs; `serve`
   does not sweep them on its own yet.

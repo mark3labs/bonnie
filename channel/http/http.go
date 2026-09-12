@@ -392,7 +392,10 @@ func (c *Channel) handleCancel(w http.ResponseWriter, r *http.Request, in channe
 //
 // The cursor query parameter is the last Seq the client saw. The stream stays
 // open until the client goes away: a suspended run may wait for hours, and
-// that is the point of the system.
+// that is the point of the system. A cursor that has fallen off the in-memory
+// backlog is served from the journal, so no reconnect sees a gap — the
+// catch-up is [Runner.StreamEvents], and it is the reason every event
+// carries the journal position it is anchored to.
 func (c *Channel) handleStream(w http.ResponseWriter, r *http.Request, in channel.Inbound) {
 	runID, ok := attachedRunID(w, r, in)
 	if !ok {
@@ -409,7 +412,7 @@ func (c *Channel) handleStream(w http.ResponseWriter, r *http.Request, in channe
 		cursor = n
 	}
 
-	events, unsubscribe := c.runner.Events().Subscribe(runID, cursor)
+	events, unsubscribe := c.runner.StreamEvents(runID, cursor)
 	defer unsubscribe()
 
 	w.Header().Set("Content-Type", "application/x-ndjson")

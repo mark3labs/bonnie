@@ -29,6 +29,14 @@ the known risks, and the invariants every task must preserve.
 | T-012 | The sandbox lifecycle is journalled: `RecordSandbox`, a resume note when a workspace is gone, `runs show` timeline, `bonnie sandbox prune` | `runtime/journal.go`, `runtime/session.go`, `sandbox/lifecycle.go`, `cmd/bonnie/sandbox.go` |
 | T-014 | Cross-process run ownership: `flock` per run, `ErrRunOwnedElsewhere` on a second writer, reads unlocked, per-host limit stated | `runtime/filejournal.go`, `filejournal_test.go` |
 | T-015 | `channeltest` conformance suite; compile-time assertions in `channel`; unknown `TurnPolicy` refused, not guessed | `channeltest/`, `channel/channel_test.go` |
+| T-016 | Events survive a reconnect past the backlog: every event anchored to a journal record, `Runner.StreamEvents` replays the journal, the stream survives a restart | `runtime/events.go`, `runtime/runner.go`, `runtime/events_test.go` |
+
+## T-016 — Journal-backed event catch-up
+
+**RESOLVED.** eve's contract — reconnect, rewind, and replay all return the
+event at the same position — adopted on BONNIE's substrate: the journal is
+the durable stream. The design, the anchors, and the live-only exceptions are
+in `docs/SPEC.md` §4.8.
 
 ### Resolved by upstream
 

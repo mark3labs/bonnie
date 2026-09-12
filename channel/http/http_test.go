@@ -27,9 +27,10 @@ type stubAgent struct {
 	steers  []string
 	block   chan struct{}
 	started chan struct{}
+	session *runtime.Session
 }
 
-func (a *stubAgent) PromptResult(ctx context.Context, _ string) (*kit.TurnResult, error) {
+func (a *stubAgent) PromptResult(ctx context.Context, msg string) (*kit.TurnResult, error) {
 	a.mu.Lock()
 	if a.started != nil {
 		close(a.started)
@@ -48,10 +49,28 @@ func (a *stubAgent) PromptResult(ctx context.Context, _ string) (*kit.TurnResult
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.call >= len(a.turns) {
-		return &kit.TurnResult{Response: "done"}, nil
+	// The real agent journals its turns — the assistant message is what a
+	// response event anchors to, and a stream test that skips it would test
+	// a shape production never produces. Unscripted calls answer "done",
+	// and that answer is journalled like any other.
+	res := &kit.TurnResult{Response: "done"}
+	if a.call < len(a.turns) {
+		res = a.turns[a.call]
 	}
-	res := a.turns[a.call]
+	if a.session != nil {
+		if _, err := a.session.AppendMessage(kit.NewLLMUserMessage(msg)); err != nil {
+			return nil, err
+		}
+		if res.Response != "" {
+			assistant := kit.LLMMessage{
+				Role:    kit.LLMMessageRole("assistant"),
+				Content: []kit.LLMMessagePart{kit.LLMTextPart{Text: res.Response}},
+			}
+			if _, err := a.session.AppendMessage(assistant); err != nil {
+				return nil, err
+			}
+		}
+	}
 	a.call++
 	return res, nil
 }
@@ -85,7 +104,10 @@ func newTestServer(t *testing.T, agent *stubAgent, opts ...Option) *testServer {
 
 func newTestServerOn(t *testing.T, j runtime.Journal, agent *stubAgent, opts ...Option) *testServer {
 	t.Helper()
-	r := runtime.NewRunner(j, func(context.Context, *runtime.Session) (runtime.Agent, error) {
+	r := runtime.NewRunner(j, func(_ context.Context, s *runtime.Session) (runtime.Agent, error) {
+		agent.mu.Lock()
+		agent.session = s
+		agent.mu.Unlock()
 		return agent, nil
 	})
 	c := New(r, opts...)
@@ -387,17 +409,23 @@ func TestStreamEmitsNDJSON(t *testing.T) {
 		}
 		t.Fatalf("stream closed after %d events without reaching the completed state", len(seen))
 	}
+	// Seqs are journal anchors, not dense counters: a turn journals its
+	// messages between the state records, so the response's anchor sits
+	// between the running and completed states. What the reconnect
+	// contract needs is that they rise and never repeat.
 	for i, ev := range seen {
-		if ev.Seq != i+1 {
-			t.Fatalf("event %d has seq %d, want %d", i, ev.Seq, i+1)
+		if i > 0 && ev.Seq <= seen[i-1].Seq {
+			t.Fatalf("event %d has seq %d, not above %d", i, ev.Seq, seen[i-1].Seq)
 		}
 		if ev.RunID != "stream-me" {
-			t.Fatalf("event %d belongs to %q", i, ev.RunID)
+			t.Fatalf("event %d belongs to %q", ev.Seq, ev.RunID)
 		}
 	}
 }
 
 // TestStreamResumesFromCursor is the reconnect contract: no gap, no duplicate.
+// The seqs are journal anchors, so they are not dense — the response sits
+// between the running and completed state records.
 func TestStreamResumesFromCursor(t *testing.T) {
 	t.Parallel()
 	s := newTestServer(t, &stubAgent{turns: []*kit.TurnResult{{Response: "hello"}}},
@@ -406,14 +434,15 @@ func TestStreamResumesFromCursor(t *testing.T) {
 	s.post(t, "/runs", StartRequest{Text: "hi"}) //nolint:errcheck // state asserted below
 
 	first := readStream(t, s, "/runs/cursor-me/stream?cursor=0", 2)
-	if first[0].Seq != 1 || first[1].Seq != 2 {
-		t.Fatalf("first read = %v", seqs(first))
+	if first[0].Seq != 1 || first[1].Seq != 3 {
+		t.Fatalf("first read = %v, want [1 3] — the response anchors to the assistant message record", seqs(first))
 	}
 
-	// A client that dropped after event 2 comes back with its cursor.
-	second := readStream(t, s, "/runs/cursor-me/stream?cursor=2", 1)
-	if second[0].Seq != 3 {
-		t.Fatalf("reconnect delivered seq %d, want 3 — a gap or a duplicate", second[0].Seq)
+	// A client that dropped after event 3 comes back with its cursor: the
+	// closing state of the turn is the next durable event.
+	second := readStream(t, s, "/runs/cursor-me/stream?cursor=3", 1)
+	if second[0].Seq != 4 || second[0].State != runtime.RunCompleted {
+		t.Fatalf("reconnect delivered %v, want the completed state at seq 4 — a gap or a duplicate", seqs(second))
 	}
 }
 
@@ -682,5 +711,55 @@ func TestUnknownTurnPolicyIs400(t *testing.T) {
 	})
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400: an unknown policy must be refused, not guessed", resp.StatusCode)
+	}
+}
+
+// TestStreamCatchUpPastTheBacklog is the §4.8 regression, at the wire. The
+// run produces more events than the bus keeps, and a client reconnects from
+// the very start: the catch-up must serve the whole history from the journal
+// — no gap, no duplicate, in order — instead of a stream that starts in the
+// middle.
+func TestStreamCatchUpPastTheBacklog(t *testing.T) {
+	t.Parallel()
+
+	j := runtime.NewMemoryJournal()
+	turns := make([]*kit.TurnResult, 0, 6)
+	for i := range 6 {
+		turns = append(turns, &kit.TurnResult{Response: fmt.Sprintf("turn %d", i+1)})
+	}
+	agent := &stubAgent{turns: turns}
+	r := runtime.NewRunner(j, func(_ context.Context, s *runtime.Session) (runtime.Agent, error) {
+		agent.mu.Lock()
+		agent.session = s
+		agent.mu.Unlock()
+		return agent, nil
+	}, runtime.WithEventBuffer(3))
+	ch := New(r, WithIDGenerator(func() string { return "catch-up" }))
+	srv := httptest.NewServer(ch.Handler())
+	t.Cleanup(srv.Close)
+	ts := &testServer{Server: srv, runner: r, channel: ch, agent: agent}
+
+	for i := range 6 {
+		if _, err := r.Start(context.Background(), "catch-up", runtime.Input{
+			Text: fmt.Sprintf("turn %d", i+1),
+		}); err != nil {
+			t.Fatalf("Start %d: %v", i+1, err)
+		}
+	}
+
+	events := readStream(t, ts, "/runs/catch-up/stream?cursor=0", 18)
+	if len(events) != 18 {
+		t.Fatalf("read %d events, want the full 18-event history (6 turns × running, response, completed)", len(events))
+	}
+	for i, ev := range events {
+		if i > 0 && ev.Seq <= events[i-1].Seq {
+			t.Fatalf("event %d has seq %d, not above %d", i, ev.Seq, events[i-1].Seq)
+		}
+	}
+	if events[16].Type != runtime.EventResponse || events[16].Text != "turn 6" {
+		t.Fatalf("second-to-last event = %+v, want the turn 6 response", events[16])
+	}
+	if last := events[17]; last.State != runtime.RunCompleted {
+		t.Fatalf("last event = %+v, want the closing completed state", last)
 	}
 }

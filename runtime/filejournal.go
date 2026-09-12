@@ -70,7 +70,25 @@ type FileJournal struct {
 	runs map[string]*runFile
 }
 
-var _ Journal = (*FileJournal)(nil)
+var (
+	_ Journal     = (*FileJournal)(nil)
+	_ Positioner  = (*FileJournal)(nil)
+	_ StepJournal = (*FileJournal)(nil)
+)
+
+// Position implements [Positioner].
+func (j *FileJournal) Position(_ context.Context, runID string) (int, error) {
+	rf, err := j.run(runID)
+	if err != nil {
+		return 0, err
+	}
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	if err := rf.loadLocked(); err != nil {
+		return 0, err
+	}
+	return rf.seq, nil
+}
 
 // FileJournalOption configures a [FileJournal].
 type FileJournalOption func(*FileJournal)

@@ -24,7 +24,18 @@ func NewMemoryJournal() *MemoryJournal {
 	}
 }
 
-var _ Journal = (*MemoryJournal)(nil)
+var (
+	_ Journal     = (*MemoryJournal)(nil)
+	_ Positioner  = (*MemoryJournal)(nil)
+	_ StepJournal = (*MemoryJournal)(nil)
+)
+
+// Position implements [Positioner].
+func (j *MemoryJournal) Position(_ context.Context, runID string) (int, error) {
+	j.mu.RLock()
+	defer j.mu.RUnlock()
+	return len(j.records[runID]), nil
+}
 
 // Append implements [Journal].
 func (j *MemoryJournal) Append(_ context.Context, rec Record) (int, error) {
