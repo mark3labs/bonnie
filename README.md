@@ -47,7 +47,7 @@ called — so it does not repeat a side effect it has already performed.
 
 ## Contents
 
-- [Install](#install) · [Quickstart](#quickstart) · [Park and resume](#park-and-resume)
+- [Install](#install) · [Quickstart: no Go](#quickstart-no-go-required) · [Quickstart](#quickstart) · [Park and resume](#park-and-resume)
 - [Your own tools](#your-own-tools) · [Sandboxing](#sandboxing) · [Serve over HTTP](#serve-over-http)
 - [CLI](#cli) · [Storage](#storage) · [Streaming](#streaming) · [Steer and cancel](#steer-and-cancel)
 - [How it works](#how-it-works) · [Limits](#limits) · [Docs](#documentation)
@@ -102,6 +102,38 @@ Other flake outputs:
 | `packages.microsandbox` | the `msb` CLI plus its `libkrunfw` |
 | `apps.msb` | `nix run github:mark3labs/bonnie#msb` |
 | `overlays.default` | both packages, for your own nixpkgs |
+
+## Quickstart: no Go required
+
+Scaffold an agent, edit one file, serve it. No Go toolchain, no build.
+
+```bash
+bonnie init my-agent --model anthropic/claude-sonnet-4-5
+cd my-agent
+# edit instructions.md — that file is the agent's system prompt
+bonnie serve --agent .
+```
+
+The tree is four things: `agent.yaml` (the manifest: model, sandbox,
+channels), `instructions.md` (the system prompt, read fresh at every
+start), and `skills/` and `workspace/` (seed directories — files under
+`workspace/` are mirrored into every run's sandbox, and a file the model
+already wrote is never overwritten).
+
+```bash
+# talk to it over HTTP
+curl -s localhost:8080/runs -d '{"text":"What are you?"}'
+```
+
+Every serve setting comes from the manifest or a flag, and the startup
+banner says which source won. Flags win: `--model`, `--addr`, `--sandbox`,
+and the rest override the manifest when both are given.
+
+The manifest is strict: an unknown key, an unknown `apiVersion`, or two
+manifests in one directory is an error that names what is wrong — never a
+silent default. A tree that carries Go tools cannot be served this way;
+`serve` refuses it and names `bonnie build` (the codegen path, coming in
+`v0.2`).
 
 ## Quickstart
 
@@ -349,6 +381,7 @@ opposite: it targets one exact run and returns `404` rather than creating one.
 ## CLI
 
 ```
+bonnie init     Scaffold an agent tree (manifest, instructions, seeds)
 bonnie serve    Mount the HTTP channel and serve durable runs
 bonnie runs     List and inspect durable runs
 bonnie sandbox  Reclaim the sandboxes of terminal runs (prune)
@@ -356,6 +389,13 @@ bonnie version  Print the version
 ```
 
 ```bash
+bonnie init my-agent --model anthropic/claude-sonnet-4-5
+bonnie init .                      adopt this directory; never overwrites
+bonnie init my-agent --format toml # or json; yaml is the default
+bonnie init my-agent --tools       add a Go module with a sample tool
+
+bonnie serve --agent my-agent      serve a discovered tree, no build
+bonnie serve --agent . --config agent.toml
 bonnie serve --addr :8080 --journal .bonnie \
              --model anthropic/claude-sonnet-4-5 \
              --sandbox docker --sandbox-deny-network

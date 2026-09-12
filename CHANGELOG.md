@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- L2 discovery, first increment (`T-017`): the agent tree is discovered
+  from a manifest. `bonnie init` scaffolds a tree — `agent.yaml`,
+  `instructions.md`, and the `skills/` and `workspace/` seed directories —
+  with no Go module by default; `--tools` adds a module with a sample tool.
+  `bonnie serve --agent DIR` serves a discovered tree with no build and no
+  toolchain: instructions from disk, model, sandbox, and channel bindings
+  from the manifest. Flags override the manifest, and the startup banner
+  names the source that won. Files under the manifest's `workspace:` are
+  mirrored into every run's sandbox on every backend, and a file the model
+  already wrote is never overwritten.
+- The manifest loader (`agent/`) is strict on one code path for `agent.yaml`,
+  `agent.toml`, and `agent.json`: an unknown key, an unknown `apiVersion`,
+  or two manifests in one root is an error naming what is wrong. `mcp` and
+  `skills` are reserved and refused until their loading stories exist.
+  `serve --agent` refuses a tree that carries Go tools and names
+  `bonnie build` (the codegen increment, T-018) — a partial run is never
+  the answer.
+
 ### Changed
 
 - The `bonnie` CLI is built on cobra, and its help and errors render with

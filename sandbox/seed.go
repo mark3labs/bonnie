@@ -1,0 +1,126 @@
+package sandbox
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+)
+
+// gitkeep is the scaffold's empty-directory marker. It is bookkeeping for
+// version control, not seed content, and never reaches a workspace.
+const gitkeep = ".gitkeep"
+
+// Seeded wraps a [Provider] and mirrors a local directory into every sandbox
+// it opens. It is how a manifest's workspace seed reaches the run: the files
+// an author wrote under `workspace/` are present at [Workspace] before the
+// model's first command runs, on every backend, because the mirror travels
+// over the [Sandbox] interface and not over any backend's own tooling.
+//
+// Seeding never overwrites a file the sandbox already has. A run that
+// resumes — the same sandbox reopened — keeps every edit the model made; a
+// seed file the model deleted reappears, which is the honest behaviour for a
+// seed and stated here so nobody mistakes it for a bug.
+//
+// The wrapper forwards the optional provider interfaces: [Networked],
+// [ExistenceChecker], and [RunDeleter]. A backend that cannot enforce a
+// network policy still refuses one — the wrapper refuses on its behalf — so
+// wrapping never widens what a caller can request.
+func Seeded(p Provider, dir string) Provider {
+	return &seeded{p: p, dir: dir}
+}
+
+// seeded is the [Seeded] wrapper.
+type seeded struct {
+	p   Provider
+	dir string
+}
+
+var _ Provider = (*seeded)(nil)
+
+// Name implements [Provider].
+func (s *seeded) Name() string { return s.p.Name() }
+
+// Available implements [Provider].
+func (s *seeded) Available(ctx context.Context) error { return s.p.Available(ctx) }
+
+// Open implements [Provider]. The seed lands after the underlying open, so a
+// failed seed fails the open: the tool call that triggered it reports the
+// error, the model retries, and the seed lands when the fault clears. It is
+// never silent and never permanent.
+func (s *seeded) Open(ctx context.Context, runID string) (Sandbox, error) {
+	sb, err := s.p.Open(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	if err := seedInto(ctx, sb, s.dir); err != nil {
+		return nil, fmt.Errorf("bonnie: sandbox: seed workspace: %w", err)
+	}
+	return sb, nil
+}
+
+// SetNetworkPolicy forwards to the wrapped provider. When that provider
+// cannot enforce policies at all, the wrapper refuses — the same refusal the
+// backend would have made, kept intact through the wrapper.
+func (s *seeded) SetNetworkPolicy(policy NetworkPolicy) error {
+	n, ok := s.p.(Networked)
+	if !ok {
+		return fmt.Errorf("%w: the %s sandbox cannot control the network", ErrPolicyUnsupported, s.p.Name())
+	}
+	return n.SetNetworkPolicy(policy)
+}
+
+// SandboxExists forwards to the wrapped provider. A backend that cannot
+// report existence returns an error rather than a false "no": the caller
+// treats an error as "cannot report" and a bare false as a verified loss,
+// and confusing the two would record a loss that never happened.
+func (s *seeded) SandboxExists(ctx context.Context, runID string) (bool, error) {
+	ec, ok := s.p.(ExistenceChecker)
+	if !ok {
+		return false, fmt.Errorf("bonnie: sandbox: the %s backend cannot report sandbox existence", s.p.Name())
+	}
+	return ec.SandboxExists(ctx, runID)
+}
+
+// DeleteRun forwards to the wrapped provider. A backend that cannot delete
+// reports that, rather than claiming a reclaim that never happened.
+func (s *seeded) DeleteRun(ctx context.Context, runID string) (bool, error) {
+	rd, ok := s.p.(RunDeleter)
+	if !ok {
+		return false, fmt.Errorf("bonnie: sandbox: the %s backend cannot delete sandboxes", s.p.Name())
+	}
+	return rd.DeleteRun(ctx, runID)
+}
+
+// seedInto mirrors dir into the sandbox, relative to [Workspace], skipping
+// files that are already there and skipping [gitkeep].
+func seedInto(ctx context.Context, sb Sandbox, dir string) error {
+	return filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if d.Name() == gitkeep {
+			return nil
+		}
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		target := Resolve(filepath.ToSlash(rel))
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if _, err := sb.ReadFile(ctx, target); err == nil {
+			return nil // the model's file wins; a resume never reverts
+		} else if !errors.Is(err, ErrNotFound) {
+			return err
+		}
+		return sb.WriteFile(ctx, target, data)
+	})
+}

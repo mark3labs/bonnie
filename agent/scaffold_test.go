@@ -1,0 +1,189 @@
+package agent
+
+import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// The three formats must scaffold trees that parse to the same struct, and
+// the --model flag must land in every one of them.
+func TestScaffoldParsesInEveryFormat(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		format    string
+		wantFile  string
+		wantModel string
+	}{
+		{format: "", wantFile: "agent.yaml"},
+		{format: "yaml", wantFile: "agent.yaml"},
+		{format: "toml", wantFile: "agent.toml"},
+		{format: "json", wantFile: "agent.json"},
+		{format: "yaml", wantFile: "agent.yaml", wantModel: "opencode/kimi-k2.5"},
+		{format: "toml", wantFile: "agent.toml", wantModel: "opencode/kimi-k2.5"},
+		{format: "json", wantFile: "agent.json", wantModel: "opencode/kimi-k2.5"},
+	}
+	for _, c := range cases {
+		t.Run(c.format+" model="+c.wantModel, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			created, err := Scaffold(dir, InitOptions{Format: c.format, Model: c.wantModel})
+			if err != nil {
+				t.Fatalf("Scaffold: %v", err)
+			}
+			if len(created) == 0 {
+				t.Fatal("no files created")
+			}
+			if _, err := os.Stat(filepath.Join(dir, c.wantFile)); err != nil {
+				t.Fatalf("the %s scaffold did not create %s", c.format, c.wantFile)
+			}
+			// Directories exist and are tracked.
+			for _, d := range []string{"skills", "workspace"} {
+				if _, err := os.Stat(filepath.Join(dir, d, gitkeep)); err != nil {
+					t.Fatalf("the %s directory was not scaffolded: %v", d, err)
+				}
+			}
+
+			m, path, err := Load(dir)
+			if err != nil {
+				t.Fatalf("the scaffolded tree does not parse: %v", err)
+			}
+			if filepath.Base(path) != c.wantFile {
+				t.Fatalf("discovered %q, want %q", path, c.wantFile)
+			}
+			// The title defaults to the directory base name — eve's rule.
+			if m.Title != filepath.Base(dir) {
+				t.Fatalf("title = %q, want the directory base name", m.Title)
+			}
+			if m.Instructions != "instructions.md" || m.Workspace != "workspace/" {
+				t.Fatalf("paths did not survive: %+v", m)
+			}
+			if m.Model != c.wantModel {
+				t.Fatalf("model = %q, want %q", m.Model, c.wantModel)
+			}
+		})
+	}
+}
+
+func TestScaffoldNeverOverwrites(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	sentinel := "the author was here first\n"
+	if err := os.WriteFile(filepath.Join(dir, "instructions.md"), []byte(sentinel), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Scaffold(dir, InitOptions{})
+	if err == nil {
+		t.Fatal("want a refusal when a file exists")
+	}
+	if !strings.Contains(err.Error(), "instructions.md") || !strings.Contains(err.Error(), "never overwrites") {
+		t.Fatalf("the refusal does not name the file and the rule: %v", err)
+	}
+
+	// The existing file is untouched.
+	b, err := os.ReadFile(filepath.Join(dir, "instructions.md"))
+	if err != nil || string(b) != sentinel {
+		t.Fatalf("init touched the existing file: %q, %v", b, err)
+	}
+
+	// And init changed nothing else: no half-scaffold next to the refusal.
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("init wrote files despite refusing: %v", entries)
+	}
+}
+
+func TestScaffoldToolsModule(t *testing.T) {
+	t.Parallel()
+	dir := filepath.Join(t.TempDir(), "my-agent")
+	if _, err := Scaffold(dir, InitOptions{Tools: true}); err != nil {
+		t.Fatalf("Scaffold: %v", err)
+	}
+	for _, f := range []string{
+		"go.mod", "main.go", "bonnie_gen.go", filepath.Join("tools", "echo", "tool.go"),
+	} {
+		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
+			t.Fatalf("the --tools scaffold did not create %s: %v", f, err)
+		}
+	}
+
+	mod, err := os.ReadFile(filepath.Join(dir, "go.mod"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(string(mod), "module my-agent\n") || !strings.Contains(string(mod), "go 1.27") {
+		t.Fatalf("go.mod is not the expected scaffold: %s", mod)
+	}
+
+	// The generated wiring stub calls the sample tool by the module path.
+	gen, err := os.ReadFile(filepath.Join(dir, "bonnie_gen.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(gen), "my-agent/tools/echo") || !strings.Contains(string(gen), "DO NOT EDIT") {
+		t.Fatalf("bonnie_gen.go is not the expected stub: %s", gen)
+	}
+
+	// The scaffold carries its own .gitignore? No — it does not. Assert the
+	// journal directory is not pre-created either: the tree starts clean.
+	if _, err := os.Stat(filepath.Join(dir, ".bonnie")); !os.IsNotExist(err) {
+		t.Fatal("the scaffold pre-created a journal directory")
+	}
+}
+
+// The scaffold's main.go must compile against the pinned Bonnie release in
+// the environment every BONNIE developer has: a go.work covering the tree.
+//
+// The bonnie module is not on a public proxy (the repository is private), so
+// the workspace — or GOPRIVATE with credentials — is how the module resolves.
+// This test builds the scaffold the way a developer's machine does.
+func TestScaffoldToolsModuleBuilds(t *testing.T) {
+	t.Parallel()
+	kitRoot, ok := findUpstream(t)
+	if !ok {
+		t.Skip("no kit checkout beside this repo; the workspace build cannot be simulated")
+	}
+
+	parent := t.TempDir()
+	dir := filepath.Join(parent, "my-agent")
+	if _, err := Scaffold(dir, InitOptions{Tools: true}); err != nil {
+		t.Fatalf("Scaffold: %v", err)
+	}
+
+	work := filepath.Join(parent, "go.work")
+	if err := os.WriteFile(work, []byte("go 1.27.1\n\nuse (\n\t./my-agent\n\t"+bonnieRoot()+"\n\t"+kitRoot+"\n)\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	build := exec.Command("go", "build", "./...")
+	build.Dir = dir
+	build.Env = append(os.Environ(), "GOWORK="+work)
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("the fresh scaffold does not build: %v\n%s", err, out)
+	}
+}
+
+// bonnieRoot returns this repository's absolute path.
+func bonnieRoot() string {
+	wd, err := os.Getwd()
+	if err != nil {
+		return "."
+	}
+	return filepath.Clean(filepath.Join(wd, ".."))
+}
+
+// findUpstream looks for the kit checkout the local go.work names.
+func findUpstream(t *testing.T) (string, bool) {
+	t.Helper()
+	p := filepath.Join(filepath.Dir(bonnieRoot()), "kit")
+	if _, err := os.Stat(filepath.Join(p, "go.mod")); err != nil {
+		return "", false
+	}
+	return p, true
+}

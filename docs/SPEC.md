@@ -32,7 +32,8 @@ an eve clone: see §7 for what is deliberately different.
 ```
 L4  CLI, evals, traces                 CLI implemented; evals planned
 L3  channel/    inbound transports     channel/http implemented
-L2  discovery   agent/ tree + codegen  spec drafted: docs/L2.md, not built
+L2  discovery   agent/ tree + codegen  manifest + init + serve --agent
+                                       implemented (T-017); codegen: T-018
 L1  runtime/    durable run executor   implemented, memory + file journals
 L0  kit/pkg/kit                        upstream, unmodified
 
@@ -703,9 +704,19 @@ Any change must preserve these. Each has, or must gain, a test.
 
 L2 — [`docs/L2.md`](L2.md) — drafts four more (11–14: generated-code
 allowlist, disposable-generated versus sacred-authored files, refusal of
-partial discovery, strict manifest). They move into this list when the code
-that enforces them lands, not before; an invariant here must already have a
-test.
+partial discovery, strict manifest). Two of them are enforced and tested as
+of T-017 and join the list now; 11 and 12 land with T-018's generator.
+
+13. **Discovery refuses what it cannot fully honor.** `serve --agent` on a
+    tree that carries Go tools is an error naming `bonnie build`, not a
+    partial run. A manifest key whose loading story does not exist is
+    refused (`mcp`, `skills`), never accepted and ignored. Guard tests:
+    `TestResolveServeRefusesGoTree`, `TestReservedKeysAreRefused`.
+14. **The manifest is strict.** Unknown key, unknown `apiVersion`, two
+    manifests in one root — all errors that name what is wrong. The
+    strictness is one code path for all three formats (decode into the
+    struct and into a generic map, diff key sets), so it cannot drift
+    between formats. Guard tests: `agent/manifest_test.go`.
 
 ---
 

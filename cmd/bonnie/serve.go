@@ -4,14 +4,18 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
+	"github.com/mark3labs/bonnie/agent"
 	bonniehttp "github.com/mark3labs/bonnie/channel/http"
 	"github.com/mark3labs/bonnie/runtime"
 	"github.com/mark3labs/bonnie/sandbox"
@@ -28,6 +32,8 @@ type serveOpts struct {
 	sandboxImg  string
 	denyNetwork bool
 	shutdown    time.Duration
+	agentDir    string
+	configPath  string
 }
 
 // newServeCmd mounts `bonnie serve`.
@@ -45,10 +51,16 @@ func newServeCmd() *cobra.Command {
   POST /runs/{id}/cancel     stop the turn a run is executing
   GET  /runs/{id}/stream     NDJSON event stream, resumable with ?cursor=
 
-Without --sandbox, tool calls run as this process, with its files, network,
+With --agent DIR, serve reads the agent tree at DIR — its manifest, its
+instructions file, its sandbox and channel settings — and serves it with no
+build and no Go toolchain. Flags override the manifest, and the startup
+banner names the source that won. A tree that carries Go tools cannot be
+honored by serve and is refused: build it instead with bonnie build.
+
+Without a sandbox, tool calls run as this process, with its files, network,
 and credentials. Use --sandbox docker for a server that is reachable from
 outside. See docs/SANDBOX.md.`,
-		RunE: func(*cobra.Command, []string) error { return runServe(o) },
+		RunE: func(cmd *cobra.Command, _ []string) error { return runServe(cmd.Flags(), o) },
 	}
 	f := cmd.Flags()
 	f.StringVar(&o.addr, "addr", ":8080", "address to listen on")
@@ -59,40 +71,41 @@ outside. See docs/SANDBOX.md.`,
 	f.StringVar(&o.sandboxImg, "sandbox-image", "", "sandbox image, for example python:3.12-slim")
 	f.BoolVar(&o.denyNetwork, "sandbox-deny-network", false, "block all network egress from the sandbox")
 	f.DurationVar(&o.shutdown, "shutdown-timeout", 30*time.Second, "how long to wait for in-flight turns on shutdown")
+	f.StringVar(&o.agentDir, "agent", "", "serve the agent tree at this directory")
+	f.StringVar(&o.configPath, "config", "", "path of the manifest, instead of discovering one in the agent root")
 	return cmd
 }
 
-// runServe mounts the HTTP channel over a file-backed journal.
-func runServe(o serveOpts) error {
-	journal, err := runtime.OpenFileJournal(o.journal)
+// settingSource names where an effective setting came from. It is "flag",
+// "default", or the manifest file's name. The banner prints it, because an
+// operator must never guess which value won.
+type settingSource string
+
+const (
+	srcFlag    settingSource = "flag"
+	srcDefault settingSource = "default"
+)
+
+// serveConfig is the resolved configuration of one serve run: every setting
+// after precedence, the sandbox network policy, and the banner lines.
+type serveConfig struct {
+	model        string
+	prompt       string
+	addr         string
+	journal      string
+	sandboxKind  string
+	sandboxImage string
+	network      *sandbox.NetworkPolicy
+	title        string
+
+	banner []string
+}
+
+// runServe resolves the configuration and serves until interrupted.
+func runServe(flags *pflag.FlagSet, o serveOpts) error {
+	cfg, err := resolveServe(flags, o)
 	if err != nil {
 		return err
-	}
-	defer func() { _ = journal.Close() }()
-
-	var opts []kit.Option
-	if o.model != "" {
-		opts = append(opts, kit.WithModel(o.model))
-	}
-	if o.prompt != "" {
-		opts = append(opts, kit.WithSystemPrompt(o.prompt))
-	}
-
-	factory, err := agentFactory(o.sandboxKind, o.sandboxImg, o.denyNetwork, opts)
-	if err != nil {
-		return err
-	}
-
-	runner := runtime.NewRunner(journal, factory)
-	channel := bonniehttp.New(runner)
-
-	srv := &http.Server{
-		Addr:              o.addr,
-		Handler:           channel.Handler(),
-		ReadHeaderTimeout: 10 * time.Second,
-		// A turn can wait on a model for minutes, and a stream waits for as
-		// long as the client cares to listen, so neither gets a write
-		// deadline.
 	}
 
 	// SIGINT stops new work and lets in-flight turns reach their next
@@ -101,10 +114,205 @@ func runServe(o serveOpts) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	return serveHTTP(ctx, cfg, o.shutdown, nil)
+}
+
+// resolveServe loads the manifest when one is named or discovered, refuses
+// trees it cannot fully honor, applies precedence — flags over manifest
+// over defaults — and returns the effective configuration and its banner.
+//
+// The strictness of precedence is one code path (pick): the same rule
+// decides every setting, so no setting can silently drift to its own
+// precedence order.
+func resolveServe(flags *pflag.FlagSet, o serveOpts) (*serveConfig, error) {
+	changed := func(name string) bool { return flags.Changed(name) }
+	val := func(name string) string { v, _ := flags.GetString(name); return v }
+
+	// The manifest, when serving an agent tree.
+	var manifest *agent.Manifest
+	manifestPath := ""
+	root := "."
+	if o.agentDir != "" || o.configPath != "" {
+		var err error
+		if o.configPath != "" {
+			manifestPath = o.configPath
+			if o.agentDir != "" {
+				root = o.agentDir
+			} else {
+				root = filepath.Dir(manifestPath)
+			}
+			manifest, err = agent.LoadFile(manifestPath)
+		} else {
+			root = o.agentDir
+			manifest, manifestPath, err = agent.Load(root)
+		}
+		if err != nil {
+			return nil, err
+		}
+		if err := refuseGoTree(root); err != nil {
+			return nil, err
+		}
+	}
+	manifestSrc := settingSource(filepath.Base(manifestPath))
+
+	// pick resolves one string setting: flag over manifest over default.
+	pick := func(flagName, manVal, def string) (string, settingSource) {
+		switch {
+		case changed(flagName):
+			return val(flagName), srcFlag
+		case manVal != "":
+			return manVal, manifestSrc
+		default:
+			return def, srcDefault
+		}
+	}
+
+	cfg := &serveConfig{}
+	var addrSrc, journalSrc, modelSrc, sandboxSrc settingSource
+	cfg.journal, journalSrc = pick("journal", "", ".bonnie")
+	cfg.addr, addrSrc = pick("addr", manifestChannelAddr(manifest), ":8080")
+	cfg.model, modelSrc = pick("model", manifestModel(manifest), "")
+	sb := manifestSandbox(manifest)
+	cfg.sandboxKind, sandboxSrc = pick("sandbox", sb.Kind, "none")
+	cfg.sandboxImage, _ = pick("sandbox-image", sb.Image, "")
+	if manifest != nil {
+		cfg.title = manifest.Title
+	}
+
+	// The system prompt: the flag wins outright. Otherwise the tree's
+	// instructions file is the prompt, read fresh at start.
+	if o.prompt != "" {
+		cfg.prompt = o.prompt
+	} else if manifest != nil {
+		path, src := manifest.Instructions, manifestSrc
+		if path == "" {
+			path, src = "instructions.md", srcDefault
+		}
+		b, err := os.ReadFile(filepath.Join(root, path))
+		if err != nil {
+			return nil, fmt.Errorf("bonnie: the instructions file could not be read: %w", err)
+		}
+		cfg.prompt = string(b)
+		cfg.banner = append(cfg.banner, fmt.Sprintf("bonnie: instructions %s (%s)", path, src))
+	}
+
+	// The network policy: the deny flag wins, then the manifest's policy.
+	// An explicit allow-all is the default and requests no control at all.
+	networkSrc := srcDefault
+	switch {
+	case o.denyNetwork:
+		cfg.network = &sandbox.NetworkPolicy{Mode: sandbox.NetworkDenyAll}
+		networkSrc = srcFlag
+	case sb.Network != nil && sb.Network.Mode != "":
+		networkSrc = manifestSrc
+		switch sb.Network.Mode {
+		case "deny-all":
+			cfg.network = &sandbox.NetworkPolicy{Mode: sandbox.NetworkDenyAll}
+		case "allow-list":
+			cfg.network = &sandbox.NetworkPolicy{Mode: sandbox.NetworkAllowList, Allow: sb.Network.Allow}
+		}
+	}
+
+	// A restrictive policy without a sandbox is a control nothing can
+	// apply — the invariant is the same one a backend enforces one level
+	// down. Refuse with the fix in the message.
+	if cfg.network != nil && (cfg.sandboxKind == "" || cfg.sandboxKind == "none") {
+		return nil, fmt.Errorf("bonnie: a network policy needs a sandbox: pass --sandbox docker, or set sandbox.kind in the manifest")
+	}
+
+	// The banner: the setting and the source that won, one line each.
+	line := func(label, value string, src settingSource) {
+		cfg.banner = append(cfg.banner, fmt.Sprintf("bonnie: %s %s (%s)", label, value, src))
+	}
+	if cfg.title != "" {
+		line("agent", cfg.title, manifestSrc)
+	}
+	line("serving on", cfg.addr, addrSrc)
+	line("journal", cfg.journal, journalSrc)
+	if cfg.model != "" {
+		line("model", cfg.model, modelSrc)
+	}
+	line("sandbox", cfg.sandboxKind, sandboxSrc)
+	line("network", networkLabel(cfg.network), networkSrc)
+	if cfg.sandboxKind == "" || cfg.sandboxKind == "none" {
+		// The no-isolation warning, printed once at startup. The manifest
+		// must not make "no sandbox" quieter than the flag does.
+		cfg.banner = append(cfg.banner,
+			"bonnie: WARNING no sandbox: tool calls run as this process, with its files, network, and credentials")
+	}
+	return cfg, nil
+}
+
+// networkLabel is the effective network mode for the banner.
+func networkLabel(p *sandbox.NetworkPolicy) string {
+	if p == nil {
+		return "allow-all"
+	}
+	return string(p.Mode)
+}
+
+// refuseGoTree rejects a tree serve cannot fully honor, naming bonnie
+// build. Silently skipping the user's tools would be the failure, not a
+// graceful degradation: the model would run without the tools the author
+// wrote, and nothing would say so.
+func refuseGoTree(root string) error {
+	if _, err := os.Stat(filepath.Join(root, "go.mod")); err == nil {
+		return fmt.Errorf("bonnie: this tree carries a Go module, which serve cannot load at run time — build it instead (bonnie build), or run its own main.go")
+	}
+	if entries, err := os.ReadDir(filepath.Join(root, "tools")); err == nil && len(entries) > 0 {
+		return fmt.Errorf("bonnie: this tree carries Go tools (tools/), which serve cannot load at run time — build it instead (bonnie build)")
+	}
+	return nil
+}
+
+// serveHTTP opens the journal, wires the runner and channel, and serves
+// until the context ends or the listener fails. The listener is injectable
+// so tests can bind :0 and learn the port.
+func serveHTTP(ctx context.Context, cfg *serveConfig, shutdown time.Duration, ln net.Listener) error {
+	for _, l := range cfg.banner {
+		fmt.Fprintln(os.Stderr, l)
+	}
+
+	journal, err := runtime.OpenFileJournal(cfg.journal)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = journal.Close() }()
+
+	var opts []kit.Option
+	if cfg.model != "" {
+		opts = append(opts, kit.WithModel(cfg.model))
+	}
+	if cfg.prompt != "" {
+		opts = append(opts, kit.WithSystemPrompt(cfg.prompt))
+	}
+
+	factory, err := agentFactory(cfg.sandboxKind, cfg.sandboxImage, cfg.network, opts)
+	if err != nil {
+		return err
+	}
+
+	runner := runtime.NewRunner(journal, factory)
+	channel := bonniehttp.New(runner)
+
+	srv := &http.Server{
+		Handler:           channel.Handler(),
+		ReadHeaderTimeout: 10 * time.Second,
+		// A turn can wait on a model for minutes, and a stream waits for as
+		// long as the client cares to listen, so neither gets a write
+		// deadline.
+	}
+
+	if ln == nil {
+		ln, err = net.Listen("tcp", cfg.addr)
+		if err != nil {
+			return fmt.Errorf("bonnie: listen on %s: %w", cfg.addr, err)
+		}
+	}
+
 	errs := make(chan error, 1)
 	go func() {
-		fmt.Fprintf(os.Stderr, "bonnie: serving on %s, journal %s\n", o.addr, o.journal)
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errs <- err
 			return
 		}
@@ -118,7 +326,7 @@ func runServe(o serveOpts) error {
 		fmt.Fprintln(os.Stderr, "bonnie: shutting down, letting in-flight turns checkpoint")
 	}
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), o.shutdown)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdown)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("shutdown: %w", err)
@@ -133,10 +341,13 @@ func runServe(o serveOpts) error {
 // That is the right default for a local developer and the wrong one for a
 // server reachable from outside, so the banner says which mode is active
 // rather than leaving an operator to guess.
-func agentFactory(kind, image string, denyNetwork bool, opts []kit.Option) (runtime.AgentFactory, error) {
+//
+// A nil policy means no control was requested — allow-all, the default. A
+// policy a backend cannot enforce is refused, never stored and ignored.
+func agentFactory(kind, image string, policy *sandbox.NetworkPolicy, opts []kit.Option) (runtime.AgentFactory, error) {
 	if kind == "" || kind == "none" {
-		if denyNetwork {
-			return nil, fmt.Errorf("--sandbox-deny-network needs a sandbox; pass --sandbox docker")
+		if policy != nil {
+			return nil, fmt.Errorf("a network policy needs a sandbox; pass --sandbox docker")
 		}
 		return runtime.KitAgent(opts...), nil
 	}
@@ -145,12 +356,12 @@ func agentFactory(kind, image string, denyNetwork bool, opts []kit.Option) (runt
 	if err != nil {
 		return nil, err
 	}
-	if denyNetwork {
+	if policy != nil {
 		net, ok := provider.(sandbox.Networked)
 		if !ok {
 			return nil, fmt.Errorf("the %s sandbox cannot control the network", provider.Name())
 		}
-		if err := net.SetNetworkPolicy(sandbox.NetworkPolicy{Mode: sandbox.NetworkDenyAll}); err != nil {
+		if err := net.SetNetworkPolicy(*policy); err != nil {
 			return nil, err
 		}
 	}
@@ -200,4 +411,30 @@ func sandboxProvider(kind, image string) (sandbox.Provider, error) {
 	default:
 		return nil, fmt.Errorf("unknown sandbox %q: want none, docker, microsandbox, local, or auto", kind)
 	}
+}
+
+// manifestModel reads the model from a manifest, tolerating no manifest.
+func manifestModel(m *agent.Manifest) string {
+	if m == nil {
+		return ""
+	}
+	return m.Model
+}
+
+// manifestSandbox reads the sandbox config, tolerating no manifest and no
+// sandbox key.
+func manifestSandbox(m *agent.Manifest) agent.SandboxConfig {
+	if m == nil || m.Sandbox == nil {
+		return agent.SandboxConfig{}
+	}
+	return *m.Sandbox
+}
+
+// manifestChannelAddr reads the HTTP channel binding, tolerating no
+// manifest.
+func manifestChannelAddr(m *agent.Manifest) string {
+	if m == nil || m.Channels == nil || m.Channels.HTTP == nil {
+		return ""
+	}
+	return m.Channels.HTTP.Addr
 }

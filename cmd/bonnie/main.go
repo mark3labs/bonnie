@@ -51,7 +51,6 @@ binary at all. This CLI exists for local development and for inspecting
 durable runs.
 
 Planned:
-  init       Scaffold an agent tree
   dev        Run the agent locally with hot reload
   eval       Run evals against a local or remote agent`,
 		Version: buildVersion(),
@@ -59,7 +58,7 @@ Planned:
 			return cmd.Help()
 		},
 	}
-	root.AddCommand(newServeCmd(), newRunsCmd(), newSandboxCmd(), newVersionCmd())
+	root.AddCommand(newServeCmd(), newRunsCmd(), newSandboxCmd(), newInitCmd(), newVersionCmd())
 	return root
 }
 

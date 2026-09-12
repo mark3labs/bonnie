@@ -20,7 +20,6 @@ the known risks, and the invariants every task must preserve.
 | ID | Title | Priority | Size | Blocks |
 |---|---|---|---|---|
 | T-013 | Verify the microsandbox adapter on real hardware (macOS box only) | P1 | S | — |
-| T-017 | L2 core: the manifest, `bonnie init`, `serve --agent` | P1 | M | T-018 |
 | T-018 | L2 codegen: tool discovery, `bonnie dev`, `bonnie build` | P1 | M | T-019 |
 | T-019 | Evals against a discovered agent | P2 | L | — |
 
@@ -28,6 +27,7 @@ the known risks, and the invariants every task must preserve.
 
 | ID | Delivered | Where |
 |---|---|---|
+| T-017 | L2 core: the strict manifest loader (`agent/`), `bonnie init` (zero-Go default, `--tools` module), `serve --agent` with flag-over-manifest precedence and source-annotated banner, the go-tree refusal, workspace seeding | `agent/manifest.go`, `agent/scaffold.go`, `cmd/bonnie/init.go`, `cmd/bonnie/serve.go`, `sandbox/seed.go` |
 | T-012 | The sandbox lifecycle is journalled: `RecordSandbox`, a resume note when a workspace is gone, `runs show` timeline, `bonnie sandbox prune` | `runtime/journal.go`, `runtime/session.go`, `sandbox/lifecycle.go`, `cmd/bonnie/sandbox.go` |
 | T-014 | Cross-process run ownership: `flock` per run, `ErrRunOwnedElsewhere` on a second writer, reads unlocked, per-host limit stated | `runtime/filejournal.go`, `filejournal_test.go` |
 | T-015 | `channeltest` conformance suite; compile-time assertions in `channel`; unknown `TurnPolicy` refused, not guessed | `channeltest/`, `channel/channel_test.go` |
@@ -397,6 +397,11 @@ future adapter fails only in that adapter.
 
 ## T-017 — L2 core: the manifest, `bonnie init`, `serve --agent`
 
+**RESOLVED.** The zero-Go path ships: scaffold, edit one file, serve. The
+loader is one strict code path for all three formats; precedence is one
+function for every setting; the banner names the source that won. What
+differs from the plan below is recorded in the resolution notes.
+
 **Priority** P1 · **Size** M · **Spec** [`docs/L2.md`](L2.md) §3, §4, §6
 
 ### Why
@@ -426,18 +431,58 @@ today requires a hand-written `main.go` for anything.
 
 ### Acceptance criteria
 
-- [ ] `bonnie init` in an empty directory produces a tree that
+- [x] `bonnie init` in an empty directory produces a tree that
       `bonnie serve --agent .` serves; curl round-trips one run
-- [ ] `--format toml` and `--format json` scaffolds parse to the same
-      struct as YAML
-- [ ] Unknown manifest key → error naming the key, all three formats
-- [ ] Unknown `apiVersion` → error
-- [ ] Two manifests in one root → error naming both; `--config` resolves it
-- [ ] `init` refuses to overwrite any existing file and changes nothing
-- [ ] `serve --agent` refuses a tree it cannot fully honor, naming
-      `bonnie build`
-- [ ] `go.sum` gains no new modules — yaml, toml, and fsnotify are already
+      (`TestServeAgentRoundTrip` — scaffold, serve, POST, GET, 404; the
+      smoke test against the real binary hit the live provider and the
+      manifest's model reached it)
+- [x] `--format toml` and `--format json` scaffolds parse to the same
+      struct as YAML (`TestScaffoldParsesInEveryFormat`)
+- [x] Unknown manifest key → error naming the key, all three formats
+      (`TestUnknownKeyIsNamed`, including a nested `sandbox.netwrok`)
+- [x] Unknown `apiVersion` → error (`TestAPIVersionIsChecked`)
+- [x] Two manifests in one root → error naming both; `--config` resolves it
+      (`TestTwoManifestsInOneRootIsRefused`)
+- [x] `init` refuses to overwrite any existing file and changes nothing
+      (`TestScaffoldNeverOverwrites` — the pre-flight names every blocker
+      and writes nothing)
+- [x] `serve --agent` refuses a tree it cannot fully honor, naming
+      `bonnie build` (`TestResolveServeRefusesGoTree` — go.mod, a tools
+      directory, and the `--tools` scaffold itself)
+- [x] `go.sum` gains no new modules — yaml, toml, and fsnotify are already
       in the graph as Kit's transitive deps; promote, do not add
+      (verified: `git diff go.mod go.sum` is empty)
+
+### Resolution notes — what was learned
+
+- **The mark3labs modules are not publicly fetchable.** The repository is
+  private: anonymous HTTPS fails, `proxy.golang.org` 404s, and
+  `sum.golang.org` has no entry — so a scaffolded `go.mod` cannot be
+  `tidy`d by a stranger, and even a workspace-covered build must not pin
+  requires (the pinned version triggers sumdb verification and fails).
+  `init --tools` therefore writes `go.mod` with no requires and prints the
+  two paths that work: a `go.work` covering the tree (builds as-is), or
+  repository access with `GOPRIVATE` and `go mod tidy`. The guard test
+  builds the fresh scaffold through a synthetic `go.work`
+  (`TestScaffoldToolsModuleBuilds`). If public module fetches are ever
+  wanted, the repository's visibility is the decision to revisit.
+- **`skills:` is reserved, not wired.** Seeding skill files into a sandbox
+  nothing reads would be a dead key — a control nothing applied. The key
+  is refused with the same message class as `mcp`, until a skill-loading
+  story exists. `workspace:` IS wired: `sandbox.Seeded` wraps any provider
+  and mirrors the seed directory over the `Sandbox` interface, skip-if-
+  exists, so a resumed run never has its edits reverted
+  (`sandbox/seed_test.go`). The wrapper forwards `Networked`,
+  `ExistenceChecker`, and `RunDeleter`, so wrapping never widens what a
+  caller can request.
+- **`init --tools` writes a `bonnie_gen.go` stub** so the fresh module
+  compiles before codegen exists. main.go (authored, never rewritten)
+  calls `discoveredTools()` — the symbol the real generator will define.
+  The stub carries the DO-NOT-EDIT banner and is disposable per the L2
+  contract.
+- **A manifest with no instructions file is refused** at serve time. The
+  default path (`instructions.md`) is a promise the tree must keep; eve's
+  "one required file" rule is adopted with it.
 
 ### Watch for
 
