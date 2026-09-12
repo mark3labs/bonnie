@@ -543,6 +543,11 @@ files under a nested directory without moving the generator with them. And
 keep `runtime/` free of L2 imports: the generator is an L4 tool that emits
 L0/L1 calls, not a library the runtime links.
 
+Since T-017, `init --tools` writes a `bonnie_gen.go` stub defining
+`discoveredTools()` (guarded by `TestScaffoldToolsModuleBuilds`). The
+generator replaces exactly that file — same symbol, same package — so the
+authored `main.go` never changes; do not invent a second entry point.
+
 ---
 
 ## T-019 — Evals against a discovered agent

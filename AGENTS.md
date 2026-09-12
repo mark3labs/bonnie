@@ -44,11 +44,12 @@ If you need something Kit does not export:
 ## Architecture
 
 ```
-L4  CLI, evals, traces                 planned
-L3  channel/    inbound transports     interfaces drafted
-L2  discovery   agent/ tree + codegen  planned
+L4  CLI, evals, traces                 CLI implemented; evals planned
+L3  channel/    inbound transports     channel/http implemented
+L2  discovery   agent/ tree + codegen  manifest + init + serve --agent
+                                       implemented; codegen: T-018
 L1  runtime/    durable run executor   implemented
-L0  kit/pkg/kit                        upstream
+L0  kit/pkg/kit                        upstream, unmodified
 ```
 
 ### L1 durability seams (runtime/)

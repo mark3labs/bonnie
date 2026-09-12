@@ -647,7 +647,7 @@ edge cases. Consult them for **design questions**, not for implementation.
 | `channel.Principal` | `SessionAuthContext` | [Authentication](https://eve.dev/docs/channels/eve) |
 | `AppendExtensionData` | `defineState` | [State](https://eve.dev/docs/concepts/state) |
 | `bonnie init` / `dev` / `build` | `eve init`, `npm run dev`, deploy | [Getting Started](https://eve.dev/docs/getting-started) |
-| `agent.yaml` (or `.toml` / `.json`) | `agent/` slots, naming from paths | [Getting Started](https://eve.dev/docs/getting-started) |
+| `agent.yaml` (or `.toml` / `.json`) | *no analogue* — eve's config is `agent/agent.ts` code (`defineAgent`) plus `package.json`; a declarative manifest is BONNIE's, because Go compiles and data-shaped config must resolve at run time without code | [Getting Started](https://eve.dev/docs/getting-started) |
 | Kit compaction (inherited) | `compaction.thresholdPercent` | [Default Harness](https://eve.dev/docs/concepts/default-harness) |
 | *deferred* | `defineEval`, `eve eval` | [Evals](https://eve.dev/docs/evals/overview) |
 | *deferred* | `instrumentation.ts` | [Observability](https://eve.dev/docs/guides/instrumentation) |

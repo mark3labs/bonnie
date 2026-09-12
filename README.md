@@ -285,6 +285,12 @@ return kit.ToolOutput{
 The run stops, `Start` returns with `State == RunWaiting`, and
 `run.Suspend.Prompt` carries your question.
 
+Prefer scaffolding over hand-wiring? `bonnie init --tools` creates a tree
+with one sample tool and a `main.go` you own; tools there live in
+`tools/<name>/tool.go` as `func Tool() kit.Tool`, and the directory name is
+the tool's name. Codegen that regenerates the wiring (and `bonnie dev`/
+`bonnie build`) lands in `v0.2`; the scaffold builds today.
+
 ## Sandboxing
 
 By default, tool calls run **as your process** — your files, your network, your
@@ -336,6 +342,14 @@ holds no container. Read [`docs/SANDBOX.md`](docs/SANDBOX.md) before deploying.
 
 ```bash
 bonnie serve --journal .bonnie --model anthropic/claude-sonnet-4-5 --sandbox docker
+```
+
+Or serve a discovered agent tree — manifest, instructions, sandbox and
+channels from files, no build. See [Quickstart: no Go
+required](#quickstart-no-go-required):
+
+```bash
+bonnie serve --agent my-agent
 ```
 
 Or mount it in your own server:
@@ -536,6 +550,10 @@ Stated plainly, because the failure modes are not obvious:
 - **Sandbox lifecycle is journalled, and reclaiming is manual.**
   `bonnie sandbox prune` deletes the sandboxes of terminal runs; `serve`
   does not sweep them on its own yet.
+- **The mark3labs modules are not publicly fetchable.** The repository is
+  private, so a scaffolded module (`bonnie init --tools`) builds through a
+  `go.work` covering it, or with repository access and `GOPRIVATE` plus
+  `go mod tidy`. The zero-Go path (`serve --agent`) needs neither.
 
 ## Examples
 

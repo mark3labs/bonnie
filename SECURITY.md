@@ -37,6 +37,11 @@ Turn it on:
 
 ```sh
 bonnie serve --sandbox docker --sandbox-deny-network
+# or, from an agent manifest (bonnie serve --agent):
+#   sandbox:
+#     kind: docker
+#     network:
+#       mode: deny-all
 ```
 
 ```go
@@ -52,7 +57,9 @@ Even with a sandbox, the host is responsible for the rest:
 - Docker isolates with namespaces and cgroups, not a guest kernel. Use
   microsandbox when the threat model includes hostile code.
 - Sandbox egress is open unless you set a policy. Use
-  `--sandbox-deny-network`, or an allow-list on microsandbox.
+  `--sandbox-deny-network`, or an allow-list on microsandbox. The manifest's
+  `sandbox.network` key is the same control and the same refusals: a mode a
+  backend cannot enforce is an error, never a silent default.
 - Run BONNIE itself in a container or VM that limits system calls, file
   access, and network.
 - Do not give BONNIE credentials that your application does not also hold.

@@ -96,6 +96,28 @@ and reads results — it never holds a sandbox handle and never sees a
 credential. Every sandbox call therefore travels the same journalling,
 approval, and event path as any other tool.
 
+### Seeding: `sandbox.Seeded` wraps any provider
+
+[sandbox.Seeded](../sandbox/seed.go) is a `Provider` decorator that mirrors a
+local directory into every sandbox it opens. It is how an agent manifest's
+`workspace:` seed reaches the run — the mirror travels over the `Sandbox`
+interface alone (`ReadFile` probe, then `WriteFile`), so it works identically
+on local, Docker, and microsandbox, and a new backend gets it for free.
+
+Two semantics are deliberate:
+
+- **Skip-if-exists.** A file the sandbox already has wins, so a resumed run
+  never has the model's edits reverted. A seed file the model deleted
+  reappears — that is what a seed is, and it is stated on the function.
+- **A failed seed fails the open.** The tool call that triggered it reports
+  the error and the model retries; the seed is never silent and never
+  permanent.
+
+The wrapper forwards the optional provider interfaces — `Networked`,
+`ExistenceChecker`, `RunDeleter` — so wrapping never widens what a caller can
+request, and a backend that cannot enforce a policy still refuses one through
+the wrapper.
+
 ### A non-zero exit is a result, not an error
 
 `Exec` returns a `*Result` with an `ExitCode`. Only a failure to run the
@@ -192,6 +214,11 @@ Implement `Provider` and `Sandbox`, then add the backend to `backends()` in
 `conformance_test.go`. It inherits 18 cases covering exit codes, binary file
 round trips, workspace persistence, reattachment after `Stop`, per-run
 isolation, argv quoting, and the no-caching contract.
+
+You implement nothing for seeding: `sandbox.Seeded` rides the `Sandbox`
+interface. Do keep the optional interfaces (`Networked`, `ExistenceChecker`,
+`RunDeleter`) out of `Provider` itself — they exist so a caller can type-assert
+for capability, and the seeding wrapper forwards them by assertion.
 
 A backend that cannot run on the test machine must **skip**, not fail.
 

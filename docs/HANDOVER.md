@@ -18,23 +18,25 @@ run as the host process.
 ## 2. Where things stand
 
 ```
-master @ b3ec7b2 (+ this session's work)  →  github.com/mark3labs/bonnie
-7 packages · 40 Go files · 133 test functions · all green
+master @ 0395c17  →  github.com/mark3labs/bonnie
+9 packages · 56 Go files (32 non-test) · 190 test functions · all green
 ```
 
 | Package | State |
 |---|---|
+| `agent/` | NEW — L2 discovery, first increment (T-017): the strict manifest loader (`agent.yaml`/`.toml`/`.json`), `bonnie init` scaffolding, the `--tools` module scaffold. Codegen is T-018. |
 | `runtime/` | Complete. Journal, session, runner, torn-write repair, events. Verified against a live model. |
 | `channel/` | Interfaces, tested — `channeltest` conformance suite (T-015). |
 | `channel/http/` | Complete. Six routes, NDJSON stream, journalled address map. |
-| `sandbox/` | `local`, `docker`, `microsandbox` verified on Linux/KVM; macOS box open (T-013). |
-| `cmd/bonnie/` | `serve`, `runs list`, `runs show`. |
+| `sandbox/` | `local`, `docker`, `microsandbox` verified on Linux/KVM; macOS box open (T-013). `sandbox.Seeded` wraps any provider and seeds a manifest workspace (T-017). |
+| `cmd/bonnie/` | `serve` (now also `serve --agent DIR --config PATH`), `init`, `runs list`, `runs show`, `sandbox prune`. |
 | `examples/` | `minimal`, `hitl-restart`. |
 
 **Not done:** nothing blocking. T-011 closed — `v0.1.0` is tagged and
 published, verified by a downloaded artifact printing the injected version.
 T-009 resolved itself — Kit `v0.106.0` answered all four upstream asks, and
-BONNIE adopted the seams the same day.
+BONNIE adopted the seams the same day. T-017 landed after the release:
+the zero-Go authoring path ships, so the numbers above are past `v0.1.0`.
 
 ## 3. Start here
 
@@ -54,8 +56,9 @@ go test -race -tags integration ./runtime ./sandbox
 ```
 
 `docs/TASKS.md` has the open work at the top, shipped work archived at the
-bottom. Highest value first: the L2 program **T-017/T-018** — spec in
-[`docs/L2.md`](L2.md). The only other open box is T-013's macOS case.
+bottom. Highest value first: **T-018** — L2 codegen, which continues the
+program in [`docs/L2.md`](L2.md) that T-017 started. The only other open
+box is T-013's macOS case.
 
 ## 4. The one rule that matters
 
@@ -200,17 +203,20 @@ A backend that cannot run on the test machine must **skip**, not fail.
 
 ## 8. What I would do next, in order
 
-1. **T-011 — tag the release.** T-009 resolved itself: Kit `v0.106.0`
-   answered the asks, BONNIE adopted `kit.StepAppender`, and the torn-write
-   window is now one write, not two. Nothing else blocks it.
+1. **T-018 — L2 codegen.** Tool discovery, `bonnie dev`, `bonnie build`.
+   The contract it must honour is already live: `init --tools` writes a
+   disposable `bonnie_gen.go` stub defining `discoveredTools()`, and the
+   authored `main.go` calls it — the generator replaces exactly that file.
+   Spec: [`docs/L2.md`](L2.md) §5, §6.
 2. **T-013 — the last hardware box.** microsandbox is verified on
    Linux/KVM, including the live suite and network policies. macOS on
    Apple Silicon is the only open case.
-3. **T-017 then T-018 — L2 discovery.** The adoption gap against eve is the
-   authoring path, not the runtime. Spec: [`docs/L2.md`](L2.md). Ship the
-   zero-Go path (manifest, `init`, `serve --agent`) before codegen.
-4. **T-019 — evals.** Spec it before coding it; it needs the L2 tree as its
-   subject.
+3. **T-019 — evals.** Spec it before coding it; it needs the L2 tree as
+   its subject, which T-018 completes.
+
+(T-017 — the manifest, `bonnie init`, `serve --agent` — shipped in
+`0395c17`, one commit after this handover was written; see `docs/TASKS.md`
+for its resolution notes, including the module-fetchability finding.)
 
 ## 9. Verification before you commit
 
