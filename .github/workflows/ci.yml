@@ -74,29 +74,33 @@ jobs:
       # instead of silently eroding the boundary.
       #
       # NOTE: this must inspect DIRECT imports, not `go list -deps`. The
-      # transitive graph always contains kit/internal/... because pkg/kit
-      # itself imports those packages — that is Kit's business, not ours.
-      # The -e flag is required: without it `go list` aborts on the very
-      # package we want to report, and the job fails with an opaque error.
+      # transitive graph always contains kit/internal/... and the charm TUI
+      # stack because pkg/kit imports those packages — that is Kit's
+      # business, not ours. The -e flag is required: without it `go list`
+      # aborts on the very package we want to report, and the job fails with
+      # an opaque error.
+      #
+      # The template attributes every import to the package that imports it,
+      # so a failure names the offender, not just the import.
       - name: Assert BONNIE touches only the public Kit SDK
         env:
           GOWORK: off
         run: |
           set -euo pipefail
-          go list -e -f '{{range .Imports}}{{.}}{{"\n"}}{{end}}{{range .TestImports}}{{.}}{{"\n"}}{{end}}{{range .XTestImports}}{{.}}{{"\n"}}{{end}}' ./... \
+          go list -e -f '{{ $p := .ImportPath }}{{ range .Imports }}{{ $p }} {{ . }}{{ "\n" }}{{ end }}{{ range .TestImports }}{{ $p }} {{ . }}{{ "\n" }}{{ end }}{{ range .XTestImports }}{{ $p }} {{ . }}{{ "\n" }}{{ end }}' ./... \
             | sort -u > /tmp/direct.txt
-          if grep -q 'mark3labs/kit/internal' /tmp/direct.txt; then
+          if awk '{print $2}' /tmp/direct.txt | grep -q 'mark3labs/kit/internal'; then
             echo "::error::BONNIE directly imports a Kit internal package."
-            grep 'mark3labs/kit/internal' /tmp/direct.txt
+            awk '$2 ~ /mark3labs\/kit\/internal/ {print "  " $0}' /tmp/direct.txt
             exit 1
           fi
           # Kit re-exports every model type BONNIE needs as an alias in
           # pkg/kit. Naming charm.land/fantasy directly would pin BONNIE to
           # Kit's own transitive dependency and break when Kit moves it.
-          if grep -q '^charm.land/fantasy' /tmp/direct.txt; then
+          if awk '{print $2}' /tmp/direct.txt | grep -q '^charm.land/fantasy'; then
             echo "::error::BONNIE directly imports charm.land/fantasy. Use the kit.LLM* aliases."
-            grep '^charm.land/fantasy' /tmp/direct.txt
+            awk '$2 == "charm.land/fantasy" {print "  " $0}' /tmp/direct.txt
             exit 1
           fi
           echo "Kit packages BONNIE imports directly:"
-          grep 'mark3labs/kit' /tmp/direct.txt || echo "  (none)"
+          awk '$2 ~ /mark3labs\/kit/ {print "  " $0}' /tmp/direct.txt || echo "  (none)"

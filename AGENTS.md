@@ -94,9 +94,11 @@ changing anything in `runtime/`. Full detail with citations in `docs/SPEC.md` §
 - Use `fakeAgent` in `runner_test.go` rather than a live model.
 - `t.Parallel()` by default.
 
-## Headless
-BONNIE never renders a terminal. No bubbletea, lipgloss, or huh. Terminal
-rendering is Kit's job. `depguard` enforces this.
+## Terminal rendering
+Kit renders the agent's terminal UI. BONNIE's framework packages ship no
+TUI today, and the CLI styles only its own help and errors (fang). That is
+a starting position, not a rule — the Charm stack is allowed if a feature
+genuinely needs it. The hard boundary is the public-Kit-SDK rule above.
 
 ## Local development
 BONNIE and Kit are separate repos. Use a `go.work` in the PARENT directory:

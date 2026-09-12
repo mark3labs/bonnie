@@ -200,7 +200,7 @@ func TestRepairKeepsTrailingTextOnlyTurn(t *testing.T) {
 	}
 }
 
-// assertNoOrphan states invariant 4 of docs/SPEC.md as an assertion: every
+// assertNoOrphan states invariant 3 of docs/SPEC.md as an assertion: every
 // tool call in the conversation has a result.
 func assertNoOrphan(t *testing.T, msgs []kit.LLMMessage) {
 	t.Helper()

@@ -25,9 +25,9 @@ master @ b3ec7b2 (+ this session's work)  →  github.com/mark3labs/bonnie
 | Package | State |
 |---|---|
 | `runtime/` | Complete. Journal, session, runner, torn-write repair, events. Verified against a live model. |
-| `channel/` | Interfaces only, no tests (T-015). |
+| `channel/` | Interfaces, tested — `channeltest` conformance suite (T-015). |
 | `channel/http/` | Complete. Six routes, NDJSON stream, journalled address map. |
-| `sandbox/` | `local` and `docker` verified. **`microsandbox` has never run** (T-013). |
+| `sandbox/` | `local`, `docker`, `microsandbox` verified on Linux/KVM; macOS box open (T-013). |
 | `cmd/bonnie/` | `serve`, `runs list`, `runs show`. |
 | `examples/` | `minimal`, `hitl-restart`. |
 
@@ -50,8 +50,8 @@ go test -race -tags integration ./runtime ./sandbox
 ```
 
 `docs/TASKS.md` has the open work at the top, shipped work archived at the
-bottom. Highest value first: **T-013** (verify microsandbox — needs hardware)
-and **T-012** (journal the sandbox lifecycle).
+bottom. Highest value first: **T-011** (tag the release) and the L2 program
+**T-017/T-018** — spec in [`docs/L2.md`](L2.md).
 
 ## 4. The one rule that matters
 
@@ -190,23 +190,23 @@ and a new implementation should join one rather than write its own tests:
 |---|---|---|
 | Journal | `runtime/journal_conformance_test.go` | memory + file |
 | Sandbox | `sandbox/conformance_test.go` | local + docker + microsandbox, 18 cases |
-| Channel | *does not exist* | T-015 |
+| Channel | `channeltest/` | address resolution, turn policies, suspend, cancel |
 
 A backend that cannot run on the test machine must **skip**, not fail.
 
 ## 8. What I would do next, in order
 
-1. **T-013 — verify microsandbox.** It is written, compiles, and has never
-   executed. Needs macOS on Apple Silicon or Linux with KVM. Until this is
-   done, do not let the docs imply that path is proven.
-2. **T-012 — journal the sandbox lifecycle.** Today a pruned container gives a
-   resumed run an empty workspace with no explanation, and finished runs leak
-   containers.
-3. **T-011 — tag the release.** T-009 resolved itself: Kit `v0.106.0`
+1. **T-011 — tag the release.** T-009 resolved itself: Kit `v0.106.0`
    answered the asks, BONNIE adopted `kit.StepAppender`, and the torn-write
-   window is now one write, not two.
-4. **T-015 — `channel` tests**, before a second adapter makes the interface
-   hard to change.
+   window is now one write, not two. Nothing else blocks it.
+2. **T-013 — the last hardware box.** microsandbox is verified on
+   Linux/KVM, including the live suite and network policies. macOS on
+   Apple Silicon is the only open case.
+3. **T-017 then T-018 — L2 discovery.** The adoption gap against eve is the
+   authoring path, not the runtime. Spec: [`docs/L2.md`](L2.md). Ship the
+   zero-Go path (manifest, `init`, `serve --agent`) before codegen.
+4. **T-019 — evals.** Spec it before coding it; it needs the L2 tree as its
+   subject.
 
 ## 9. Verification before you commit
 
@@ -234,6 +234,7 @@ is the pattern.
 |---|---|
 | `docs/TASKS.md` | Open work first, shipped work archived. Start here. |
 | `docs/SPEC.md` | Verified Kit facts with file:line, every risk, the invariants. |
+| `docs/L2.md` | Draft spec for `v0.2`: the agent tree, manifest, codegen. |
 | `docs/SANDBOX.md` | Backends, adapter contracts, why the CLI and not the SDKs. |
 | `docs/UPSTREAM.md` | Four Kit issues, written and ready to file. |
 | `AGENTS.md` | Conventions. Short. |

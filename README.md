@@ -351,6 +351,7 @@ opposite: it targets one exact run and returns `404` rather than creating one.
 ```
 bonnie serve    Mount the HTTP channel and serve durable runs
 bonnie runs     List and inspect durable runs
+bonnie sandbox  Reclaim the sandboxes of terminal runs (prune)
 bonnie version  Print the version
 ```
 
@@ -516,6 +517,7 @@ See [`examples/README.md`](examples/README.md) for copy-pasteable commands.
 | [`docs/HANDOVER.md`](docs/HANDOVER.md) | Picking up the project: state, pitfalls, what to do next |
 | [`docs/SANDBOX.md`](docs/SANDBOX.md) | Sandbox backends and the contracts an adapter must honour |
 | [`docs/SPEC.md`](docs/SPEC.md) | Specification: scope, verified Kit facts, known risks, invariants |
+| [`docs/L2.md`](docs/L2.md) | Draft spec for `v0.2`: the agent tree, manifest, `init`/`dev`/`build` |
 | [`docs/TASKS.md`](docs/TASKS.md) | Open work, and an archive of what shipped |
 | [`docs/UPSTREAM.md`](docs/UPSTREAM.md) | Changes BONNIE asks of Kit, with evidence |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Boundary rule, workspace setup, commands |

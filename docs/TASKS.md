@@ -20,7 +20,10 @@ the known risks, and the invariants every task must preserve.
 | ID | Title | Priority | Size | Blocks |
 |---|---|---|---|---|
 | T-011 | Tag and release `v0.1.0` | P2 | S | — |
-| T-013 | Verify the microsandbox adapter on real hardware | P1 | S | — |
+| T-013 | Verify the microsandbox adapter on real hardware (macOS box only) | P1 | S | — |
+| T-017 | L2 core: the manifest, `bonnie init`, `serve --agent` | P1 | M | T-018 |
+| T-018 | L2 codegen: tool discovery, `bonnie dev`, `bonnie build` | P1 | M | T-019 |
+| T-019 | Evals against a discovered agent | P2 | L | — |
 
 ### Shipped after `v0.1.0`
 
@@ -227,7 +230,7 @@ Today that produces three distinct failures:
 
 ### Watch for
 
-Do not let `runtime/` import `sandbox/` (invariant 7 is about `channel/`, but
+Do not let `runtime/` import `sandbox/` (invariant 6 is about `channel/`, but
 the same layering logic applies). The record kind belongs in `runtime`; the
 code that writes it belongs in `sandbox`. That held: `LazyOpener` takes the
 `*runtime.Session` and calls its record methods, and the resume check lives
@@ -382,6 +385,137 @@ future adapter fails only in that adapter.
       unknown policy, suspension and respond, and cancellation
 - [x] An unknown `TurnPolicy` is refused (`channel.ErrUnknownTurnPolicy`),
       never guessed — it used to fall through and silently queue
+
+---
+
+## T-017 — L2 core: the manifest, `bonnie init`, `serve --agent`
+
+**Priority** P1 · **Size** M · **Spec** [`docs/L2.md`](L2.md) §3, §4, §6
+
+### Why
+
+The runtime core is done and hardened (T-012, T-014, T-015, T-016). What
+deletes the adoption gap against eve is a five-minute path that needs no Go:
+scaffold, edit instructions, serve. eve's getting-started is that path. BONNIE
+today requires a hand-written `main.go` for anything.
+
+### Do
+
+1. The manifest loader per `docs/L2.md` §4: `agent.yaml` primary,
+   `agent.toml` and `agent.json` accepted; one loader, one schema; strict
+   unknown-key rejection and `apiVersion` check by key-set diff, so all
+   three formats get identical errors.
+2. Discovery with the ambiguity refusal: two manifests in one root is an
+   error naming both; `--config` names one.
+3. `bonnie init` — scaffold `agent.yaml` (or `--format`), `instructions.md`,
+   `skills/`, `workspace/`. Never overwrite. Default is the zero-Go path;
+   `--tools` adds `go.mod`, `main.go`, and a sample tool.
+4. `serve --agent DIR` — instructions from disk, model, sandbox, channel
+   binding from the manifest; flags override and the banner names each
+   setting's source.
+5. The refusal: a tree with `tools/` or `go.mod` is refused with an error
+   naming `bonnie build` (invariant 13). `kind: none` prints the
+   no-isolation warning.
+
+### Acceptance criteria
+
+- [ ] `bonnie init` in an empty directory produces a tree that
+      `bonnie serve --agent .` serves; curl round-trips one run
+- [ ] `--format toml` and `--format json` scaffolds parse to the same
+      struct as YAML
+- [ ] Unknown manifest key → error naming the key, all three formats
+- [ ] Unknown `apiVersion` → error
+- [ ] Two manifests in one root → error naming both; `--config` resolves it
+- [ ] `init` refuses to overwrite any existing file and changes nothing
+- [ ] `serve --agent` refuses a tree it cannot fully honor, naming
+      `bonnie build`
+- [ ] `go.sum` gains no new modules — yaml, toml, and fsnotify are already
+      in the graph as Kit's transitive deps; promote, do not add
+
+### Watch for
+
+Do not add an `auth` key to the manifest. The channel carries a `Principal`
+and verifies nothing; a config key that promises authentication it cannot
+deliver is the SECURITY.md failure in manifest form. Also do not let the
+loader grow three bespoke decoders — the strictness must be one code path,
+or the formats will drift.
+
+---
+
+## T-018 — L2 codegen: tool discovery, `bonnie dev`, `bonnie build`
+
+**Priority** P1 · **Size** M · **Blocks on** T-017 · **Spec**
+[`docs/L2.md`](L2.md) §5, §6
+
+### Why
+
+The manifest covers data. Custom tools are Go, and Go is compiled — so tools
+are wired by codegen, watched by `bonnie dev`, and shipped as the user's own
+binary by `bonnie build`. This is the graduation path: zero Go to start, a
+single static binary at the end.
+
+### Do
+
+1. Codegen per `docs/L2.md` §5: walk `tools/<name>/tool.go`, require
+   `func Tool() kit.Tool`, emit `bonnie_gen.go`; duplicate names are a
+   generator error; idempotent output; DO-NOT-EDIT banner.
+2. The import allowlist: stdlib, BONNIE public packages, `kit/pkg/kit`.
+   The generator refuses anything else. This is invariant 11.
+3. `bonnie dev` — fsnotify watch set per `docs/L2.md` §6, debounce,
+   regenerate, `go build`, graceful restart (SIGTERM, drain, restart).
+4. `bonnie build` — embed instructions, skills, and workspace via
+   `go:embed` in the generated file; output one static binary that serves
+   with no BONNIE CLI and no toolchain on the host.
+5. `--dry-run` on both commands prints the discovery plan — the `eve info`
+   analogue.
+
+### Acceptance criteria
+
+- [ ] Codegen twice over the same tree is byte-identical
+- [ ] A duplicate tool name fails with both paths named
+- [ ] Generated imports match the allowlist (guard test greps the file)
+- [ ] Authored files are never rewritten; deleting `bonnie_gen.go` and
+      regenerating restores an equivalent build
+- [ ] **The dev-restart test:** a run parks in the child, `dev` restarts,
+      a respond in the new child completes it — crosses a process boundary
+      in spirit (invariant 4)
+- [ ] `bonnie build` output serves a full run on a host with no Go and no
+      BONNIE install, with instructions served from the embedded copy
+- [ ] `--dry-run` prints files found, tools generated, embed set
+
+### Watch for
+
+`go:embed` patterns are relative to the generated file's package and cannot
+climb with `..`. The scaffold is flat for this reason — do not move authored
+files under a nested directory without moving the generator with them. And
+keep `runtime/` free of L2 imports: the generator is an L4 tool that emits
+L0/L1 calls, not a library the runtime links.
+
+---
+
+## T-019 — Evals against a discovered agent
+
+**Priority** P2 · **Size** L · **Blocks on** T-018 · **Reference**
+[eve Evals](https://eve.dev/docs/evals/overview)
+
+### Why
+
+L4's second half. eve puts evals beside the agent tree; T-017/T-018 give
+BONNIE a tree to point at. Without a defined agent, `bonnie eval` has no
+subject.
+
+### Do
+
+Write the spec first, in this file or a new `docs/EVALS.md`, before any
+code: what a case is, where cases live (beside the tree, per eve's
+convention), how a run is scored, and what CI runs without a provider key.
+This task is a placeholder until that spec exists.
+
+### Acceptance criteria
+
+- [ ] Spec written and reviewed before implementation
+- [ ] `bonnie eval` runs cases against a discovered agent
+- [ ] Hermetic mode (no provider key) skips, never fails
 
 ---
 

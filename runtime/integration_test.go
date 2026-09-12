@@ -112,7 +112,7 @@ func TestLiveSuspendAndResume(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	// Kit must not open a session of its own — invariant 8. Anything it
+	// Kit must not open a session of its own — invariant 7. Anything it
 	// created would show up in this directory's session list.
 	before, err := kit.ListSessions("")
 	if err != nil {

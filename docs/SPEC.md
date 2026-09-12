@@ -32,7 +32,7 @@ an eve clone: see §7 for what is deliberately different.
 ```
 L4  CLI, evals, traces                 CLI implemented; evals planned
 L3  channel/    inbound transports     channel/http implemented
-L2  discovery   agent/ tree + codegen  planned, NOT in MVP
+L2  discovery   agent/ tree + codegen  spec drafted: docs/L2.md, not built
 L1  runtime/    durable run executor   implemented, memory + file journals
 L0  kit/pkg/kit                        upstream, unmodified
 
@@ -67,7 +67,7 @@ verified to fire:
 | Layer | Mechanism | Verified |
 |---|---|---|
 | Go compiler | BONNIE's module path is not a prefix of Kit's, so the `internal` rule applies | `use of internal package ... not allowed` |
-| `depguard` | `.golangci.yml` denies `kit/internal`, `charm.land/fantasy`, and the TUI stack | configured |
+| `depguard` | `.golangci.yml` denies `kit/internal` and `charm.land/fantasy` | configured |
 | CI | `.github/workflows/ci.yml` job `boundary` | catches a planted violation |
 
 The CI job inspects **direct** imports, not `go list -deps`. The transitive
@@ -446,7 +446,7 @@ consumers read it:
 
 Where the code sits, and why: the record kind and the note live in
 `runtime/`, the code that writes them lives in `sandbox/` — the same layering
-invariant 7 states for `channel/`. `sandbox.LazyOpener` takes the session now
+invariant 6 states for `channel/`. `sandbox.LazyOpener` takes the session now
 and journals the open, retrying the record on every call until the journal
 takes it; a bookkeeping failure fails the tool call that saw it, so the model
 retries, and the record lands when the journal recovers. It is never silent
@@ -587,6 +587,9 @@ L2 discovery and codegen · evals · OpenTelemetry · Slack/GitHub/Discord/
 Telegram channels · scheduler · memory providers · multi-tenancy ·
 subagent orchestration · structured output · web client SDK.
 
+The L2 spec is now drafted: [`docs/L2.md`](L2.md) covers the agent tree, the
+manifest, `init`/`dev`/`build`, and the codegen contract for `v0.2`.
+
 All are valuable. None is load-bearing for the claim. A narrow true v0.1 beats
 a broad shaky one.
 
@@ -642,6 +645,8 @@ edge cases. Consult them for **design questions**, not for implementation.
 | `channel/http` NDJSON stream | `GET /eve/v1/session/:id/stream` | [Sessions, Runs & Streaming](https://eve.dev/docs/concepts/sessions-runs-and-streaming) |
 | `channel.Principal` | `SessionAuthContext` | [Authentication](https://eve.dev/docs/channels/eve) |
 | `AppendExtensionData` | `defineState` | [State](https://eve.dev/docs/concepts/state) |
+| `bonnie init` / `dev` / `build` | `eve init`, `npm run dev`, deploy | [Getting Started](https://eve.dev/docs/getting-started) |
+| `agent.yaml` (or `.toml` / `.json`) | `agent/` slots, naming from paths | [Getting Started](https://eve.dev/docs/getting-started) |
 | Kit compaction (inherited) | `compaction.thresholdPercent` | [Default Harness](https://eve.dev/docs/concepts/default-harness) |
 | *deferred* | `defineEval`, `eve eval` | [Evals](https://eve.dev/docs/evals/overview) |
 | *deferred* | `instrumentation.ts` | [Observability](https://eve.dev/docs/guides/instrumentation) |
@@ -673,29 +678,34 @@ Any change must preserve these. Each has, or must gain, a test.
 
 1. **Public API only.** No direct import of `kit/internal/...`, and no direct
    import of `charm.land/fantasy`.
-2. **Headless.** No bubbletea, lipgloss, or huh anywhere in BONNIE.
-3. **Append-only journal.** `Replay` is deterministic for a given run.
-4. **Restore yields a provider-valid conversation.** No orphaned `tool_use`
+2. **Append-only journal.** `Replay` is deterministic for a given run.
+3. **Restore yields a provider-valid conversation.** No orphaned `tool_use`
    (§4.2), and no lost tool calls (§4.1).
-5. **Resume works across processes.** A run suspended by one `Runner` completes
+4. **Resume works across processes.** A run suspended by one `Runner` completes
    in a second `Runner` sharing only the journal.
-6. **`Agent` stays an interface.** Never narrow it to `*kit.Kit`; it is what
+5. **`Agent` stays an interface.** Never narrow it to `*kit.Kit`; it is what
    makes L1 testable without credentials. Optional capability, such as event
    streaming, goes through a type assertion for a narrow optional interface
    (`eventSource` in `runtime/events.go`), never by widening `Agent`.
-7. **L1 does not import L3.** `runtime/` must not depend on `channel/`.
-8. **Kit opens no session of its own.** `Options.SessionManager` is always set
+6. **L1 does not import L3.** `runtime/` must not depend on `channel/`.
+7. **Kit opens no session of its own.** `Options.SessionManager` is always set
    before `kit.New` (§3.1).
-9. **Reserved runs stay out of operator listings.** A transport that keeps
+8. **Reserved runs stay out of operator listings.** A transport that keeps
    bookkeeping in the journal uses [`runtime.ReservedRunPrefix`], and anything
    operator-facing filters with `runtime.IsReservedRun`.
-10. **A sandbox never caches a tool call.** Every `Exec` must really run the
-    command. A memoizing backend makes a repeated side effect invisible to the
-    model. `TestEveryCallExecutes` enforces this for every adapter.
-11. **A backend that cannot enforce a security control refuses it.** Returning
+9. **A sandbox never caches a tool call.** Every `Exec` must really run the
+   command. A memoizing backend makes a repeated side effect invisible to the
+   model. `TestEveryCallExecutes` enforces this for every adapter.
+10. **A backend that cannot enforce a security control refuses it.** Returning
     success for a network policy nothing applies tells an operator they are
     protected when they are not. BONNIE broke this rule once, in
     `sandbox/microsandbox.go`, and §4.11 records it.
+
+L2 — [`docs/L2.md`](L2.md) — drafts four more (11–14: generated-code
+allowlist, disposable-generated versus sacred-authored files, refusal of
+partial discovery, strict manifest). They move into this list when the code
+that enforces them lands, not before; an invariant here must already have a
+test.
 
 ---
 
