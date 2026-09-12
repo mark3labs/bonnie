@@ -8,9 +8,18 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+
 	"github.com/mark3labs/bonnie/runtime"
 	kit "github.com/mark3labs/kit/pkg/kit"
 )
+
+// execute runs a command with args. These are the same commands main runs
+// through fang; the tests drive cobra directly and assert on plain output.
+func execute(c *cobra.Command, args ...string) error {
+	c.SetArgs(args)
+	return c.Execute()
+}
 
 // seedJournal writes a run that looks like a real one: a question, a
 // suspension, and the state to match.
@@ -88,7 +97,7 @@ func capture(t *testing.T, fn func() error) string {
 func TestRunsList(t *testing.T) {
 	dir := seedJournal(t)
 
-	out := capture(t, func() error { return runsList([]string{"--journal", dir}) })
+	out := capture(t, func() error { return execute(newRunsListCmd(), "--journal", dir) })
 	if !strings.Contains(out, "run-1") || !strings.Contains(out, "waiting") {
 		t.Fatalf("list output:\n%s", out)
 	}
@@ -104,7 +113,7 @@ func TestRunsListFiltersByState(t *testing.T) {
 	dir := seedJournal(t)
 
 	out := capture(t, func() error {
-		return runsList([]string{"--journal", dir, "--state", "waiting"})
+		return execute(newRunsListCmd(), "--journal", dir, "--state", "waiting")
 	})
 	if !strings.Contains(out, "run-1") {
 		t.Fatalf("filter dropped the waiting run:\n%s", out)
@@ -118,7 +127,7 @@ func TestRunsListJSON(t *testing.T) {
 	dir := seedJournal(t)
 
 	out := capture(t, func() error {
-		return runsList([]string{"--journal", dir, "--json"})
+		return execute(newRunsListCmd(), "--journal", dir, "--json")
 	})
 	var rows []struct {
 		RunID string `json:"run_id"`
@@ -135,7 +144,7 @@ func TestRunsListJSON(t *testing.T) {
 func TestRunsShowTimeline(t *testing.T) {
 	dir := seedJournal(t)
 
-	out := capture(t, func() error { return runsShow([]string{"--journal", dir, "run-1"}) })
+	out := capture(t, func() error { return execute(newRunsShowCmd(), "--journal", dir, "run-1") })
 	for _, want := range []string{"run-1", "waiting", "message", "suspend", "deploy the app"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("timeline is missing %q:\n%s", want, out)
@@ -147,7 +156,7 @@ func TestRunsShowJSON(t *testing.T) {
 	dir := seedJournal(t)
 
 	out := capture(t, func() error {
-		return runsShow([]string{"--journal", dir, "--json", "run-1"})
+		return execute(newRunsShowCmd(), "--journal", dir, "--json", "run-1")
 	})
 	var recs []runtime.Record
 	if err := json.Unmarshal([]byte(out), &recs); err != nil {
@@ -172,25 +181,42 @@ func TestRunsShowJSON(t *testing.T) {
 func TestRunsShowUnknownRun(t *testing.T) {
 	dir := seedJournal(t)
 
-	err := runsShow([]string{"--journal", dir, "nope"})
+	err := execute(newRunsShowCmd(), "--journal", dir, "nope")
 	if err == nil {
 		t.Fatal("want an error for an unknown run")
 	}
 }
 
 func TestRunsRejectsUnknownSubcommand(t *testing.T) {
-	if err := runRuns([]string{"frobnicate"}); err == nil {
+	if err := execute(newRunsCmd(), "frobnicate"); err == nil {
 		t.Fatal("want an error for an unknown subcommand")
 	}
-	if err := runRuns(nil); err == nil {
+	if err := execute(newRunsCmd()); err == nil {
 		t.Fatal("want an error when no subcommand is given")
+	}
+}
+
+// TestRootRejectsUnknownCommand keeps the top-level tree honest: a mistyped
+// command is an error, not a silent no-op.
+func TestRootRejectsUnknownCommand(t *testing.T) {
+	if err := execute(newRootCmd(), "frobnicate"); err == nil {
+		t.Fatal("want an error for an unknown command")
+	}
+}
+
+// TestVersionCommandPrints pins the scriptable form. `--version` on the root
+// is fang's rendering; this subcommand is the one scripts can rely on.
+func TestVersionCommandPrints(t *testing.T) {
+	out := capture(t, func() error { return execute(newVersionCmd()) })
+	if !strings.HasPrefix(out, "bonnie ") {
+		t.Fatalf("version output: %q", out)
 	}
 }
 
 // TestServeRejectsBadFlags keeps the flag set wired up without starting a
 // listener.
 func TestServeRejectsBadFlags(t *testing.T) {
-	if err := runServe([]string{"--nope"}); err == nil {
+	if err := execute(newServeCmd(), "--nope"); err == nil {
 		t.Fatal("want an error for an unknown flag")
 	}
 }
@@ -200,7 +226,7 @@ func TestServeRejectsBadFlags(t *testing.T) {
 func TestJournalDirIsCreated(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "fresh")
 
-	out := capture(t, func() error { return runsList([]string{"--journal", dir}) })
+	out := capture(t, func() error { return execute(newRunsListCmd(), "--journal", dir) })
 	if !strings.Contains(out, "no runs") {
 		t.Fatalf("output:\n%s", out)
 	}
@@ -236,7 +262,7 @@ func TestRunsShowDisplaysTheSandbox(t *testing.T) {
 		t.Fatalf("Close: %v", err)
 	}
 
-	out := capture(t, func() error { return runsShow([]string{"--journal", dir, "run-sbx"}) })
+	out := capture(t, func() error { return execute(newRunsShowCmd(), "--journal", dir, "run-sbx") })
 	for _, want := range []string{
 		"backend docker",
 		"bonnie-run-sbx",
@@ -290,7 +316,7 @@ func TestSandboxPruneReclaimsTerminalRuns(t *testing.T) {
 
 	// Dry run: nothing is deleted.
 	capture(t, func() error {
-		return runSandboxPrune([]string{"--journal", ".bonnie", "--sandbox", "local", "--dry-run"})
+		return execute(newSandboxPruneCmd(), "--journal", ".bonnie", "--sandbox", "local", "--dry-run")
 	})
 	if _, err := os.Stat(doneDir); err != nil {
 		t.Fatal("dry run deleted a workspace")
@@ -298,7 +324,7 @@ func TestSandboxPruneReclaimsTerminalRuns(t *testing.T) {
 
 	// Real run: the terminal run's workspace goes, the parked one stays.
 	out := capture(t, func() error {
-		return runSandboxPrune([]string{"--journal", ".bonnie", "--sandbox", "local"})
+		return execute(newSandboxPruneCmd(), "--journal", ".bonnie", "--sandbox", "local")
 	})
 	if _, err := os.Stat(doneDir); !os.IsNotExist(err) {
 		t.Fatalf("the terminal run's workspace survived prune: %v", err)

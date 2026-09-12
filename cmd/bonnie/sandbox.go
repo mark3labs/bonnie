@@ -2,40 +2,51 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"os"
 	"text/tabwriter"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"github.com/mark3labs/bonnie/runtime"
 	"github.com/mark3labs/bonnie/sandbox"
 )
 
-// runSandbox dispatches the sandbox subcommands.
-func runSandbox(args []string) error {
-	if len(args) == 0 {
-		sandboxUsage()
-		return nil
+// newSandboxCmd mounts `bonnie sandbox`.
+func newSandboxCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "sandbox",
+		Short: "Reclaim the sandboxes of finished runs",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return cmd.Help()
+		},
 	}
-	switch args[0] {
-	case "prune":
-		return runSandboxPrune(args[1:])
-	case "help", "-h", "--help":
-		sandboxUsage()
-		return nil
-	default:
-		sandboxUsage()
-		return fmt.Errorf("bonnie: unknown sandbox command %q", args[0])
-	}
+	cmd.AddCommand(newSandboxPruneCmd())
+	return cmd
 }
 
-func sandboxUsage() {
-	fmt.Fprint(os.Stderr, `usage: bonnie sandbox <command>
+func newSandboxPruneCmd() *cobra.Command {
+	var o pruneOpts
+	cmd := &cobra.Command{
+		Use:   "prune",
+		Short: "Delete the sandboxes of runs that reached a terminal state",
+		RunE:  func(*cobra.Command, []string) error { return runSandboxPrune(o) },
+	}
+	f := cmd.Flags()
+	f.StringVar(&o.journal, "journal", ".bonnie", "journal directory")
+	f.StringVar(&o.kind, "sandbox", "docker", "sandbox backend the runs used: docker, microsandbox, msb, or local")
+	f.StringVar(&o.image, "sandbox-image", "", "sandbox image, only needed to construct the backend")
+	f.BoolVar(&o.dryRun, "dry-run", false, "report what would be deleted, delete nothing")
+	return cmd
+}
 
-  prune   delete the sandboxes of runs that reached a terminal state
-
-`)
+// pruneOpts carries the parsed flags of `bonnie sandbox prune`.
+type pruneOpts struct {
+	journal string
+	kind    string
+	image   string
+	dryRun  bool
 }
 
 // runSandboxPrune reclaims the sandboxes of terminal runs.
@@ -50,17 +61,8 @@ func sandboxUsage() {
 // This is the cheap answer. The complete one is a background sweep in
 // `serve`; a command an operator can run from cron is a deliberate first
 // step, and it is the same code either way.
-func runSandboxPrune(args []string) error {
-	fs := flag.NewFlagSet("sandbox prune", flag.ContinueOnError)
-	dir := fs.String("journal", ".bonnie", "journal directory")
-	kind := fs.String("sandbox", "docker", "sandbox backend the runs used: docker, microsandbox, msb, or local")
-	image := fs.String("sandbox-image", "", "sandbox image, only needed to construct the backend")
-	dryRun := fs.Bool("dry-run", false, "report what would be deleted, delete nothing")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-
-	provider, err := sandboxProvider(*kind, *image)
+func runSandboxPrune(o pruneOpts) error {
+	provider, err := sandboxProvider(o.kind, o.image)
 	if err != nil {
 		return err
 	}
@@ -69,7 +71,7 @@ func runSandboxPrune(args []string) error {
 		return fmt.Errorf("the %s backend cannot delete a run's sandbox without opening it", provider.Name())
 	}
 
-	journal, err := runtime.OpenFileJournal(*dir)
+	journal, err := runtime.OpenFileJournal(o.journal)
 	if err != nil {
 		return err
 	}
@@ -97,7 +99,7 @@ func runSandboxPrune(args []string) error {
 			_, _ = fmt.Fprintf(tw, "%s\t%s\tkept (run is not terminal)\n", runID, state)
 			continue
 		}
-		if *dryRun {
+		if o.dryRun {
 			_, _ = fmt.Fprintf(tw, "%s\t%s\twould delete sandbox\n", runID, state)
 			continue
 		}
@@ -113,7 +115,7 @@ func runSandboxPrune(args []string) error {
 		}
 	}
 
-	if *dryRun {
+	if o.dryRun {
 		fmt.Fprintln(os.Stderr, "dry run: nothing was deleted")
 	} else {
 		fmt.Fprintf(os.Stderr, "deleted %d sandbox(es)\n", reaped)

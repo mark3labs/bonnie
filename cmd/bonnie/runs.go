@@ -3,50 +3,66 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 	"text/tabwriter"
 
+	"github.com/spf13/cobra"
+
 	"github.com/mark3labs/bonnie/runtime"
 )
 
-// runRuns dispatches the runs subcommands. They read the journal directly, so
-// they work against a stopped server — which is exactly when an operator needs
-// them.
-func runRuns(args []string) error {
-	if len(args) == 0 {
-		return fmt.Errorf("runs needs a subcommand: list or show")
+// newRunsCmd mounts `bonnie runs`. Its subcommands read the journal directly,
+// so they work against a stopped server — which is exactly when an operator
+// needs them.
+func newRunsCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "runs",
+		Short: "List and inspect durable runs",
+		Long: `List and inspect durable runs.
+
+These read the journal directly, so they work against a stopped server —
+which is exactly when an operator needs them.`,
+		RunE: func(*cobra.Command, []string) error {
+			return fmt.Errorf("runs needs a subcommand: list or show")
+		},
 	}
-	switch args[0] {
-	case "list":
-		return runsList(args[1:])
-	case "show":
-		return runsShow(args[1:])
-	default:
-		return fmt.Errorf("unknown runs subcommand %q: want list or show", args[0])
-	}
+	cmd.AddCommand(newRunsListCmd(), newRunsShowCmd())
+	return cmd
 }
 
-func runsList(args []string) error {
-	fs := flag.NewFlagSet("runs list", flag.ContinueOnError)
-	dir := fs.String("journal", ".bonnie", "journal directory")
-	state := fs.String("state", "", "only list runs in this state")
-	asJSON := fs.Bool("json", false, "print JSON instead of a table")
-	if err := fs.Parse(args); err != nil {
-		return err
+func newRunsListCmd() *cobra.Command {
+	var (
+		dir    string
+		state  string
+		asJSON bool
+	)
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "List durable runs",
+		Args:  cobra.NoArgs,
+		RunE: func(*cobra.Command, []string) error {
+			return runsList(dir, state, asJSON)
+		},
 	}
+	f := cmd.Flags()
+	f.StringVar(&dir, "journal", ".bonnie", "journal directory")
+	f.StringVar(&state, "state", "", "only list runs in this state")
+	f.BoolVar(&asJSON, "json", false, "print JSON instead of a table")
+	return cmd
+}
 
-	journal, err := runtime.OpenFileJournal(*dir)
+func runsList(dir, state string, asJSON bool) error {
+	journal, err := runtime.OpenFileJournal(dir)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = journal.Close() }()
 
 	ctx := context.Background()
-	ids, err := journal.Runs(ctx, runtime.RunState(*state))
+	ids, err := journal.Runs(ctx, runtime.RunState(state))
 	if err != nil {
 		return err
 	}
@@ -84,7 +100,7 @@ func runsList(args []string) error {
 		rows = append(rows, r)
 	}
 
-	if *asJSON {
+	if asJSON {
 		return writeJSON(os.Stdout, rows)
 	}
 	if len(rows) == 0 {
@@ -100,19 +116,27 @@ func runsList(args []string) error {
 	return tw.Flush()
 }
 
-func runsShow(args []string) error {
-	fs := flag.NewFlagSet("runs show", flag.ContinueOnError)
-	dir := fs.String("journal", ".bonnie", "journal directory")
-	asJSON := fs.Bool("json", false, "print the raw records as JSON")
-	if err := fs.Parse(args); err != nil {
-		return err
+func newRunsShowCmd() *cobra.Command {
+	var (
+		dir    string
+		asJSON bool
+	)
+	cmd := &cobra.Command{
+		Use:   "show <run-id>",
+		Short: "Print one run's timeline, or its raw records with --json",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(_ *cobra.Command, args []string) error {
+			return runsShow(dir, asJSON, args[0])
+		},
 	}
-	if fs.NArg() != 1 {
-		return fmt.Errorf("runs show needs exactly one run ID")
-	}
-	runID := fs.Arg(0)
+	f := cmd.Flags()
+	f.StringVar(&dir, "journal", ".bonnie", "journal directory")
+	f.BoolVar(&asJSON, "json", false, "print the raw records as JSON")
+	return cmd
+}
 
-	journal, err := runtime.OpenFileJournal(*dir)
+func runsShow(dir string, asJSON bool, runID string) error {
+	journal, err := runtime.OpenFileJournal(dir)
 	if err != nil {
 		return err
 	}
@@ -123,7 +147,7 @@ func runsShow(args []string) error {
 	if err != nil {
 		return err
 	}
-	if *asJSON {
+	if asJSON {
 		return writeJSON(os.Stdout, recs)
 	}
 

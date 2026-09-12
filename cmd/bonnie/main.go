@@ -2,60 +2,96 @@
 //
 // The framework is usable as a library without this binary; the CLI exists for
 // local development and for inspecting durable runs.
+//
+// The CLI renders its own help and errors with fang. It ships no
+// interactive interface; the framework packages below it render no terminal
+// at all today. The hard boundary this repo enforces is the Kit one above.
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"runtime/debug"
 	"strings"
+
+	"github.com/charmbracelet/fang"
+	"github.com/spf13/cobra"
 )
 
 // version is set by the linker at release time.
 var version = "dev"
 
 func main() {
-	if len(os.Args) < 2 {
-		usage()
-		os.Exit(2)
-	}
-
-	var err error
-	switch os.Args[1] {
-	case "version", "--version", "-v":
-		fmt.Println("bonnie", buildVersion())
-	case "help", "--help", "-h":
-		usage()
-	case "serve":
-		err = runServe(os.Args[2:])
-	case "runs":
-		err = runRuns(os.Args[2:])
-	case "sandbox":
-		err = runSandbox(os.Args[2:])
-	default:
-		fmt.Fprintf(os.Stderr, "bonnie: unknown command %q\n\n", os.Args[1])
-		usage()
-		os.Exit(2)
-	}
-
-	if err != nil {
-		fmt.Fprintln(os.Stderr, prefixed(err))
+	if err := fang.Execute(context.Background(), newRootCmd(),
+		// fang detects the version from build info, which reports "unknown"
+		// for a `go run` binary and misses the linker-injected release
+		// version. Hand it over explicitly so `--version` and the version
+		// subcommand agree.
+		fang.WithVersion(buildVersion()),
+		fang.WithErrorHandler(fangErrorHandler)); err != nil {
 		os.Exit(1)
 	}
 }
 
-// prefixed renders an error for the terminal with exactly one "bonnie:" on
-// the front.
+// newRootCmd assembles the command tree. main runs it through fang; tests
+// drive it with SetArgs, which exercises the same wiring without the styling.
+func newRootCmd() *cobra.Command {
+	root := &cobra.Command{
+		Use:   "bonnie",
+		Short: "BONNIE — Builder Of Neural Network Intelligence Engines",
+		Long: `Durable agent runs for Go.
+
+Survive a crash. Wait days for a human. Answer over HTTP.
+
+The framework is a library first: runtime.NewRunner and channel/http need no
+binary at all. This CLI exists for local development and for inspecting
+durable runs.
+
+Planned:
+  init       Scaffold an agent tree
+  dev        Run the agent locally with hot reload
+  eval       Run evals against a local or remote agent`,
+		Version: buildVersion(),
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return cmd.Help()
+		},
+	}
+	root.AddCommand(newServeCmd(), newRunsCmd(), newSandboxCmd(), newVersionCmd())
+	return root
+}
+
+// fangErrorHandler renders an error through fang with exactly one "bonnie:"
+// on the front.
 //
 // Library errors are already wrapped `bonnie: context: ...` by convention, so
 // prefixing unconditionally produced "bonnie: bonnie: ...". Errors raised by
 // the CLI itself carry no prefix and need one.
+func fangErrorHandler(w io.Writer, styles fang.Styles, err error) {
+	fang.DefaultErrorHandler(w, styles, errors.New(prefixed(err)))
+}
+
+// prefixed adds the "bonnie:" prefix unless the error already carries one.
 func prefixed(err error) string {
 	msg := err.Error()
 	if strings.HasPrefix(msg, "bonnie:") {
 		return msg
 	}
 	return "bonnie: " + msg
+}
+
+func newVersionCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "version",
+		Short: "Print the BONNIE version",
+		Args:  cobra.NoArgs,
+		RunE: func(*cobra.Command, []string) error {
+			fmt.Println("bonnie", buildVersion())
+			return nil
+		},
+	}
 }
 
 func buildVersion() string {
@@ -66,46 +102,4 @@ func buildVersion() string {
 		return info.Main.Version
 	}
 	return version
-}
-
-func usage() {
-	fmt.Fprint(os.Stderr, `BONNIE — Builder Of Neural Network Intelligence Engines
-
-Usage:
-  bonnie <command> [flags]
-
-Commands:
-  serve      Mount the HTTP channel and serve durable runs
-  runs       List and inspect durable runs
-  sandbox    Reclaim the sandboxes of finished runs
-  version    Print the BONNIE version
-  help       Show this message
-
-Run "bonnie <command> -h" for the flags of a command.
-
-serve:
-  bonnie serve [--addr :8080] [--journal .bonnie] [--model PROVIDER/MODEL]
-                [--sandbox none|docker|microsandbox|local|auto]
-                [--sandbox-image IMAGE] [--sandbox-deny-network]
-
-    POST /runs                 start a run, or resolve an address to one
-    GET  /runs/{id}            report a run's durable state
-    POST /runs/{id}            send a message to an existing run
-    POST /runs/{id}/respond    answer a suspended run
-    POST /runs/{id}/cancel     stop the turn a run is executing
-    GET  /runs/{id}/stream     NDJSON event stream, resumable with ?cursor=
-
-    Without --sandbox, tool calls run as this process, with its files,
-    network, and credentials. Use --sandbox docker for a server that is
-    reachable from outside. See docs/SANDBOX.md.
-
-runs:
-  bonnie runs list [--journal .bonnie] [--state waiting] [--json]
-  bonnie runs show <run-id> [--journal .bonnie] [--json]
-
-Planned:
-  init       Scaffold an agent/ tree
-  dev        Run the agent locally with hot reload
-  eval       Run evals against a local or remote agent
-`)
 }

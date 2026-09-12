@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"net/http"
 	"os"
@@ -11,42 +10,75 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	bonniehttp "github.com/mark3labs/bonnie/channel/http"
 	"github.com/mark3labs/bonnie/runtime"
 	"github.com/mark3labs/bonnie/sandbox"
 	kit "github.com/mark3labs/kit/pkg/kit"
 )
 
-// runServe mounts the HTTP channel over a file-backed journal.
-func runServe(args []string) error {
-	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
-	addr := fs.String("addr", ":8080", "address to listen on")
-	dir := fs.String("journal", ".bonnie", "journal directory")
-	model := fs.String("model", "", "model to use, for example anthropic/claude-sonnet-4-5")
-	prompt := fs.String("system-prompt", "", "system prompt override")
-	sandboxKind := fs.String("sandbox", "none", "tool sandbox: none, docker, microsandbox, local, or auto")
-	sandboxImage := fs.String("sandbox-image", "", "sandbox image, for example python:3.12-slim")
-	denyNet := fs.Bool("sandbox-deny-network", false, "block all network egress from the sandbox")
-	timeout := fs.Duration("shutdown-timeout", 30*time.Second, "how long to wait for in-flight turns on shutdown")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
+// serveOpts carries the parsed flags of `bonnie serve`.
+type serveOpts struct {
+	addr        string
+	journal     string
+	model       string
+	prompt      string
+	sandboxKind string
+	sandboxImg  string
+	denyNetwork bool
+	shutdown    time.Duration
+}
 
-	journal, err := runtime.OpenFileJournal(*dir)
+// newServeCmd mounts `bonnie serve`.
+func newServeCmd() *cobra.Command {
+	var o serveOpts
+	cmd := &cobra.Command{
+		Use:   "serve",
+		Short: "Mount the HTTP channel and serve durable runs",
+		Long: `Mount the HTTP channel over a file-backed journal and serve durable runs.
+
+  POST /runs                 start a run, or resolve an address to one
+  GET  /runs/{id}            report a run's durable state
+  POST /runs/{id}            send a message to an existing run
+  POST /runs/{id}/respond    answer a suspended run
+  POST /runs/{id}/cancel     stop the turn a run is executing
+  GET  /runs/{id}/stream     NDJSON event stream, resumable with ?cursor=
+
+Without --sandbox, tool calls run as this process, with its files, network,
+and credentials. Use --sandbox docker for a server that is reachable from
+outside. See docs/SANDBOX.md.`,
+		RunE: func(*cobra.Command, []string) error { return runServe(o) },
+	}
+	f := cmd.Flags()
+	f.StringVar(&o.addr, "addr", ":8080", "address to listen on")
+	f.StringVar(&o.journal, "journal", ".bonnie", "journal directory")
+	f.StringVar(&o.model, "model", "", "model to use, for example anthropic/claude-sonnet-4-5")
+	f.StringVar(&o.prompt, "system-prompt", "", "system prompt override")
+	f.StringVar(&o.sandboxKind, "sandbox", "none", "tool sandbox: none, docker, microsandbox, local, or auto")
+	f.StringVar(&o.sandboxImg, "sandbox-image", "", "sandbox image, for example python:3.12-slim")
+	f.BoolVar(&o.denyNetwork, "sandbox-deny-network", false, "block all network egress from the sandbox")
+	f.DurationVar(&o.shutdown, "shutdown-timeout", 30*time.Second, "how long to wait for in-flight turns on shutdown")
+	return cmd
+}
+
+// runServe mounts the HTTP channel over a file-backed journal.
+func runServe(o serveOpts) error {
+	journal, err := runtime.OpenFileJournal(o.journal)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = journal.Close() }()
 
 	var opts []kit.Option
-	if *model != "" {
-		opts = append(opts, kit.WithModel(*model))
+	if o.model != "" {
+		opts = append(opts, kit.WithModel(o.model))
 	}
-	if *prompt != "" {
-		opts = append(opts, kit.WithSystemPrompt(*prompt))
+	if o.prompt != "" {
+		opts = append(opts, kit.WithSystemPrompt(o.prompt))
 	}
 
-	factory, err := agentFactory(*sandboxKind, *sandboxImage, *denyNet, opts)
+	factory, err := agentFactory(o.sandboxKind, o.sandboxImg, o.denyNetwork, opts)
 	if err != nil {
 		return err
 	}
@@ -55,7 +87,7 @@ func runServe(args []string) error {
 	channel := bonniehttp.New(runner)
 
 	srv := &http.Server{
-		Addr:              *addr,
+		Addr:              o.addr,
 		Handler:           channel.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		// A turn can wait on a model for minutes, and a stream waits for as
@@ -71,7 +103,7 @@ func runServe(args []string) error {
 
 	errs := make(chan error, 1)
 	go func() {
-		fmt.Fprintf(os.Stderr, "bonnie: serving on %s, journal %s\n", *addr, *dir)
+		fmt.Fprintf(os.Stderr, "bonnie: serving on %s, journal %s\n", o.addr, o.journal)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errs <- err
 			return
@@ -86,7 +118,7 @@ func runServe(args []string) error {
 		fmt.Fprintln(os.Stderr, "bonnie: shutting down, letting in-flight turns checkpoint")
 	}
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), *timeout)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), o.shutdown)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("shutdown: %w", err)
