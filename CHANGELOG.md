@@ -10,6 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 The 0.1.0 scope below is complete in the working tree. The tag is not pushed
 yet, so everything under 0.1.0 is still unreleased until it is.
 
+### Added
+
+- Nix flake: `packages.bonnie`, `packages.microsandbox`, `apps.msb`,
+  `overlays.default`, and a `devShells.default` with Go 1.27, `golangci-lint`,
+  `goreleaser`, and the microsandbox CLI
+- The `bonnie` Nix package wraps the binary so `msb` is on its PATH
+
 ## [0.1.0] — 2026-09-12
 
 ### Added

@@ -66,6 +66,13 @@ As a CLI:
 go install github.com/mark3labs/bonnie/cmd/bonnie@latest
 ```
 
+With Nix. This gives you the CLI with the microsandbox CLI (`msb`) already on
+its PATH:
+
+```bash
+nix profile install github:mark3labs/bonnie   # or: nix run github:mark3labs/bonnie
+```
+
 Set a provider key. BONNIE uses whatever Kit is configured for:
 
 ```bash
@@ -73,6 +80,28 @@ export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY, or GEMINI_API_KEY
 ```
 
 Requires Go 1.27+. Sandboxing is optional and needs Docker or `msb`.
+
+### Development shell
+
+The flake also gives you a shell with Go 1.27, `golangci-lint`, `goreleaser`,
+and the microsandbox CLI:
+
+```bash
+nix develop
+go test -race ./...
+```
+
+The repository ships an `.envrc`, so `direnv allow` enters the same shell on
+`cd`.
+
+Other flake outputs:
+
+| Output | What it is |
+|---|---|
+| `packages.default`, `packages.bonnie` | the BONNIE CLI |
+| `packages.microsandbox` | the `msb` CLI plus its `libkrunfw` |
+| `apps.msb` | `nix run github:mark3labs/bonnie#msb` |
+| `overlays.default` | both packages, for your own nixpkgs |
 
 ## Quickstart
 
