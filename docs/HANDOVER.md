@@ -211,7 +211,8 @@ A backend that cannot run on the test machine must **skip**, not fail.
 ## 9. Verification before you commit
 
 ```bash
-gofmt -l .                                   # must be empty
+gofmt -l $(git ls-files '*.go')              # must be empty; never `gofmt -l .`,
+                                             # it walks .direnv/ and reports vendored files
 go build ./...
 go vet ./... && go vet -tags integration ./...
 go test -race ./...

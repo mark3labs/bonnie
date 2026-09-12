@@ -17,6 +17,7 @@ package channel
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/mark3labs/bonnie/runtime"
@@ -24,6 +25,11 @@ import (
 
 // TurnPolicy decides what happens when a message arrives while a turn is
 // already running for the same address.
+//
+// The vocabulary is exactly [PolicySteer] and [PolicyQueue]. An adapter that
+// receives anything else must refuse it with [ErrUnknownTurnPolicy] rather
+// than guess: a typo silently falling back to one of the two would make the
+// same message mean different things on different transports.
 type TurnPolicy string
 
 const (
@@ -37,6 +43,11 @@ const (
 	// PolicyQueue lets the active turn finish, then runs the next message.
 	PolicyQueue TurnPolicy = "queue"
 )
+
+// ErrUnknownTurnPolicy is returned when a [SendOptions.TurnPolicy] is
+// neither [PolicySteer] nor [PolicyQueue]. Every adapter refuses it; none
+// silently falls back to a default.
+var ErrUnknownTurnPolicy = errors.New("bonnie: channel: unknown turn policy")
 
 // Principal identifies who is on the other end of a channel. It is carried
 // into the run so tools can make per-tenant authorisation decisions.

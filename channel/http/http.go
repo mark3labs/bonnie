@@ -193,6 +193,14 @@ func (s *ref) Send(ctx context.Context, text string, opts channel.SendOptions) (
 	if policy == "" {
 		policy = s.c.policy
 	}
+	// Refuse, never guess. An unknown policy that silently queued would
+	// make one misspelling mean "wait" on one transport and "interrupt" on
+	// another.
+	switch policy {
+	case channel.PolicySteer, channel.PolicyQueue:
+	default:
+		return nil, fmt.Errorf("%w: %q", channel.ErrUnknownTurnPolicy, policy)
+	}
 
 	// A message that lands mid-turn is steered into the turn that is already
 	// running, which keeps the work the turn has done. Queue waits instead.
@@ -473,6 +481,8 @@ func writeError(w http.ResponseWriter, err error) {
 		errors.Is(err, runtime.ErrRunActive),
 		errors.Is(err, runtime.ErrRunNotActive):
 		writeJSON(w, http.StatusConflict, ErrorResponse{Error: err.Error()})
+	case errors.Is(err, channel.ErrUnknownTurnPolicy):
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
 	case errors.Is(err, context.Canceled):
 		writeJSON(w, 499, ErrorResponse{Error: err.Error()})
 	default:

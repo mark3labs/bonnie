@@ -667,3 +667,20 @@ func seqs(events []runtime.Event) []int {
 	}
 	return out
 }
+
+// TestUnknownTurnPolicyIs400 pins the refusal at the wire. The conformance
+// suite holds every adapter to the same contract; this is the HTTP shape of
+// it — a misspelled turn_policy is a bad request, not a silently queued one.
+func TestUnknownTurnPolicyIs400(t *testing.T) {
+	t.Parallel()
+	ts := newTestServer(t, &stubAgent{})
+
+	resp, _ := ts.post(t, "/runs", StartRequest{
+		Address:    "addr-policy",
+		Text:       "hello",
+		TurnPolicy: channel.TurnPolicy("steer "),
+	})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: an unknown policy must be refused, not guessed", resp.StatusCode)
+	}
+}

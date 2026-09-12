@@ -33,6 +33,10 @@ yet, so everything under 0.1.0 is still unreleased until it is.
 - `PrepareStepResult.Tools`, `ToolOutput.Halt`/`FinalValue` as contract, and
   the `SessionManager` freeze are available from Kit but not yet used by
   BONNIE (L2 will want per-step tools)
+- The `channeltest` package: the conformance suite a channel adapter joins
+  instead of writing its own tests. The HTTP adapter is the first member.
+  An unknown `TurnPolicy` is now refused with `channel.ErrUnknownTurnPolicy`
+  (HTTP: 400) rather than silently queueing
 - microsandbox: every network policy mode is now enforced. `SetNetworkPolicy`
   maps `deny-all` to `msb create --no-net` and an allow-list to
   `--net-rule allow@<host>`, verified with real egress. Previously every mode

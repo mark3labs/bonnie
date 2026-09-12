@@ -135,7 +135,7 @@ was deliberately left undone.
 - [x] `go.work` is not committed
 - [ ] `goreleaser build --snapshot --clean` produces working binaries
 - [ ] All CI jobs green on `master`, including `boundary`
-      (`lint` was failing on every commit; fixed, pending confirmation)
+      (green; the old golangci-lint pin was the only failure)
 - [ ] Release notes state both the claims and the limits
 - [ ] Tag pushed and artifacts published
 - [ ] A downloaded binary prints the injected version
@@ -332,8 +332,15 @@ future adapter fails only in that adapter.
 
 ### Acceptance criteria
 
-- [ ] `channel` has a test file
-- [ ] A new adapter has a documented way to prove it satisfies the contract
+- [x] `channel` has a test file — compile-time assertions for every adapter
+      in the repo, plus a wire-format pin on the `TurnPolicy` values
+- [x] A new adapter has a documented way to prove it satisfies the contract —
+      `channeltest.RunConformance`, which the HTTP adapter joins in
+      `channel/channel_test.go`. It covers address resolution, attach-never-
+      creates, both turn policies against a held-open turn, refusal of an
+      unknown policy, suspension and respond, and cancellation
+- [x] An unknown `TurnPolicy` is refused (`channel.ErrUnknownTurnPolicy`),
+      never guessed — it used to fall through and silently queue
 
 ---
 
