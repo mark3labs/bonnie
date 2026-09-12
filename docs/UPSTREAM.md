@@ -1,20 +1,40 @@
 # Upstream asks for Kit
 
-These are the changes BONNIE needs from `github.com/mark3labs/kit/pkg/kit`.
-Each one is written so you can paste it into an issue on `mark3labs/kit`.
+**Status: ANSWERED. All four landed in Kit `v0.106.0`** — PR
+`mark3labs/kit#135`, "feat(sdk): durability seams for external SessionManager
+implementations", merged 2026-09-12. The release notes credit BONNIE as the
+first external consumer of the public SDK and say the seams were verified
+non-breaking against BONNIE's own suite.
 
-BONNIE is Kit's first serious external consumer of the public SDK. Every gap
-here is a gap that a real SDK user hits.
+Nothing was filed as issues; the release landed before the filing. This file
+stays as the record of what was asked, why, and what each ask became. The
+citations below are from Kit `v0.105.0`, the version the asks were drafted
+against; `docs/SPEC.md` §3 carries the re-verified `v0.106.0` citations.
 
-File status: **drafted, not yet filed.** Put the issue link next to each title
-when you file it, and copy the links into `docs/SPEC.md` §6.
+| Ask | Became | Where in v0.106.0 |
+|---|---|---|
+| 1. Batch append | `kit.StepAppender` optional interface, dispatched at every multi-message site | `pkg/kit/session.go:181-231`, `pkg/kit/kit.go:2996,3141,3205` |
+| 2. Per-step tools | `PrepareStepResult.Tools []Tool`, nil-vs-empty documented | `pkg/kit/hooks.go` |
+| 3. Halt/FinalValue promise | stated as contract in the godoc | `pkg/kit/tools.go` |
+| 4. SessionManager policy | frozen for `v0.x`; capability via optional interfaces | `pkg/kit/session.go` |
 
-Line numbers are from Kit `v0.105.0`, the version pinned in `go.mod`. Check
-them again before you file.
+BONNIE adopted ask 1 in `runtime/session.go` (`Session.AppendStep`) and
+mirrored the optional-interface pattern on its own `Journal` seam
+(`runtime.StepJournal`), so a host journal is not forced to implement the
+batch method either. See `docs/SPEC.md` §4.2 for what the adoption closed
+and why the torn-write repair stays.
 
 ---
 
 ## 1. Batch append on `SessionManager`
+
+**ANSWERED in v0.106.0.** Landed almost exactly as drafted — as the optional
+`kit.StepAppender` interface rather than a widening of `SessionManager`,
+dispatched at all three persistence sites, with the fallback preserved.
+One improvement over the draft: the shipped `AppendStep` takes a `context.Context`,
+and its godoc documents that the context may already be cancelled, because
+Kit persists a completed step before it checks for cancellation. BONNIE's
+`Session.AppendStep` honours that with `context.WithoutCancel`.
 
 **Priority: highest.** Without this, no external `SessionManager` can be
 crash-safe for a tool-calling step.
@@ -120,6 +140,12 @@ item 4 below.
 
 ## 2. `PrepareStepResult.Tools []Tool`
 
+**ANSWERED in v0.106.0.** `Tools []Tool` landed on `PrepareStepResult` with
+the nil-versus-empty distinction documented: nil keeps the live tool set, so
+runtime `AddTools`/`RemoveTools` still reach the model mid-turn; an empty
+non-nil slice offers no tools and forces a text response. Not yet used by
+BONNIE; L2 discovery is the consumer.
+
 ### The problem
 
 The doc comment on `PrepareStepHook` in `pkg/kit/hooks.go` advertises "dynamic
@@ -142,6 +168,12 @@ is second in the list, not first.
 ---
 
 ## 3. A stability promise for `ToolOutput.Halt` and `FinalValue`
+
+**ANSWERED in v0.106.0.** The godoc now states that `Halt` plus `FinalValue`
+is a supported suspension mechanism, that a halted tool call still emits a
+well-formed tool result, and that `FinalValue` is propagated by dynamic type,
+unmodified. No behaviour change — the implementation already did this;
+BONNIE's suspension protocol is contract now, not coincidence.
 
 ### The problem
 
@@ -168,6 +200,11 @@ enough.
 ---
 
 ## 4. A stability policy for `kit.SessionManager`
+
+**ANSWERED in v0.106.0.** The interface is frozen for the `v0.x` line; new
+capability arrives through optional interfaces that Kit type-asserts for.
+`StepAppender` is the first instance and sets the precedent, exactly as the
+ask predicted. An implementer can now tell which world it lives in.
 
 ### The problem
 

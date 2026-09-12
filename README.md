@@ -462,10 +462,11 @@ demo and something you can deploy:
 - **Replay is lossless.** Journalled messages keep their typed parts, so a
   resumed run knows which tools it called and what came back. It will not
   repeat a side effect it already performed.
-- **A torn write is repaired.** Kit journals an assistant message and its tool
-  result separately. Crash between them and you get an unanswered tool call,
-  which every provider rejects. On restore, BONNIE drops that incomplete step
-  and records the repair.
+- **A step commits atomically.** A tool call and its result reach the journal
+  as one write and one fsync (`kit.StepAppender`, adopted from Kit `v0.106.0`),
+  so a crash cannot leave an unanswered tool call. If a torn step still
+  reaches disk — from an older journal, a non-batching journal, or a short
+  write — restore drops that incomplete step and records the repair.
 - **Cancelling keeps finished work.** Steps are persisted before the context is
   checked, so a cancelled turn loses only the step in flight.
 

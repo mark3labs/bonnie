@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"sync"
 )
@@ -36,6 +37,38 @@ func (j *MemoryJournal) Append(_ context.Context, rec Record) (int, error) {
 		j.states[rec.RunID] = RunPending
 	}
 	return rec.Seq, nil
+}
+
+// AppendStep implements [StepJournal]. Every record lands under one lock, so
+// a reader never observes part of a step. An in-memory journal cannot be
+// torn by a crash — the process and the journal die together — so this is
+// about keeping the step a unit for concurrent readers, and about giving
+// [Session] one code path instead of a durable and a volatile one.
+func (j *MemoryJournal) AppendStep(_ context.Context, recs []Record) ([]int, error) {
+	if len(recs) == 0 {
+		return nil, nil
+	}
+	// One step belongs to one run; see FileJournal.AppendStep.
+	for i := range recs {
+		if recs[i].RunID != recs[0].RunID {
+			return nil, fmt.Errorf("bonnie: append step: record %d is for run %q, not %q",
+				i+1, recs[i].RunID, recs[0].RunID)
+		}
+	}
+	j.mu.Lock()
+	defer j.mu.Unlock()
+
+	seqs := make([]int, len(recs))
+	base := len(j.records[recs[0].RunID])
+	for i := range recs {
+		recs[i].Seq = base + i + 1
+		seqs[i] = recs[i].Seq
+		j.records[recs[i].RunID] = append(j.records[recs[i].RunID], recs[i])
+	}
+	if _, ok := j.states[recs[0].RunID]; !ok {
+		j.states[recs[0].RunID] = RunPending
+	}
+	return seqs, nil
 }
 
 // Replay implements [Journal].

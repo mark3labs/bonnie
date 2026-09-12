@@ -287,3 +287,62 @@ func TestJournalSurvivesReopen(t *testing.T) {
 		}
 	})
 }
+
+// TestJournalAppendStepCommitsAsUnit holds a journal that implements
+// [StepJournal] to the contract Kit's kit.StepAppender relies on: one call
+// commits every record of a step, one sequence number per record, in input
+// order, with nothing partial on the way. A journal that does not implement
+// the interface skips: the per-record fallback still works, and the
+// torn-write repair covers the crash window that leaves.
+func TestJournalAppendStepCommitsAsUnit(t *testing.T) {
+	t.Parallel()
+	eachJournal(t, func(t *testing.T, f journalFactory) {
+		j := f.open(t)
+		if _, ok := j.(StepJournal); !ok {
+			t.Skip("journal does not implement StepJournal; Session uses the " +
+				"per-record fallback for it")
+		}
+		ctx := context.Background()
+		const runID = "step-unit"
+		s := NewSession(runID, j)
+
+		ids, err := s.AppendStep(ctx, []kit.LLMMessage{
+			toolCall("Deploying.", "c1", "deploy", `{"region":"eu"}`),
+			toolResult("c1", "ok"),
+		})
+		if err != nil {
+			t.Fatalf("AppendStep: %v", err)
+		}
+		if len(ids) != 2 || ids[0] == ids[1] {
+			t.Fatalf("entry IDs = %v, want two distinct IDs in order", ids)
+		}
+
+		recs, err := j.Replay(ctx, runID)
+		if err != nil {
+			t.Fatalf("Replay: %v", err)
+		}
+		if len(recs) != 2 {
+			t.Fatalf("journal holds %d records, want 2", len(recs))
+		}
+		for i, rec := range recs {
+			if rec.Seq != i+1 {
+				t.Fatalf("record %d has seq %d, want %d: a step must not leave gaps", i, rec.Seq, i+1)
+			}
+			if rec.EntryID != ids[i] {
+				t.Fatalf("record %d has entry %q, want %q", i, rec.EntryID, ids[i])
+			}
+		}
+
+		// The restored session must see the step whole — the pair is the
+		// point, not the records.
+		restored, err := Restore(ctx, runID, j)
+		if err != nil {
+			t.Fatalf("Restore: %v", err)
+		}
+		msgs := restored.GetMessages()
+		if len(msgs) != 2 {
+			t.Fatalf("restored %d messages, want 2", len(msgs))
+		}
+		assertNoOrphan(t, msgs)
+	})
+}

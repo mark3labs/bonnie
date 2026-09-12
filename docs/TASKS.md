@@ -19,12 +19,20 @@ the known risks, and the invariants every task must preserve.
 
 | ID | Title | Priority | Size | Blocks |
 |---|---|---|---|---|
-| T-009 | File the four upstream Kit issues | P2 | S | T-011 |
 | T-011 | Tag and release `v0.1.0` | P2 | S | — |
 | T-012 | Journal the sandbox lifecycle | P1 | M | — |
 | T-013 | Verify the microsandbox adapter on real hardware | P1 | S | — |
 | T-014 | Cross-process run ownership | P2 | M | — |
 | T-015 | `channel` package has no tests | P2 | S | — |
+
+### Resolved by upstream
+
+**T-009 — file the four upstream Kit issues — is moot.** Kit `v0.106.0`
+(PR `mark3labs/kit#135`) answered all four asks before anything was filed.
+BONNIE adopted the batch-append seam the same day: `Session.AppendStep`
+plus the `runtime.StepJournal` optional interface. `docs/UPSTREAM.md` records
+what each ask became, and `docs/SPEC.md` §3 was re-verified against
+`v0.106.0`. T-011 no longer depends on it.
 
 ### Shipped in `v0.1.0`
 
@@ -46,6 +54,13 @@ Sizes: S ≈ half a day · M ≈ 1–2 days · L ≈ 3–4 days.
 ---
 
 ## T-009 — File the four upstream Kit issues
+
+**RESOLVED WITHOUT FILING.** Kit `v0.106.0` (PR `mark3labs/kit#135`,
+"durability seams for external SessionManager implementations") answered all
+four asks before anything was filed. See [Resolved by upstream](#resolved-by-upstream)
+at the top of this file and [`docs/UPSTREAM.md`](UPSTREAM.md) for what each
+ask became. The section below is the task as it was written, kept for the
+record.
 
 **Priority** P2 · **Size** S · **Blocks** T-011
 
@@ -72,20 +87,29 @@ Then put the issue links next to each title in `docs/UPSTREAM.md` and in
 
 ### Acceptance criteria
 
-- [ ] Four issues filed with reproductions or citations
-- [ ] `docs/UPSTREAM.md` carries the issue links
-- [ ] `docs/SPEC.md` §6 carries the issue links
+- [x] Four issues filed with reproductions or citations — **moot**: the
+      release answered them; nothing to file
+- [x] `docs/UPSTREAM.md` carries the outcome of each ask, with PR and
+      file:line references into `v0.106.0`
+- [x] `docs/SPEC.md` §6 carries the outcome, and §3 was re-verified against
+      `v0.106.0`
+- [x] BONNIE adopts the batch-append seam (`Session.AppendStep`,
+      `runtime.StepJournal`, tests in `runtime/step_append_test.go`)
 
 ### Watch for
 
-This needs a GitHub account with access to `mark3labs/kit`, so a human has to
-do the filing. The writing is finished.
+Nothing. The release landed the seams before the filing, and BONNIE adopted
+them. If a future Kit release changes the shapes `docs/SPEC.md` §3 cites,
+re-verify that section and update it in the same commit.
 
 ---
 
 ## T-011 — Tag and release `v0.1.0`
 
-**Priority** P2 · **Size** S · **Depends on** T-009
+**Priority** P2 · **Size** S
+
+T-009 is resolved by upstream, so nothing blocks this task but the decision
+to ship.
 
 ### Why
 
@@ -359,4 +383,5 @@ All three are verified, against a live model, in this order:
    `TestLiveSuspendAndResume`.
 3. `bonnie runs show` renders the timeline and valid `--json`.
 
-What remains before tagging is T-009 and T-011, neither of which is code.
+What remains before tagging is T-011. T-009 resolved itself: Kit `v0.106.0`
+answered the asks, and BONNIE adopted the seams.

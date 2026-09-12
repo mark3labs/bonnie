@@ -254,6 +254,95 @@ func (j *FileJournal) Append(_ context.Context, rec Record) (int, error) {
 	return j.appendLocked(rf, rec)
 }
 
+// AppendStep implements [StepJournal]. Every record of the step is encoded
+// into one buffer and written with a single Write, then synced once, so the
+// step is either fully durable or absent — never torn.
+//
+// Sequence numbers are assigned while encoding and kept even when the write
+// fails. A short write can leave bytes in the file, so rolling the counter
+// back could hand the same sequence number to two records. Numbers that skip
+// are harmless; numbers that repeat are corruption.
+//
+// A short write can also leave a torn trailing line, which the next
+// [FileJournal.Replay] treats as end-of-file, and a line that ends exactly on
+// a record boundary can orphan the last record of a truncated step — the
+// same shape a crash between two per-message writes produced, and the same
+// repair in [Restore] covers it. The window went from "any crash between two
+// fsyncs" to "a torn single Write", which is as small as a file can make it.
+func (j *FileJournal) AppendStep(_ context.Context, recs []Record) ([]int, error) {
+	if len(recs) == 0 {
+		return nil, nil
+	}
+	// One step belongs to one run; a mixed batch would split across files
+	// and no longer be a unit.
+	for i := range recs {
+		if recs[i].RunID != recs[0].RunID {
+			return nil, fmt.Errorf("bonnie: append step: record %d is for run %q, not %q",
+				i+1, recs[i].RunID, recs[0].RunID)
+		}
+	}
+	rf, err := j.run(recs[0].RunID)
+	if err != nil {
+		return nil, err
+	}
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+
+	if err := rf.loadLocked(); err != nil {
+		return nil, err
+	}
+	f, err := rf.writerLocked()
+	if err != nil {
+		return nil, err
+	}
+
+	// Encode everything before any byte reaches the file. A record that
+	// cannot be encoded fails the whole batch with nothing written and the
+	// sequence counter restored.
+	assigned := 0
+	defer func() {
+		if assigned > 0 {
+			rf.seq -= assigned
+		}
+	}() // roll back only while nothing has been written
+	seqs := make([]int, len(recs))
+	var buf []byte
+	for i := range recs {
+		rf.seq++
+		assigned++
+		recs[i].Seq = rf.seq
+		seqs[i] = rf.seq
+		line, err := json.Marshal(recs[i])
+		if err != nil {
+			return nil, fmt.Errorf("bonnie: encode record: %w", err)
+		}
+		buf = append(buf, line...)
+		buf = append(buf, '\n')
+	}
+
+	if _, err := f.Write(buf); err != nil {
+		// Bytes may have reached the file; the sequence numbers stay
+		// assigned. See the comment above the function.
+		assigned = 0
+		return nil, fmt.Errorf("bonnie: write step: %w", err)
+	}
+	if err := j.syncLocked(rf, f); err != nil {
+		assigned = 0
+		return nil, err
+	}
+	assigned = 0 // committed: the deferred rollback must not fire
+
+	for i := range recs {
+		switch {
+		case recs[i].Kind == RecordState:
+			rf.state = recs[i].State
+		case rf.state == "":
+			rf.state = RunPending
+		}
+	}
+	return seqs, nil
+}
+
 // Replay implements [Journal].
 func (j *FileJournal) Replay(_ context.Context, runID string) ([]Record, error) {
 	rf, err := j.run(runID)

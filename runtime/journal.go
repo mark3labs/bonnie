@@ -147,3 +147,30 @@ type Journal interface {
 	// Close releases any resources held by the journal.
 	Close() error
 }
+
+// StepJournal is an optional interface a [Journal] may implement to commit a
+// whole agent step as one unit.
+//
+// It exists for the same reason Kit's [kit.StepAppender] does: a tool-calling
+// step is two messages, and writing them one at a time leaves a crash window
+// between them. A journal that implements this interface writes every record
+// of the step with one lock, one buffer, and one fsync, so the step is either
+// fully durable or not present at all.
+//
+// The contract mirrors [kit.StepAppender]: a partial write must not be
+// reported as success, and cancellation must not stop a completed step from
+// being written — see [Session.AppendStep] for why. [FileJournal] and
+// [MemoryJournal] both implement it. A journal that does not keeps working:
+// [Session] falls back to one [Journal.Append] per record, and the torn-write
+// repair in [Restore] still covers the crash window that leaves.
+//
+// This is an optional interface rather than a widening of [Journal] for the
+// same reason Kit made [kit.StepAppender] optional: Go interfaces have no
+// default implementations, so adding a method to [Journal] would break every
+// host implementation at compile time, with no deprecation window.
+type StepJournal interface {
+	// AppendStep writes every record of one step and returns the sequence
+	// number assigned to each, in input order. Implementations assign Seq;
+	// callers may leave it zero.
+	AppendStep(ctx context.Context, recs []Record) (seqs []int, err error)
+}

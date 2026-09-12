@@ -50,6 +50,12 @@ type sessionEntry struct {
 // early warning we want.
 var _ kit.SessionManager = (*Session)(nil)
 
+// Compile-time proof that Session takes the atomic step path. Kit
+// type-asserts for kit.StepAppender at every site that persists more than
+// one message, so implementing it routes every tool-calling step through
+// [Session.AppendStep] and its single journal write.
+var _ kit.StepAppender = (*Session)(nil)
+
 // NewSession creates an empty journal-backed session for a run.
 func NewSession(runID string, j Journal) *Session {
 	if j == nil {
@@ -72,12 +78,15 @@ func NewSession(runID string, j Journal) *Session {
 // process. A record written without a payload falls back to its flattened
 // text, which keeps journals from older BONNIE versions readable.
 //
-// Restore also repairs a torn write. Kit journals the assistant message and
-// the tool message of one step separately, so a crash between them leaves an
-// unanswered tool call that every provider rejects. Restore drops that
-// incomplete trailing step and journals a [RecordRepair]. A mismatch anywhere
-// but the tail means the journal is damaged, and Restore returns
-// [ErrCorruptConversation] rather than rewrite history.
+// Restore also repairs a torn write. A journal can still hold an assistant
+// message whose tool call has no tool result: every journal written before
+// Kit v0.106.0, every journal whose implementation does not provide
+// [StepJournal], and the residual torn single Write that [FileJournal]
+// documents. An orphaned tool call is a conversation every provider rejects,
+// so Restore drops that incomplete trailing step and journals a
+// [RecordRepair]. A mismatch anywhere but the tail means the journal is
+// damaged, and Restore returns [ErrCorruptConversation] rather than rewrite
+// history.
 func Restore(ctx context.Context, runID string, j Journal) (*Session, error) {
 	recs, err := j.Replay(ctx, runID)
 	if err != nil {
@@ -315,6 +324,12 @@ func (s *Session) RunID() string { return s.runID }
 // AppendMessage implements [kit.SessionManager]. The whole typed message is
 // encoded into the journal record, so a replay rebuilds tool calls and tool
 // results rather than a text-only approximation of them.
+//
+// Kit no longer calls this for a multi-message step when the session also
+// implements [kit.StepAppender]; it calls [Session.AppendStep] instead. The
+// method stays because it is part of the frozen [kit.SessionManager]
+// contract, and because single messages — a user turn, a compaction — still
+// arrive one at a time.
 func (s *Session) AppendMessage(msg kit.LLMMessage) (string, error) {
 	// Encode before touching in-memory state: a message that cannot be
 	// journalled must not enter the tree, or the session and the journal
@@ -362,6 +377,122 @@ func (s *Session) AppendMessage(msg kit.LLMMessage) (string, error) {
 		Payload:   payload,
 	})
 	return id, err
+}
+
+// AppendStep implements [kit.StepAppender]. It receives every message of
+// one agent step in a single call and commits them as one unit: the records
+// are built first, then written through [StepJournal] with one lock and one
+// fsync when the journal supports it.
+//
+// Before Kit v0.106.0 there was no such call, so a step was two independent
+// writes and a crash between them left an orphaned tool call — the condition
+// [Restore]'s repair exists to drop. With this method implemented, Kit hands
+// the whole step over at once, and a [FileJournal] writes it as a single
+// buffered Write followed by one fsync. The torn-write window shrinks from
+// "any crash between two fsyncs" to "a torn single Write". The repair
+// stays: journals written by older BONNIE versions, journals whose
+// implementation does not provide [StepJournal], and the residual short-write
+// case all still produce the shape it fixes.
+//
+// # Cancellation
+//
+// Kit persists a completed step before it checks for cancellation, so ctx
+// may already be cancelled when this runs. Aborting on that would discard
+// exactly the finished work this method exists to save, silently, because
+// Kit ignores the returned error. The write therefore runs under a context
+// that keeps tracing values but drops cancellation, which is the behaviour
+// Kit's own contract for [kit.StepAppender] prescribes.
+//
+// # Ordering
+//
+// The tree is updated before the journal write, matching [AppendMessage]: a
+// journal failure then leaves the live conversation coherent, and the
+// divergence — tree ahead of journal — disappears at the next crash, because
+// the process and the in-memory tree die together. An orphaned tool call
+// cannot result either way: the step enters the journal all at once or not
+// at all.
+func (s *Session) AppendStep(ctx context.Context, msgs []kit.LLMMessage) ([]string, error) {
+	if len(msgs) == 0 {
+		return nil, nil
+	}
+	// Encode every message before any state changes: a batch that cannot
+	// be journalled must not half-enter the tree.
+	payloads := make([]json.RawMessage, len(msgs))
+	for i := range msgs {
+		b, err := json.Marshal(msgs[i])
+		if err != nil {
+			return nil, fmt.Errorf("bonnie: encode message: %w", err)
+		}
+		payloads[i] = b
+	}
+
+	s.mu.Lock()
+	ids := make([]string, len(msgs))
+	recs := make([]Record, len(msgs))
+	parent := s.leaf
+	ts := now()
+	for i := range msgs {
+		id := s.ids.next("m")
+		ids[i] = id
+		text := messageText(msgs[i])
+		recs[i] = Record{
+			RunID:     s.runID,
+			Kind:      RecordMessage,
+			Timestamp: ts,
+			EntryID:   id,
+			ParentID:  parent,
+			Role:      string(msgs[i].Role),
+			Text:      text,
+			Payload:   payloads[i],
+		}
+		e := &sessionEntry{
+			meta: kit.BranchEntry{
+				ID:        id,
+				ParentID:  parent,
+				Type:      kit.EntryTypeMessage,
+				Role:      string(msgs[i].Role),
+				Content:   text,
+				Provider:  s.provider,
+				Model:     s.modelID,
+				Timestamp: ts,
+			},
+			msg: &msgs[i],
+		}
+		s.entries[id] = e
+		if p, ok := s.entries[parent]; ok {
+			p.meta.Children = append(p.meta.Children, id)
+		}
+		s.leaf = id
+		parent = id
+	}
+	s.mu.Unlock()
+
+	// A completed step must survive an interrupted turn: keep the values,
+	// drop the cancellation. See the Cancellation section above.
+	writeCtx := context.WithoutCancel(ctx)
+	if err := s.journalStep(writeCtx, recs); err != nil {
+		return ids, err
+	}
+	return ids, nil
+}
+
+// journalStep writes one step's records through [StepJournal] when the
+// journal provides it, and one [Journal.Append] per record when it does not.
+//
+// The fallback has the same crash window the pre-v0.106 per-message writes
+// had; a host that wants crash-safe steps should implement [StepJournal].
+// Both paths keep the step a unit in the tree regardless.
+func (s *Session) journalStep(ctx context.Context, recs []Record) error {
+	if sj, ok := s.journal.(StepJournal); ok {
+		_, err := sj.AppendStep(ctx, recs)
+		return err
+	}
+	for i := range recs {
+		if _, err := s.journal.Append(ctx, recs[i]); err != nil {
+			return fmt.Errorf("bonnie: append record %d of step: %w", i+1, err)
+		}
+	}
+	return nil
 }
 
 // branchLocked walks from the current leaf to the root and returns the path in

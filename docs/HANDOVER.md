@@ -31,8 +31,9 @@ master @ b3ec7b2 (+ this session's work)  →  github.com/mark3labs/bonnie
 | `cmd/bonnie/` | `serve`, `runs list`, `runs show`. |
 | `examples/` | `minimal`, `hitl-restart`. |
 
-**Not done, both human decisions:** file the upstream Kit issues (T-009,
-already written in `docs/UPSTREAM.md`) and tag `v0.1.0` (T-011).
+**Not done, one human decision:** tag `v0.1.0` (T-011). T-009 resolved
+itself — Kit `v0.106.0` answered all four upstream asks, and BONNIE adopted
+the seams the same day.
 
 ## 3. Start here
 
@@ -80,19 +81,26 @@ only text, so a resumed run had no memory of which tools it had called and
 would repeat a side effect it had already performed. If you add a record kind,
 put the lossless form in `Payload`.
 
-### A tool-calling step is two journal records
+### A tool-calling step used to be two journal records
 
-Kit calls `AppendMessage` once per message, so an assistant message carrying a
-`tool_use` and the tool message carrying its `tool_result` are separate writes.
-Crash between them and you get an orphaned tool call, which **every provider
-rejects** — the run becomes permanently unresumable.
+Kit called `AppendMessage` once per message, so an assistant message carrying
+a `tool_use` and the tool message carrying its `tool_result` were separate
+writes. Crash between them and you got an orphaned tool call, which **every
+provider rejects** — the run became permanently unresumable.
 
-`runtime/repair.go` drops that incomplete trailing step on restore and journals
-the repair. A mismatch anywhere but the tail is real corruption and returns
-`ErrCorruptConversation` rather than silently rewriting history.
+**Kit `v0.106.0` closed the main window.** It added `kit.StepAppender`; BONNIE
+implements it (`Session.AppendStep`) and mirrors the pattern on its own
+journal seam (`runtime.StepJournal`). A step now reaches a `FileJournal` as
+one buffered write and one fsync, and a cancelled context cannot drop a
+completed step, because the write runs under `context.WithoutCancel` per
+Kit's documented contract.
 
-This is also the strongest of the upstream asks: a batch-append hook on
-`SessionManager` would remove the need for the repair entirely.
+`runtime/repair.go` stays anyway, because three things still produce the torn
+shape: journals written before the upgrade, journals whose implementation
+does not provide `StepJournal` (the per-record fallback), and a short write of
+the batch buffer. It drops that incomplete trailing step on restore and
+journals the repair. A mismatch anywhere but the tail is real corruption and
+returns `ErrCorruptConversation` rather than silently rewriting history.
 
 ### A sandbox must never cache a tool call
 
@@ -156,6 +164,7 @@ Durability comes from four **public** Kit extension points:
 | Need | Kit API | BONNIE file |
 |---|---|---|
 | Journal every message | `Options.SessionManager` | `runtime/session.go` |
+| Commit a step atomically | `kit.StepAppender` (v0.106.0) | `runtime/session.go`, `journal.go`, `filejournal.go` |
 | Checkpoint each step | `Kit.OnStepFinish` | `runtime/runner.go` |
 | Inject replayed context | `Kit.OnContextPrepare` | `runtime/runner.go` |
 | Park for a human | `ToolOutput{Halt, FinalValue}` | `runtime/suspend.go` |
@@ -193,7 +202,9 @@ A backend that cannot run on the test machine must **skip**, not fail.
 2. **T-012 — journal the sandbox lifecycle.** Today a pruned container gives a
    resumed run an empty workspace with no explanation, and finished runs leak
    containers.
-3. **T-009 and T-011 — file the issues, tag the release.** Neither is code.
+3. **T-011 — tag the release.** T-009 resolved itself: Kit `v0.106.0`
+   answered the asks, BONNIE adopted `kit.StepAppender`, and the torn-write
+   window is now one write, not two.
 4. **T-015 — `channel` tests**, before a second adapter makes the interface
    hard to change.
 

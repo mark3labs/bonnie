@@ -61,10 +61,13 @@ changing anything in `runtime/`. Full detail with citations in `docs/SPEC.md` §
 | Inject replayed context | `Kit.OnContextPrepare` | `runner.go` |
 | Suspend for human input | `ToolOutput{Halt, FinalValue}` | `suspend.go` |
 
-- `Session` implements all 21 methods of `kit.SessionManager`. The
+- `Session` implements all 20 methods of `kit.SessionManager` (the count was
+  recorded as 21 until `v0.106.0` was verified; it was wrong). The
   `var _ kit.SessionManager = (*Session)(nil)` assertion in `session.go` is a
-  deliberate tripwire: if Kit widens the interface, the build breaks here
-  first.
+  deliberate tripwire: if Kit breaks the v0.x freeze and widens the interface,
+  the build breaks here first. `Session` also implements `kit.StepAppender`
+  (`AppendStep`), so a tool-calling step reaches the journal as one atomic
+  write.
 - `Agent` is an interface, not `*kit.Kit`. This keeps the executor testable
   without credentials and documents how small the Kit surface actually is.
   Do not replace it with a concrete type.

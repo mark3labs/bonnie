@@ -90,8 +90,13 @@ real SDK users hit. That pressure is the point.
 ## 3. Verified facts about Kit
 
 These were confirmed by reading Kit at the commit pinned in `go.mod`
-(`v0.105.0`). **Re-verify with the cited file:line before relying on any of
+(`v0.106.0`). **Re-verify with the cited file:line before relying on any of
 them**, and update this section if a Kit upgrade changes them.
+
+`v0.106.0` is the release that answered every ask in `docs/UPSTREAM.md`
+(PR `mark3labs/kit#135`, "durability seams for external SessionManager
+implementations"). All four changes are additive; the upgrade from
+`v0.105.0` broke nothing.
 
 ### 3.1 `Options.SessionManager` must be set at construction
 
@@ -111,7 +116,8 @@ before and after a real two-process run. The count does not change.
 
 ### 3.2 `Halt` does not orphan a tool call
 
-`pkg/kit/tools.go:265-275` — `recordHalt(ctx, name, result)` runs **before**
+`pkg/kit/tools.go:212-214` defines `recordHalt`; the call sites at
+`pkg/kit/tools.go:295` and `:312` (one per tool constructor) run it **before**
 `toolOutputToResponse(result)` returns. The tool still produces a normal
 `ToolResponse`, so the assistant message and its tool result are both emitted.
 The loop stops after the step completes.
@@ -119,46 +125,65 @@ The loop stops after the step completes.
 The suspension protocol is therefore sound: a halted turn leaves a
 well-formed conversation that a provider will accept on resume.
 
+`v0.106.0` states this as contract: `ToolOutput`'s godoc now says `Halt` plus
+`FinalValue` is a supported suspension mechanism and that a halted tool call
+still emits a well-formed tool result. BONNIE's suspension protocol no
+longer rests on an implementation detail.
+
 **Verified live.** `TestLiveSuspendAndResume` parks a real model on
 `ask_human`, restores the journal in a second process, and asserts that the
 replayed conversation holds an equal number of tool calls and tool results.
 The provider then accepts that conversation on resume.
 
-### 3.3 Step messages are persisted incrementally — but one at a time
+### 3.3 Step messages are persisted incrementally — and, since v0.106.0, atomically when the session allows it
 
-`internal/agent/agent.go:946-958` — `OnStepFinish` appends `step.Messages` to
+`internal/agent/agent.go:946-961` — `OnStepFinish` appends `step.Messages` to
 the accumulator, calls `cb.OnStepMessages(step.Messages)`, and only **then**
-checks `ctx.Err()`. So a cancelled turn keeps its completed steps.
+checks `ctx.Err()`. So a cancelled turn keeps its completed steps, and the
+context handed to persistence may already be cancelled.
 
-`pkg/kit/kit.go:2990-2994` — Kit's handler is:
+`pkg/kit/kit.go` — every site that persists more than one message now routes
+through `appendMessages`, which type-asserts for [kit.StepAppender] and falls
+back to a per-message loop only when the session manager does not implement
+it:
 
-```go
-OnStepMessages: func(stepMessages []fantasy.Message) {
-    for _, msg := range stepMessages {
-        _, _ = m.session.AppendMessage(msg)
-    }
-},
-```
+- `kit.go:2996` — per-step persistence during generation
+- `kit.go:3141` — `persistGenerationRemainder`, the tail of a finished or
+  overflow-retried turn, which can carry a complete assistant + tool pair
+- `kit.go:3205` — pre-generation messages
 
-It loops. The assistant message (carrying `tool_use`) and the tool-role message
-(carrying `tool_result`) arrive as **two separate `AppendMessage` calls**.
+BONNIE's `Session` implements `kit.StepAppender` (`runtime/session.go`), so a
+tool-calling step reaches the journal as **one call** and `FileJournal`
+commits it as one buffered write and one fsync. §4.2 records what this closes
+and what it cannot.
 
-This matters — see §4.1.
+`appendMessages` deliberately ignores errors, matching the historical
+behaviour of the call sites it replaced: a persistence failure must not abort
+a turn that has already produced model output. The consequence for BONNIE is
+that a journal write failure is silent to Kit — the runner's own error
+reporting is the only place it can surface.
 
 ### 3.4 The `SessionManager` contract
 
-`pkg/kit/session.go:26-110` — 21 methods. The doc comment on `AppendMessage`
-(lines 30-35) promises that for tool-calling steps the assistant and tool
-messages "are appended together as a pair", so "the session never contains an
-orphaned tool call without its result, which would break subsequent LLM
-requests."
+`pkg/kit/session.go:36` — **20 methods**, not 21 as this section previously
+claimed; the count was wrong at `v0.105.0` too and was corrected when
+`v0.106.0` was verified. The doc comment on `AppendMessage` promises that for
+tool-calling steps the assistant and tool messages "are appended together as
+a pair", so "the session never contains an orphaned tool call without its
+result, which would break subsequent LLM requests" — and, since `v0.106.0`, it
+also states plainly that this ordering is not atomicity, and points to
+`StepAppender` for that.
 
-Kit honours this **within a process**. It does not, and cannot, honour it
-across a crash — see §4.1.
+`v0.106.0` settled the stability question (UPSTREAM ask 4): the interface is
+**frozen for `v0.x`**, and new capability arrives through optional interfaces
+that Kit type-asserts for. `StepAppender` is the first instance and sets the
+precedent. An implementer can now tell which world it lives in.
 
 `runtime/session.go` carries `var _ kit.SessionManager = (*Session)(nil)` as a
-deliberate tripwire: if Kit widens the interface, BONNIE's build breaks there
-first.
+deliberate tripwire: if Kit ever breaks the freeze and widens the interface,
+BONNIE's build fails there first. A second assertion,
+`var _ kit.StepAppender = (*Session)(nil)`, proves BONNIE takes the atomic
+step path.
 
 ### 3.5 `*kit.Kit` satisfies `runtime.Agent`
 
@@ -199,32 +224,45 @@ reissue a replayed entry ID.
 
 ### 4.2 RESOLVED — torn write orphans a tool call
 
-**Fixed by T-003. Regression tests: `runtime/repair_test.go` and
-`TestFileJournalCrashResumeIsProviderValid`. Keep them passing.**
+**Fixed twice.** First by T-003's repair (`runtime/repair.go`), which stays.
+Then by the upstream fix BONNIE asked for: Kit `v0.106.0` added
+`kit.StepAppender`, BONNIE's `Session` implements it, and a tool-calling step
+now reaches the journal as one call that `FileJournal` commits as one buffered
+write and one fsync. Regression tests: `runtime/repair_test.go`,
+`TestFileJournalCrashResumeIsProviderValid`, and the step tests in
+`runtime/step_append_test.go`. Keep them all passing.
 
-Kit calls `AppendMessage` once per message (§3.3). BONNIE's
-`Session.AppendMessage` performs one journal `Append` per call. So a
-tool-calling step produces two journal records:
+**The hazard, for the record.** A tool-calling step produces two journal
+records — an assistant message containing `tool_use`, then a tool message
+containing `tool_result`. Written separately, a crash between them leaves a
+replay whose last assistant message has an unanswered `tool_use`. Providers
+reject that conversation. The run becomes permanently unresumable — the exact
+failure Kit's own docstring warns about, reintroduced at the journal layer.
 
-```
-record N    : assistant message containing tool_use   ← crash here
-record N+1  : tool message containing tool_result
-```
+**What the atomic path closed.** The window went from "any crash between two
+fsyncs" to "a torn single `Write`", which is as small as an append-only file
+can make it. A cancelled context no longer drops a completed step either:
+Kit persists before it checks `ctx.Err()`, and `Session.AppendStep` writes
+under `context.WithoutCancel`, per the contract `v0.106.0` documents on
+`kit.StepAppender`.
 
-If the process dies between them, a replay rebuilds a conversation whose last
-assistant message has an unanswered `tool_use`. Providers reject that. The run
-would become permanently unresumable — the exact failure Kit's own docstring
-warns about, reintroduced at the journal layer.
+**Why the repair stays.** Three sources still produce the torn shape, and
+none of them is hypothetical:
 
-The in-process pairing guarantee does not survive a crash, so BONNIE repairs.
+1. Journals written before the upgrade — every run created by an older
+   BONNIE, on disk today.
+2. Journals whose implementation does not provide BONNIE's `StepJournal` —
+   `Session` falls back to per-record writes for them, with the old window.
+3. A short write of the single batch buffer, which can land a prefix of the
+   step on disk.
 
-**The mitigation.** `Restore` calls `repairTrailingOrphan`
-(`runtime/repair.go`). It walks the replayed messages; when a tool call has no
-matching result **and every later message is a tool result**, it drops that
-whole step and journals a `RecordRepair`. Dropping is correct: the step never
-finished, so re-running it is the intended semantics. A partially answered
-multi-call step is dropped whole, because keeping the answered calls would
-leave the same orphan.
+`Restore` therefore still calls `repairTrailingOrphan`
+(`runtime/repair.go`). It walks the replayed messages; when a tool call has
+no matching result **and every later message is a tool result**, it drops
+that whole step and journals a `RecordRepair`. Dropping is correct: the step
+never finished, so re-running it is the intended semantics. A partially
+answered multi-call step is dropped whole, because keeping the answered
+calls would leave the same orphan.
 
 A mismatch anywhere but the tail is not a torn write. It means the journal is
 damaged, and `Restore` returns `ErrCorruptConversation` rather than silently
@@ -233,10 +271,6 @@ rewriting history.
 The journal is append-only, so the orphan records stay on disk and every later
 `Restore` finds them again. The repair is therefore deterministic, and it is
 journalled only once.
-
-**Still worth filing upstream.** A batch-append hook on `SessionManager` would
-let an implementation write a step atomically and remove the need for the
-repair. See `docs/UPSTREAM.md` ask 1; it is the strongest of them.
 
 ### 4.3 RESOLVED — nothing has run against a live model
 
@@ -474,25 +508,25 @@ including it was close to zero.
 
 ## 6. Upstream asks for Kit
 
-File these as issues on `mark3labs/kit` **before** tagging `v0.1.0`, so the
-release documents its own assumptions.
+**All four answered by Kit `v0.106.0`** — PR `mark3labs/kit#135`, "durability
+seams for external SessionManager implementations", released before BONNIE
+filed anything. The asks were drafted in [`docs/UPSTREAM.md`](UPSTREAM.md),
+which now records what landed and where; nothing needs filing.
 
-The full text of each, with the evidence and the file:line citations, is in
-[`docs/UPSTREAM.md`](UPSTREAM.md). They are drafted and ready to paste; put the
-issue links next to the titles there and here when you file them.
-
-1. **Batch append on `SessionManager`** (§4.2) — without it, no external
-   session manager can be crash-safe across a tool-calling step. Highest
-   value. BONNIE's `runtime/repair.go` is the evidence.
-2. **`PrepareStepResult.Tools []Tool`** — the doc comment on `PrepareStepHook`
-   in `pkg/kit/hooks.go` already advertises "dynamic tool filtering per step",
-   but the result struct cannot express it. Needed later for eve-style
-   [dynamic capabilities](https://eve.dev/docs/guides/dynamic-capabilities).
-3. **Stability promise on `ToolOutput.Halt` + `FinalValue`** — currently reads
-   as a stop-early convenience. BONNIE's entire suspension protocol depends on
-   it being stable.
-4. **Stability policy for `kit.SessionManager`** — adding a method breaks every
-   external implementer. BONNIE's compile-time assertion is the tripwire.
+1. **Batch append on `SessionManager`** (§4.2) — landed as the optional
+   `kit.StepAppender` interface, routed through `appendMessages` at all three
+   persistence sites. BONNIE adopted it: `Session.AppendStep` plus the
+   `StepJournal` seam on BONNIE's own `Journal` interface. Highest value, and
+   the one the torn-write repair existed to mitigate.
+2. **`PrepareStepResult.Tools []Tool`** — landed, with nil-versus-empty
+   semantics documented (nil keeps the live tool set; empty offers none).
+   Not yet used by BONNIE; L2 discovery will want it.
+3. **Stability promise on `ToolOutput.Halt` + `FinalValue`** — landed in the
+   godoc. BONNIE's suspension protocol is now contract, not coincidence.
+4. **Stability policy for `kit.SessionManager`** — landed: the interface is
+   frozen for `v0.x`, new capability arrives through optional interfaces.
+   `StepAppender` is the precedent. The compile-time tripwire in
+   `runtime/session.go` stays as enforcement.
 
 ---
 

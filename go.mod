@@ -2,7 +2,7 @@ module github.com/mark3labs/bonnie
 
 go 1.27.0
 
-require github.com/mark3labs/kit v0.105.0
+require github.com/mark3labs/kit v0.106.0
 
 require (
 	charm.land/fantasy v0.43.1 // indirect

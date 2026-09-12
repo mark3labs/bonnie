@@ -16,6 +16,23 @@ yet, so everything under 0.1.0 is still unreleased until it is.
   `overlays.default`, and a `devShells.default` with Go 1.27, `golangci-lint`,
   `goreleaser`, and the microsandbox CLI
 - The `bonnie` Nix package wraps the binary so `msb` is on its PATH
+- Kit upgraded to `v0.106.0`, which answered all four upstream asks
+  (`mark3labs/kit#135`). `SessionManager` is frozen for `v0.x`; new capability
+  arrives through optional interfaces
+- `Session.AppendStep` implements `kit.StepAppender`: a tool-calling step
+  reaches the journal as one call. `FileJournal.AppendStep` commits it as one
+  buffered write and one fsync, so the torn-write window that orphaned tool
+  calls went from "any crash between two fsyncs" to "a torn single Write".
+  A cancelled context no longer drops a completed step — the write runs under
+  `context.WithoutCancel`, per the contract Kit documents on `StepAppender`
+- `runtime.StepJournal`: an optional interface on BONNIE's own `Journal` seam,
+  mirroring Kit's pattern so a host journal is not forced to implement the
+  batch method. `FileJournal` and `MemoryJournal` implement it; anything else
+  keeps the per-record fallback, covered by the torn-write repair, which
+  stays for pre-upgrade journals and short writes
+- `PrepareStepResult.Tools`, `ToolOutput.Halt`/`FinalValue` as contract, and
+  the `SessionManager` freeze are available from Kit but not yet used by
+  BONNIE (L2 will want per-step tools)
 - microsandbox: every network policy mode is now enforced. `SetNetworkPolicy`
   maps `deny-all` to `msb create --no-net` and an allow-list to
   `--net-rule allow@<host>`, verified with real egress. Previously every mode
