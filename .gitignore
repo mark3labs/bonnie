@@ -1,0 +1,28 @@
+# Compiled binaries
+/bonnie
+/output/
+/dist/
+
+# Go workspace — BONNIE and Kit are separate repos. Keep go.work out of both;
+# put it in the parent directory that holds them. CI runs with GOWORK=off so
+# it builds against the Kit version pinned in go.mod.
+go.work
+go.work.sum
+
+# Test and coverage output
+*.test
+*.out
+coverage.*
+
+# Local run journals and sandbox workspaces. The default journal root is
+# .bonnie, and it holds full conversation content in plain text.
+.bonnie/
+
+# Journal files written outside the default root by an ad-hoc run.
+*.jsonl
+
+# Editor and OS noise
+.DS_Store
+.idea/
+.vscode/
+*.swp

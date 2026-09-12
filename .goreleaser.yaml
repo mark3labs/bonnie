@@ -1,0 +1,53 @@
+version: 2
+
+project_name: bonnie
+
+builds:
+  - main: ./cmd/bonnie
+    binary: bonnie
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+
+archives:
+  # goreleaser v2.6 renamed `format` to `formats`. Use the new key so a
+  # current goreleaser does not warn on every release.
+  - formats: [tar.gz]
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^chore:"
+      - "^ci:"
+  groups:
+    - title: Features
+      regexp: "^feat"
+      order: 0
+    - title: Bug fixes
+      regexp: "^fix"
+      order: 1
+    - title: Documentation
+      regexp: "^docs"
+      order: 2
+    - title: Tests
+      regexp: "^test"
+      order: 3
+
+release:
+  draft: false
+  prerelease: false

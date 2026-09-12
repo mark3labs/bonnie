@@ -1,0 +1,42 @@
+version: "2"
+
+linters:
+  enable:
+    - depguard
+    - staticcheck
+    - unused
+    - modernize
+
+  settings:
+    depguard:
+      rules:
+        # BONNIE is a separate Go module so the compiler already rejects
+        # imports of github.com/mark3labs/kit/internal/... . This rule is the
+        # belt to that suspenders: it produces a readable error early, and it
+        # also blocks the transitive dependencies that Kit keeps out of the
+        # SDK graph (the TUI stack), which the compiler would happily allow.
+        public-kit-api-only:
+          list-mode: lax
+          deny:
+            - pkg: github.com/mark3labs/kit/internal
+              desc: >-
+                BONNIE depends on the public Kit SDK only. Use
+                github.com/mark3labs/kit/pkg/kit. If something you need is not
+                exported, raise it upstream rather than reaching in.
+            - pkg: charm.land/fantasy
+              desc: >-
+                BONNIE names Kit types through the aliases in
+                github.com/mark3labs/kit/pkg/kit, never through fantasy
+                directly. Kit owns the model layer; a direct fantasy import
+                pins BONNIE to Kit's transitive dependency and breaks the
+                moment Kit changes it.
+            - pkg: charm.land/bubbletea
+              desc: BONNIE is headless. Terminal rendering belongs in Kit's TUI.
+            - pkg: charm.land/bubbles
+              desc: BONNIE is headless. Terminal rendering belongs in Kit's TUI.
+            - pkg: charm.land/huh
+              desc: BONNIE is headless. Terminal rendering belongs in Kit's TUI.
+
+formatters:
+  enable:
+    - gofmt

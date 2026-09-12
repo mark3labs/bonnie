@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.27"
+          cache: true
+
+      # GOWORK=off is deliberate. Locally a go.work file points BONNIE at a
+      # checkout of Kit, which hides the case where BONNIE fails to build
+      # against the PUBLISHED Kit version. CI must always use the version in
+      # go.mod. This is the classic multi-repo trap.
+      - name: Build
+        env:
+          GOWORK: off
+        run: go build ./...
+
+      - name: Vet
+        env:
+          GOWORK: off
+        run: go vet ./...
+
+      - name: Test
+        env:
+          GOWORK: off
+        run: go test -race ./...
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.27"
+          cache: true
+      - uses: golangci/golangci-lint-action@v8
+        env:
+          GOWORK: off
+        with:
+          version: v2.1.0
+
+  boundary:
+    name: Public API boundary
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.27"
+          cache: true
+
+      # The compiler already blocks kit/internal because BONNIE's module path
+      # is not a prefix of Kit's. This job states the invariant explicitly so a
+      # future change that vendors Kit or merges the repos fails loudly here
+      # instead of silently eroding the boundary.
+      #
+      # NOTE: this must inspect DIRECT imports, not `go list -deps`. The
+      # transitive graph always contains kit/internal/... because pkg/kit
+      # itself imports those packages — that is Kit's business, not ours.
+      # The -e flag is required: without it `go list` aborts on the very
+      # package we want to report, and the job fails with an opaque error.
+      - name: Assert BONNIE touches only the public Kit SDK
+        env:
+          GOWORK: off
+        run: |
+          set -euo pipefail
+          go list -e -f '{{range .Imports}}{{.}}{{"\n"}}{{end}}{{range .TestImports}}{{.}}{{"\n"}}{{end}}{{range .XTestImports}}{{.}}{{"\n"}}{{end}}' ./... \
+            | sort -u > /tmp/direct.txt
+          if grep -q 'mark3labs/kit/internal' /tmp/direct.txt; then
+            echo "::error::BONNIE directly imports a Kit internal package."
+            grep 'mark3labs/kit/internal' /tmp/direct.txt
+            exit 1
+          fi
+          # Kit re-exports every model type BONNIE needs as an alias in
+          # pkg/kit. Naming charm.land/fantasy directly would pin BONNIE to
+          # Kit's own transitive dependency and break when Kit moves it.
+          if grep -q '^charm.land/fantasy' /tmp/direct.txt; then
+            echo "::error::BONNIE directly imports charm.land/fantasy. Use the kit.LLM* aliases."
+            grep '^charm.land/fantasy' /tmp/direct.txt
+            exit 1
+          fi
+          echo "Kit packages BONNIE imports directly:"
+          grep 'mark3labs/kit' /tmp/direct.txt || echo "  (none)"
