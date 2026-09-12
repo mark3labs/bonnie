@@ -48,7 +48,7 @@ called — so it does not repeat a side effect it has already performed.
 ## Contents
 
 - [Install](#install) · [Quickstart: no Go](#quickstart-no-go-required) · [Quickstart](#quickstart) · [Park and resume](#park-and-resume)
-- [Your own tools](#your-own-tools) · [Sandboxing](#sandboxing) · [Serve over HTTP](#serve-over-http)
+- [Your own tools](#your-own-tools) · [Sandboxing](#sandboxing) · [Serve over HTTP](#serve-over-http) · [Chat channels](#chat-channels)
 - [CLI](#cli) · [Storage](#storage) · [Streaming](#streaming) · [Steer and cancel](#steer-and-cancel)
 - [How it works](#how-it-works) · [Limits](#limits) · [Docs](#documentation)
 
@@ -392,6 +392,40 @@ curl -s localhost:8080/runs -d '{"address":"slack:C123/T456","text":"hi"}'
 The same address always resolves to the same run. `POST /runs/{id}` is the
 opposite: it targets one exact run and returns `404` rather than creating one.
 
+## Chat channels
+
+Slack, Discord, and Telegram put the same durable runs into a conversation.
+Enable one in the manifest, put its credentials in the environment, and
+serve:
+
+```yaml
+# agent.yaml
+channels:
+  slack: {}
+  discord: {}
+  telegram:
+    username: mybot
+```
+
+```bash
+export SLACK_BOT_TOKEN=xoxb-... SLACK_SIGNING_SECRET=...
+export DISCORD_BOT_TOKEN=... DISCORD_PUBLIC_KEY=...
+export TELEGRAM_BOT_TOKEN=... TELEGRAM_WEBHOOK_SECRET=...
+bonnie serve --agent .
+```
+
+Each channel mounts one webhook (`/slack/events`, `/discord/interactions`,
+`/telegram`), verifies its platform's signature — Slack's v0 HMAC, Discord's
+Ed25519, Telegram's shared secret — and answers within the platform's ACK
+deadline while the turn runs on. The reply posts back to the thread; a
+parked run posts its question, and the next message on the thread is the
+answer.
+
+The details are in [`docs/CHANNELS.md`](docs/CHANNELS.md): the per-platform
+setup, the dispatch and steering rules, and what is deliberately not
+implemented (streaming edits, button HITL, attachments, gateway
+transports).
+
 ## CLI
 
 ```
@@ -538,8 +572,11 @@ Stated plainly, because the failure modes are not obvious:
   create time; reattaching under a different policy fails with
   `ErrPolicyMismatch`.
 - **Sandbox egress is open** unless you set a policy.
-- **No auth verification.** The HTTP channel carries a `Principal`; it does not
-  check one. Authenticate in front of it.
+- **No auth verification on the HTTP channel.** It carries a `Principal`; it
+  does not check one. Authenticate in front of it. The chat channels are
+  different: each verifies its platform's signature, and a channel without
+  its credentials refuses to serve. That verifies the platform, not the
+  person — a user ID inside a verified Slack event is Slack's word.
 - **Run ownership is per host.** The file journal locks each run with
   `flock`, so a second writer to the same run is refused rather than allowed
   to corrupt it. That lock does not work on a network filesystem, and it does

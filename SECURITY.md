@@ -82,6 +82,19 @@ You must authenticate requests **before they reach the HTTP channel**. Examples:
 
 Failing to do so means any client can send requests on behalf of any principal.
 
+### Chat channels: platform signatures are verified, users are asserted
+
+The Slack, Discord, and Telegram channels verify every webhook request
+against the platform's scheme — Slack's v0 HMAC over the raw body with a
+five-minute replay window, Discord's Ed25519 over the timestamped body,
+Telegram's shared-secret header. A channel whose verification credentials
+are missing refuses to serve at startup; it will not run wide open.
+
+This verifies **the platform, not the person**. A user ID inside a verified
+Slack event is Slack's word about who typed. The `Principal` recorded on the
+run carries that assertion, and a tool that makes per-tenant decisions from
+it should treat it as such.
+
 ### Journal security
 
 The journal directory holds the full conversation content in plain text:

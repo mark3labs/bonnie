@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Chat channels: Slack, Discord, and Telegram adapters (`channel/slack`,
+  `channel/discord`, `channel/telegram`), zero new dependencies. Each
+  mounts one verified webhook — Slack's v0 HMAC with a replay window,
+  Discord's Ed25519, Telegram's shared secret — acknowledges inside the
+  platform's deadline, runs the turn in a goroutine the handler does not
+  outlive, and delivers the reply to the thread. A run that parks for human
+  input posts its question into the chat, and the next message there
+  resumes it. Each adapter joins the `channeltest` conformance suite.
+- `channel/chat`, the shared plumbing the adapters are built on: the
+  journalled address map (moved from `channel/http`), per-run turn locks,
+  the `SessionRef` implementation, the dispatch rule (a reply to a parked
+  run resumes it — a chat surface cannot say "this is a resume"), and the
+  goroutine delivery model.
+- The manifest's `channels:` keys (`channels.slack`, `channels.discord`,
+  `channels.telegram`) enable the chat adapters for `bonnie serve --agent`.
+  Configuration lives in the manifest; credentials live in the environment
+  (`SLACK_BOT_TOKEN`, `SLACK_SIGNING_SECRET`, `DISCORD_BOT_TOKEN`,
+  `DISCORD_PUBLIC_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`),
+  and a missing one is a startup error that names the variable. Secrets in
+  the manifest are refused by construction: the keys do not exist.
+- New invariant 15 in `docs/SPEC.md` §8: a chat channel verifies its caller
+  or refuses to serve. See `docs/CHANNELS.md` for the per-platform setup,
+  the dispatch and steering rules, and what is deliberately not
+  implemented.
+
+### Changed
+
 - L2 discovery, first increment (`T-017`): the agent tree is discovered
   from a manifest. `bonnie init` scaffolds a tree — `agent.yaml`,
   `instructions.md`, and the `skills/` and `workspace/` seed directories —

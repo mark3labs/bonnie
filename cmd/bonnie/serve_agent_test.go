@@ -7,9 +7,11 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -354,6 +356,121 @@ func TestServeAgentRoundTrip(t *testing.T) {
 	}
 }
 
+// A chat channel's manifest key enables it; the secrets come from the
+// environment. A missing secret is a startup error that names the variable,
+// because a webhook that does not verify its caller is a door with no lock.
+func TestChatChannelNeedsItsSecrets(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	manifest := "apiVersion: " + agent.APIVersion + "\nchannels:\n  telegram: {}\n"
+	if err := os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "instructions.md"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	o, flags := parseServe(t, "--agent", dir, "--journal", filepath.Join(t.TempDir(), "j"))
+	_, err := resolveServe(flags, o)
+	if err == nil || !strings.Contains(err.Error(), "TELEGRAM_BOT_TOKEN") {
+		t.Fatalf("err = %v, want the missing-variable refusal", err)
+	}
+}
+
+// The full path: the manifest enables Telegram, the secrets come from the
+// environment, serve mounts the webhook, a message arrives, the run
+// completes, and the reply lands on the (faked) Telegram API.
+//
+// Not parallel: t.Setenv forbids it, and the env vars are the wiring under
+// test.
+func TestServeMountsChatChannels(t *testing.T) {
+	dir := t.TempDir()
+	manifest := "apiVersion: " + agent.APIVersion + "\nchannels:\n  telegram: {}\nsandbox:\n  kind: none\n"
+	if err := os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "instructions.md"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// The fake Telegram API, and the env that points the channel at it.
+	var mu sync.Mutex
+	var sent []string
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Text string `json:"text"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		mu.Lock()
+		sent = append(sent, body.Text)
+		mu.Unlock()
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	t.Cleanup(fake.Close)
+	t.Setenv("TELEGRAM_BOT_TOKEN", "t0ken")
+	t.Setenv("TELEGRAM_WEBHOOK_SECRET", "s3cret")
+	t.Setenv("TELEGRAM_API_URL", fake.URL)
+
+	o, flags := parseServe(t, "--agent", dir, "--journal", filepath.Join(t.TempDir(), "j"),
+		"--model", "bonnie-probe/nonexistent")
+	cfg, err := resolveServe(flags, o)
+	if err != nil {
+		t.Fatalf("resolveServe: %v", err)
+	}
+	if !containsLine(cfg.banner, "channel telegram /telegram (agent.yaml)") {
+		t.Fatalf("the banner does not name the channel:\n%s", strings.Join(cfg.banner, "\n"))
+	}
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- serveHTTP(ctx, cfg, time.Second, ln) }()
+
+	base := "http://" + ln.Addr().String()
+	waitForHTTP(t, http.DefaultClient, base)
+
+	// Drive the webhook the way Telegram would.
+	upd, _ := json.Marshal(map[string]any{
+		"message": map[string]any{
+			"text": "hello over telegram",
+			"from": map[string]any{"id": 7, "username": "ada", "is_bot": false},
+			"chat": map[string]any{"id": 42, "type": "private"},
+		},
+	})
+	req, _ := http.NewRequest(http.MethodPost, base+"/telegram", strings.NewReader(string(upd)))
+	req.Header.Set("X-Telegram-Bot-Api-Secret-Token", "s3cret")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("webhook: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("webhook = %d", resp.StatusCode)
+	}
+
+	// The run fails at the model (no credential here); the failure is
+	// delivered to the chat, which is the point: silence helps nobody.
+	waitForCond(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(sent) > 0
+	})
+	mu.Lock()
+	last := sent[0]
+	mu.Unlock()
+	if !strings.Contains(last, "failed") {
+		t.Fatalf("delivered %q, want the failure notice", last)
+	}
+
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("serveHTTP: %v", err)
+	}
+}
+
 // onlyRunID finds the single operator-visible run in a journal directory.
 // The channel's own bookkeeping is a reserved run and never counts (SPEC §8,
 // invariant 8).
@@ -393,4 +510,17 @@ func waitForHTTP(t *testing.T, client *http.Client, base string) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatal("the server never came up")
+}
+
+// waitForCond polls until check is true, with a timeout.
+func waitForCond(t *testing.T, check func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if check() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("timed out waiting for the condition")
 }

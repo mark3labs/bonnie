@@ -18,16 +18,17 @@ run as the host process.
 ## 2. Where things stand
 
 ```
-master @ 0395c17  →  github.com/mark3labs/bonnie
-9 packages · 56 Go files (32 non-test) · 190 test functions · all green
+master @ 6906e8a (+ the chat channels)  →  github.com/mark3labs/bonnie
+13 packages · 62 Go files (35 non-test) · 214 test functions · all green
 ```
 
 | Package | State |
 |---|---|
 | `agent/` | NEW — L2 discovery, first increment (T-017): the strict manifest loader (`agent.yaml`/`.toml`/`.json`), `bonnie init` scaffolding, the `--tools` module scaffold. Codegen is T-018. |
 | `runtime/` | Complete. Journal, session, runner, torn-write repair, events. Verified against a live model. |
-| `channel/` | Interfaces, tested — `channeltest` conformance suite (T-015). |
+| `channel/` | Interfaces, tested — `channeltest` conformance suite (T-015). `channel/chat` holds the chat plumbing: the journalled address map, locks, dispatch. |
 | `channel/http/` | Complete. Six routes, NDJSON stream, journalled address map. |
+| `channel/slack/`, `channel/discord/`, `channel/telegram/` | Chat adapters (T-020): verified webhooks, threaded delivery, HITL-in-chat. Zero new dependencies. Setup in `docs/CHANNELS.md`; live-platform runs unverified (no credentials — see T-020's Watch for). |
 | `sandbox/` | `local`, `docker`, `microsandbox` verified on Linux/KVM; macOS box open (T-013). `sandbox.Seeded` wraps any provider and seeds a manifest workspace (T-017). |
 | `cmd/bonnie/` | `serve` (now also `serve --agent DIR --config PATH`), `init`, `runs list`, `runs show`, `sandbox prune`. |
 | `examples/` | `minimal`, `hitl-restart`. |

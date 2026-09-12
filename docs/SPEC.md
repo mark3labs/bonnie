@@ -645,6 +645,7 @@ edge cases. Consult them for **design questions**, not for implementation.
 | `channel.TurnPolicy` | `turnPolicy: "steer" \| "queue"` | [Custom Channels](https://eve.dev/docs/channels/custom) |
 | `channel/http` NDJSON stream | `GET /eve/v1/session/:id/stream` | [Sessions, Runs & Streaming](https://eve.dev/docs/concepts/sessions-runs-and-streaming) |
 | `channel.Principal` | `SessionAuthContext` | [Authentication](https://eve.dev/docs/channels/eve) |
+| `channel/chat` dispatch, steering, delivery | Chat SDK `send`, turn policies, default handlers | [Chat SDK](https://eve.dev/docs/channels/chat-sdk) |
 | `AppendExtensionData` | `defineState` | [State](https://eve.dev/docs/concepts/state) |
 | `bonnie init` / `dev` / `build` | `eve init`, `npm run dev`, deploy | [Getting Started](https://eve.dev/docs/getting-started) |
 | `agent.yaml` (or `.toml` / `.json`) | *no analogue* — eve's config is `agent/agent.ts` code (`defineAgent`) plus `package.json`; a declarative manifest is BONNIE's, because Go compiles and data-shaped config must resolve at run time without code | [Getting Started](https://eve.dev/docs/getting-started) |

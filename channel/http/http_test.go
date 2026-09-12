@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/mark3labs/bonnie/channel"
+	"github.com/mark3labs/bonnie/channel/chat"
 	"github.com/mark3labs/bonnie/runtime"
 	kit "github.com/mark3labs/kit/pkg/kit"
 )
@@ -592,13 +593,13 @@ func TestPrincipalIsCarried(t *testing.T) {
 		t.Fatalf("run = %+v", run)
 	}
 
-	recs, err := s.runner.Journal().Replay(context.Background(), addressRun)
+	recs, err := s.runner.Journal().Replay(context.Background(), chat.AddressRun)
 	if err != nil {
 		t.Fatalf("Replay: %v", err)
 	}
 	var found bool
 	for _, rec := range recs {
-		if rec.ExtType == principalExtType && strings.Contains(string(rec.Payload), `"u-1"`) {
+		if rec.ExtType == chat.PrincipalExtType && strings.Contains(string(rec.Payload), `"u-1"`) {
 			found = true
 		}
 	}

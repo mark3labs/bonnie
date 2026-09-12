@@ -119,10 +119,26 @@ type NetworkConfig struct {
 	Allow []string `yaml:"allow" toml:"allow" json:"allow"`
 }
 
-// ChannelsConfig binds inbound transports.
+// ChannelsConfig binds inbound transports. A nil value for a channel means
+// it is not served; the presence of a key enables it.
 type ChannelsConfig struct {
 	// HTTP configures the HTTP channel.
 	HTTP *HTTPConfig `yaml:"http" toml:"http" json:"http"`
+
+	// Slack enables the Slack channel. Its credentials come from the
+	// environment, never from the manifest: SLACK_BOT_TOKEN and
+	// SLACK_SIGNING_SECRET are required, and their absence is a startup
+	// error that names the variable.
+	Slack *SlackChannelConfig `yaml:"slack" toml:"slack" json:"slack"`
+
+	// Discord enables the Discord channel. Its credentials come from the
+	// environment: DISCORD_BOT_TOKEN and DISCORD_PUBLIC_KEY are required.
+	Discord *DiscordChannelConfig `yaml:"discord" toml:"discord" json:"discord"`
+
+	// Telegram enables the Telegram channel. Its credentials come from the
+	// environment: TELEGRAM_BOT_TOKEN and TELEGRAM_WEBHOOK_SECRET are
+	// required.
+	Telegram *TelegramChannelConfig `yaml:"telegram" toml:"telegram" json:"telegram"`
 }
 
 // HTTPConfig is the HTTP channel's binding.
@@ -130,6 +146,35 @@ type HTTPConfig struct {
 	// Addr is the listen address, for example ":8080". Empty means the
 	// host default.
 	Addr string `yaml:"addr" toml:"addr" json:"addr"`
+}
+
+// SlackChannelConfig is the Slack channel's binding.
+type SlackChannelConfig struct {
+	// Path is the webhook route. Empty means the adapter default.
+	Path string `yaml:"path" toml:"path" json:"path"`
+}
+
+// DiscordChannelConfig is the Discord channel's binding.
+type DiscordChannelConfig struct {
+	// Path is the webhook route. Empty means the adapter default.
+	Path string `yaml:"path" toml:"path" json:"path"`
+
+	// Command is the slash command the channel answers. Empty means the
+	// adapter default ("ask").
+	Command string `yaml:"command" toml:"command" json:"command"`
+}
+
+// TelegramChannelConfig is the Telegram channel's binding.
+type TelegramChannelConfig struct {
+	// Path is the webhook route. Empty means the adapter default.
+	Path string `yaml:"path" toml:"path" json:"path"`
+
+	// Command is the group command the channel answers. Empty means the
+	// adapter default ("ask").
+	Command string `yaml:"command" toml:"command" json:"command"`
+
+	// Username is the bot's username without the @, for group mentions.
+	Username string `yaml:"username" toml:"username" json:"username"`
 }
 
 // reservedKeys are named in the schema but refused when present, because

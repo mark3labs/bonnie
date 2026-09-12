@@ -16,7 +16,11 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/mark3labs/bonnie/agent"
+	"github.com/mark3labs/bonnie/channel"
+	"github.com/mark3labs/bonnie/channel/discord"
 	bonniehttp "github.com/mark3labs/bonnie/channel/http"
+	"github.com/mark3labs/bonnie/channel/slack"
+	"github.com/mark3labs/bonnie/channel/telegram"
 	"github.com/mark3labs/bonnie/runtime"
 	"github.com/mark3labs/bonnie/sandbox"
 	kit "github.com/mark3labs/kit/pkg/kit"
@@ -97,6 +101,10 @@ type serveConfig struct {
 	sandboxImage string
 	network      *sandbox.NetworkPolicy
 	title        string
+
+	telegram *telegram.Config
+	slack    *slack.Config
+	discord  *discord.Config
 
 	banner []string
 }
@@ -220,6 +228,49 @@ func resolveServe(flags *pflag.FlagSet, o serveOpts) (*serveConfig, error) {
 		return nil, fmt.Errorf("bonnie: a network policy needs a sandbox: pass --sandbox docker, or set sandbox.kind in the manifest")
 	}
 
+	// Chat channels: a manifest key enables one, and its credentials come
+	// from the environment — secrets never live in the manifest. A missing
+	// secret is a startup error that names the variable, because a channel
+	// that receives without verifying is a door with no lock.
+	if m := manifest; m != nil && m.Channels != nil {
+		if tg := m.Channels.Telegram; tg != nil {
+			cfg.telegram = &telegram.Config{
+				Token:    os.Getenv("TELEGRAM_BOT_TOKEN"),
+				Secret:   os.Getenv("TELEGRAM_WEBHOOK_SECRET"),
+				Username: tg.Username,
+				Command:  tg.Command,
+				APIURL:   os.Getenv("TELEGRAM_API_URL"),
+				Path:     tg.Path,
+			}
+			if err := requireEnv("telegram", "TELEGRAM_BOT_TOKEN", "TELEGRAM_WEBHOOK_SECRET"); err != nil {
+				return nil, err
+			}
+		}
+		if s := m.Channels.Slack; s != nil {
+			cfg.slack = &slack.Config{
+				BotToken:      os.Getenv("SLACK_BOT_TOKEN"),
+				SigningSecret: os.Getenv("SLACK_SIGNING_SECRET"),
+				APIURL:        os.Getenv("SLACK_API_URL"),
+				Path:          s.Path,
+			}
+			if err := requireEnv("slack", "SLACK_BOT_TOKEN", "SLACK_SIGNING_SECRET"); err != nil {
+				return nil, err
+			}
+		}
+		if d := m.Channels.Discord; d != nil {
+			cfg.discord = &discord.Config{
+				BotToken:  os.Getenv("DISCORD_BOT_TOKEN"),
+				PublicKey: os.Getenv("DISCORD_PUBLIC_KEY"),
+				Command:   d.Command,
+				APIURL:    os.Getenv("DISCORD_API_URL"),
+				Path:      d.Path,
+			}
+			if err := requireEnv("discord", "DISCORD_BOT_TOKEN", "DISCORD_PUBLIC_KEY"); err != nil {
+				return nil, err
+			}
+		}
+	}
+
 	// The banner: the setting and the source that won, one line each.
 	line := func(label, value string, src settingSource) {
 		cfg.banner = append(cfg.banner, fmt.Sprintf("bonnie: %s %s (%s)", label, value, src))
@@ -234,6 +285,15 @@ func resolveServe(flags *pflag.FlagSet, o serveOpts) (*serveConfig, error) {
 	}
 	line("sandbox", cfg.sandboxKind, sandboxSrc)
 	line("network", networkLabel(cfg.network), networkSrc)
+	if cfg.slack != nil {
+		line("channel slack", displayPath(cfg.slack.Path, slack.DefaultPath), manifestSrc)
+	}
+	if cfg.discord != nil {
+		line("channel discord", displayPath(cfg.discord.Path, discord.DefaultPath), manifestSrc)
+	}
+	if cfg.telegram != nil {
+		line("channel telegram", displayPath(cfg.telegram.Path, telegram.DefaultPath), manifestSrc)
+	}
 	if cfg.sandboxKind == "" || cfg.sandboxKind == "none" {
 		// The no-isolation warning, printed once at startup. The manifest
 		// must not make "no sandbox" quieter than the flag does.
@@ -293,10 +353,28 @@ func serveHTTP(ctx context.Context, cfg *serveConfig, shutdown time.Duration, ln
 	}
 
 	runner := runtime.NewRunner(journal, factory)
-	channel := bonniehttp.New(runner)
+
+	// One mux carries every enabled channel: the HTTP transport always,
+	// then the chat channels the manifest enabled.
+	mux := http.NewServeMux()
+	httpCh := bonniehttp.New(runner)
+	mount(mux, httpCh)
+	if cfg.telegram != nil {
+		mount(mux, telegram.New(runner, *cfg.telegram))
+	}
+	if cfg.slack != nil {
+		mount(mux, slack.New(runner, *cfg.slack))
+	}
+	if cfg.discord != nil {
+		d, err := discord.New(runner, *cfg.discord)
+		if err != nil {
+			return err
+		}
+		mount(mux, d)
+	}
 
 	srv := &http.Server{
-		Handler:           channel.Handler(),
+		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
 		// A turn can wait on a model for minutes, and a stream waits for as
 		// long as the client cares to listen, so neither gets a write
@@ -332,6 +410,40 @@ func serveHTTP(ctx context.Context, cfg *serveConfig, shutdown time.Duration, ln
 		return fmt.Errorf("shutdown: %w", err)
 	}
 	return <-errs
+}
+
+// requireEnv refuses to serve a channel whose verification credentials are
+// missing. The names are the fix: set the variables and start again.
+func requireEnv(channel string, names ...string) error {
+	for _, n := range names {
+		if os.Getenv(n) == "" {
+			return fmt.Errorf("bonnie: the %s channel needs %s in the environment; a webhook that does not verify its caller is a door with no lock", channel, n)
+		}
+	}
+	return nil
+}
+
+// displayPath is a channel's webhook path for the banner.
+func displayPath(p, def string) string {
+	if p == "" {
+		return def
+	}
+	return p
+}
+
+// mount puts a channel's routes on the serve mux, with the channel itself
+// as the inbound side. Every BONNIE adapter is both: the webhook is its
+// route, and the address map is its inbound surface.
+func mount(mux *http.ServeMux, ch interface {
+	channel.Channel
+	channel.Inbound
+}) {
+	for _, rt := range ch.Routes() {
+		handler := rt.Handler
+		mux.HandleFunc(rt.Method+" "+rt.Path, func(w http.ResponseWriter, r *http.Request) {
+			handler(w, r, ch)
+		})
+	}
 }
 
 // agentFactory builds the agent factory the server runs, with or without a

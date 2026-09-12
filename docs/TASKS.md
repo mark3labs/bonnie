@@ -27,6 +27,7 @@ the known risks, and the invariants every task must preserve.
 
 | ID | Delivered | Where |
 |---|---|---|
+| T-020 | Chat channels: Slack, Discord, Telegram adapters with verified webhooks, dispatch (a reply to a parked run resumes it), threaded delivery; `channel/chat` shared plumbing; the manifest's `channels:` keys with env-only credentials | `channel/slack/`, `channel/discord/`, `channel/telegram/`, `channel/chat/`, `cmd/bonnie/serve.go`, `docs/CHANNELS.md` |
 | T-017 | L2 core: the strict manifest loader (`agent/`), `bonnie init` (zero-Go default, `--tools` module), `serve --agent` with flag-over-manifest precedence and source-annotated banner, the go-tree refusal, workspace seeding | `agent/manifest.go`, `agent/scaffold.go`, `cmd/bonnie/init.go`, `cmd/bonnie/serve.go`, `sandbox/seed.go` |
 | T-012 | The sandbox lifecycle is journalled: `RecordSandbox`, a resume note when a workspace is gone, `runs show` timeline, `bonnie sandbox prune` | `runtime/journal.go`, `runtime/session.go`, `sandbox/lifecycle.go`, `cmd/bonnie/sandbox.go` |
 | T-014 | Cross-process run ownership: `flock` per run, `ErrRunOwnedElsewhere` on a second writer, reads unlocked, per-host limit stated | `runtime/filejournal.go`, `filejournal_test.go` |
@@ -392,6 +393,80 @@ future adapter fails only in that adapter.
       unknown policy, suspension and respond, and cancellation
 - [x] An unknown `TurnPolicy` is refused (`channel.ErrUnknownTurnPolicy`),
       never guessed — it used to fall through and silently queue
+
+---
+
+## T-020 — Chat channels: Slack, Discord, Telegram
+
+**RESOLVED.** eve's chat-channel devex, on BONNIE's contract: dispatch,
+steering, delivery, and HITL-in-chat, with verification front and centre.
+The full page is [`docs/CHANNELS.md`](CHANNELS.md); the reasoning below is
+the record.
+
+**Priority** P1 · **Size** L · **Spec** [`docs/CHANNELS.md`](CHANNELS.md)
+
+### Why
+
+A durable run is only reachable by the person who made the HTTP call. The
+team already lives in a chat; the run should live there too. eve's chat
+channels are the devex reference: dispatch rules decide which platform
+events reach the agent, steering handles the message that arrives mid-turn,
+and a parked run's question lands in the thread with the next reply
+answering it.
+
+### Decisions, and why
+
+- **Zero new dependencies.** The SANDBOX.md precedent ("why the CLI and
+  not the SDKs"), applied to transports: the platforms' webhooks are plain
+  HTTPS + JSON, and every verification scheme is stdlib — Slack's v0
+  HMAC-SHA256, Discord's Ed25519, Telegram's secret-token header. No SDK,
+  no websocket dependency, no bigger binary.
+- **Shared plumbing in `channel/chat`.** The journalled address map,
+  per-run locks, the `SessionRef` implementation, and dispatch moved out of
+  `channel/http` — four adapters must not keep four copies of the thing
+  that makes a conversation durable. `channel/http` now uses it too, and
+  its tests are the refactor's safety net.
+- **Dispatch: a reply to a parked run resumes it.** A chat surface cannot
+  say "this is a resume". `Start` on a waiting run would open a fresh turn
+  and strand the suspension, so `chat.Route` checks the run's state and
+  routes to `Resume`. The check and the entry run under the turn lock.
+- **Verification is mandatory at the wiring.** A manifest chat key without
+  its credentials in the environment is a startup error naming the
+  variable — a webhook that does not verify its caller is a door with no
+  lock. New invariant 15.
+- **Deliveries are one message per turn.** eve edits the message as tokens
+  arrive; BONNIE's chat channels post at boundaries. The NDJSON stream is
+  the live-output surface.
+
+### Acceptance criteria
+
+- [x] Each adapter joins `channeltest.RunConformance` — the Inbound
+      contract (addressing, policies, suspension, cancellation) is proven
+      without any platform (three tests named `TestConformance`)
+- [x] Each webhook verifies its scheme and refuses tampered bodies, stale
+      timestamps, and missing secrets
+- [x] Slack redelivers are dropped by `event_id`; a retried event cannot
+      send the same message twice
+- [x] A group message that is not for the bot creates no run (Telegram
+      mention/command, Slack thread-binding, Discord slash-command-only)
+- [x] A parked run's question is delivered into the chat; the next message
+      there resumes it (`TestReplyToAParkedRunResumesIt`,
+      `TestAskAnswersAParkedRun`)
+- [x] `serve --agent` mounts enabled channels from the manifest, banner
+      names them, and a missing credential is a named error
+      (`TestServeMountsChatChannels`, `TestChatChannelNeedsItsSecrets`)
+- [x] No new `go.sum` entries (verified: `git diff go.sum` is empty)
+
+### Watch for
+
+The adapters' live behaviour against the real platforms is verified only by
+reading their API docs and testing against recorded shapes — there are no
+credentials on the development machine, and the integration-tagged live
+suites do not cover chat. A first real deployment should watch three
+things: Slack's event subscription configuration (which events arrive at
+all), Discord's command registration, and Telegram's `setWebhook` secret.
+The fakes pin the wire shapes the adapters assume; if a platform changes
+them, the tests fail instead of the conversation.
 
 ---
 

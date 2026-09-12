@@ -28,29 +28,22 @@ package http
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"strconv"
-	"sync"
 
 	"github.com/mark3labs/bonnie/channel"
+	"github.com/mark3labs/bonnie/channel/chat"
 	"github.com/mark3labs/bonnie/runtime"
 )
 
 // Channel is the HTTP transport. It implements [channel.Channel] and
 // [channel.Inbound].
 type Channel struct {
-	runner *runtime.Runner
+	core   *chat.Core
 	policy channel.TurnPolicy
-	newID  func() string
-	reg    *registry
-
-	mu    sync.Mutex
-	locks map[string]*sync.Mutex
+	idGen  []chat.CoreOption
 }
 
 var (
@@ -70,21 +63,16 @@ func WithTurnPolicy(p channel.TurnPolicy) Option {
 // WithIDGenerator replaces the run-ID generator. Tests use it to get stable
 // IDs; production rarely needs it.
 func WithIDGenerator(fn func() string) Option {
-	return func(c *Channel) { c.newID = fn }
+	return func(c *Channel) { c.idGen = append(c.idGen, chat.WithIDGenerator(fn)) }
 }
 
 // New returns an HTTP channel over a runner.
 func New(r *runtime.Runner, opts ...Option) *Channel {
-	c := &Channel{
-		runner: r,
-		policy: channel.PolicySteer,
-		newID:  newRunID,
-		reg:    newRegistry(r.Journal()),
-		locks:  make(map[string]*sync.Mutex),
-	}
+	c := &Channel{policy: channel.PolicySteer}
 	for _, opt := range opts {
 		opt(c)
 	}
+	c.core = chat.NewCore(r, c.policy, c.idGen...)
 	return c
 }
 
@@ -120,13 +108,13 @@ func (c *Channel) Handler() http.Handler {
 // From implements [channel.Inbound]. The returned reference resolves the
 // address every time it is used, so a re-keyed address follows its new run.
 func (c *Channel) From(address string) channel.SessionRef {
-	return &ref{c: c, address: address, create: true}
+	return c.core.From(address)
 }
 
 // Attach implements [channel.Inbound]. The returned reference targets exactly
 // one run and never creates one.
 func (c *Channel) Attach(runID string) channel.SessionRef {
-	return &ref{c: c, runID: runID}
+	return c.core.Attach(runID)
 }
 
 // Rebind points an address at a different run, and creates the binding when
@@ -137,104 +125,7 @@ func (c *Channel) Attach(runID string) channel.SessionRef {
 // touched: it keeps its history and can still be reached with
 // [Channel.Attach].
 func (c *Channel) Rebind(ctx context.Context, address, runID string) error {
-	return c.reg.bind(ctx, address, runID)
-}
-
-// lock serialises turns for one run. A queued message waits here instead of
-// racing an active turn.
-func (c *Channel) lock(runID string) func() {
-	c.mu.Lock()
-	mu, ok := c.locks[runID]
-	if !ok {
-		mu = &sync.Mutex{}
-		c.locks[runID] = mu
-	}
-	c.mu.Unlock()
-
-	mu.Lock()
-	return mu.Unlock
-}
-
-// ref is a [channel.SessionRef] over one address or one run ID.
-type ref struct {
-	c       *Channel
-	address string
-	runID   string
-	create  bool
-}
-
-var _ channel.SessionRef = (*ref)(nil)
-
-// RunID implements [channel.SessionRef].
-func (s *ref) RunID(ctx context.Context) (string, error) {
-	if !s.create {
-		// Attach: the run must already exist.
-		if _, err := s.c.runner.Journal().State(ctx, s.runID); err != nil {
-			return "", err
-		}
-		return s.runID, nil
-	}
-	return s.c.reg.resolve(ctx, s.address, s.c.newID)
-}
-
-// Send implements [channel.SessionRef].
-func (s *ref) Send(ctx context.Context, text string, opts channel.SendOptions) (*runtime.Run, error) {
-	runID, err := s.RunID(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if opts.Auth != nil {
-		if err := s.c.reg.notePrincipal(ctx, runID, opts.Auth); err != nil {
-			return nil, err
-		}
-	}
-
-	policy := opts.TurnPolicy
-	if policy == "" {
-		policy = s.c.policy
-	}
-	// Refuse, never guess. An unknown policy that silently queued would
-	// make one misspelling mean "wait" on one transport and "interrupt" on
-	// another.
-	switch policy {
-	case channel.PolicySteer, channel.PolicyQueue:
-	default:
-		return nil, fmt.Errorf("%w: %q", channel.ErrUnknownTurnPolicy, policy)
-	}
-
-	// A message that lands mid-turn is steered into the turn that is already
-	// running, which keeps the work the turn has done. Queue waits instead.
-	if policy == channel.PolicySteer && s.c.runner.IsActive(runID) {
-		if err := s.c.runner.Steer(runID, text); err == nil {
-			return s.c.runner.Snapshot(ctx, runID)
-		}
-		// The turn ended between the check and the steer: fall through and
-		// run it as a new turn.
-	}
-
-	unlock := s.c.lock(runID)
-	defer unlock()
-	return s.c.runner.Start(ctx, runID, runtime.Input{Text: text})
-}
-
-// Respond implements [channel.SessionRef].
-func (s *ref) Respond(ctx context.Context, responses []runtime.InputResponse) (*runtime.Run, error) {
-	runID, err := s.RunID(ctx)
-	if err != nil {
-		return nil, err
-	}
-	unlock := s.c.lock(runID)
-	defer unlock()
-	return s.c.runner.Resume(ctx, runID, responses)
-}
-
-// Cancel implements [channel.SessionRef].
-func (s *ref) Cancel(ctx context.Context) error {
-	runID, err := s.RunID(ctx)
-	if err != nil {
-		return err
-	}
-	return s.c.runner.Cancel(runID)
+	return c.core.Addresses().Bind(ctx, address, runID)
 }
 
 // ---------------------------------------------------------------------------
@@ -320,7 +211,7 @@ func (c *Channel) handleStart(w http.ResponseWriter, r *http.Request, in channel
 	if req.Address != "" {
 		sess = in.From(req.Address)
 	} else {
-		sess = in.From(c.newID())
+		sess = in.From(c.core.NewID())
 	}
 
 	run, err := sess.Send(r.Context(), req.Text, channel.SendOptions{
@@ -340,7 +231,7 @@ func (c *Channel) handleGet(w http.ResponseWriter, r *http.Request, in channel.I
 	if !ok {
 		return
 	}
-	run, err := c.runner.Snapshot(r.Context(), runID)
+	run, err := c.core.Runner().Snapshot(r.Context(), runID)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -412,7 +303,7 @@ func (c *Channel) handleStream(w http.ResponseWriter, r *http.Request, in channe
 		cursor = n
 	}
 
-	events, unsubscribe := c.runner.StreamEvents(runID, cursor)
+	events, unsubscribe := c.core.Runner().StreamEvents(runID, cursor)
 	defer unsubscribe()
 
 	w.Header().Set("Content-Type", "application/x-ndjson")
@@ -491,16 +382,4 @@ func writeError(w http.ResponseWriter, err error) {
 	default:
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
 	}
-}
-
-// newRunID returns a run ID that is safe as a file name, which is what the
-// file journal needs.
-func newRunID() string {
-	var b [8]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		// crypto/rand does not fail on any supported platform; if it ever
-		// does, a duplicate run ID would silently merge two conversations.
-		panic(fmt.Sprintf("bonnie: read random: %v", err))
-	}
-	return "run-" + hex.EncodeToString(b[:])
 }
