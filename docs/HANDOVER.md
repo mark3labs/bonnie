@@ -1,7 +1,7 @@
 # Handover
 
 **For:** the next agent or developer to work on BONNIE
-**State:** `v0.1.0` scope complete, pushed to `master`, not tagged
+**State:** `v0.1.0` tagged and released, 2026-09-12
 **Read first:** this file, then `docs/SPEC.md`, then `AGENTS.md`
 
 ---

@@ -146,12 +146,15 @@ was deliberately left undone.
 
 - [x] `.goreleaser.yaml` and `.github/workflows/release.yml` exist and parse
 - [x] `go.work` is not committed
-- [ ] `goreleaser build --snapshot --clean` produces working binaries
-- [ ] All CI jobs green on `master`, including `boundary`
+- [x] `goreleaser check` passes; `goreleaser build --snapshot --clean`
+      builds working binaries on all four targets, and the binary prints the
+      injected version
+- [x] All CI jobs green on `master`, including `boundary`
       (green; the old golangci-lint pin was the only failure)
-- [ ] Release notes state both the claims and the limits
-- [ ] Tag pushed and artifacts published
-- [ ] A downloaded binary prints the injected version
+- [x] Release notes state both the claims and the limits
+      (in the tag annotation and the GitHub release)
+- [x] Tag pushed and artifacts published
+- [x] A downloaded binary prints the injected version
 
 ### Watch for
 
