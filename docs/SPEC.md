@@ -30,7 +30,8 @@ an eve clone: see §7 for what is deliberately different.
 ### Layers
 
 ```
-L4  CLI, evals, traces                 CLI implemented; evals planned
+L4  CLI, evals, traces                 CLI implemented, incl. the built-in TUI
+                                       (bonnie dev / bonnie chat); evals planned
 L3  channel/    inbound transports     channel/http implemented
 L2  discovery   agent/ tree + codegen  manifest + init + serve --agent
                                        implemented (T-017); codegen: T-018
@@ -70,6 +71,14 @@ verified to fire:
 | Go compiler | BONNIE's module path is not a prefix of Kit's, so the `internal` rule applies | `use of internal package ... not allowed` |
 | `depguard` | `.golangci.yml` denies `kit/internal` and `charm.land/fantasy` | configured |
 | CI | `.github/workflows/ci.yml` job `boundary` | catches a planted violation |
+
+The `charm.land/fantasy` denial is about **model types**, not the terminal
+stack. The CLI's built-in TUI (`cmd/bonnie/tui`) imports
+`charm.land/bubbletea/v2`, `charm.land/bubbles/v2`, and `charm.land/lipgloss/v2`
+directly — the charm v2 TUI libraries — which is allowed because a terminal
+surface that renders Kit's model types to the screen is a separate concern
+from naming the model types. It still never names fantasy or Kit internals;
+see §8 invariant 1.
 
 The CI job inspects **direct** imports, not `go list -deps`. The transitive
 graph always contains 18 `kit/internal/*` packages because `pkg/kit` imports

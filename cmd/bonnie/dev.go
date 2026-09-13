@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -16,12 +17,17 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/mark3labs/bonnie/agent"
+	"github.com/mark3labs/bonnie/cmd/bonnie/tui"
 )
 
 // devOpts carries the parsed flags of `bonnie dev`.
 type devOpts struct {
 	dryRun   bool
 	shutdown time.Duration
+	tui      bool
+	// addr is the explicit address to bind. Empty starts at :8080 and
+	// walks 8081, 8082, … until one is free.
+	addr string
 }
 
 // newDevCmd mounts `bonnie dev`.
@@ -29,18 +35,20 @@ func newDevCmd() *cobra.Command {
 	var o devOpts
 	cmd := &cobra.Command{
 		Use:   "dev [dir]",
-		Short: "Run an agent tree with hot reload",
-		Long: `Run the agent tree at dir locally with hot reload: watch the tree,
-regenerate the tool wiring, rebuild, and gracefully restart the serving child.
+		Short: "Run an agent tree with hot reload and the built-in TUI",
+		Long: `Run the agent tree at dir locally with hot reload and the built-in TUI: watch the
+tree, regenerate the tool wiring, rebuild, and gracefully restart the serving child —
+while you interact with the agent in a terminal.
 
-The loop watches the manifest, instructions, skills/, workspace/, tools/**, and
-go.mod and go.sum. A change rebuilds the wrapper and restarts the child with
-SIGTERM, waiting out its drain (--shutdown-timeout) before the next starts. A
-parked run keeps no compute and lives in the journal; a restarted child resumes
-it, and a stream client reconnects with ?cursor=.
+The loop watches the manifest, instructions, skills/, workspace/, tools/**, and go.mod
+and go.sum. A change rebuilds the wrapper and restarts the child with SIGTERM, waiting
+out its drain (--shutdown-timeout) before the next starts. A parked run keeps no
+compute and lives in the journal; a restarted child resumes it, and the TUI reconnects
+to the stream (the journal is the durable record).
 
-The cost is seconds per save on a small module — the honest price of Go — and
-it buys a real artifact: the same binary bonnie build ships.
+The TUI connects to the same HTTP channel the child serves, so the transcript you see
+is what any client sees. --no-tui runs the serve loop alone for CI and non-interactive
+hosts.
 
 --dry-run prints the discovery plan without watching or building.`,
 		Args: cobra.MaximumNArgs(1),
@@ -54,6 +62,8 @@ it buys a real artifact: the same binary bonnie build ships.
 	}
 	f := cmd.Flags()
 	f.BoolVar(&o.dryRun, "dry-run", false, "print the discovery plan without watching or building")
+	f.BoolVar(&o.tui, "tui", true, "open the built-in terminal interface against the child")
+	f.StringVar(&o.addr, "addr", "", "address to bind (empty = :8080, then :8081, …)")
 	f.DurationVar(&o.shutdown, "shutdown-timeout", 30*time.Second, "how long to wait for in-flight turns on restart")
 	return cmd
 }
@@ -67,12 +77,29 @@ type devServer struct {
 	bin      string
 	shutdown time.Duration
 
-	// log carries the child's output. It is os.Stderr for a real dev run; a
-	// test sets a buffer to read the child's listen address. env overrides
-	// the environment child builds inherit, so a hermetic test can point a
-	// temp go.work at the tree.
+	// addr is the loopback address the child is told to bind. Empty means
+	// walk 8080, 8081, 8082, … until one is free. An explicit --addr is
+	// bound verbatim.
+	addr string
+
+	// served is the address the child bound. It is set once at first start
+	// and reused on every restart, so the TUI stays connected.
+	served string
+
+	// log carries the child's output. It is os.Stderr for a real dev run.
+	// env overrides the environment child builds inherit, so a hermetic test
+	// can point a temporary go.work at the tree.
 	log io.Writer
 	env []string
+
+	// beforeStop closes parent-owned connections to the child before a hot
+	// reload. It is nil when dev runs without the TUI.
+	beforeStop func()
+
+	// ready closes after the first child process starts. The caller then
+	// waits until that child accepts connections before it opens the TUI.
+	ready     chan struct{}
+	readyOnce sync.Once
 
 	mu    sync.Mutex
 	child *exec.Cmd
@@ -83,12 +110,58 @@ func newDevServer(root string, o devOpts) *devServer {
 		root:     root,
 		bin:      filepath.Join(root, ".bonnie", "dev-agent"),
 		shutdown: o.shutdown,
+		addr:     o.addr,
 		log:      os.Stderr,
+		ready:    make(chan struct{}),
 	}
 }
 
-// run builds the child and serves it, restarting on tree changes, until ctx
-// ends. A dry run is handled by the caller before this.
+// pickListenAddr returns the first free loopback address. An explicit --addr
+// is used as-is. Otherwise it tries :8080, then :8081, then :8082, and so on.
+func pickListenAddr(explicit string) (string, error) {
+	if explicit != "" {
+		return explicit, nil
+	}
+	for port := 8080; port < 8080+100; port++ {
+		addr := fmt.Sprintf("127.0.0.1:%d", port)
+		ln, err := net.Listen("tcp", addr)
+		if err != nil {
+			continue
+		}
+		_ = ln.Close()
+		return addr, nil
+	}
+	return "", fmt.Errorf("bonnie: dev: no free port in 8080–8179")
+}
+
+// waitForListen dials addr until the child answers, or the context ends.
+func waitForListen(ctx context.Context, addr string) error {
+	d := net.Dialer{Timeout: 200 * time.Millisecond}
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		c, err := d.DialContext(ctx, "tcp", addr)
+		if err == nil {
+			_ = c.Close()
+			return nil
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return fmt.Errorf("bonnie: dev: child never listened on %s", addr)
+}
+
+// servedURL returns the address selected for the child and the TUI.
+func (d *devServer) servedURL() string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.served != "" {
+		return d.served
+	}
+	return d.addr
+}
+
 func (d *devServer) run(ctx context.Context) error {
 	if err := d.restart(); err != nil {
 		return err
@@ -162,8 +235,12 @@ func (d *devServer) restart() error {
 
 	d.mu.Lock()
 	old := d.child
+	beforeStop := d.beforeStop
 	d.mu.Unlock()
 	if old != nil {
+		if beforeStop != nil {
+			beforeStop()
+		}
 		if err := stopGracefully(old, d.shutdown); err != nil {
 			fmt.Fprintf(os.Stderr, "bonnie: dev: stopping previous child: %v\n", err)
 		}
@@ -191,17 +268,34 @@ func (d *devServer) build() error {
 // start forks the child serving the tree. It returns after the child is
 // started; the dev loop does not wait for it to exit.
 func (d *devServer) start() error {
-	cmd := exec.Command(d.bin)
+	// Reuse the address the first child bound so a hot reload keeps the TUI
+	// connected. The first start walks 8080, 8081, … until one is free.
+	d.mu.Lock()
+	addr := d.served
+	d.mu.Unlock()
+	if addr == "" {
+		var err error
+		addr, err = pickListenAddr(d.addr)
+		if err != nil {
+			return err
+		}
+		d.mu.Lock()
+		d.served = addr
+		d.mu.Unlock()
+	}
+
+	cmd := exec.Command(d.bin, "-addr", addr)
 	cmd.Dir = d.root
 	cmd.Stdout = d.log
 	cmd.Stderr = d.log
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("bonnie: dev: start child: %w", err)
 	}
+	fmt.Fprintf(os.Stderr, "bonnie: dev: started child (pid %d) on %s\n", cmd.Process.Pid, addr)
 	d.mu.Lock()
 	d.child = cmd
 	d.mu.Unlock()
-	fmt.Fprintf(os.Stderr, "bonnie: dev: started child (pid %d)\n", cmd.Process.Pid)
+	d.readyOnce.Do(func() { close(d.ready) })
 	return nil
 }
 
@@ -280,5 +374,42 @@ func runDev(root string, o devOpts) error {
 	d := newDevServer(root, o)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	return d.run(ctx)
+
+	// The serve loop owns the child and the journal; it runs in the
+	// background. The TUI, when enabled, is the foreground: it talks to the
+	// child over HTTP, so a hot reload of the child does not kill the
+	// conversation — the journal is what survives.
+	loopErr := make(chan error, 1)
+	go func() { loopErr <- d.run(ctx) }()
+
+	if o.tui {
+		// Wait for the child to bind, then take over the foreground until
+		// the user leaves the TUI.
+		select {
+		case <-d.ready:
+		case <-ctx.Done():
+			return <-loopErr
+		}
+		url := chatURL(d.servedURL())
+		if err := waitForListen(ctx, d.servedURL()); err != nil {
+			return err
+		}
+		client := tui.NewHTTP(url, nil)
+		d.mu.Lock()
+		d.beforeStop = client.CloseStreams
+		d.mu.Unlock()
+		if err := runTUIClient(ctx, client, tuiAddress(d.root)); err != nil {
+			return err
+		}
+		// The TUI ended; stop the serve loop.
+		stop()
+		return <-loopErr
+	}
+
+	select {
+	case err := <-loopErr:
+		return err
+	case <-ctx.Done():
+		return nil
+	}
 }

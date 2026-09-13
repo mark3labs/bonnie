@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -374,7 +375,7 @@ func serveHTTP(ctx context.Context, cfg *serveConfig, shutdown time.Duration, ln
 	}
 
 	srv := &http.Server{
-		Handler:           mux,
+		Handler:           closeStreamsOnShutdown(ctx, mux),
 		ReadHeaderTimeout: 10 * time.Second,
 		// A turn can wait on a model for minutes, and a stream waits for as
 		// long as the client cares to listen, so neither gets a write
@@ -410,6 +411,23 @@ func serveHTTP(ctx context.Context, cfg *serveConfig, shutdown time.Duration, ln
 		return fmt.Errorf("shutdown: %w", err)
 	}
 	return <-errs
+}
+
+// closeStreamsOnShutdown closes long-lived event streams when server shutdown
+// starts. Other requests keep their original context and can finish a
+// checkpoint during the shutdown timeout.
+func closeStreamsOnShutdown(ctx context.Context, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || !strings.HasSuffix(r.URL.Path, "/stream") {
+			next.ServeHTTP(w, r)
+			return
+		}
+		streamCtx, cancel := context.WithCancel(r.Context())
+		stop := context.AfterFunc(ctx, cancel)
+		defer stop()
+		defer cancel()
+		next.ServeHTTP(w, r.WithContext(streamCtx))
+	})
 }
 
 // requireEnv refuses to serve a channel whose verification credentials are

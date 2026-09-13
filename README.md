@@ -123,6 +123,9 @@ already wrote is never overwritten).
 ```bash
 # talk to it over HTTP
 curl -s localhost:8080/runs -d '{"text":"What are you?"}'
+
+# or talk to it in the terminal — one durable conversation, live streamed
+bonnie chat --addr :8080
 ```
 
 Every serve setting comes from the manifest or a flag, and the startup
@@ -431,6 +434,8 @@ transports).
 ```
 bonnie init     Scaffold an agent tree (manifest, instructions, seeds)
 bonnie serve    Mount the HTTP channel and serve durable runs
+bonnie dev      Run an agent tree with hot reload and the built-in TUI
+bonnie chat     Talk to a running agent in a terminal
 bonnie runs     List and inspect durable runs
 bonnie sandbox  Reclaim the sandboxes of terminal runs (prune)
 bonnie version  Print the version
@@ -441,6 +446,9 @@ bonnie init my-agent --model anthropic/claude-sonnet-4-5
 bonnie init .                      adopt this directory; never overwrites
 bonnie init my-agent --format toml # or json; yaml is the default
 bonnie init my-agent --tools       add a Go module with a sample tool
+
+bonnie dev my-agent                hot reload + the terminal interface
+bonnie chat --addr :8080           talk to any running channel in a terminal
 
 bonnie serve --agent my-agent      serve a discovered tree, no build
 bonnie serve --agent . --config agent.toml

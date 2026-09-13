@@ -31,6 +31,7 @@ the known risks, and the invariants every task must preserve.
 
 | ID | Delivered | Where |
 |---|---|---|
+| T-021 | Built-in terminal TUI: `bonnie dev` opens a scrollback chat; `bonnie chat` connects to an HTTP channel; cursor reconnect and cancel | `cmd/bonnie/tui/`, `cmd/bonnie/chat.go`, `cmd/bonnie/dev.go` |
 | T-018 | L2 codegen: tool discovery (`agent/gen`), `bonnie dev` (fsnotify loop), `bonnie build` (go:embed + static binary), `--dry-run`; import allowlist; duplicate-name refusal; idempotent codegen | `agent/generate.go`, `agent/generate_test.go`, `cmd/bonnie/build.go`, `cmd/bonnie/dev.go`, `cmd/bonnie/l2_test.go` |
 | T-020 | Chat channels: Slack, Discord, Telegram adapters with verified webhooks, dispatch (a reply to a parked run resumes it), threaded delivery; `channel/chat` shared plumbing; the manifest's `channels:` keys with env-only credentials | `channel/slack/`, `channel/discord/`, `channel/telegram/`, `channel/chat/`, `cmd/bonnie/serve.go`, `docs/CHANNELS.md` |
 | T-017 | L2 core: the strict manifest loader (`agent/`), `bonnie init` (always a Go module; `--tools` adds a sample tool — the zero-Go fork was replaced in `v0.2.0`), `serve --agent` with flag-over-manifest precedence and source-annotated banner, the go-tree refusal, workspace seeding | `agent/manifest.go`, `agent/scaffold.go`, `cmd/bonnie/init.go`, `cmd/bonnie/serve.go`, `sandbox/seed.go` |
@@ -669,6 +670,79 @@ single static binary at the end.
   emits L0/L1 calls. It lives in `agent/`, not `runtime/`.
 
 ---
+
+## T-021 — Built-in terminal TUI
+
+**RESOLVED.** `bonnie dev` now opens a minimal scrollback TUI, and
+`bonnie chat` connects the same TUI to any running HTTP channel. Typing,
+completed turns, and a hot-reload reconnect were verified live in tmux.
+
+**Priority** P2 · **Size** M · **Reference**
+[eve Dev TUI](https://eve.dev/docs/guides/dev-tui)
+
+### Why
+
+eve's `eve dev` opens a terminal UI beside the dev server: you type a prompt,
+watch tool calls and the answer stream in, answer a parked run. BONNIE's own
+`dev` had no such surface — it built and served, and a developer reached the
+agent only over HTTP with `curl`. A single command that brings up a minimal TUI
+is what deletes that gap.
+
+### What shipped
+
+1. **`cmd/bonnie/tui`** — a bubbletea (charm v2: bubbletea, bubbles, lipgloss)
+   model that is an **HTTP client of the channel**. It holds one conversation
+   (one run, resolved from an address), renders a scrollable transcript, and
+   streams the run's events live from the journal-cursor. Because it speaks
+   the wire, it works against any running channel, not only the one `dev`
+   started.
+2. **`bonnie chat`** — connect the TUI to a running channel
+   (`--addr`, default `127.0.0.1:8080`), one durable conversation per `--run`
+   address.
+3. **`bonnie dev`** — the hot-reload serve loop now also opens the TUI against
+   its own child. The child binds a free port (or `--addr`); the TUI connects
+   to the real bound address, so a hot reload restarts the child and the run
+   survives in the journal.
+
+### Decisions, and why
+
+- **HTTP client, not in-process runner.** The TUI never imports the runtime
+  beyond the wire types. That keeps it usable against `serve`, `dev`, or a
+  remote server, and keeps the framework packages terminal-free.
+- **Walk ports 8080, 8081, 8082, ...** The first free loopback port is used
+  and then kept for each hot reload. `--addr` overrides it with a fixed
+  address. The listen-close-bind step has a short race, but a child bind
+  failure is reported and never falls back to the manifest address.
+- **Streaming is cursor-based and durable.** The transcript is rebuilt from
+  the journal on reconnect, so a `dev` hot reload does not lose the
+  conversation; live Kit deltas (message text, tool calls, reasoning) overlay
+  it and never survive a restart, exactly as the event contract specifies.
+
+### Acceptance criteria
+
+- [x] `bonnie dev` opens the TUI against its serving child (scrollback, not
+      alt-screen; port walks 8080, 8081, …)
+- [x] `bonnie chat --addr` talks to any running channel
+- [x] A first message starts a run; a question parks it; the next send resumes
+      it (`TestModelFirstTurnParks`, `TestModelResumeAnswersAQuestion`)
+- [x] Live events render into the transcript (tool calls, streamed text)
+- [x] The HTTP client decodes the channel's wire shapes (`TestHTTPClientWire`)
+- [x] A free port is chosen automatically, and `--addr` binds a fixed one
+- [x] `go test -race ./cmd/bonnie/...` passes; no `charm.land/fantasy` import
+- [x] tmux typing reaches the textarea and submits a live turn
+      (`TestModelAcceptsTypedKeys`; verified live in tmux)
+- [x] Stream re-opens from the last cursor after a `dev` child restart
+      (`TestModelReconnectsFromLastCursor`; verified live across hot reload)
+- [x] `ctrl+w` calls the channel cancel route (`TestModelCancelCallsChannel`,
+      `TestHTTPClientWire`)
+
+### Watch for
+
+- The TUI is an L4 CLI surface. The layered packages (`runtime`, `channel`)
+  stay terminal-free; do not move bubbletea into them.
+- Bubble Tea v2 always requests basic Kitty key disambiguation. The original
+  typing defect was not Kitty mode: `Model.Init` focused a copied textarea.
+  `New` now focuses the textarea stored in the model.
 
 ## T-019 — Evals against a discovered agent
 

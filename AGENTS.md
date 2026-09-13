@@ -97,10 +97,13 @@ changing anything in `runtime/`. Full detail with citations in `docs/SPEC.md` §
 - `t.Parallel()` by default.
 
 ## Terminal rendering
-Kit renders the agent's terminal UI. BONNIE's framework packages ship no
-TUI today, and the CLI styles only its own help and errors (fang). That is
-a starting position, not a rule — the Charm stack is allowed if a feature
-genuinely needs it. The hard boundary is the public-Kit-SDK rule above.
+Kit renders the agent's terminal UI. BONNIE's framework packages ship no TUI
+today; the CLI owns one interactive surface, `bonnie dev` / `bonnie chat`
+(`cmd/bonnie/tui`, charm's bubbletea/bubbles/lipgloss v2), and styles its own
+help and errors with fang. The layered framework packages stay terminal-free; a
+host that wants an off-screen conversation uses the HTTP channel. The hard
+boundary is the public-Kit-SDK rule above, and it extends here: the TUI talks
+to the wire the channel exposes, never to Kit internals.
 
 ## Local development
 BONNIE and Kit are separate repos. Use a `go.work` in the PARENT directory:

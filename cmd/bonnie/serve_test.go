@@ -1,13 +1,58 @@
 package main
 
 import (
+	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mark3labs/bonnie/sandbox"
 	kit "github.com/mark3labs/kit/pkg/kit"
 )
+
+func TestCloseStreamsOnShutdown(t *testing.T) {
+	t.Parallel()
+	shutdownCtx, shutdown := context.WithCancel(context.Background())
+	started := make(chan struct{}, 1)
+	ended := make(chan struct{}, 1)
+	h := closeStreamsOnShutdown(shutdownCtx, http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		started <- struct{}{}
+		<-r.Context().Done()
+		ended <- struct{}{}
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/runs/run-1/stream", nil)
+	go h.ServeHTTP(httptest.NewRecorder(), req)
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("stream handler did not start")
+	}
+	shutdown()
+	select {
+	case <-ended:
+	case <-time.After(time.Second):
+		t.Fatal("stream handler did not stop on shutdown")
+	}
+}
+
+func TestCloseStreamsDoesNotCancelTurn(t *testing.T) {
+	t.Parallel()
+	shutdownCtx, shutdown := context.WithCancel(context.Background())
+	defer shutdown()
+	observed := make(chan error, 1)
+	h := closeStreamsOnShutdown(shutdownCtx, http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		observed <- r.Context().Err()
+	}))
+	shutdown()
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/runs/run-1", nil))
+	if err := <-observed; err != nil {
+		t.Fatalf("turn context was cancelled: %v", err)
+	}
+}
 
 func TestSandboxProviderSelection(t *testing.T) {
 	cases := []struct {

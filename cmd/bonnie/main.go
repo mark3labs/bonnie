@@ -52,7 +52,8 @@ durable runs.
 
 Commands:
   serve    serve an agent tree or a hand-wired library over HTTP
-  dev      run an agent tree with hot reload
+  dev      run an agent tree with hot reload and the built-in TUI
+  chat     interact with a running agent in a terminal
   build    compile an agent tree into one static binary
   init     scaffold a new agent tree
   runs     inspect durable runs
@@ -65,7 +66,7 @@ Planned:
 			return cmd.Help()
 		},
 	}
-	root.AddCommand(newServeCmd(), newRunsCmd(), newSandboxCmd(), newInitCmd(), newBuildCmd(), newDevCmd(), newVersionCmd())
+	root.AddCommand(newServeCmd(), newRunsCmd(), newSandboxCmd(), newInitCmd(), newBuildCmd(), newDevCmd(), newChatCmd(), newVersionCmd())
 	return root
 }
 
