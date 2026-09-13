@@ -15,6 +15,13 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT"></a>
 </p>
 
+> [!WARNING]
+> **Early and experimental. Use at your own risk.** BONNIE is pre-1.0
+> software under active development. The API can change without notice,
+> the durability and sandboxing claims are tested but not yet proven in
+> production, and no release is suitable for workloads whose loss would
+> hurt. Read [Limits](#limits) before you deploy anything with it.
+
 ---
 
 An agent turn normally lives and dies with your process. Kill it mid-tool-call

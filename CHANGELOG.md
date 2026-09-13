@@ -11,6 +11,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Nothing yet. The next release starts here.
 
+## [0.3.0] — 2026-09-13
+
+The terminal increment: `bonnie dev` and `bonnie chat` open a scrollback TUI
+that streams one durable conversation — tool calls render as a spinner that
+becomes a check mark with the result on the next line. Two event-stream
+defects that swallowed tool calls are fixed.
+
+### Added
+
+- Built-in terminal TUI (T-021): `bonnie dev` opens the TUI against its
+  serving child, `bonnie chat` connects the same TUI to any running HTTP
+  channel. One durable conversation per address, streamed from the
+  journal-cursor; a `dev` hot reload reconnects without losing the
+  conversation, and `ctrl+w` cancels the running turn.
+- `GET /addresses/{address}` on the HTTP channel: a read-only lookup that
+  returns the run bound to an address and its journal cursor, and creates
+  nothing on a miss. The TUI uses it to open the stream before the first
+  message of a session.
+- A tool call renders as one compact entry: a spinner while the tool works, a
+  check mark when it completes, and an indented arrow with a one-line,
+  Unicode-safe truncated result.
+
+### Fixed
+
+- Live events that share one journal anchor were dropped past the first one
+  (`docs/SPEC.md` §4.8.1). A tool-call start, parsed call, execution, and
+  result can all land on the same anchor, so the TUI lost tool calls the
+  event bus held.
+- A TUI that reopened an existing address learned its run ID only after the
+  first turn, so tool and reasoning events of that turn never reached it.
+  The startup lookup fixes the stream; guard tests cover both.
+
 ## [0.2.0] — 2026-09-13
 
 The L2 increment: an agent is a tree, not a hand-wired library. `bonnie init`
