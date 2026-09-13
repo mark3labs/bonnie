@@ -30,7 +30,7 @@ master @ 26d5c1c  →  github.com/mark3labs/bonnie
 | `channel/` | Interfaces, tested — `channeltest` conformance suite (T-015). `channel/chat` holds the chat plumbing: the journalled address map, locks, dispatch. |
 | `channel/http/` | Complete. Six routes, NDJSON stream, journalled address map. |
 | `channel/slack/`, `channel/discord/`, `channel/telegram/` | Chat adapters (T-020): verified webhooks, threaded delivery, HITL-in-chat. Zero new dependencies. Setup in `docs/CHANNELS.md`; live-platform runs unverified (no credentials — see T-020's Watch for). |
-| `sandbox/` | `local`, `docker`, `microsandbox` verified on Linux/KVM; macOS box open (T-013). `sandbox.Seeded` wraps any provider and seeds a manifest workspace (T-017). |
+| `sandbox/` | `local`, `docker`, `microsandbox` verified on Linux/KVM. `sandbox.Seeded` wraps any provider and seeds a manifest workspace (T-017). macOS (T-013) is deferred — no hardware. |
 | `cmd/bonnie/` | `serve` (also `serve --agent DIR --config PATH`), `init`, `runs list`, `runs show`, `sandbox prune`. |
 | `examples/` | `minimal`, `hitl-restart`. |
 
@@ -63,8 +63,8 @@ go test -race -tags integration ./runtime ./sandbox
 bottom. Highest value first: **T-018** — L2 codegen, which continues the
 program in [`docs/L2.md`](L2.md) that T-017 started. The chat channels are
 T-020, shipped; their live-platform runs are unverified (no credentials
-here), so a first real deployment is worth treating as verification. The
-other open box is T-013's macOS case.
+here), so a first real deployment is worth treating as verification. T-013
+(macOS) is deferred — no hardware.
 
 ## 4. The one rule that matters
 
@@ -226,10 +226,7 @@ A backend that cannot run on the test machine must **skip**, not fail.
    disposable `bonnie_gen.go` stub defining `discoveredTools()`, and the
    authored `main.go` calls it — the generator replaces exactly that file.
    Spec: [`docs/L2.md`](L2.md) §5, §6.
-2. **T-013 — the last hardware box.** microsandbox is verified on
-   Linux/KVM, including the live suite and network policies. macOS on
-   Apple Silicon is the only open case.
-3. **T-019 — evals.** Spec it before coding it; it needs the L2 tree as
+2. **T-019 — evals.** Spec it before coding it; it needs the L2 tree as
    its subject, which T-018 completes.
 
 Then, in no fixed order, the growth that is not a task yet:

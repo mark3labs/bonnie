@@ -19,9 +19,14 @@ the known risks, and the invariants every task must preserve.
 
 | ID | Title | Priority | Size | Blocks |
 |---|---|---|---|---|
-| T-013 | Verify the microsandbox adapter on real hardware (macOS box only) | P1 | S | — |
 | T-018 | L2 codegen: tool discovery, `bonnie dev`, `bonnie build` | P1 | M | T-019 |
 | T-019 | Evals against a discovered agent | P2 | L | — |
+
+### Deferred
+
+| ID | Title | Why |
+|---|---|---|
+| T-013 | Verify the microsandbox adapter on real hardware (macOS box only) | no access to an Apple Silicon machine; everything code-side is verified on Linux/KVM. Reopen when hardware is available. |
 
 ### Shipped after `v0.1.0`
 

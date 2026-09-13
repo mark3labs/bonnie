@@ -255,7 +255,7 @@ The live tests cover the claims that matter:
   pass with `msb` 0.6.18 (2026-09-12), every network policy mode is enforced
   with real egress, and the live suite — a real model working, suspending,
   and resuming inside the microVM — passes. It has not been run on macOS with
-  Apple Silicon. See T-013.
+  Apple Silicon; that verification (T-013) is deferred for lack of hardware.
 - **microsandbox network policy is fixed at create time.** `msb modify`
   cannot change network rules, so a reattached sandbox keeps its create-time
   policy; `Open` reports a mismatch with `ErrPolicyMismatch` rather than

@@ -524,7 +524,9 @@ the live suites' first choice — a test model must not share a quota with a
 busy workspace. Both live suites passed again with the new default and no
 explicit override.
 
-What is left for T-013 is hardware, not code:
+What is left for T-013 is hardware, not code — and T-013 is deferred: there is
+no Apple Silicon machine to run it on, and everything code-side is verified
+on Linux/KVM. Reopen the task when hardware appears.
 
 - Verified on Linux/KVM only, not macOS on Apple Silicon.
 
