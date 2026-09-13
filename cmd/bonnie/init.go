@@ -45,10 +45,11 @@ is needed. The model goes into the manifest with --model.`,
 				dir = args[0]
 			}
 			created, err := agent.Scaffold(dir, agent.InitOptions{
-				Format: o.format,
-				Title:  o.title,
-				Model:  o.model,
-				Tools:  o.tools,
+				Format:  o.format,
+				Title:   o.title,
+				Model:   o.model,
+				Tools:   o.tools,
+				Version: buildVersion(),
 			})
 			if err != nil {
 				return err
