@@ -300,13 +300,12 @@ func TestServeAgentRoundTrip(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)
-	go func() { done <- serveHTTP(ctx, cfg, time.Second, ln) }()
+	go func() { done <- serveHTTP(ctx, cfg, 3*time.Second, ln) }()
 
 	base := "http://" + ln.Addr().String()
 	// This test's own client, so the shared DefaultClient's keep-alive pool
 	// cannot hold a connection open past the shutdown deadline.
 	transport := &http.Transport{}
-	defer transport.CloseIdleConnections()
 	client := &http.Client{Transport: transport}
 	waitForHTTP(t, client, base)
 
@@ -350,6 +349,10 @@ func TestServeAgentRoundTrip(t *testing.T) {
 		t.Fatalf("GET an unknown run = %d, want 404", res.StatusCode)
 	}
 
+	// Drop this test's pooled connections before the cancel, so the
+	// server's Shutdown finds nothing to wait for. A pooled keep-alive conn
+	// that Shutdown's first sweep misses is the flake that broke CI.
+	transport.CloseIdleConnections()
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatalf("serveHTTP: %v", err)
@@ -427,10 +430,16 @@ func TestServeMountsChatChannels(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)
-	go func() { done <- serveHTTP(ctx, cfg, time.Second, ln) }()
+	go func() { done <- serveHTTP(ctx, cfg, 3*time.Second, ln) }()
 
 	base := "http://" + ln.Addr().String()
-	waitForHTTP(t, http.DefaultClient, base)
+	// This test's own client, so no pooled keep-alive connection can hold
+	// the server's Shutdown past its deadline — the same race that flaked
+	// the round-trip test once. Closing idle conns before the cancel makes
+	// the shutdown deterministic.
+	transport := &http.Transport{}
+	client := &http.Client{Transport: transport}
+	waitForHTTP(t, client, base)
 
 	// Drive the webhook the way Telegram would.
 	upd, _ := json.Marshal(map[string]any{
@@ -442,7 +451,7 @@ func TestServeMountsChatChannels(t *testing.T) {
 	})
 	req, _ := http.NewRequest(http.MethodPost, base+"/telegram", strings.NewReader(string(upd)))
 	req.Header.Set("X-Telegram-Bot-Api-Secret-Token", "s3cret")
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("webhook: %v", err)
 	}
@@ -465,6 +474,9 @@ func TestServeMountsChatChannels(t *testing.T) {
 		t.Fatalf("delivered %q, want the failure notice", last)
 	}
 
+	// Drop the pooled connections before the cancel, as in the round-trip
+	// test above.
+	transport.CloseIdleConnections()
 	cancel()
 	if err := <-done; err != nil {
 		t.Fatalf("serveHTTP: %v", err)
