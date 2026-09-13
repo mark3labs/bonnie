@@ -1,7 +1,8 @@
 # Handover
 
 **For:** the next agent or developer to work on BONNIE
-**State:** `v0.1.0` tagged and released, 2026-09-12
+**State:** two increments past `v0.1.0` — T-017 (L2 core) and T-020 (chat
+channels) shipped; T-018 is next
 **Read first:** this file, then `docs/SPEC.md`, then `AGENTS.md`
 
 ---
@@ -18,26 +19,28 @@ run as the host process.
 ## 2. Where things stand
 
 ```
-master @ 6906e8a (+ the chat channels)  →  github.com/mark3labs/bonnie
+master @ 26d5c1c  →  github.com/mark3labs/bonnie
 13 packages · 62 Go files (35 non-test) · 214 test functions · all green
 ```
 
 | Package | State |
 |---|---|
-| `agent/` | NEW — L2 discovery, first increment (T-017): the strict manifest loader (`agent.yaml`/`.toml`/`.json`), `bonnie init` scaffolding, the `--tools` module scaffold. Codegen is T-018. |
+| `agent/` | L2 discovery, first increment (T-017): the strict manifest loader (`agent.yaml`/`.toml`/`.json`), `bonnie init` scaffolding, the `--tools` module scaffold. Codegen is T-018. |
 | `runtime/` | Complete. Journal, session, runner, torn-write repair, events. Verified against a live model. |
 | `channel/` | Interfaces, tested — `channeltest` conformance suite (T-015). `channel/chat` holds the chat plumbing: the journalled address map, locks, dispatch. |
 | `channel/http/` | Complete. Six routes, NDJSON stream, journalled address map. |
 | `channel/slack/`, `channel/discord/`, `channel/telegram/` | Chat adapters (T-020): verified webhooks, threaded delivery, HITL-in-chat. Zero new dependencies. Setup in `docs/CHANNELS.md`; live-platform runs unverified (no credentials — see T-020's Watch for). |
 | `sandbox/` | `local`, `docker`, `microsandbox` verified on Linux/KVM; macOS box open (T-013). `sandbox.Seeded` wraps any provider and seeds a manifest workspace (T-017). |
-| `cmd/bonnie/` | `serve` (now also `serve --agent DIR --config PATH`), `init`, `runs list`, `runs show`, `sandbox prune`. |
+| `cmd/bonnie/` | `serve` (also `serve --agent DIR --config PATH`), `init`, `runs list`, `runs show`, `sandbox prune`. |
 | `examples/` | `minimal`, `hitl-restart`. |
 
-**Not done:** nothing blocking. T-011 closed — `v0.1.0` is tagged and
-published, verified by a downloaded artifact printing the injected version.
-T-009 resolved itself — Kit `v0.106.0` answered all four upstream asks, and
-BONNIE adopted the seams the same day. T-017 landed after the release:
-the zero-Go authoring path ships, so the numbers above are past `v0.1.0`.
+**Not done:** nothing blocking. `v0.1.0` is tagged, published, and artifact-
+verified. T-009 resolved itself — Kit `v0.106.0` answered all four upstream
+asks, and BONNIE adopted the seams the same day. Two task increments shipped
+after the release: T-017 (the zero-Go authoring path) and T-020 (the chat
+channels), so the numbers above are past `v0.1.0`. CI is green; the one flake
+it ever showed was a test-side keep-alive shutdown race (`f15a3c8`), not a
+product bug.
 
 ## 3. Start here
 
@@ -58,8 +61,10 @@ go test -race -tags integration ./runtime ./sandbox
 
 `docs/TASKS.md` has the open work at the top, shipped work archived at the
 bottom. Highest value first: **T-018** — L2 codegen, which continues the
-program in [`docs/L2.md`](L2.md) that T-017 started. The only other open
-box is T-013's macOS case.
+program in [`docs/L2.md`](L2.md) that T-017 started. The chat channels are
+T-020, shipped; their live-platform runs are unverified (no credentials
+here), so a first real deployment is worth treating as verification. The
+other open box is T-013's macOS case.
 
 ## 4. The one rule that matters
 
@@ -158,11 +163,23 @@ Live tests now use `noCoreTools()` and `isolatedWorkspace(t)`, which fails if
 anything appears in the temp directory. `docs/SPEC.md` §4.9 has the full
 story.
 
+### A chat reply to a parked run must resume, not start
+
+A chat surface gives the agent no way to say "this is a resume": the same
+thread carries starts, follow-ups, and answers to parked runs. Sending a
+reply to a waiting run through `Start` opens a **fresh turn** and leaves the
+suspension unanswered for ever — the model talks past the question. The
+runtime's `Resume` is what answers it, so [channel/chat's dispatch]
+(`chat.Route`) checks the run's state under the turn lock and routes
+accordingly. Build any new chat shape on `channel/chat` and never decide
+send-vs-resume in the adapter.
+
 ## 6. Architecture in 60 seconds
 
 ```
 L4  cmd/bonnie        serve, runs
-L3  channel/          transport interfaces → channel/http
+L3  channel/          transport interfaces → http, slack, discord, telegram
+                       (channel/chat is the shared plumbing beneath them)
 L1  runtime/          durable executor          sandbox/  isolated tools
 L0  kit/pkg/kit       upstream, unmodified
 ```
@@ -215,9 +232,22 @@ A backend that cannot run on the test machine must **skip**, not fail.
 3. **T-019 — evals.** Spec it before coding it; it needs the L2 tree as
    its subject, which T-018 completes.
 
-(T-017 — the manifest, `bonnie init`, `serve --agent` — shipped in
-`0395c17`, one commit after this handover was written; see `docs/TASKS.md`
-for its resolution notes, including the module-fetchability finding.)
+Then, in no fixed order, the growth that is not a task yet:
+
+- **Verify the chat channels against live platforms.** T-020's adapters are
+  proven against recorded wire shapes, not real traffic — a first real
+  deployment (Slack events, Discord command registration, Telegram
+  `setWebhook`) is the missing evidence.
+- **HTTP auth verification on the channel.** The HTTP channel carries a
+  `Principal` and verifies nothing; the chat channels verify the platform
+  but not the person. The `auth` manifest key still does not exist, and
+  should not until the verification does.
+- **A database journal.** `flock` per run is per-host; a multi-host user is
+  the trigger. It would be the second `Journal` implementation and must
+  join the conformance suite.
+- **The `v0.3` sandbox candidates** in [`docs/L2.md`](L2.md) §12:
+  declarative exec tools and sandbox-template amortization (eve's
+  bootstrap idea).
 
 ## 9. Verification before you commit
 
@@ -245,9 +275,10 @@ is the pattern.
 |---|---|
 | `docs/TASKS.md` | Open work first, shipped work archived. Start here. |
 | `docs/SPEC.md` | Verified Kit facts with file:line, every risk, the invariants. |
-| `docs/L2.md` | Draft spec for `v0.2`: the agent tree, manifest, codegen. |
-| `docs/SANDBOX.md` | Backends, adapter contracts, why the CLI and not the SDKs. |
-| `docs/UPSTREAM.md` | Four Kit issues, written and ready to file. |
+| `docs/L2.md` | Spec for `v0.2`: the agent tree, manifest, codegen — T-018. |
+| `docs/CHANNELS.md` | The chat adapters' contract: per-platform setup, dispatch rules, limits. |
+| `docs/SANDBOX.md` | Backends, adapter contracts, why the CLI and not the SDKs, where a workspace lives. |
+| `docs/UPSTREAM.md` | Four Kit asks, all answered by `v0.106.0`; the record. |
 | `AGENTS.md` | Conventions. Short. |
 | `README.md` | User-facing. Every snippet was compiled and the quickstart run. |
 
@@ -262,7 +293,17 @@ was verified about Kit and where, so a changed assumption is findable.
   fixed at create time; a reattach under a different policy fails loudly.**
   The live suites run against `opencode/kimi-k2.5` by default, after the
   Anthropic workspace quota blocked every agent-sized request for a day.
-- The HTTP channel carries a `Principal` and does not verify it.
+- **The HTTP channel carries a `Principal` and does not verify it.** The
+  chat channels verify the platform's signature — Slack v0 HMAC, Discord
+  Ed25519, Telegram's secret token — and refuse to serve without the
+  credentials; that verifies the platform, never the person.
+- **The chat adapters are proven against recorded wire shapes, not live
+  traffic.** No credentials exist on the development machine; a first real
+  deployment is the remaining evidence.
+- The sandbox workspace is **not a volume** — the container's writable
+  layer, the msb rootfs, or a host directory. Reattach, not a volume, is
+  the durability mechanism; `docker system prune` destroys it, and the
+  journal notes the loss into the conversation.
 - Run ownership is enforced per host with a `flock` per run; a shared
   network filesystem or a second writer still needs one owner in front.
 - Events are anchored to the journal: a reconnect whose cursor has fallen
