@@ -610,7 +610,8 @@ including it was close to zero.
 **All four answered by Kit `v0.106.0`** — PR `mark3labs/kit#135`, "durability
 seams for external SessionManager implementations", released before BONNIE
 filed anything. The asks were drafted in [`docs/UPSTREAM.md`](UPSTREAM.md),
-which now records what landed and where; nothing needs filing.
+whose record of what landed and where is archived in
+`docs/archive/UPSTREAM.md`; nothing needs filing.
 
 1. **Batch append on `SessionManager`** (§4.2) — landed as the optional
    `kit.StepAppender` interface, routed through `appendMessages` at all three

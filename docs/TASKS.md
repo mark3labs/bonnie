@@ -51,8 +51,8 @@ in `docs/SPEC.md` §4.8.
 **T-009 — file the four upstream Kit issues — is moot.** Kit `v0.106.0`
 (PR `mark3labs/kit#135`) answered all four asks before anything was filed.
 BONNIE adopted the batch-append seam the same day: `Session.AppendStep`
-plus the `runtime.StepJournal` optional interface. `docs/UPSTREAM.md` records
-what each ask became, and `docs/SPEC.md` §3 was re-verified against
+plus the `runtime.StepJournal` optional interface. `docs/archive/UPSTREAM.md`
+records what each ask became, and `docs/SPEC.md` §3 was re-verified against
 `v0.106.0`. T-011 no longer depends on it.
 
 ### Shipped in `v0.1.0`
@@ -80,9 +80,9 @@ Sizes: S ≈ half a day · M ≈ 1–2 days · L ≈ 3–4 days.
 **RESOLVED WITHOUT FILING.** Kit `v0.106.0` (PR `mark3labs/kit#135`,
 "durability seams for external SessionManager implementations") answered all
 four asks before anything was filed. See [Resolved by upstream](#resolved-by-upstream)
-at the top of this file and [`docs/UPSTREAM.md`](UPSTREAM.md) for what each
-ask became. The section below is the task as it was written, kept for the
-record.
+at the top of this file and [`docs/archive/UPSTREAM.md`](archive/UPSTREAM.md)
+for what each ask became. The section below is the task as it was written,
+kept for the record.
 
 **Priority** P2 · **Size** S · **Blocks** T-011
 

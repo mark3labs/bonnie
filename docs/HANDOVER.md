@@ -275,7 +275,7 @@ is the pattern.
 | `docs/L2.md` | Spec for `v0.2`: the agent tree, manifest, codegen — T-018. |
 | `docs/CHANNELS.md` | The chat adapters' contract: per-platform setup, dispatch rules, limits. |
 | `docs/SANDBOX.md` | Backends, adapter contracts, why the CLI and not the SDKs, where a workspace lives. |
-| `docs/UPSTREAM.md` | Four Kit asks, all answered by `v0.106.0`; the record. |
+| `docs/UPSTREAM.md` | The home for future Kit asks; the four `v0.1.0` asks are answered and archived in `docs/archive/`. |
 | `AGENTS.md` | Conventions. Short. |
 | `README.md` | User-facing. Every snippet was compiled and the quickstart run. |
 
