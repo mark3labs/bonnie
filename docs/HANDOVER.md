@@ -17,7 +17,10 @@ checks and commit.
 - `ctrl+w` calls `POST /runs/{id}/cancel`.
 - The textarea is focused in `New`. The old `Init` code focused a copied model,
   which caused the tmux typing defect.
-- Leaked OSC color-query replies are not inserted into the textarea.
+- In TUI mode, the child writes through a non-TTY writer. This prevents child
+  terminal-capability queries from sending replies into the TUI input.
+- The textarea uses Bubble Tea's real cursor pattern and one visible row, so it
+  renders one input prompt.
 - A durable final response replaces its streamed draft, so reconnect does not
   add a second answer.
 
@@ -25,7 +28,8 @@ checks and commit.
 
 - `go test -race ./cmd/bonnie/...` passes.
 - Live tmux typing inserted text and submitted a provider-backed turn.
-- A clean live turn rendered one answer and no terminal-control text.
+- A clean live turn rendered one answer, one input prompt, and no
+  terminal-control text.
 - A watched-file change restarted the child without a forced-kill timeout.
 - The TUI reconnected and completed a second turn on the same durable run.
 

@@ -148,13 +148,19 @@ func TestModelAcceptsTypedKeys(t *testing.T) {
 	}
 }
 
-func TestModelDropsLeakedTerminalColorReply(t *testing.T) {
+func TestModelRendersOneInputPromptAndRealCursor(t *testing.T) {
 	t.Parallel()
 	m := newTestModel(&fakeClient{})
-	next, _ := m.Update(keyText("]10;rgb:ffff/ffff/ffff"))
-	m = next.(Model)
-	if got := m.input.Value(); got != "" {
-		t.Fatalf("input = %q, want leaked terminal reply to be dropped", got)
+	view := m.View()
+	if got := strings.Count(view.Content, "❯"); got != 1 {
+		t.Fatalf("prompt count = %d, want 1:\n%s", got, view.Content)
+	}
+	if view.Cursor == nil {
+		t.Fatal("view has no real textarea cursor")
+	}
+	wantY := strings.Count(m.renderPrefix(), "\n")
+	if view.Cursor.Y != wantY {
+		t.Fatalf("cursor row = %d, want input row %d", view.Cursor.Y, wantY)
 	}
 }
 

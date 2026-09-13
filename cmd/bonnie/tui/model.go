@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/cursor"
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 	kit "github.com/mark3labs/kit/pkg/kit"
@@ -135,6 +136,7 @@ func New(client Client, ctx context.Context, address string) Model {
 	ta := textarea.New()
 	ta.Placeholder = "Type a message… (enter to send, ctrl+c to quit)"
 	ta.Prompt = "❯ "
+	ta.SetVirtualCursor(false)
 	ta.SetWidth(60)
 	ta.ShowLineNumbers = false
 	ta.CharLimit = 0
@@ -222,6 +224,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 
+	case cursor.BlinkMsg:
+		var cmd tea.Cmd
+		m.input, cmd = m.input.Update(msg)
+		return m, cmd
+
 	case tea.QuitMsg:
 		m.quitting = true
 		m.stopStream()
@@ -233,7 +240,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // View implements tea.Model.
 func (m Model) View() tea.View {
-	v := tea.NewView(m.render())
+	prefix := m.renderPrefix()
+	v := tea.NewView(prefix + m.input.View() + footer)
+	if c := m.input.Cursor(); c != nil {
+		// prefix ends with the newline directly before the textarea. Count
+		// separators, not rendered lines, or that trailing newline adds one
+		// extra row and puts the cursor on the footer.
+		c.Y += strings.Count(prefix, "\n")
+		v.Cursor = c
+	}
 	v.AltScreen = false
 	return v
 }
@@ -266,12 +281,6 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		m.input.Reset()
 		return m.send(value)
-	}
-
-	// Some terminal multiplexers can leak an OSC color-query reply after they
-	// remove its escape introducer. It is terminal control data, not user text.
-	if isLeakedColorReply(msg.Key().Text) {
-		return m, nil
 	}
 
 	// Anything else is typing. The textarea's own enter binding is not used:
@@ -590,13 +599,17 @@ func (m *Model) commitError(text string) {
 func (m *Model) layout() {
 	w := max(m.width, 20)
 	m.input.SetWidth(w)
-	m.input.SetHeight(2)
+	m.input.SetHeight(1)
 }
 
 // render assembles the frame: header, transcript, status, input, help.
 // The viewport content is recomputed from the transcript on every frame, so it
 // can never drift from [Model.entries].
 func (m *Model) render() string {
+	return m.renderPrefix() + m.input.View() + footer
+}
+
+func (m *Model) renderPrefix() string {
 	var b strings.Builder
 	b.WriteString(styles.header.Render(" bonnie chat · " + m.address + " "))
 	b.WriteString("\n")
@@ -606,8 +619,6 @@ func (m *Model) render() string {
 	}
 	b.WriteString(m.statusLine())
 	b.WriteString("\n")
-	b.WriteString(m.input.View())
-	b.WriteString(footer)
 	return b.String()
 }
 
@@ -684,11 +695,4 @@ func resultSnippet(s string) string {
 
 func fmtToolResult(name, snippet string) string {
 	return "↳ " + name + ": " + snippet
-}
-
-func isLeakedColorReply(text string) bool {
-	text = strings.TrimPrefix(text, "]")
-	return strings.HasPrefix(text, "10;rgb:") ||
-		strings.HasPrefix(text, "11;rgb:") ||
-		strings.HasPrefix(text, "12;rgb:")
 }

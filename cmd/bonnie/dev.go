@@ -106,12 +106,19 @@ type devServer struct {
 }
 
 func newDevServer(root string, o devOpts) *devServer {
+	log := io.Writer(os.Stderr)
+	if o.tui {
+		// Give the child a pipe, not the terminal file itself. The child still
+		// writes through to stderr, but terminal-detection code cannot send
+		// capability queries whose replies would enter the TUI.
+		log = io.MultiWriter(os.Stderr)
+	}
 	return &devServer{
 		root:     root,
 		bin:      filepath.Join(root, ".bonnie", "dev-agent"),
 		shutdown: o.shutdown,
 		addr:     o.addr,
-		log:      os.Stderr,
+		log:      log,
 		ready:    make(chan struct{}),
 	}
 }

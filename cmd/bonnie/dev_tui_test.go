@@ -2,9 +2,18 @@ package main
 
 import (
 	"net"
+	"os"
 	"strings"
 	"testing"
 )
+
+func TestDevTUIChildOutputIsNotTerminalFile(t *testing.T) {
+	t.Parallel()
+	d := newDevServer(t.TempDir(), devOpts{tui: true})
+	if _, ok := d.log.(*os.File); ok {
+		t.Fatal("TUI child writes directly to a terminal file")
+	}
+}
 
 // TestPickListenAddrWalksFrom8080: an occupied 8080 is skipped and 8081 is
 // chosen. An explicit --addr is used as-is.
