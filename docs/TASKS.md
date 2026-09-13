@@ -676,6 +676,9 @@ single static binary at the end.
 **RESOLVED.** `bonnie dev` now opens a minimal scrollback TUI, and
 `bonnie chat` connects the same TUI to any running HTTP channel. Typing,
 completed turns, and a hot-reload reconnect were verified live in tmux.
+**Shipped in `v0.3.0`**, which also fixed the two event-stream defects the
+first live uses exposed (§4.8.1 of the spec) and added the colored tool-call
+rendering and the startup address lookup.
 
 **Priority** P2 · **Size** M · **Reference**
 [eve Dev TUI](https://eve.dev/docs/guides/dev-tui)
