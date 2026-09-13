@@ -1,7 +1,12 @@
 # Handover — built-in TUI (`bonnie dev` / `bonnie chat`)
 
-T-021 is complete. The work is in the working tree and is ready for final
-checks and commit.
+T-021 is complete and committed on `master`:
+
+- `9ccfe1f feat(cli): add built-in terminal chat`
+- `79329ec fix(tui): isolate terminal input`
+
+All checks and live verification are complete. The only remaining working-tree
+items are unrelated root agent files, which are intentionally untracked.
 
 ## Delivered
 
