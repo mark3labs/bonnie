@@ -587,10 +587,10 @@ Stated plainly, because the failure modes are not obvious:
 - **Sandbox lifecycle is journalled, and reclaiming is manual.**
   `bonnie sandbox prune` deletes the sandboxes of terminal runs; `serve`
   does not sweep them on its own yet.
-- **The mark3labs modules are not publicly fetchable.** The repository is
-  private, so a scaffolded module (`bonnie init --tools`) builds through a
-  `go.work` covering it, or with repository access and `GOPRIVATE` plus
-  `go mod tidy`. The zero-Go path (`serve --agent`) needs neither.
+- **The mark3labs modules are publicly fetchable.** A scaffolded module
+  (`bonnie init --tools`) runs `go mod tidy` and resolves `bonnie` and `kit`
+  from the proxy; no `go.work`, no `GOPRIVATE`. The zero-Go path
+  (`serve --agent`) needs neither Go nor a module.
 
 ## Examples
 

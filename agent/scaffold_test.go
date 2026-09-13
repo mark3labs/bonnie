@@ -137,12 +137,10 @@ func TestScaffoldToolsModule(t *testing.T) {
 	}
 }
 
-// The scaffold's main.go must compile against the pinned Bonnie release in
-// the environment every BONNIE developer has: a go.work covering the tree.
-//
-// The bonnie module is not on a public proxy (the repository is private), so
-// the workspace — or GOPRIVATE with credentials — is how the module resolves.
-// This test builds the scaffold the way a developer's machine does.
+// The scaffold's main.go must compile. The mark3labs modules are public, so a
+// developer can `go mod tidy` and build directly off the proxy. This test
+// stays hermetic: it builds through a go.work over the local bonnie and kit
+// checkouts, so it needs no network and skips when the kit checkout is absent.
 func TestScaffoldToolsModuleBuilds(t *testing.T) {
 	t.Parallel()
 	kitRoot, ok := findUpstream(t)

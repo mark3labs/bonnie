@@ -50,15 +50,22 @@ The framework is a library first: runtime.NewRunner and channel/http need no
 binary at all. This CLI exists for local development and for inspecting
 durable runs.
 
+Commands:
+  serve    serve an agent tree or a hand-wired library over HTTP
+  dev      run an agent tree with hot reload
+  build    compile an agent tree into one static binary
+  init     scaffold a new agent tree
+  runs     inspect durable runs
+  sandbox  manage sandbox workspaces
+
 Planned:
-  dev        Run the agent locally with hot reload
-  eval       Run evals against a local or remote agent`,
+  eval     Run evals against a local or remote agent`,
 		Version: buildVersion(),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return cmd.Help()
 		},
 	}
-	root.AddCommand(newServeCmd(), newRunsCmd(), newSandboxCmd(), newInitCmd(), newVersionCmd())
+	root.AddCommand(newServeCmd(), newRunsCmd(), newSandboxCmd(), newInitCmd(), newBuildCmd(), newDevCmd(), newVersionCmd())
 	return root
 }
 

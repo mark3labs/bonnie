@@ -304,11 +304,15 @@ func main() {
 		opts = append(opts, kit.WithModel(*model))
 	}
 	// The instructions file is the agent's system prompt, read fresh each
-	// start — the same behaviour as bonnie serve --agent.
+	// start — the same behaviour as bonnie serve --agent. A bonnie build
+	// binary has no instructions.md on the host, so it falls back to the
+	// copy its generator embedded.
 	if b, err := os.ReadFile("instructions.md"); err == nil {
 		opts = append(opts, kit.WithSystemPrompt(string(b)))
 	} else if !os.IsNotExist(err) {
 		log.Fatal(err)
+	} else if inst := embeddedInstructions(); inst != "" {
+		opts = append(opts, kit.WithSystemPrompt(inst))
 	}
 
 	// Tools run as this process. To isolate them, swap the factory:
@@ -358,7 +362,9 @@ func main() {
 }
 
 // genTemplate renders the disposable generated-wiring stub. The generator
-// that lands with codegen rewrites exactly this file from tools/.
+// that lands with codegen rewrites exactly this file from tools/, replacing it
+// with the real discoveredTools and the embedded instructions, skills, and
+// workspace a `bonnie build` ships in the binary.
 func genTemplate(module string) string {
 	return fmt.Sprintf(`// Code generated as part of the scaffold; DO NOT EDIT.
 //
@@ -368,9 +374,17 @@ func genTemplate(module string) string {
 package main
 
 import (
+	"embed"
+
 	echo "%[1]s/tools/echo"
 
 	kit "github.com/mark3labs/kit/pkg/kit"
+)
+
+var (
+	_instructions string
+	_skills        embed.FS
+	_workspace     embed.FS
 )
 
 // discoveredTools is the wiring point for the tree's tools. The generator
@@ -381,6 +395,17 @@ func discoveredTools() []kit.Tool {
 		echo.Tool(),
 	}
 }
+
+// embeddedInstructions is supplied by the code generator on build; the stub
+// leaves it empty until a build embeds the real instructions.
+func embeddedInstructions() string { return _instructions }
+
+// embeddedSkills is the tree's skills directory, embedded at build time.
+func embeddedSkills() embed.FS { return _skills }
+
+// embeddedWorkspace is the tree's workspace seed directory, embedded at
+// build time.
+func embeddedWorkspace() embed.FS { return _workspace }
 `, module)
 }
 

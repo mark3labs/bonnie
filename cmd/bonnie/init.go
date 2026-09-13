@@ -32,9 +32,9 @@ instructions.md, set a model, and serve.
   bonnie init .              adopt this directory — init never overwrites
 
 With --tools the tree gains a Go module, a sample tool, and a main.go that
-serves it. That path needs the mark3labs modules resolvable: they are not on
-a public proxy, so cover the tree with a go.work (the setup in AGENTS.md) or
-configure repository access and run go mod tidy.
+serves it. The mark3labs modules are public, so run go mod tidy from the
+tree and it resolves them from the proxy; no go.work or private access is
+needed.
 
 The model goes into the manifest with --model, so the first serve already
 knows what to call.`,
@@ -65,11 +65,11 @@ Next:
 `, dir)
 			if o.tools {
 				_, _ = fmt.Fprint(os.Stdout, `
-The tree is a Go module. The mark3labs modules are not on a public proxy, so
-either cover the tree with a go.work that also uses the bonnie and kit
-checkouts, or configure repository access and run go mod tidy. Then:
+The tree is a Go module. The mark3labs modules are public, so run go mod tidy
+from the tree and it resolves them from the proxy. Then:
 
-  go build ./...            the fresh scaffold compiles
+  go mod tidy              fetch bonnie and kit from the proxy
+  go build ./...           the fresh scaffold compiles
   ./`+scaffoldName(dir)+`                  serves on :8080
 `)
 			}

@@ -19,7 +19,6 @@ the known risks, and the invariants every task must preserve.
 
 | ID | Title | Priority | Size | Blocks |
 |---|---|---|---|---|
-| T-018 | L2 codegen: tool discovery, `bonnie dev`, `bonnie build` | P1 | M | T-019 |
 | T-019 | Evals against a discovered agent | P2 | L | — |
 
 ### Deferred
@@ -32,6 +31,7 @@ the known risks, and the invariants every task must preserve.
 
 | ID | Delivered | Where |
 |---|---|---|
+| T-018 | L2 codegen: tool discovery (`agent/gen`), `bonnie dev` (fsnotify loop), `bonnie build` (go:embed + static binary), `--dry-run`; import allowlist; duplicate-name refusal; idempotent codegen | `agent/generate.go`, `agent/generate_test.go`, `cmd/bonnie/build.go`, `cmd/bonnie/dev.go`, `cmd/bonnie/l2_test.go` |
 | T-020 | Chat channels: Slack, Discord, Telegram adapters with verified webhooks, dispatch (a reply to a parked run resumes it), threaded delivery; `channel/chat` shared plumbing; the manifest's `channels:` keys with env-only credentials | `channel/slack/`, `channel/discord/`, `channel/telegram/`, `channel/chat/`, `cmd/bonnie/serve.go`, `docs/CHANNELS.md` |
 | T-017 | L2 core: the strict manifest loader (`agent/`), `bonnie init` (zero-Go default, `--tools` module), `serve --agent` with flag-over-manifest precedence and source-annotated banner, the go-tree refusal, workspace seeding | `agent/manifest.go`, `agent/scaffold.go`, `cmd/bonnie/init.go`, `cmd/bonnie/serve.go`, `sandbox/seed.go` |
 | T-012 | The sandbox lifecycle is journalled: `RecordSandbox`, a resume note when a workspace is gone, `runs show` timeline, `bonnie sandbox prune` | `runtime/journal.go`, `runtime/session.go`, `sandbox/lifecycle.go`, `cmd/bonnie/sandbox.go` |
@@ -535,17 +535,14 @@ today requires a hand-written `main.go` for anything.
 
 ### Resolution notes — what was learned
 
-- **The mark3labs modules are not publicly fetchable.** The repository is
-  private: anonymous HTTPS fails, `proxy.golang.org` 404s, and
-  `sum.golang.org` has no entry — so a scaffolded `go.mod` cannot be
-  `tidy`d by a stranger, and even a workspace-covered build must not pin
-  requires (the pinned version triggers sumdb verification and fails).
-  `init --tools` therefore writes `go.mod` with no requires and prints the
-  two paths that work: a `go.work` covering the tree (builds as-is), or
-  repository access with `GOPRIVATE` and `go mod tidy`. The guard test
-  builds the fresh scaffold through a synthetic `go.work`
-  (`TestScaffoldToolsModuleBuilds`). If public module fetches are ever
-  wanted, the repository's visibility is the decision to revisit.
+- **The mark3labs modules are publicly fetchable** (resolved 2026-09-13).
+  `proxy.golang.org` serves `bonnie` and `kit`, and sum.golang.org has
+  entries, so a scaffolded `go.mod` tidies and builds off the proxy with no
+  workspace and no `GOPRIVATE`. `init --tools` writes a bare `go.mod`;
+  `go mod tidy` fills it. The guard test builds the fresh scaffold through a
+  synthetic `go.work` over the local checkouts (`TestScaffoldToolsModuleBuilds`)
+  to stay hermetic, but a standalone `go build` off the proxy is the verified
+  public path.
 - **`skills:` is reserved, not wired.** Seeding skill files into a sandbox
   nothing reads would be a dead key — a control nothing applied. The key
   is refused with the same message class as `mcp`, until a skill-loading
@@ -576,6 +573,11 @@ or the formats will drift.
 
 ## T-018 — L2 codegen: tool discovery, `bonnie dev`, `bonnie build`
 
+**RESOLVED.** The graduation path closes: a tree's tools are discovered at
+build time by codegen, hot-reloaded by `bonnie dev`, and shipped as the user's
+own static binary by `bonnie build`. The recording below is the record of what
+shipped and the decisions that were made while building it.
+
 **Priority** P1 · **Size** M · **Blocks on** T-017 · **Spec**
 [`docs/L2.md`](L2.md) §5, §6
 
@@ -586,47 +588,85 @@ are wired by codegen, watched by `bonnie dev`, and shipped as the user's own
 binary by `bonnie build`. This is the graduation path: zero Go to start, a
 single static binary at the end.
 
-### Do
+### What shipped
 
-1. Codegen per `docs/L2.md` §5: walk `tools/<name>/tool.go`, require
-   `func Tool() kit.Tool`, emit `bonnie_gen.go`; duplicate names are a
-   generator error; idempotent output; DO-NOT-EDIT banner.
-2. The import allowlist: stdlib, BONNIE public packages, `kit/pkg/kit`.
-   The generator refuses anything else. This is invariant 11.
-3. `bonnie dev` — fsnotify watch set per `docs/L2.md` §6, debounce,
-   regenerate, `go build`, graceful restart (SIGTERM, drain, restart).
-4. `bonnie build` — embed instructions, skills, and workspace via
-   `go:embed` in the generated file; output one static binary that serves
-   with no BONNIE CLI and no toolchain on the host.
-5. `--dry-run` on both commands prints the discovery plan — the `eve info`
-   analogue.
+1. **Codegen (`agent/generate.go`).** `Discover` walks `tools/<name>/` and
+   requires each directory to export `func Tool() kit.Tool`; `Plan.Render`
+   produces `bonnie_gen.go`, byte-identical across runs. The generated file
+   defines `discoveredTools()` and the embed accessors
+   (`embeddedInstructions`, `embeddedSkills`, `embeddedWorkspace`). It imports
+   only the tree's tool packages, `embed`, and `kit/pkg/kit` — it cannot emit a
+   boundary violation. Duplicate declared names (two directories passing the
+   same name to `kit.NewTool`) are refused with both paths named, before a
+   provider silently keeps one.
+2. **`bonnie build`.** Generates the wiring, embeds instructions (and
+   skills/workspace when they hold real files), and `go build`s one static
+   binary `./<title>`. `--dry-run` prints the discovery plan.
+3. **`bonnie dev`.** The fsnotify loop: watch the tree (manifest,
+   instructions, `skills/`, `workspace/`, `tools/**`, `go.mod`, `go.sum`),
+   debounce, regenerate, rebuild, and gracefully restart the child with
+   SIGTERM. A parked run keeps no compute and lives in the journal, so the
+   restarted child resumes it. `--dry-run` prints the plan.
+
+### Decisions, and why
+
+- **The generator registers nothing; it calls `Tool()`.** The runtime tool
+  name is whatever the code passes to `kit.NewTool`. So the generated file
+  imports each tool package and calls `.Tool()`, and the *only* thing codegen
+  can validate about names is the declared `NewTool` name. That is what
+  duplicate detection is on: two directories that both declare "echo" would
+  collapse to one tool at run time, so codegen refuses before it can happen.
+  Directory-name-is-tool-name (§3) is the authoring convention; the duplicate
+  check is the guard on the real runtime name.
+- **The embed slots are always declared.** A `//go:embed` directive is emitted
+  only for the paths discovery found, but `_instructions`/`_skills`/
+  `_workspace` are always declared, so the accessors and the `embed` import
+  compile whether or not a slot is embedded. A bare `.gitkeep` is never real
+  content, so it does not trigger an embed.
+- **`main.go` falls back to the embedded instructions.** The scaffold's
+  authored `main.go` reads `instructions.md` from disk first (the dev path);
+  a `bonnie build` binary has no such file, so it falls back to
+  `embeddedInstructions()`. That is what makes the build output serve with
+  no agent tree beside it.
+- **A bad save never takes the child down.** A change that does not build is
+  reported and the loop keeps the running child serving. Only the initial
+  build failure, or a non-build error, stops `dev`.
+- **`go.mod` promotes `fsnotify`, adds nothing.** `fsnotify` was already in
+  the graph as a transitive dependency; it is now a direct import. No new
+  `go.sum` entry.
 
 ### Acceptance criteria
 
-- [ ] Codegen twice over the same tree is byte-identical
-- [ ] A duplicate tool name fails with both paths named
-- [ ] Generated imports match the allowlist (guard test greps the file)
-- [ ] Authored files are never rewritten; deleting `bonnie_gen.go` and
+- [x] Codegen twice over the same tree is byte-identical
+      (`TestCodegenIsIdempotent`)
+- [x] A duplicate tool name fails with both paths named
+      (`TestCodegenRejectsDuplicateToolName`)
+- [x] Generated imports match the allowlist (guard test greps the file;
+      `TestGeneratedImportsMatchAllowlist`, plus the boundary job)
+- [x] Authored files are never rewritten; deleting `bonnie_gen.go` and
       regenerating restores an equivalent build
-- [ ] **The dev-restart test:** a run parks in the child, `dev` restarts,
-      a respond in the new child completes it — crosses a process boundary
-      in spirit (invariant 4)
-- [ ] `bonnie build` output serves a full run on a host with no Go and no
+      (`TestGeneratorRewritesOnlyGeneratedFile`, `TestGeneratedFileCompiles`)
+- [x] **The dev-restart test:** a run parks in the child, `dev` restarts, a
+      respond in the new child completes it — crosses a process boundary in
+      spirit (`TestDevRestartCompletesParkedRun`)
+- [x] `bonnie build` output serves a full run on a host with no Go and no
       BONNIE install, with instructions served from the embedded copy
-- [ ] `--dry-run` prints files found, tools generated, embed set
+      (`TestBuildOutputServesEmbeddedInstructions`)
+- [x] `--dry-run` prints files found, tools generated, embed set
+      (`TestRunBuildDryRun`, `TestPlanStringNamesDiscovery`)
 
 ### Watch for
 
-`go:embed` patterns are relative to the generated file's package and cannot
-climb with `..`. The scaffold is flat for this reason — do not move authored
-files under a nested directory without moving the generator with them. And
-keep `runtime/` free of L2 imports: the generator is an L4 tool that emits
-L0/L1 calls, not a library the runtime links.
-
-Since T-017, `init --tools` writes a `bonnie_gen.go` stub defining
-`discoveredTools()` (guarded by `TestScaffoldToolsModuleBuilds`). The
-generator replaces exactly that file — same symbol, same package — so the
-authored `main.go` never changes; do not invent a second entry point.
+- **The hermetic build/dev tests skip without a kit checkout.** They build a
+  real child binary through a temp `go.work`, so like
+  `TestScaffoldToolsModuleBuilds` they need the upstream `kit` checkout beside
+  the repo. CI green does not mean they ran unless that checkout exists.
+- **`go:embed` patterns cannot climb** with `..`. The generated file is at the
+  module root and embeds `instructions.md`, `skills`, and `workspace` relative
+  to it. Do not move authored files under a nested directory without moving
+  the generator with them.
+- `runtime/` stays free of L2 imports — the generator is an L4 tool that
+  emits L0/L1 calls. It lives in `agent/`, not `runtime/`.
 
 ---
 

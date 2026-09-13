@@ -4,6 +4,7 @@ go 1.27.0
 
 require (
 	github.com/charmbracelet/fang v1.0.0
+	github.com/fsnotify/fsnotify v1.10.1
 	github.com/mark3labs/kit v0.106.0
 	github.com/spf13/cobra v1.10.2
 )
@@ -51,7 +52,6 @@ require (
 	github.com/clipperhouse/displaywidth v0.11.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect
-	github.com/fsnotify/fsnotify v1.10.1 // indirect
 	github.com/go-logfmt/logfmt v0.6.1 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect

@@ -1,8 +1,9 @@
 # Handover
 
 **For:** the next agent or developer to work on BONNIE
-**State:** two increments past `v0.1.0` — T-017 (L2 core) and T-020 (chat
-channels) shipped; T-018 is next
+**State:** three increments past `v0.1.0` — T-017 (L2 core), T-020 (chat
+channels), and T-018 (L2 codegen, `bonnie dev`, `bonnie build`) shipped;
+T-019 (evals) is next
 **Read first:** this file, then `docs/SPEC.md`, then `AGENTS.md`
 
 ---
@@ -36,11 +37,11 @@ master @ 26d5c1c  →  github.com/mark3labs/bonnie
 
 **Not done:** nothing blocking. `v0.1.0` is tagged, published, and artifact-
 verified. T-009 resolved itself — Kit `v0.106.0` answered all four upstream
-asks, and BONNIE adopted the seams the same day. Two task increments shipped
-after the release: T-017 (the zero-Go authoring path) and T-020 (the chat
-channels), so the numbers above are past `v0.1.0`. CI is green; the one flake
-it ever showed was a test-side keep-alive shutdown race (`f15a3c8`), not a
-product bug.
+asks, and BONNIE adopted the seams the same day. Three task increments shipped
+after the release: T-017 (the zero-Go authoring path), T-020 (the chat
+channels), and T-018 (codegen, `bonnie dev`, `bonnie build`), so the numbers
+above are past `v0.1.0`. CI is green; the one flake it ever showed was a
+test-side keep-alive shutdown race (`f15a3c8`), not a product bug.
 
 ## 3. Start here
 
@@ -60,9 +61,10 @@ go test -race -tags integration ./runtime ./sandbox
 ```
 
 `docs/TASKS.md` has the open work at the top, shipped work archived at the
-bottom. Highest value first: **T-018** — L2 codegen, which continues the
-program in [`docs/L2.md`](L2.md) that T-017 started. The chat channels are
-T-020, shipped; their live-platform runs are unverified (no credentials
+bottom. Highest value first: **T-019** — evals against the discovered agent,
+which continues the program in [`docs/L2.md`](L2.md). T-018 (codegen,
+`bonnie dev`, `bonnie build`) is shipped; the chat channels are T-020,
+shipped, and their live-platform runs are unverified (no credentials
 here), so a first real deployment is worth treating as verification. T-013
 (macOS) is deferred — no hardware.
 
@@ -221,13 +223,8 @@ A backend that cannot run on the test machine must **skip**, not fail.
 
 ## 8. What I would do next, in order
 
-1. **T-018 — L2 codegen.** Tool discovery, `bonnie dev`, `bonnie build`.
-   The contract it must honour is already live: `init --tools` writes a
-   disposable `bonnie_gen.go` stub defining `discoveredTools()`, and the
-   authored `main.go` calls it — the generator replaces exactly that file.
-   Spec: [`docs/L2.md`](L2.md) §5, §6.
-2. **T-019 — evals.** Spec it before coding it; it needs the L2 tree as
-   its subject, which T-018 completes.
+1. **T-019 — evals.** Spec it before coding it; it needs the L2 tree as
+   its subject, which T-018 completes. Highest value, still open.
 
 Then, in no fixed order, the growth that is not a task yet:
 
