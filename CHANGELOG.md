@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Nothing yet. The next release starts here.
+
+## [0.2.0] — 2026-09-13
+
+The L2 increment: an agent is a tree, not a hand-wired library. `bonnie init`
+scaffolds one; `bonnie serve --agent` serves it with no compile; `bonnie dev`
+hot-reloads it; `bonnie build` graduates it into one static binary. The chat
+channels move durable runs into Slack, Discord, and Telegram, and every
+scaffold is now a Go module that builds against the public modules.
+
+### Added
+
 - Chat channels: Slack, Discord, and Telegram adapters (`channel/slack`,
   `channel/discord`, `channel/telegram`), zero new dependencies. Each
   mounts one verified webhook — Slack's v0 HMAC with a replay window,
@@ -39,13 +51,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - L2 discovery, first increment (`T-017`): the agent tree is discovered
   from a manifest. `bonnie init` scaffolds a tree — `agent.yaml`,
   `instructions.md`, and the `skills/` and `workspace/` seed directories —
-  with no Go module by default; `--tools` adds a module with a sample tool.
-  `bonnie serve --agent DIR` serves a discovered tree with no build and no
-  toolchain: instructions from disk, model, sandbox, and channel bindings
-  from the manifest. Flags override the manifest, and the startup banner
-  names the source that won. Files under the manifest's `workspace:` are
-  mirrored into every run's sandbox on every backend, and a file the model
-  already wrote is never overwritten.
+  as a Go module with a `main.go` that defines the default agent;
+  `--tools` adds a sample tool. `bonnie serve --agent DIR` serves a
+  discovered tree with no build and no toolchain: instructions from disk,
+  model, sandbox, and channel bindings from the manifest. Flags override
+  the manifest, and the startup banner names the source that won. Files under
+  the manifest's `workspace:` are mirrored into every run's sandbox on every
+  backend, and a file the model already wrote is never overwritten.
+- Always a Go module (`Option A`, this release): `bonnie init` no longer
+  offers a zero-Go fork. Every scaffold builds out of the box — the authored
+  `main.go` reads the manifest for the model, address, and instructions and
+  wires the default agent, so `go run .`, `bonnie dev`, and `bonnie build`
+  converge on it. `--tools` only adds a sample tool directory; the modules
+  are public, so `go mod tidy` resolves them from the proxy.
 - The manifest loader (`agent/`) is strict on one code path for `agent.yaml`,
   `agent.toml`, and `agent.json`: an unknown key, an unknown `apiVersion`,
   or two manifests in one root is an error naming what is wrong. `mcp` and
@@ -177,4 +195,5 @@ gets deployed into situations it cannot handle.
 
 ---
 
+[0.2.0]: https://github.com/mark3labs/bonnie/releases/tag/v0.2.0
 [0.1.0]: https://github.com/mark3labs/bonnie/releases/tag/v0.1.0
