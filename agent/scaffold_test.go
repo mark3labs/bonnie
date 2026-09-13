@@ -121,13 +121,18 @@ func TestScaffoldToolsModule(t *testing.T) {
 		t.Fatalf("go.mod is not the expected scaffold: %s", mod)
 	}
 
-	// The generated wiring stub calls the sample tool by the module path.
+	// The generated wiring stub is the disposable placeholder; the generator
+	// rewrites it from tools/ on the next build. It carries the banner but,
+	// alone, discovers no tools — the sample tool is wired by codegen.
 	gen, err := os.ReadFile(filepath.Join(dir, "bonnie_gen.go"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(gen), "my-agent/tools/echo") || !strings.Contains(string(gen), "DO NOT EDIT") {
+	if !strings.Contains(string(gen), "DO NOT EDIT") {
 		t.Fatalf("bonnie_gen.go is not the expected stub: %s", gen)
+	}
+	if !strings.Contains(string(gen), "func discoveredTools() []kit.Tool { return nil }") {
+		t.Fatalf("the stub should discover no tools until codegen runs: %s", gen)
 	}
 
 	// The scaffold carries its own .gitignore? No — it does not. Assert the

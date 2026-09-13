@@ -269,16 +269,28 @@ sandbox:
 	}
 }
 
-// TestServeAgentRoundTrip is the zero-Go claim, end to end and hermetically:
-// scaffold a tree, serve it, and move a run over HTTP. No model credential
-// is configured, so the run starts and fails at the model call — which is
-// the part the runtime's own live integration covers. What this test proves
-// is the path: manifest, instructions, journal, runner, channel, routes.
+// TestServeAgentRoundTrip is serve --agent's claim, end to end and
+// hermetically: a data-only tree (manifest + instructions, no Go module) is
+// served, and a run moves over HTTP. Every scaffold is a Go module now, so
+// the data-only tree is built by hand — it is the shape serve --agent exists
+// to serve, the one with no code to compile. No model credential is
+// configured, so the run starts and fails at the model call — which is the
+// part the runtime's own live integration covers. What this test proves is
+// the path: manifest, instructions, journal, runner, channel, routes.
 func TestServeAgentRoundTrip(t *testing.T) {
 	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "my-agent")
-	if _, err := agent.Scaffold(dir, agent.InitOptions{}); err != nil {
-		t.Fatalf("Scaffold: %v", err)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "agent.yaml"), []byte(`apiVersion: bonnie.dev/v0alpha
+title: my-agent
+instructions: instructions.md
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "instructions.md"), []byte("You are my-agent."), 0o644); err != nil {
+		t.Fatal(err)
 	}
 	journal := filepath.Join(t.TempDir(), "j")
 	// The scaffold names no model, and a model without a credential retries

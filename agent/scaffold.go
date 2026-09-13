@@ -27,9 +27,10 @@ type InitOptions struct {
 	// line is left as a comment and the host default applies.
 	Model string
 
-	// Tools adds the Go module: go.mod, a main.go that serves the tree,
-	// one sample tool, and the generated wiring stub. The zero-Go path is
-	// the default and stays the default.
+	// Tools adds a sample Go tool to the module: tools/echo/tool.go. The Go
+	// module itself (go.mod, main.go, bonnie_gen.go) is always scaffolded,
+	// so a fresh tree builds out of the box; --tools only adds a real tool
+	// to a tree that would otherwise ship with none.
 	Tools bool
 }
 
@@ -46,10 +47,10 @@ type scaffoldFile struct {
 // first; if any exists, Scaffold refuses naming all of them and changes
 // nothing. Refusing is what makes `bonnie init .` safe to run twice.
 //
-// The zero-Go scaffold is the manifest, instructions.md, and two
-// directories. With Tools, it is a Go module whose `go build ./...` passes:
-// main.go is the user's own wiring, and the generated wiring it calls is the
-// one file BONNIE owns (and regenerates).
+// Every tree is a Go module. The manifest and instructions.md carry the data;
+// main.go is the authored entry that reads them and wires the default agent;
+// bonnie_gen.go is the wiring BONNIE owns (and regenerates). `go build ./...`
+// passes on the fresh scaffold. --tools adds a sample tool to tools/.
 func Scaffold(dir string, opts InitOptions) ([]string, error) {
 	if opts.Format == "" {
 		opts.Format = "yaml"
@@ -68,18 +69,18 @@ func Scaffold(dir string, opts InitOptions) ([]string, error) {
 		return nil, err
 	}
 
+	module := moduleName(opts.Title)
 	files := []scaffoldFile{
 		{path: manifest.name, content: manifest.body, mode: 0o644},
 		{path: "instructions.md", content: instructionsTemplate(opts.Title), mode: 0o644},
+		{path: "go.mod", content: goModTemplate(module), mode: 0o644},
+		{path: "main.go", content: mainTemplate(), mode: 0o644},
+		{path: "bonnie_gen.go", content: genTemplate(), mode: 0o644},
 		{path: filepath.Join("skills", gitkeep), content: "", mode: 0o644},
 		{path: filepath.Join("workspace", gitkeep), content: "", mode: 0o644},
 	}
 	if opts.Tools {
-		module := moduleName(opts.Title)
 		files = append(files,
-			scaffoldFile{path: "go.mod", content: goModTemplate(module), mode: 0o644},
-			scaffoldFile{path: "main.go", content: mainTemplate(module), mode: 0o644},
-			scaffoldFile{path: "bonnie_gen.go", content: genTemplate(module), mode: 0o644},
 			scaffoldFile{path: filepath.Join("tools", "echo", "tool.go"), content: toolTemplate(), mode: 0o644},
 		)
 	}
@@ -249,7 +250,8 @@ func instructionsTemplate(title string) string {
 
 Keep answers short and concrete. Say when you do not know something instead
 of guessing. This file is your system prompt: edit it to make the agent
-yours, and `+"`bonnie serve --agent .`"+` picks the change up on the next run.
+yours. `+"`go run .`"+` picks the change up live, and `+"`bonnie build`"+` ships it
+in the binary.
 `, title)
 }
 
@@ -261,14 +263,17 @@ go 1.27.0
 }
 
 // mainTemplate renders the user's own serving binary. It is authored —
-// BONNIE never rewrites it — and calls the one generated symbol,
-// discoveredTools, for the tree's tools.
-func mainTemplate(module string) string {
-	return fmt.Sprintf(`// Command %[1]s serves the agent defined by this tree.
+// BONNIE never rewrites it. It reads the manifest for the data (model,
+// address, instructions path) and calls the two generated symbols,
+// discoveredTools and embeddedManifest, for the tree's tools and its
+// embedded data. This is the default agent: edit it to wire a sandbox or
+// the chat channels.
+func mainTemplate() string {
+	return `// Command serves the agent defined by this tree.
 //
-// This file is yours. It wires the journal, the runner, and the HTTP channel
-// by hand; extend it as you like. The one piece BONNIE owns is
-// bonnie_gen.go, which supplies the tree's tools.
+// This file is yours. It wires the journal, the runner, and the HTTP channel;
+// extend it as you like. The pieces BONNIE owns are in bonnie_gen.go — the
+// tree's tools and the data a bonnie build embeds.
 package main
 
 import (
@@ -283,15 +288,21 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mark3labs/bonnie/agent"
 	bonniehttp "github.com/mark3labs/bonnie/channel/http"
 	"github.com/mark3labs/bonnie/runtime"
 	kit "github.com/mark3labs/kit/pkg/kit"
 )
 
 func main() {
-	addr := flag.String("addr", ":8080", "address to listen on")
-	model := flag.String("model", "", "model to use, for example anthropic/claude-sonnet-4-5")
+	addr := flag.String("addr", "", "address to listen on (overrides the manifest)")
+	model := flag.String("model", "", "model to use (overrides the manifest)")
 	flag.Parse()
+
+	// The manifest is the data file. It is read from disk while the agent
+	// runs from its tree; a bonnie build binary has no manifest on the
+	// host, so it falls back to the copy its generator embedded.
+	m := loadManifest()
 
 	journal, err := runtime.OpenFileJournal(".bonnie")
 	if err != nil {
@@ -302,17 +313,11 @@ func main() {
 	var opts []kit.Option
 	if *model != "" {
 		opts = append(opts, kit.WithModel(*model))
+	} else if mm := manifestModel(m); mm != "" {
+		opts = append(opts, kit.WithModel(mm))
 	}
-	// The instructions file is the agent's system prompt, read fresh each
-	// start — the same behaviour as bonnie serve --agent. A bonnie build
-	// binary has no instructions.md on the host, so it falls back to the
-	// copy its generator embedded.
-	if b, err := os.ReadFile("instructions.md"); err == nil {
-		opts = append(opts, kit.WithSystemPrompt(string(b)))
-	} else if !os.IsNotExist(err) {
-		log.Fatal(err)
-	} else if inst := embeddedInstructions(); inst != "" {
-		opts = append(opts, kit.WithSystemPrompt(inst))
+	if prompt := instructions(m); prompt != "" {
+		opts = append(opts, kit.WithSystemPrompt(prompt))
 	}
 
 	// Tools run as this process. To isolate them, swap the factory:
@@ -325,8 +330,13 @@ func main() {
 	runner := runtime.NewRunner(journal, runtime.KitAgent(opts...))
 	channel := bonniehttp.New(runner)
 
+	listen := *addr
+	if listen == "" {
+		listen = manifestAddr(m)
+	}
+
 	srv := &http.Server{
-		Addr:              *addr,
+		Addr:              listen,
 		Handler:           channel.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
@@ -336,7 +346,7 @@ func main() {
 
 	errs := make(chan error, 1)
 	go func() {
-		fmt.Fprintf(os.Stderr, "%[1]s: serving on %%s\n", *addr)
+		fmt.Fprintf(os.Stderr, "serving on %s\n", listen)
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errs <- err
 			return
@@ -358,15 +368,55 @@ func main() {
 		log.Fatal(err)
 	}
 }
-`, module)
+
+// loadManifest reads the agent manifest: from disk while running from the
+// tree, else from the embedded copy a bonnie build shipped. The embedded
+// copy keeps the model and address working on a host with no tree beside it.
+func loadManifest() *agent.Manifest {
+	if m, _, err := agent.Load("."); err == nil {
+		return m
+	}
+	return embeddedManifest()
+}
+
+// manifestModel is the model the manifest names, tolerating no manifest.
+func manifestModel(m *agent.Manifest) string {
+	if m == nil {
+		return ""
+	}
+	return m.Model
+}
+
+// manifestAddr is the HTTP channel the manifest names, else the default.
+func manifestAddr(m *agent.Manifest) string {
+	if m != nil && m.Channels != nil && m.Channels.HTTP != nil && m.Channels.HTTP.Addr != "" {
+		return m.Channels.HTTP.Addr
+	}
+	return ":8080"
+}
+
+// instructions is the system prompt: the manifest's instructions file read
+// fresh from disk, else the embedded copy a bonnie build shipped.
+func instructions(m *agent.Manifest) string {
+	path := "instructions.md"
+	if m != nil && m.Instructions != "" {
+		path = m.Instructions
+	}
+	if b, err := os.ReadFile(path); err == nil {
+		return string(b)
+	}
+	return embeddedInstructions()
+}
+`
 }
 
 // genTemplate renders the disposable generated-wiring stub. The generator
-// that lands with codegen rewrites exactly this file from tools/, replacing it
-// with the real discoveredTools and the embedded instructions, skills, and
-// workspace a `bonnie build` ships in the binary.
-func genTemplate(module string) string {
-	return fmt.Sprintf(`// Code generated as part of the scaffold; DO NOT EDIT.
+// rewrites exactly this file from tools/ on the next build or dev run,
+// replacing it with the real discoveredTools and the embedded instructions,
+// manifest, skills, and workspace a `bonnie build` ships in the binary. The
+// stub defines the same symbols empty so the fresh scaffold compiles.
+func genTemplate() string {
+	return `// Code generated as part of the scaffold; DO NOT EDIT.
 //
 // bonnie_gen.go is disposable: delete it and regenerate with bonnie build
 // or bonnie dev. Everything else in this tree is authored and BONNIE never
@@ -376,8 +426,7 @@ package main
 import (
 	"embed"
 
-	echo "%[1]s/tools/echo"
-
+	"github.com/mark3labs/bonnie/agent"
 	kit "github.com/mark3labs/kit/pkg/kit"
 )
 
@@ -385,19 +434,14 @@ var (
 	_instructions string
 	_skills        embed.FS
 	_workspace     embed.FS
+	_manifest      []byte
 )
 
-// discoveredTools is the wiring point for the tree's tools. The generator
-// rewrites this function from tools/<name>/tool.go — each directory exports
-// func Tool() kit.Tool, and the directory name is the tool's name.
-func discoveredTools() []kit.Tool {
-	return []kit.Tool{
-		echo.Tool(),
-	}
-}
+// discoveredTools returns the tree's tools. The scaffold defines it empty;
+// the generator rewrites it from tools/<name>/tool.go on the next build.
+func discoveredTools() []kit.Tool { return nil }
 
-// embeddedInstructions is supplied by the code generator on build; the stub
-// leaves it empty until a build embeds the real instructions.
+// embeddedInstructions is supplied by the generator on build.
 func embeddedInstructions() string { return _instructions }
 
 // embeddedSkills is the tree's skills directory, embedded at build time.
@@ -406,7 +450,10 @@ func embeddedSkills() embed.FS { return _skills }
 // embeddedWorkspace is the tree's workspace seed directory, embedded at
 // build time.
 func embeddedWorkspace() embed.FS { return _workspace }
-`, module)
+
+// embeddedManifest is the manifest a bonnie build embedded, parsed.
+func embeddedManifest() *agent.Manifest { return nil }
+`
 }
 
 // toolTemplate renders the sample tool. The directory name is the tool name

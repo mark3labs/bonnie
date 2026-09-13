@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -24,20 +23,21 @@ func newInitCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "init [dir]",
 		Short: "Scaffold an agent tree",
-		Long: `Scaffold an agent tree: a manifest, an instructions file, and the
-seed directories. The default scaffold needs no Go at all — edit
-instructions.md, set a model, and serve.
+		Long: `Scaffold an agent tree: a manifest, an instructions file, a Go
+module, and a main.go that defines the default agent. The freshly scaffolded
+tree is a Go project that builds out of the box.
 
   bonnie init my-agent       a new tree
   bonnie init .              adopt this directory — init never overwrites
 
-With --tools the tree gains a Go module, a sample tool, and a main.go that
-serves it. The mark3labs modules are public, so run go mod tidy from the
-tree and it resolves them from the proxy; no go.work or private access is
-needed.
+  cd my-agent
+  go mod tidy                fetch bonnie and kit from the public proxy
+  go run .                   serve the default agent over HTTP
+  bonnie build               compile it into one static binary
 
-The model goes into the manifest with --model, so the first serve already
-knows what to call.`,
+--tools adds a sample Go tool (tools/echo) so there is something wired by
+codegen to see. The mark3labs modules are public; no go.work or private access
+is needed. The model goes into the manifest with --model.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			dir := "."
@@ -61,16 +61,14 @@ knows what to call.`,
 			_, _ = fmt.Fprintf(os.Stdout, `
 Next:
   edit instructions.md      make the agent yours
-  bonnie serve --agent %s   serve it over HTTP
-`, dir)
+  go mod tidy              fetch bonnie and kit from the public proxy
+  go run .                 serve the default agent
+  bonnie build             compile it into one static binary
+`)
 			if o.tools {
 				_, _ = fmt.Fprint(os.Stdout, `
-The tree is a Go module. The mark3labs modules are public, so run go mod tidy
-from the tree and it resolves them from the proxy. Then:
-
-  go mod tidy              fetch bonnie and kit from the proxy
-  go build ./...           the fresh scaffold compiles
-  ./`+scaffoldName(dir)+`                  serves on :8080
+A sample tool lives in tools/echo. bonnie build wires it from codegen; replace
+it with tools of your own.
 `)
 			}
 			return nil
@@ -80,18 +78,6 @@ from the tree and it resolves them from the proxy. Then:
 	f.StringVar(&o.format, "format", "yaml", "manifest format: yaml, toml, or json")
 	f.StringVar(&o.title, "title", "", "agent title (default: the directory's name)")
 	f.StringVar(&o.model, "model", "", "model to write into the manifest, for example anthropic/claude-sonnet-4-5")
-	f.BoolVar(&o.tools, "tools", false, "add a Go module with one sample tool")
+	f.BoolVar(&o.tools, "tools", false, "add a sample Go tool to the module")
 	return cmd
-}
-
-// scaffoldName is the directory name for the printed run line. For "init ."
-// the current directory's base name is used.
-func scaffoldName(dir string) string {
-	name := filepath.Base(dir)
-	if name == "." {
-		if wd, err := os.Getwd(); err == nil {
-			name = filepath.Base(wd)
-		}
-	}
-	return name
 }

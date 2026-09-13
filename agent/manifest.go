@@ -241,6 +241,14 @@ func LoadFile(path string) (*Manifest, error) {
 	return parse(path, data)
 }
 
+// ParseManifestData parses manifest bytes as if they were the file named
+// filename. The format comes from the extension, exactly as [LoadFile] — so
+// a generated binary can parse an embedded manifest that is not on disk. It
+// performs the same strict validation.
+func ParseManifestData(filename string, data []byte) (*Manifest, error) {
+	return parse(filename, data)
+}
+
 // parse decodes and validates a manifest. It is the single entry point for
 // every format, so the strictness below runs exactly once.
 func parse(path string, data []byte) (*Manifest, error) {
