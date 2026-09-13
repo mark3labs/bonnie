@@ -99,11 +99,12 @@ changing anything in `runtime/`. Full detail with citations in `docs/SPEC.md` §
 ## Terminal rendering
 Kit renders the agent's terminal UI. BONNIE's framework packages ship no TUI
 today; the CLI owns one interactive surface, `bonnie dev` / `bonnie chat`
-(`cmd/bonnie/tui`, charm's bubbletea/bubbles/lipgloss v2), and styles its own
-help and errors with fang. The layered framework packages stay terminal-free; a
-host that wants an off-screen conversation uses the HTTP channel. The hard
-boundary is the public-Kit-SDK rule above, and it extends here: the TUI talks
-to the wire the channel exposes, never to Kit internals.
+(`cmd/bonnie/tui`, charm's bubbletea/bubbles/lipgloss v2, with herald-md for
+assistant markdown — the same libraries upstream Kit's TUI uses), and styles its
+own help and errors with fang. The layered framework packages stay
+terminal-free; a host that wants an off-screen conversation uses the HTTP
+channel. The hard boundary is the public-Kit-SDK rule above, and it extends
+here: the TUI talks to the wire the channel exposes, never to Kit internals.
 
 ## Local development
 BONNIE and Kit are separate repos. Use a `go.work` in the PARENT directory:

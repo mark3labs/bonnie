@@ -37,7 +37,8 @@ const (
 )
 
 // entry is one line of the transcript. An assistant entry may be "open" while
-// it is still streaming; the view shows it dimmed until the turn closes it.
+// it is still streaming; the view renders it live while open and from the
+// markdown cache once closed.
 type entry struct {
 	kind       entryKind
 	text       string
@@ -46,6 +47,12 @@ type entry struct {
 	toolResult string
 	toolDone   bool
 	toolError  bool
+
+	// rendered caches the markdown render of a closed assistant entry, keyed
+	// by the width it was rendered at. The open streaming entry re-renders
+	// every frame instead, because its text is still growing.
+	rendered      string
+	renderedWidth int
 }
 
 type status int
@@ -610,6 +617,9 @@ func (m *Model) finishAssistant(text string) {
 			last.streamed = false
 			if text != "" {
 				last.text = text
+				// The text changed, so a cached render of the streamed
+				// draft no longer describes this entry.
+				last.rendered = ""
 			}
 			return
 		}
@@ -712,6 +722,26 @@ func (m *Model) renderPrefix() string {
 	return b.String()
 }
 
+// assistantText renders one assistant entry as markdown. The open streaming
+// entry re-renders on every frame — its text is still growing, so any cache
+// would go stale on the next chunk. A closed entry renders once per
+// text-and-width and caches the result on the entry, because transcript()
+// rebuilds the whole transcript every frame and herald parsing must not run
+// per frame for a transcript that no longer changes.
+func (m *Model) assistantText(i int) string {
+	e := &m.entries[i]
+	w := m.textWidth()
+	if e.streamed {
+		return renderMarkdown(e.text, w)
+	}
+	if e.rendered == "" || e.renderedWidth != w {
+		e.rendered = renderMarkdown(e.text, w)
+		e.renderedWidth = w
+		m.entries[i] = *e
+	}
+	return e.rendered
+}
+
 // statusLine renders the current mode and activity.
 func (m *Model) statusLine() string {
 	left := styles.status.Render(m.label)
@@ -725,11 +755,13 @@ func (m *Model) statusLine() string {
 	return left + " " + right
 }
 
-// transcript renders every entry, styled by kind. Open (streamed) entries are
-// rendered with an activity marker.
+// transcript renders every entry, styled by kind. Assistant entries render
+// as markdown; the open streaming entry re-renders per frame, closed entries
+// come from a per-width cache. See [Model.assistantText].
 func (m *Model) transcript() string {
 	var b strings.Builder
-	for i, e := range m.entries {
+	for i := range m.entries {
+		e := m.entries[i]
 		if i > 0 {
 			b.WriteString("\n")
 		}
@@ -737,11 +769,7 @@ func (m *Model) transcript() string {
 		case kindUser:
 			b.WriteString(styles.user.Render("❯ " + e.text))
 		case kindAssistant:
-			if e.streamed {
-				b.WriteString(styles.assistantStream.Render(e.text))
-			} else {
-				b.WriteString(styles.assistant.Render(e.text))
-			}
+			b.WriteString(m.assistantText(i))
 		case kindQuestion:
 			b.WriteString(styles.question.Render("◇ " + e.text))
 		case kindTool:

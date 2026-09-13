@@ -31,7 +31,7 @@ the known risks, and the invariants every task must preserve.
 
 | ID | Delivered | Where |
 |---|---|---|
-| T-021 | Built-in terminal TUI: `bonnie dev` opens a scrollback chat; `bonnie chat` connects to an HTTP channel; cursor reconnect and cancel | `cmd/bonnie/tui/`, `cmd/bonnie/chat.go`, `cmd/bonnie/dev.go` |
+| T-021 | Built-in terminal TUI: `bonnie dev` opens a scrollback chat; `bonnie chat` connects to an HTTP channel; cursor reconnect and cancel; assistant messages render as markdown through herald-md (Kit's typography patterns) | `cmd/bonnie/tui/`, `cmd/bonnie/chat.go`, `cmd/bonnie/dev.go` |
 | T-018 | L2 codegen: tool discovery (`agent/gen`), `bonnie dev` (fsnotify loop), `bonnie build` (go:embed + static binary), `--dry-run`; import allowlist; duplicate-name refusal; idempotent codegen | `agent/generate.go`, `agent/generate_test.go`, `cmd/bonnie/build.go`, `cmd/bonnie/dev.go`, `cmd/bonnie/l2_test.go` |
 | T-020 | Chat channels: Slack, Discord, Telegram adapters with verified webhooks, dispatch (a reply to a parked run resumes it), threaded delivery; `channel/chat` shared plumbing; the manifest's `channels:` keys with env-only credentials | `channel/slack/`, `channel/discord/`, `channel/telegram/`, `channel/chat/`, `cmd/bonnie/serve.go`, `docs/CHANNELS.md` |
 | T-017 | L2 core: the strict manifest loader (`agent/`), `bonnie init` (always a Go module; `--tools` adds a sample tool — the zero-Go fork was replaced in `v0.2.0`), `serve --agent` with flag-over-manifest precedence and source-annotated banner, the go-tree refusal, workspace seeding | `agent/manifest.go`, `agent/scaffold.go`, `cmd/bonnie/init.go`, `cmd/bonnie/serve.go`, `sandbox/seed.go` |
@@ -706,6 +706,17 @@ is what deletes that gap.
    its own child. The child binds a free port (or `--addr`); the TUI connects
    to the real bound address, so a hot reload restarts the child and the run
    survives in the journal.
+4. **Assistant markdown (added after the release).** Assistant entries render
+   as markdown through `herald-md` (`cmd/bonnie/tui/markdown.go`), matching
+   upstream Kit's own TUI, which uses the same pair of libraries. The patterns
+   are Kit's: one cached `herald.Typography` (construction is expensive and
+   must never run per frame), a palette plus per-element overrides instead of
+   a `herald.Theme` literal (a literal zeroes the glyph fields), no paragraph
+   margin, and `lipgloss.Wrap` because herald wraps nothing. The old
+   `MaxWidth(100)` style truncated every assistant line past 100 cells —
+   wrapping is the fix, verified live. User messages stay unrendered: typed
+   text is not markdown. No syntax highlighting yet — that is a chroma
+   dependency, pluggable later via `WithCodeFormatter`.
 
 ### Decisions, and why
 
