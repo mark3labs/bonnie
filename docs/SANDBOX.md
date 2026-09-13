@@ -263,6 +263,22 @@ The live tests cover the claims that matter:
 - **Network is open by default.** Set a policy explicitly for untrusted work.
 - **No resource limits by default.** Pass `WithDockerMemory` or the
   microsandbox equivalents.
+- **The workspace is not a volume, deliberately.** Docker sandboxes keep
+  their files in the container's writable layer (`docker run --detach`),
+  microsandbox sandboxes in the rootfs `msb` manages, and `Local` in a host
+  directory. Durability comes from reattach, not from a volume: `Stop` is
+  `docker stop`, and the next `Open` starts the same container with the
+  same files — verified live. What destroys a workspace is deliberate
+  reclamation (`bonnie sandbox prune`, `docker rm`), `docker system
+  prune`, or a daemon data-root migration — and the journal notes the loss
+  into the conversation rather than handing the model a silent empty
+  directory. A named volume would not change this honestly: `docker volume
+  prune` kills volumes too, a volume is daemon-local (no multi-host gain),
+  and it would double the lifecycle `prune` must reconcile. The durable
+  artifact is the conversation; the workspace is best-effort and
+  re-derivable. If a user's runs hold genuinely expensive state, the right
+  shape is an opt-in `sandbox.persist` manifest key — a candidate task,
+  not a default.
 - **Sandbox lifecycle is journalled.** A sandbox that opens for a run writes
   a record naming the backend and the sandbox, so `bonnie runs show` can say
   what held its compute, a resumed run is told when its workspace was
