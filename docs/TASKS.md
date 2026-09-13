@@ -19,6 +19,7 @@ the known risks, and the invariants every task must preserve.
 
 | ID | Title | Priority | Size | Blocks |
 |---|---|---|---|---|
+| T-022 | TUI transcript replay on reopen | P2 | M | — |
 | T-019 | Evals against a discovered agent | P2 | L | — |
 
 ### Deferred
@@ -757,6 +758,66 @@ is what deletes that gap.
 - Bubble Tea v2 always requests basic Kitty key disambiguation. The original
   typing defect was not Kitty mode: `Model.Init` focused a copied textarea.
   `New` now focuses the textarea stored in the model.
+- **Assistant markdown (T-021 extension, verified live 2026-09-14).**
+  Assistant entries render through `herald-md` (`cmd/bonnie/tui/markdown.go`),
+  with Kit's own patterns: cached `herald.Typography`, palette-plus-overrides
+  theming, no paragraph margin, `lipgloss.Wrap` (herald wraps nothing — and
+  the old `MaxWidth(100)` style **truncated**, losing every assistant line
+  past 100 cells). Verified in tmux against `opencode/kimi-k2.5`: headings,
+  lists, tables, code fences, wrapped prose, live streaming render, and the
+  hot-reload reconnect all render correctly. The same run exposed two things:
+  a fresh `bonnie chat` on an existing address shows an empty transcript —
+  it opens at the served cursor by design, and no wire endpoint returns the
+  past conversation (now T-022) — and a dev child built from a scaffold links
+  the **published** release pinned in the tree's `go.mod`, not the working
+  tree; testing a local change through `bonnie dev` needs the hermetic
+  `go.work` beside the tree that `agent/generate_test.go` already uses.
+
+## T-022 — TUI transcript replay on reopen
+
+**Priority** P2 · **Size** M · **Found by** the T-021 tmux verification
+
+### Why
+
+`bonnie chat`'s help promises that re-opening the TUI with the same `--run`
+address "continues the conversation from the journal". The run does continue —
+the next send appends to the same durable run, verified live — but the
+**transcript does not come back**. `GET /addresses/{address}` returns the run's
+current journal cursor by design (SPEC §4.8.1), the TUI opens its stream
+there, and nothing replays. A developer who closes the terminal reopens to an
+empty screen and no way to see what the agent said before.
+
+The journal holds everything a transcript needs — user messages, assistant
+messages, tool calls, questions — so this is a wire gap, not a data gap.
+
+### Do
+
+1. A read-only wire endpoint that returns the past conversation in wire-event
+   form, e.g. `GET /runs/{id}/transcript`, built from the journal records.
+2. The TUI folds it into `entries` at startup, before the live stream opens.
+   The existing dedupe paths (`finishAssistant`, `commit`) already tolerate a
+   replayed confirmation arriving after the fetched history.
+3. Decide the resume-note rendering: `[bonnie]` notes are user-role records
+   (SPEC §4.10); decide whether they show as status entries or stay invisible.
+
+### Acceptance criteria
+
+- [ ] A reopened TUI shows the full past transcript for the bound run
+- [ ] Live events after reopen dedupe against the fetched history, never
+      double-render
+- [ ] `chat`'s help text is true again: history **and** continuation
+- [ ] A test crosses a process boundary in spirit: run, close, reopen, the
+      transcript is there
+
+### Watch for
+
+Do not reuse the event stream with cursor 0 for this. Journal replay covers
+durable events only — tool calls and live Kit deltas are live-only by design
+(SPEC §4.8), so a cursor-0 stream would render a half transcript (responses
+and questions, no user lines, no tool calls) and look like a fix while it is
+not.
+
+---
 
 ## T-019 — Evals against a discovered agent
 
