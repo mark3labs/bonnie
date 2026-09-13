@@ -24,6 +24,13 @@ type fakeClient struct {
 	streamed    int
 	streamAfter []int
 	cancelled   int
+	lookupRun   string
+	lookupAt    int
+	lookupErr   error
+}
+
+func (f *fakeClient) Lookup(_ context.Context, _ string) (string, int, error) {
+	return f.lookupRun, f.lookupAt, f.lookupErr
 }
 
 func (f *fakeClient) Start(_ context.Context, _ string, _ string) (*runtime.Run, error) {
@@ -267,8 +274,9 @@ func TestModelStreamsToolCalls(t *testing.T) {
 
 	start := kitEventToolCallStart("call-1", "shell")
 	m.apply(runtime.Event{RunID: "run-1", Seq: 1, Type: start[0], Data: []byte(start[1])})
-	if got := m.transcript(); !strings.Contains(got, spinnerFrames[0]+" shell") {
-		t.Fatalf("working tool has no spinner:\n%s", got)
+	if got := m.transcript(); !strings.Contains(got, styles.toolMarker.Render(spinnerFrames[0])) ||
+		!strings.Contains(got, styles.toolName.Render("shell")) {
+		t.Fatalf("working tool has no colored spinner and name:\n%s", got)
 	}
 
 	tc := kitEventToolCall("call-1", "shell", `{"cmd":"ls"}`)
@@ -278,7 +286,10 @@ func TestModelStreamsToolCalls(t *testing.T) {
 	m.apply(runtime.Event{RunID: "run-1", Seq: 1, Type: tr[0], Data: []byte(tr[1])})
 
 	rendered := m.transcript()
-	for _, want := range []string{"✓ shell", `{"cmd":"ls"}`, "→ file.txt file.txt", "…"} {
+	for _, want := range []string{
+		styles.toolMarker.Render("✓"), styles.toolName.Render("shell"),
+		`{"cmd":"ls"}`, "file.txt file.txt", "…",
+	} {
 		if !strings.Contains(rendered, want) {
 			t.Errorf("transcript misses %q:\n%s", want, rendered)
 		}
@@ -295,10 +306,36 @@ func TestToolResultWithoutStartStillRenders(t *testing.T) {
 	m.apply(runtime.Event{RunID: "run-1", Seq: 1, Type: tr[0], Data: []byte(tr[1])})
 
 	got := m.transcript()
-	for _, want := range []string{"✓ read", "→ contents"} {
+	for _, want := range []string{
+		styles.toolMarker.Render("✓"), styles.toolName.Render("read"),
+		styles.toolResultMark.Render("→"), styles.toolResult.Render("contents"),
+	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("standalone result misses %q:\n%s", want, got)
 		}
+	}
+}
+
+func TestToolRenderingUsesDistinctColors(t *testing.T) {
+	t.Parallel()
+	got := renderTool(entry{
+		kind: kindTool, text: `shell({"command":"ls"})`,
+		toolDone: true, toolResult: "agent.yaml",
+	}, 0)
+
+	for _, want := range []string{
+		styles.toolMarker.Render("✓"),
+		styles.toolName.Render("shell"),
+		styles.toolArgs.Render(`({"command":"ls"})`),
+		styles.toolResultMark.Render("→"),
+		styles.toolResult.Render("agent.yaml"),
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("colored tool entry misses %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, styles.reasoning.Render("shell")) {
+		t.Fatalf("tool entry uses the reasoning style:\n%s", got)
 	}
 }
 
@@ -307,6 +344,39 @@ func TestToolResultTruncationIsUnicodeSafe(t *testing.T) {
 	got := resultSnippet(strings.Repeat("界", 100))
 	if !strings.HasSuffix(got, "…") || len([]rune(got)) != 80 {
 		t.Fatalf("resultSnippet = %q (%d runes), want 80 runes ending in ellipsis", got, len([]rune(got)))
+	}
+}
+
+// TestStartupLookupResumesToolStream: a TUI that reopens an existing address
+// resolves its run on init and opens the durable stream, so tool and reasoning
+// events of the next turn are not missed.
+func TestStartupLookupResumesToolStream(t *testing.T) {
+	t.Parallel()
+	f := &fakeClient{lookupRun: "run-9", lookupAt: 4}
+	m := newTestModel(f)
+
+	if f.streamed != 0 {
+		t.Fatalf("stream opened %d times before the lookup finished", f.streamed)
+	}
+	next, cmd := m.Update(lookupMsg{runID: "run-9", cursor: 4})
+	m = next.(Model)
+	if cmd == nil {
+		t.Fatal("lookup produced no stream command")
+	}
+	_ = cmd()
+	if m.runID != "run-9" || m.cursor != 4 {
+		t.Fatalf("run = %q cursor = %d, want run-9 at 4", m.runID, m.cursor)
+	}
+	if f.streamed != 1 || len(f.streamAfter) != 1 || f.streamAfter[0] != 4 {
+		t.Fatalf("stream calls = %d after %v, want one call after 4", f.streamed, f.streamAfter)
+	}
+
+	tc := kitEventToolCall("call-1", "shell", `{"command":"sleep 2"}`)
+	m.apply(runtime.Event{RunID: "run-9", Seq: 5, Type: tc[0], Data: []byte(tc[1])})
+	tr := kitEventToolResult("call-1", "shell", "")
+	m.apply(runtime.Event{RunID: "run-9", Seq: 5, Type: tr[0], Data: []byte(tr[1])})
+	if got := m.transcript(); !strings.Contains(got, styles.toolName.Render("shell")) {
+		t.Fatalf("resumed session misses the tool call:\n%s", got)
 	}
 }
 

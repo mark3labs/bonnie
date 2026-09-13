@@ -127,13 +127,20 @@ func (m *AddressMap) Resolve(ctx context.Context, address string, newID func() s
 // adapter uses it to drop platform events for threads this channel never
 // started — everything in a busy channel is not for the agent.
 func (m *AddressMap) Lookup(address string) (string, bool) {
+	runID, ok, _ := m.LookupContext(context.Background(), address)
+	return runID, ok
+}
+
+// LookupContext returns the run bound to an address without creating one and
+// reports a journal read failure to callers that can surface it.
+func (m *AddressMap) LookupContext(ctx context.Context, address string) (string, bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if err := m.loadLocked(context.Background()); err != nil {
-		return "", false
+	if err := m.loadLocked(ctx); err != nil {
+		return "", false, err
 	}
 	runID, ok := m.byAddr[address]
-	return runID, ok
+	return runID, ok, nil
 }
 
 // Bind points an address at a run, replacing any earlier binding. Use it to

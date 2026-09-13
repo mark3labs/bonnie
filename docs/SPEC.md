@@ -423,6 +423,16 @@ works, a check mark when it completes, and an indented arrow with a one-line,
 Unicode-safe truncated result. Tool call IDs correlate start, parsed-call, and
 result events, so one call does not render as duplicate transcript lines.
 
+**TUI restart.** A second defect had the same symptom: a TUI that reopened an
+existing address learned its run ID only after the first turn, so it opened the
+event stream too late and missed every tool and reasoning event of that turn.
+The channel now exposes `GET /addresses/{address}` — a read-only lookup that
+returns the bound run ID and its current journal cursor, and creates nothing on
+a miss (the From/Attach rule of the HTTP adapter, applied to addresses). The
+TUI resolves the address at startup and opens the stream from the served
+cursor. Guard tests: `TestStartupLookupResumesToolStream`,
+`TestAddressLookupDoesNotCreate`.
+
 ### 4.9 PARTLY RESOLVED — no sandbox, observed in practice
 
 **The `sandbox` package closes this. It is opt-in, so the risk returns for any

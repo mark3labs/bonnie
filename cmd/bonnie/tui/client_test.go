@@ -45,6 +45,9 @@ func TestHTTPClientWire(t *testing.T) {
 		cancelled <- struct{}{}
 		w.WriteHeader(http.StatusNoContent)
 	})
+	mux.HandleFunc("GET /addresses/tui-test", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"run_id": "run-42", "cursor": 3})
+	})
 	mux.HandleFunc("GET /runs/run-42/stream", func(w http.ResponseWriter, r *http.Request) {
 		evs := []runtime.Event{
 			{RunID: "run-42", Seq: 1, Type: runtime.EventState, State: runtime.RunRunning},
@@ -71,6 +74,14 @@ func TestHTTPClientWire(t *testing.T) {
 	started, err := c.Start(ctx, "tui-test", "deploy")
 	if err != nil {
 		t.Fatalf("Start: %v", err)
+	}
+
+	runID, cursor, err := c.Lookup(ctx, "tui-test")
+	if err != nil {
+		t.Fatalf("Lookup: %v", err)
+	}
+	if runID != "run-42" || cursor != 3 {
+		t.Fatalf("Lookup = %q, %d, want run-42 at cursor 3", runID, cursor)
 	}
 	if started.ID != "run-42" || started.State != runtime.RunWaiting {
 		t.Fatalf("Start = %+v, want run-42 waiting", started)

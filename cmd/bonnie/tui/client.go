@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -27,6 +28,10 @@ import (
 // interface so tests can inject a fake and drive a transcript without a
 // network round trip.
 type Client interface {
+	// Lookup returns the run and current journal cursor bound to an address
+	// without creating one.
+	Lookup(ctx context.Context, address string) (string, int, error)
+
 	// Start begins a run for an address, or continues it — the channel
 	// resolves the address to the same run on every call, so a TUI session
 	// is one conversation. The returned run reports the turn's outcome.
@@ -55,6 +60,7 @@ var ErrNotFound = errors.New("bonnie: chat: not found")
 // channel/http JSON, which is the contract the TUI is a client of.
 type runResponse struct {
 	RunID    string                  `json:"run_id"`
+	Cursor   int                     `json:"cursor,omitempty"`
 	State    runtime.RunState        `json:"state"`
 	Response string                  `json:"response,omitempty"`
 	Suspend  *runtime.SuspendRequest `json:"suspend,omitempty"`
@@ -77,6 +83,15 @@ func NewHTTP(base string, hc *http.Client) *HTTP {
 		hc = &http.Client{Timeout: 0}
 	}
 	return &HTTP{base: strings.TrimRight(base, "/"), hc: hc}
+}
+
+// Lookup implements [Client].
+func (c *HTTP) Lookup(ctx context.Context, address string) (string, int, error) {
+	var out runResponse
+	if err := c.get(ctx, "/addresses/"+url.PathEscape(address), &out); err != nil {
+		return "", 0, err
+	}
+	return out.RunID, out.Cursor, nil
 }
 
 // Start implements [Client].
@@ -186,6 +201,14 @@ func (c *HTTP) CloseStreams() {
 	}
 }
 
+func (c *HTTP) get(ctx context.Context, path string, out any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+path, nil)
+	if err != nil {
+		return fmt.Errorf("bonnie: chat: request: %w", err)
+	}
+	return c.do(req, path, out)
+}
+
 func (c *HTTP) post(ctx context.Context, path string, body, out any) error {
 	var b []byte
 	var err error
@@ -200,6 +223,10 @@ func (c *HTTP) post(ctx context.Context, path string, body, out any) error {
 		return fmt.Errorf("bonnie: chat: request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	return c.do(req, path, out)
+}
+
+func (c *HTTP) do(req *http.Request, path string, out any) error {
 	resp, err := c.hc.Do(req)
 	if err != nil {
 		return fmt.Errorf("bonnie: chat: %w", err)

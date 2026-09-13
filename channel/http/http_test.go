@@ -224,6 +224,54 @@ func TestFromResolvesAddress(t *testing.T) {
 	}
 }
 
+// TestAddressLookupDoesNotCreate: the read-only address route reports a
+// bound run and its journal cursor, and a miss is a 404 that creates nothing.
+func TestAddressLookupDoesNotCreate(t *testing.T) {
+	t.Parallel()
+	s := newTestServer(t, &stubAgent{turns: []*kit.TurnResult{{Response: "one"}}})
+
+	_, run := s.post(t, "/runs", StartRequest{Address: "tui-session", Text: "hi"})
+	resp, err := http.Get(s.URL + "/addresses/tui-session")
+	if err != nil {
+		t.Fatalf("GET address: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var got struct {
+		RunID  string `json:"run_id"`
+		Cursor int    `json:"cursor"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.RunID != run.RunID {
+		t.Fatalf("address resolved to %q, want %q", got.RunID, run.RunID)
+	}
+	if got.Cursor == 0 {
+		t.Fatal("cursor = 0, want the run's journal position")
+	}
+
+	miss, err := http.Get(s.URL + "/addresses/never-bound")
+	if err != nil {
+		t.Fatalf("GET miss: %v", err)
+	}
+	defer func() { _ = miss.Body.Close() }()
+	if miss.StatusCode != http.StatusNotFound {
+		t.Fatalf("miss status = %d, want 404", miss.StatusCode)
+	}
+	runs, err := s.runner.Journal().Runs(context.Background(), "")
+	if err != nil {
+		t.Fatalf("Runs: %v", err)
+	}
+	for _, id := range runs {
+		if id == "never-bound" {
+			t.Fatal("the lookup route created a run")
+		}
+	}
+}
+
 // TestAddressMapSurvivesJournalReopen is why the map lives in the journal. A
 // restart that loses it would orphan every thread the agent was in.
 func TestAddressMapSurvivesJournalReopen(t *testing.T) {

@@ -10,6 +10,7 @@ package tui
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"slices"
 	"strings"
 	"time"
@@ -63,6 +64,13 @@ const (
 type runMsg struct {
 	run *runtime.Run
 	err error
+}
+
+// lookupMsg reports whether this address already has a durable run.
+type lookupMsg struct {
+	runID  string
+	cursor int
+	err    error
 }
 
 // streamReadyMsg carries the event stream once it is open.
@@ -161,7 +169,7 @@ func New(client Client, ctx context.Context, address string) Model {
 
 // Init implements tea.Model.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.initCmd, func() tea.Msg { return spinnerMsg{} })
+	return tea.Batch(m.initCmd, func() tea.Msg { return spinnerMsg{} }, m.lookup())
 }
 
 // Update implements tea.Model.
@@ -178,6 +186,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Tick(spinnerRate, func(time.Time) tea.Msg { return spinnerMsg{} })
 		}
 		return m, nil
+
+	case lookupMsg:
+		if msg.err != nil {
+			if errors.Is(msg.err, ErrNotFound) {
+				return m, nil
+			}
+			m.state = statusError
+			m.label = msg.err.Error()
+			m.commitError(msg.err.Error())
+			return m, nil
+		}
+		if msg.runID == "" || m.runID != "" {
+			return m, nil
+		}
+		m.runID = msg.runID
+		m.cursor = msg.cursor
+		return m, m.openStream()
 
 	case streamReadyMsg:
 		if msg.err != nil {
@@ -389,6 +414,13 @@ func (m Model) finishTurn(msg runMsg) (tea.Model, tea.Cmd) {
 		return m, m.openStream()
 	}
 	return m, nil
+}
+
+func (m Model) lookup() tea.Cmd {
+	return func() tea.Msg {
+		runID, cursor, err := m.client.Lookup(m.ctx, m.address)
+		return lookupMsg{runID: runID, cursor: cursor, err: err}
+	}
 }
 
 // openStream subscribes to the run's event stream. The stream is durable: it
@@ -713,19 +745,7 @@ func (m *Model) transcript() string {
 		case kindQuestion:
 			b.WriteString(styles.question.Render("◇ " + e.text))
 		case kindTool:
-			marker := "✓"
-			if e.streamed {
-				marker = spinnerFrames[m.frame%len(spinnerFrames)]
-			}
-			line := marker + " " + e.text
-			if e.toolDone {
-				line += "\n  → " + e.toolResult
-			}
-			if e.toolError {
-				b.WriteString(styles.err.Render(line))
-			} else {
-				b.WriteString(styles.tool.Render(line))
-			}
+			b.WriteString(renderTool(e, m.frame))
 		case kindReasoning:
 			b.WriteString(styles.reasoning.Render(e.text))
 		case kindError:
@@ -738,6 +758,32 @@ func (m *Model) transcript() string {
 }
 
 const footer = "\n" + "ctrl+c quit · ctrl+w cancel · enter send\n"
+
+func renderTool(e entry, frame int) string {
+	marker := "✓"
+	if e.streamed {
+		marker = spinnerFrames[frame%len(spinnerFrames)]
+	}
+	name, args := splitToolLine(e.text)
+	line := styles.toolMarker.Render(marker) + " " + styles.toolName.Render(name)
+	if args != "" {
+		line += styles.toolArgs.Render(args)
+	}
+	if e.toolDone {
+		line += "\n  " + styles.toolResultMark.Render("→") + " " + styles.toolResult.Render(e.toolResult)
+	}
+	if e.toolError {
+		return styles.err.Render(line)
+	}
+	return line
+}
+
+func splitToolLine(line string) (string, string) {
+	if i := strings.IndexByte(line, '('); i >= 0 {
+		return line[:i], line[i:]
+	}
+	return line, ""
+}
 
 // toolLine formats a tool call compactly.
 func toolLine(name, args string) string {

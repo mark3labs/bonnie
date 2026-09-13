@@ -11,6 +11,7 @@
 // # Routes
 //
 //	POST /runs                 start a run, or resolve an address to one
+//	GET  /addresses/{address}  look up an address without creating a run
 //	GET  /runs/{id}            report a run's durable state
 //	POST /runs/{id}            send a message to an existing run
 //	POST /runs/{id}/respond    answer a suspended run
@@ -83,6 +84,7 @@ func (c *Channel) Name() string { return "http" }
 func (c *Channel) Routes() []channel.Route {
 	return []channel.Route{
 		{Method: http.MethodPost, Path: "/runs", Handler: c.handleStart},
+		{Method: http.MethodGet, Path: "/addresses/{address}", Handler: c.handleAddress},
 		{Method: http.MethodGet, Path: "/runs/{id}", Handler: c.handleGet},
 		{Method: http.MethodPost, Path: "/runs/{id}", Handler: c.handleSend},
 		{Method: http.MethodPost, Path: "/runs/{id}/respond", Handler: c.handleRespond},
@@ -163,6 +165,7 @@ type RespondRequest struct {
 // RunResponse is the JSON form of a run at a turn boundary.
 type RunResponse struct {
 	RunID    string                  `json:"run_id"`
+	Cursor   int                     `json:"cursor,omitempty"`
 	State    runtime.RunState        `json:"state"`
 	Response string                  `json:"response,omitempty"`
 	Suspend  *runtime.SuspendRequest `json:"suspend,omitempty"`
@@ -224,6 +227,23 @@ func (c *Channel) handleStart(w http.ResponseWriter, r *http.Request, in channel
 		return
 	}
 	writeJSON(w, http.StatusOK, runResponse(run))
+}
+
+func (c *Channel) handleAddress(w http.ResponseWriter, r *http.Request, _ channel.Inbound) {
+	runID, ok, err := c.core.Addresses().LookupContext(r.Context(), r.PathValue("address"))
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	if !ok {
+		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "address is not bound"})
+		return
+	}
+	cursor := 0
+	if p, ok := c.core.Runner().Journal().(runtime.Positioner); ok {
+		cursor, _ = p.Position(r.Context(), runID)
+	}
+	writeJSON(w, http.StatusOK, RunResponse{RunID: runID, Cursor: cursor})
 }
 
 func (c *Channel) handleGet(w http.ResponseWriter, r *http.Request, in channel.Inbound) {
