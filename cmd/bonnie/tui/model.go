@@ -10,6 +10,7 @@ package tui
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"time"
 
@@ -37,9 +38,13 @@ const (
 // entry is one line of the transcript. An assistant entry may be "open" while
 // it is still streaming; the view shows it dimmed until the turn closes it.
 type entry struct {
-	kind     entryKind
-	text     string
-	streamed bool
+	kind       entryKind
+	text       string
+	streamed   bool
+	toolCallID string
+	toolResult string
+	toolDone   bool
+	toolError  bool
 }
 
 type status int
@@ -485,19 +490,25 @@ func (m *Model) applyKit(ev runtime.Event) {
 		}
 	case string(kit.EventReasoningComplete):
 		m.closeReasoningEntry()
-	case string(kit.EventToolCall), string(kit.EventToolCallStart):
+	case string(kit.EventToolCallStart):
+		var e kit.ToolCallStartEvent
+		if json.Unmarshal(ev.Data, &e) == nil {
+			m.startTool(e.ToolCallID, e.ToolName, "")
+		}
+	case string(kit.EventToolCall):
 		var e kit.ToolCallEvent
 		if json.Unmarshal(ev.Data, &e) == nil {
-			m.commit(kindTool, toolLine(e.ToolName, e.ToolArgs))
+			m.startTool(e.ToolCallID, e.ToolName, e.ToolArgs)
+		}
+	case string(kit.EventToolExecutionStart):
+		var e kit.ToolExecutionStartEvent
+		if json.Unmarshal(ev.Data, &e) == nil {
+			m.startTool(e.ToolCallID, e.ToolName, e.ToolArgs)
 		}
 	case string(kit.EventToolResult):
 		var e kit.ToolResultEvent
 		if json.Unmarshal(ev.Data, &e) == nil {
-			if e.IsError {
-				m.commit(kindError, fmtToolResult(e.ToolName, resultSnippet(e.Result)))
-			} else {
-				m.commit(kindTool, fmtToolResult(e.ToolName, resultSnippet(e.Result)))
-			}
+			m.finishTool(e.ToolCallID, e.ToolName, e.ToolArgs, e.Result, e.IsError)
 		}
 	}
 }
@@ -531,7 +542,8 @@ func (m *Model) closeReasoningEntry() {
 // opens fresh entries instead of appending to the previous turn's tail.
 func (m *Model) closeStreamEntry() {
 	for i := len(m.entries) - 1; i >= 0; i-- {
-		if m.entries[i].streamed {
+		if m.entries[i].streamed &&
+			(m.entries[i].kind == kindAssistant || m.entries[i].kind == kindReasoning) {
 			m.entries[i].streamed = false
 			break
 		}
@@ -592,6 +604,52 @@ func (m *Model) commit(kind entryKind, text string) {
 
 func (m *Model) commitError(text string) {
 	m.entries = append(m.entries, entry{kind: kindError, text: text})
+}
+
+// startTool adds a working tool line or adds arguments to its earlier start
+// event. Kit can send both events for one call.
+func (m *Model) startTool(callID, name, args string) {
+	if i := m.toolEntry(callID, name); i >= 0 {
+		if args != "" {
+			m.entries[i].text = toolLine(name, args)
+		}
+		return
+	}
+	m.entries = append(m.entries, entry{
+		kind: kindTool, text: toolLine(name, args), streamed: true,
+		toolCallID: callID,
+	})
+}
+
+// finishTool changes the working marker to a check mark and keeps a compact
+// result on the next indented line.
+func (m *Model) finishTool(callID, name, args, result string, isError bool) {
+	i := m.toolEntry(callID, name)
+	if i < 0 {
+		m.startTool(callID, name, args)
+		i = len(m.entries) - 1
+	} else if args != "" {
+		m.entries[i].text = toolLine(name, args)
+	}
+	m.entries[i].streamed = false
+	m.entries[i].toolDone = true
+	m.entries[i].toolError = isError
+	m.entries[i].toolResult = resultSnippet(result)
+}
+
+func (m *Model) toolEntry(callID, name string) int {
+	for i, e := range slices.Backward(m.entries) {
+		if e.kind != kindTool || e.toolDone {
+			continue
+		}
+		if callID != "" && e.toolCallID == callID {
+			return i
+		}
+		if callID == "" && strings.HasPrefix(e.text, name) {
+			return i
+		}
+	}
+	return -1
 }
 
 // layout sizes the input to the terminal. The transcript is ordinary
@@ -655,7 +713,19 @@ func (m *Model) transcript() string {
 		case kindQuestion:
 			b.WriteString(styles.question.Render("◇ " + e.text))
 		case kindTool:
-			b.WriteString(styles.tool.Render(e.text))
+			marker := "✓"
+			if e.streamed {
+				marker = spinnerFrames[m.frame%len(spinnerFrames)]
+			}
+			line := marker + " " + e.text
+			if e.toolDone {
+				line += "\n  → " + e.toolResult
+			}
+			if e.toolError {
+				b.WriteString(styles.err.Render(line))
+			} else {
+				b.WriteString(styles.tool.Render(line))
+			}
 		case kindReasoning:
 			b.WriteString(styles.reasoning.Render(e.text))
 		case kindError:
@@ -671,28 +741,27 @@ const footer = "\n" + "ctrl+c quit · ctrl+w cancel · enter send\n"
 
 // toolLine formats a tool call compactly.
 func toolLine(name, args string) string {
-	args = strings.TrimSpace(args)
+	args = strings.Join(strings.Fields(args), " ")
 	if args == "" {
-		return "⚙ " + name
+		return name
 	}
-	if len(args) > 60 {
-		args = args[:57] + "…"
-	}
-	return "⚙ " + name + "(" + args + ")"
+	return name + "(" + truncate(args, 60) + ")"
 }
 
-// resultSnippet trims a tool result for the transcript.
+// resultSnippet makes a one-line tool result and truncates it for the
+// transcript.
 func resultSnippet(s string) string {
-	s = strings.TrimSpace(s)
+	s = strings.Join(strings.Fields(s), " ")
 	if s == "" {
 		return "ok"
 	}
-	if len(s) > 80 {
-		s = s[:77] + "…"
-	}
-	return s
+	return truncate(s, 80)
 }
 
-func fmtToolResult(name, snippet string) string {
-	return "↳ " + name + ": " + snippet
+func truncate(s string, limit int) string {
+	runes := []rune(s)
+	if len(runes) <= limit {
+		return s
+	}
+	return string(runes[:limit-1]) + "…"
 }

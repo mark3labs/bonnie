@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -264,14 +265,48 @@ func TestModelStreamsToolCalls(t *testing.T) {
 	m := newTestModel(f)
 	m.runID = "run-1"
 
-	tc := kitEventToolCall("shell", `{"cmd":"ls"}`)
-	m.apply(runtime.Event{RunID: "run-1", Seq: 1, Type: tc[0], Data: []byte(tc[1])})
-	tr := kitEventToolResult("shell", "file.txt")
-	m.apply(runtime.Event{RunID: "run-1", Seq: 2, Type: tr[0], Data: []byte(tr[1])})
+	start := kitEventToolCallStart("call-1", "shell")
+	m.apply(runtime.Event{RunID: "run-1", Seq: 1, Type: start[0], Data: []byte(start[1])})
+	if got := m.transcript(); !strings.Contains(got, spinnerFrames[0]+" shell") {
+		t.Fatalf("working tool has no spinner:\n%s", got)
+	}
 
-	rendered := m.render()
-	if !strings.Contains(rendered, "shell") {
-		t.Errorf("transcript misses the tool call:\n%s", rendered)
+	tc := kitEventToolCall("call-1", "shell", `{"cmd":"ls"}`)
+	m.apply(runtime.Event{RunID: "run-1", Seq: 1, Type: tc[0], Data: []byte(tc[1])})
+	longResult := strings.Repeat("file.txt\n", 20)
+	tr := kitEventToolResult("call-1", "shell", longResult)
+	m.apply(runtime.Event{RunID: "run-1", Seq: 1, Type: tr[0], Data: []byte(tr[1])})
+
+	rendered := m.transcript()
+	for _, want := range []string{"✓ shell", `{"cmd":"ls"}`, "→ file.txt file.txt", "…"} {
+		if !strings.Contains(rendered, want) {
+			t.Errorf("transcript misses %q:\n%s", want, rendered)
+		}
+	}
+	if got := strings.Count(rendered, "shell"); got != 1 {
+		t.Errorf("tool rendered %d times, want one lifecycle line:\n%s", got, rendered)
+	}
+}
+
+func TestToolResultWithoutStartStillRenders(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(&fakeClient{})
+	tr := kitEventToolResult("call-1", "read", "contents")
+	m.apply(runtime.Event{RunID: "run-1", Seq: 1, Type: tr[0], Data: []byte(tr[1])})
+
+	got := m.transcript()
+	for _, want := range []string{"✓ read", "→ contents"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("standalone result misses %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestToolResultTruncationIsUnicodeSafe(t *testing.T) {
+	t.Parallel()
+	got := resultSnippet(strings.Repeat("界", 100))
+	if !strings.HasSuffix(got, "…") || len([]rune(got)) != 80 {
+		t.Fatalf("resultSnippet = %q (%d runes), want 80 runes ending in ellipsis", got, len([]rune(got)))
 	}
 }
 
@@ -346,10 +381,25 @@ type errTest struct{}
 
 func (errTest) Error() string { return "boom thing" }
 
-func kitEventToolCall(name, args string) [2]string {
-	return [2]string{string(kit.EventToolCall), `{"ToolName":"` + name + `","ToolArgs":"` + args + `"}`}
+func kitEventToolCallStart(callID, name string) [2]string {
+	e := kit.ToolCallStartEvent{ToolCallID: callID, ToolName: name}
+	return encodedKitEvent(kit.EventToolCallStart, e)
 }
 
-func kitEventToolResult(name, result string) [2]string {
-	return [2]string{string(kit.EventToolResult), `{"ToolName":"` + name + `","Result":"` + result + `"}`}
+func kitEventToolCall(callID, name, args string) [2]string {
+	e := kit.ToolCallEvent{ToolCallID: callID, ToolName: name, ToolArgs: args}
+	return encodedKitEvent(kit.EventToolCall, e)
+}
+
+func kitEventToolResult(callID, name, result string) [2]string {
+	e := kit.ToolResultEvent{ToolCallID: callID, ToolName: name, Result: result}
+	return encodedKitEvent(kit.EventToolResult, e)
+}
+
+func encodedKitEvent(typ kit.EventType, value any) [2]string {
+	data, err := json.Marshal(value)
+	if err != nil {
+		panic(err)
+	}
+	return [2]string{string(typ), string(data)}
 }

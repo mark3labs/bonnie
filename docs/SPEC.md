@@ -401,6 +401,28 @@ replay, the handoff without gap or duplicate), the stream tests in
 `channel/http` (anchors on the wire, reconnect past the backlog at 18 events),
 and the bus tests updated to the anchored contract.
 
+### 4.8.1 RESOLVED — live events at one journal anchor were dropped
+
+**Fixed in the event-stream join and covered by
+`TestStreamEventsKeepsLiveEventsAtOneAnchor`.** Live Kit events use the current
+journal position as an anchor. A tool-call start, parsed call, execution, and
+result can all occur before the next journal write, so all can have the same
+`Seq`. The old live-stream filter advanced its cursor after the first event and
+dropped all later events with that `Seq`. This made the TUI lose tool calls even
+though Kit emitted them and the event bus held them.
+
+When no journal replay is in progress, `Runner.StreamEvents` now preserves all
+live bus events in their original order, including events that share one
+anchor. The cursor still selects the first anchor (`Seq > after`); it does not
+make events at that anchor unique. During journal catch-up, events at or before
+the replay end stay filtered because ephemeral Kit events cannot be inserted
+reliably into replayed history.
+
+The TUI folds a tool lifecycle into one compact entry: a spinner while the tool
+works, a check mark when it completes, and an indented arrow with a one-line,
+Unicode-safe truncated result. Tool call IDs correlate start, parsed-call, and
+result events, so one call does not render as duplicate transcript lines.
+
 ### 4.9 PARTLY RESOLVED — no sandbox, observed in practice
 
 **The `sandbox` package closes this. It is opt-in, so the risk returns for any

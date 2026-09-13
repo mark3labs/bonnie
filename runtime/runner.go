@@ -190,6 +190,7 @@ func NewRunner(j Journal, f AgentFactory, opts ...RunnerOption) *Runner {
 	for _, opt := range opts {
 		opt(r)
 	}
+	r.bus.Anchor(r.durableSeq)
 	return r
 }
 
@@ -264,15 +265,22 @@ func (r *Runner) StreamEvents(runID string, after int) (<-chan Event, func()) {
 			}
 		}
 
-		// The live channel holds everything the bus pushed since
-		// Subscribe — including events the replay already covered, and
-		// ephemeral ones anchored before the replay's end. Seq decides
-		// each one's fate: past means already delivered or ephemeral.
+		// Without replay, preserve the bus order. Several live Kit events can
+		// share one journal anchor, so advancing emitted after the first one
+		// would hide every later event at that anchor (usually tool calls).
+		// A replay still filters everything it covered because those live-only
+		// events cannot be placed correctly in the replayed history.
 		for ev := range live {
+			if needReplay && ev.Seq <= emitted {
+				continue
+			}
+			if !needReplay && ev.Seq != 0 && ev.Seq <= after {
+				continue
+			}
 			if ev.Seq > emitted {
 				emitted = ev.Seq
-				out <- ev
 			}
+			out <- ev
 		}
 	}()
 

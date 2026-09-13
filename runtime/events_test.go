@@ -133,6 +133,45 @@ func TestStreamEventsSurvivesRestart(t *testing.T) {
 	}
 }
 
+// TestStreamEventsKeepsLiveEventsAtOneAnchor pins that Seq is an anchor, not a
+// unique event ID. Tool lifecycle events commonly share one journal position.
+func TestStreamEventsKeepsLiveEventsAtOneAnchor(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	j := NewMemoryJournal()
+	r := NewRunner(j, nil)
+	if _, err := j.Append(ctx, Record{RunID: "tool-run", Kind: RecordMessage}); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+
+	// Tool lifecycle events can all occur before another journal write. They
+	// then have the same anchor, but each event is still part of the live stream.
+	for _, typ := range []string{
+		string(kit.EventToolCallStart),
+		string(kit.EventToolCall),
+		string(kit.EventToolResult),
+	} {
+		r.bus.Publish(Event{RunID: "tool-run", Type: typ})
+	}
+
+	events, stop := r.StreamEvents("tool-run", 0)
+	defer stop()
+	for i, want := range []string{
+		string(kit.EventToolCallStart),
+		string(kit.EventToolCall),
+		string(kit.EventToolResult),
+	} {
+		select {
+		case ev := <-events:
+			if ev.Type != want || ev.Seq != 1 {
+				t.Fatalf("event %d = %+v, want type %q at anchor 1", i, ev, want)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out waiting for event %d: events at one anchor were dropped", i)
+		}
+	}
+}
+
 // TestStreamEventsHandoffHasNoGapOrDuplicate covers the join between the
 // replayed journal and the live bus: events the replay covered are dropped,
 // events it did not cover are delivered, and the seam is invisible.
