@@ -19,6 +19,7 @@ the known risks, and the invariants every task must preserve.
 
 | ID | Title | Priority | Size | Blocks |
 |---|---|---|---|---|
+| T-027 | goreleaser publishes a commit list, not the release notes | P2 | S | — |
 | T-026 | microsandbox `Open` races its own create under load | P2 | S | — |
 | T-022 | TUI transcript replay on reopen | P2 | M | — |
 | T-019 | Evals against a discovered agent | P2 | L | — |
@@ -33,6 +34,7 @@ the known risks, and the invariants every task must preserve.
 
 | ID | Delivered | Where |
 |---|---|---|
+| T-011 | Applied again for `v0.4.0`, tagged at `9ccb959` and published 2026-09-14. Verified post-publish: the downloaded `linux_amd64` artifact prints `bonnie 0.4.0` (the injected version, not `dev`), its checksum matches, it is statically linked, and it serves. The auto-generated notes were again only a commit list, so the body was replaced with the `CHANGELOG.md` section — claims and limits both stated | `CHANGELOG.md`, [release v0.4.0](https://github.com/mark3labs/bonnie/releases/tag/v0.4.0) |
 | T-025 | The journal is SQLite, pure Go (no CGO): `SQLiteJournal` over one `<root>/journal.db`, WAL, one transaction per step, concurrent writers safe instead of refused, legacy `runs/*.jsonl` imported on open. `FileJournal`, the per-run lock file, and the handle map are gone | `runtime/sqlitejournal.go`, `runtime/legacy_journal.go`, `runtime/journal.go`, `docs/SPEC.md` §4.14 |
 | T-024 | The manifest is gone: configuration is code. The root `bonnie` package owns the serving path (`Main`, `Run`, options) and the default layout as constants; codegen registers the tree through `bonnie.Register` from `init`; `bonnie init` scaffolds a one-call `main.go`; `serve` is the flag-only generic host; `yaml` and `toml` return to indirect | `bonnie.go`, `run.go`, `options.go`, `agent/scaffold.go`, `agent/generate.go`, `cmd/bonnie/`, `internal/treetest/`, `docs/L2.md` |
 | T-023 | Audit fixes: the event stream releases a parked send on disconnect (goroutine leak), reads of unknown runs no longer grow the file journal, `--sandbox-image` reaches `auto` and is refused by `local`, reserved runs are off the wire and out of `sandbox prune`, `channel/http` caps a body and maps `ErrRunOwnedElsewhere` to 409; `chat.DeliveryText` and the workspace-default rule replace three copies each; `EventBus.Backlog` removed | `runtime/events.go`, `runtime/runner.go`, `runtime/filejournal.go`, `channel/chat/chat.go`, `channel/http/http.go`, `cmd/bonnie/sandbox.go`, `docs/SPEC.md` §4.12 |
@@ -132,7 +134,7 @@ re-verify that section and update it in the same commit.
 
 ---
 
-## T-011 — Tag and release `v0.1.0`
+## T-011 — Tag and release
 
 **RESOLVED.** `v0.1.0` was tagged at `15e1727` and published on 2026-09-12;
 `release.yml` completed successfully. Verified post-publish, not assumed:
@@ -140,6 +142,45 @@ a downloaded `linux_amd64` artifact prints `bonnie 0.1.0` (the injected
 version, not `dev`), and the GitHub release notes lead with the three claims
 and the limits — the auto-generated notes had only the commit list, so the
 notes were edited to the required form.
+
+**This task is the release checklist.** It stays here as the procedure every
+subsequent tag follows, not as open work. Applications:
+
+| Version | Commit | Date |
+|---|---|---|
+| `v0.1.0` | `15e1727` | 2026-09-12 |
+| `v0.2.0` | `b1fff6d` | 2026-09-13 |
+| `v0.3.0` | `38a511d` | 2026-09-13 |
+| `v0.4.0` | `9ccb959` | 2026-09-14 |
+
+### `v0.4.0`, 2026-09-14 — every box confirmed
+
+- [x] `task release-check` — goreleaser 2.17.1, 1 config validated
+- [x] `task release-snapshot` — four targets, archives and checksums, 2m16s
+- [x] All CI jobs green on `master` at the tagged commit, including
+      `boundary` (run `34862857167`)
+- [x] `CHANGELOG.md` carries a `[0.4.0]` section in Keep-a-Changelog shape
+- [x] Release notes state the three claims **and** the limits — in the tag
+      annotation and, after an edit, on the GitHub release
+- [x] Tag pushed; `release.yml` run `34863448503` succeeded in 5m20s
+- [x] Five artifacts published; a downloaded binary prints `bonnie 0.4.0`,
+      its checksum verifies, and it serves
+
+**`0.4.0` had been written into `CHANGELOG.md` and never tagged.** Four more
+commits then accumulated under `[Unreleased]`, so the two sections were merged
+into one `0.4.0` rather than tagging `v0.5.0` and leaving a changelog heading
+no tag would ever match. Merging found three claims that intra-release churn
+had made false — `Manifest.WorkspaceDir` under *Added* after T-024 deleted the
+manifest, the seeding fix described through a manifest key that no longer
+exists, and two new exported options missing from the list. **Notes written
+mid-release must be re-checked against the code at tag time**; a later commit
+in the same release can invalidate an earlier entry, and nothing in CI
+notices.
+
+**`goreleaser` does not read `CHANGELOG.md`.** `.goreleaser.yaml` builds the
+body from commit subjects, so the published notes are a commit list until
+someone replaces them. This cost an edit at `v0.1.0` and again at `v0.4.0`.
+Setting `release.notes` would fix it once — filed as T-027.
 
 **Priority** P2 · **Size** S
 
@@ -1144,6 +1185,50 @@ rationale now lives where it is enforced:
 - Every known risk, resolved or open → `docs/SPEC.md` §4
 - The invariants a change must preserve → `docs/SPEC.md` §8
 - Sandbox adapter contracts → `docs/SANDBOX.md`
+
+---
+
+## T-027 — goreleaser publishes a commit list, not the release notes
+
+**Priority** P2 · **Size** S
+
+### Why
+
+`.goreleaser.yaml` has a `changelog:` block with `groups:`, which builds the
+GitHub release body from **commit subjects**. It never reads `CHANGELOG.md`.
+So every release publishes a list of commit hashes, and T-011's requirement —
+the notes state the three claims and the limits — is met only by a human
+editing the body afterwards. That was done by hand at `v0.1.0` and again at
+`v0.4.0`.
+
+A manual step that must happen after every tag will eventually be skipped,
+and the failure is silent: the release looks published and simply does not
+say what BONNIE cannot do. The limits are the part a reader most needs.
+
+### Do
+
+1. Point the release body at the changelog instead of the commit log. Either
+   `release.notes` with the extracted section, or a release job step that
+   slices `CHANGELOG.md` between the version heading and the next `## [` and
+   passes it to `--release-notes`.
+2. Keep the commit grouping as a secondary section if it is wanted, below the
+   notes rather than instead of them.
+3. Make the release fail, not pass quietly, when the changelog has no section
+   matching the tag being built.
+
+### Acceptance criteria
+
+- [ ] A tag publishes a body containing the three claims and the limits with
+      no human edit
+- [ ] A tag whose version has no `CHANGELOG.md` section fails the release
+      workflow with a message naming the missing heading
+- [ ] Verified on a real tag, not only in `--snapshot`
+
+### Watch for
+
+The extraction must match the heading form actually in use, `## [0.4.0] —
+DATE`, and must stop at the next `## [`. Nested `###` group headings are part
+of the section and must be kept.
 
 ---
 
