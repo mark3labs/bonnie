@@ -11,6 +11,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Nothing yet. The next release starts here.
 
+## [0.4.0] — 2026-09-14
+
+The readable-answer increment: assistant messages in the TUI render as
+markdown — headings, lists, tables, and code blocks in the same palette as
+the rest of the surface — and assistant prose wraps at the terminal width
+instead of being cut.
+
+### Added
+
+- Assistant messages render as markdown in `bonnie dev` and `bonnie chat`
+  (a T-021 extension): headings, bold, lists, tables, and code blocks render
+  through herald-md — the same typography stack upstream Kit's TUI uses — in
+  the TUI's existing palette. Streaming text renders live, so the answer
+  arrives already shaped; user messages, tool lines, and reasoning stay as
+  they were, because typed text is not markdown.
+
+### Fixed
+
+- Assistant lines longer than 100 columns were silently truncated by the old
+  `MaxWidth` style: every cell past the limit was lost, on every message.
+  Assistant prose now wraps at the terminal width and keeps everything —
+  verified live against a real model, including a wrapped 300-character
+  paragraph and the hot-reload reconnect path.
+
 ## [0.3.0] — 2026-09-13
 
 The terminal increment: `bonnie dev` and `bonnie chat` open a scrollback TUI
