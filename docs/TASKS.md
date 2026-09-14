@@ -548,12 +548,14 @@ today requires a hand-written `main.go` for anything.
 - **`skills:` is reserved, not wired.** Seeding skill files into a sandbox
   nothing reads would be a dead key — a control nothing applied. The key
   is refused with the same message class as `mcp`, until a skill-loading
-  story exists. `workspace:` IS wired: `sandbox.Seeded` wraps any provider
-  and mirrors the seed directory over the `Sandbox` interface, skip-if-
-  exists, so a resumed run never has its edits reverted
-  (`sandbox/seed_test.go`). The wrapper forwards `Networked`,
-  `ExistenceChecker`, and `RunDeleter`, so wrapping never widens what a
-  caller can request.
+  story exists. `workspace:` is wired as of the workspace-root fix: with a
+  sandbox, `sandbox.Seeded` mirrors the seed directory over the `Sandbox`
+  interface, skip-if-exists, so a resumed run never has its edits reverted
+  (`sandbox/seed_test.go`); without one, the same directory is the working
+  directory of Kit's file tools. It was written and tested but **never
+  called** until then — accepted and ignored, which invariant 13 forbids.
+  The wrapper forwards `Networked`, `ExistenceChecker`, and `RunDeleter`, so
+  wrapping never widens what a caller can request.
 - **`init --tools` writes a `bonnie_gen.go` stub** so the fresh module
   compiles before codegen exists. main.go (authored, never rewritten)
   calls `discoveredTools()` — the symbol the real generator will define.

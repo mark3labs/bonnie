@@ -315,6 +315,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -350,9 +351,28 @@ func main() {
 		opts = append(opts, kit.WithSystemPrompt(prompt))
 	}
 
+	// The workspace is the agent's root for files. Without it, Kit's file
+	// tools resolve a relative path against this process's working
+	// directory, so a model's write lands on the tree itself — beside the
+	// manifest, the instructions, and the journal.
+	//
+	// Kit's default core tools take no working directory, so the core set is
+	// rebuilt with one and passed through WithTools; AllTools is that same
+	// default set. If you switch to a sandbox below, DROP this block: the
+	// sandbox replaces the core tools with its own, and host tools handed to
+	// a sandboxed agent would give the model a shell on this machine. Seed
+	// the sandbox with sandbox.Seeded(provider, workspaceDir(m)) instead.
+	if dir := workspaceDir(m); dir != "" {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			log.Fatal(err)
+		}
+		opts = append(opts, kit.WithTools(kit.AllTools(kit.WithWorkDir(dir))...))
+	}
+
 	// Tools run as this process. To isolate them, swap the factory:
 	//
-	//	sandbox.Agent(sandbox.Docker(), append(opts, kit.WithExtraTools(discoveredTools()...))...)
+	//	sandbox.Agent(sandbox.Seeded(sandbox.Docker(), workspaceDir(m)),
+	//		append(opts, kit.WithExtraTools(discoveredTools()...))...)
 	//
 	// See docs/SANDBOX.md. Without it, a model-chosen tool call has this
 	// process's files, network, and credentials.
@@ -436,6 +456,21 @@ func instructions(m *agent.Manifest) string {
 		return string(b)
 	}
 	return embeddedInstructions()
+}
+
+// workspaceDir is the directory the agent's files live in, absolute. It is
+// the manifest's workspace, or workspace/ when the key is absent — the
+// directory bonnie init scaffolds.
+func workspaceDir(m *agent.Manifest) string {
+	rel := "workspace"
+	if m != nil && m.Workspace != "" {
+		rel = m.Workspace
+	}
+	abs, err := filepath.Abs(filepath.Clean(rel))
+	if err != nil {
+		return ""
+	}
+	return abs
 }
 `
 }

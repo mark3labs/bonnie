@@ -103,6 +103,12 @@ type serveConfig struct {
 	network      *sandbox.NetworkPolicy
 	title        string
 
+	// workspace is the directory the agent's files live in: the working
+	// directory of every file tool without a sandbox, and the seed mirrored
+	// into [sandbox.Workspace] with one. Empty when serving no tree, which
+	// leaves the process's own directory as the root.
+	workspace string
+
 	telegram *telegram.Config
 	slack    *slack.Config
 	discord  *discord.Config
@@ -186,6 +192,26 @@ func resolveServe(flags *pflag.FlagSet, o serveOpts) (*serveConfig, error) {
 	cfg.sandboxImage, _ = pick("sandbox-image", sb.Image, "")
 	if manifest != nil {
 		cfg.title = manifest.Title
+	}
+
+	// The workspace: the agent's root for files. A tree always has one, so
+	// a model's write lands beside the seed files an author wrote and never
+	// in the tree itself — where the manifest, the instructions, and the
+	// journal live. Without a tree there is nothing to anchor to, and the
+	// process's own directory stays the root.
+	workspaceSrc := srcDefault
+	if manifest != nil {
+		rel := manifest.Workspace
+		if rel != "" {
+			workspaceSrc = manifestSrc
+		} else {
+			rel = "workspace/"
+		}
+		abs, err := filepath.Abs(filepath.Join(root, filepath.Clean(rel)))
+		if err != nil {
+			return nil, fmt.Errorf("bonnie: workspace path: %w", err)
+		}
+		cfg.workspace = abs
 	}
 
 	// The system prompt: the flag wins outright. Otherwise the tree's
@@ -286,6 +312,9 @@ func resolveServe(flags *pflag.FlagSet, o serveOpts) (*serveConfig, error) {
 	}
 	line("sandbox", cfg.sandboxKind, sandboxSrc)
 	line("network", networkLabel(cfg.network), networkSrc)
+	if cfg.workspace != "" {
+		line("workspace", cfg.workspace, workspaceSrc)
+	}
 	if cfg.slack != nil {
 		line("channel slack", displayPath(cfg.slack.Path, slack.DefaultPath), manifestSrc)
 	}
@@ -347,8 +376,17 @@ func serveHTTP(ctx context.Context, cfg *serveConfig, shutdown time.Duration, ln
 	if cfg.prompt != "" {
 		opts = append(opts, kit.WithSystemPrompt(cfg.prompt))
 	}
+	// The workspace anchors the agent's files. How it is applied depends on
+	// the mode, so agentFactory owns it: host tools take a working
+	// directory, a sandbox takes a seed. Mixing the two would put host tools
+	// inside a sandboxed agent.
+	if cfg.workspace != "" {
+		if err := os.MkdirAll(cfg.workspace, 0o755); err != nil {
+			return fmt.Errorf("bonnie: workspace: %w", err)
+		}
+	}
 
-	factory, err := agentFactory(cfg.sandboxKind, cfg.sandboxImage, cfg.network, opts)
+	factory, err := agentFactory(cfg.sandboxKind, cfg.sandboxImage, cfg.network, cfg.workspace, opts)
 	if err != nil {
 		return err
 	}
@@ -474,12 +512,19 @@ func mount(mux *http.ServeMux, ch interface {
 //
 // A nil policy means no control was requested — allow-all, the default. A
 // policy a backend cannot enforce is refused, never stored and ignored.
-func agentFactory(kind, image string, policy *sandbox.NetworkPolicy, opts []kit.Option) (runtime.AgentFactory, error) {
+//
+// workspace, when set, is the directory the agent's files live in. Each mode
+// applies it its own way and they must never be mixed: without a sandbox the
+// host's file tools are rebuilt with it as their working directory; with one
+// it is the seed mirrored into [sandbox.Workspace]. Handing the host tools to
+// a sandboxed agent would give the model a shell on this machine, so the
+// option is added only on the branch that has no sandbox.
+func agentFactory(kind, image string, policy *sandbox.NetworkPolicy, workspace string, opts []kit.Option) (runtime.AgentFactory, error) {
 	if kind == "" || kind == "none" {
 		if policy != nil {
 			return nil, fmt.Errorf("a network policy needs a sandbox; pass --sandbox docker")
 		}
-		return runtime.KitAgent(opts...), nil
+		return runtime.KitAgent(append(opts, hostWorkspaceOptions(workspace)...)...), nil
 	}
 
 	provider, err := sandboxProvider(kind, image)
@@ -503,7 +548,35 @@ func agentFactory(kind, image string, policy *sandbox.NetworkPolicy, opts []kit.
 	}
 
 	fmt.Fprintf(os.Stderr, "bonnie: tools run in the %s sandbox\n", provider.Name())
+	// The manifest's workspace is a seed: its files are mirrored into every
+	// sandbox before the model's first command, and an edit the model made is
+	// never reverted on resume. Wrapping here is what makes the key real
+	// rather than accepted and ignored.
+	if workspace != "" {
+		provider = sandbox.Seeded(provider, workspace)
+	}
 	return sandbox.Agent(provider, opts...), nil
+}
+
+// hostWorkspaceOptions returns the options that root the host's file tools
+// in the workspace, or nothing when there is no workspace.
+//
+// Kit's default core tools take no working directory: the option is a
+// [kit.ToolOption] and [kit.Options] has no field that forwards one. So the
+// core set is rebuilt with the workdir applied and supplied through
+// [kit.WithTools]. [kit.AllTools] is that same default set, so no tool is
+// lost.
+//
+// It is called on the no-sandbox branch only, and that placement is the
+// security property: Kit honours Options.Tools even when DisableCoreTools is
+// set, and [sandbox.Agent] applies a caller's options after its own — so
+// using these options on a sandboxed agent would hand the model host tools
+// inside the sandbox. Guard test: TestSandboxedAgentGetsNoHostTools.
+func hostWorkspaceOptions(workspace string) []kit.Option {
+	if workspace == "" {
+		return nil
+	}
+	return []kit.Option{kit.WithTools(kit.AllTools(kit.WithWorkDir(workspace))...)}
 }
 
 // sandboxProvider maps the flag to a backend.

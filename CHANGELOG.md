@@ -27,8 +27,25 @@ instead of being cut.
   arrives already shaped; user messages, tool lines, and reasoning stay as
   they were, because typed text is not markdown.
 
+### Changed
+
+- **The agent's root is now the workspace.** A tool call's relative path
+  resolves inside the tree's `workspace/` (or the manifest's `workspace:`)
+  instead of wherever the server was started from. `serve --agent .` used to
+  drop a model's files on the tree itself — beside `agent.yaml`,
+  `instructions.md`, and `.bonnie/`, the journal a run's durability depends
+  on. A sandboxed run already rooted everything at `/workspace`, so the two
+  modes now agree. The banner names the resolved workspace. Serving without
+  a tree is unchanged: the process's own directory stays the root. Note that
+  this is a root, not a jail — an absolute path still escapes, which is what
+  the sandbox is for (`docs/SPEC.md` §4.9.1).
+
 ### Fixed
 
+- The manifest's `workspace:` key seeded nothing. `sandbox.Seeded` was
+  written and tested but never called, so the key was accepted and ignored —
+  what invariant 13 exists to forbid. A sandboxed run now really does receive
+  the seed files at `/workspace`.
 - Assistant lines longer than 100 columns were silently truncated by the old
   `MaxWidth` style: every cell past the limit was lost, on every message.
   Assistant prose now wraps at the terminal width and keeps everything —

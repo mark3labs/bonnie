@@ -464,6 +464,54 @@ The residual risk is that sandboxing is opt-in. A host that does not pass
 `--sandbox`, or does not call `sandbox.Agent`, runs tool calls as its own
 process. `README.md` and `SECURITY.md` both say so.
 
+### 4.9.1 RESOLVED — the agent's root is the workspace, in both modes
+
+**The same incident had a second cause, fixed separately.** Even with the
+right intent, a tool call's *root* was wrong: Kit's file tools resolve a
+relative path against `WorkDir`, falling back to `os.Getwd()`
+(`internal/core/read.go:122-134`), and BONNIE never set it. So a model's
+`write("notes.md")` landed in whatever directory the operator started the
+server from — for `serve --agent .` that is the agent tree itself, on top of
+`agent.yaml`, `instructions.md`, and `.bonnie/`, **the journal that makes a
+run durable**. A sandboxed run rooted everything at `/workspace`
+(`sandbox.Resolve`), so the two modes disagreed about what the agent's root
+meant, and a prompt could not name a stable location.
+
+The workspace is now the agent's root in both modes:
+
+- **No sandbox** — `hostWorkspaceOptions` rebuilds Kit's core tool set with
+  `kit.WithWorkDir(<root>/<workspace>)` and installs it through
+  `kit.WithTools`. Kit's default core tools take no working directory:
+  `WithWorkDir` is a `kit.ToolOption` and `kit.Options` has no field that
+  forwards one, so rebuilding the set is the only public route.
+  `kit.AllTools` is that same default set, so no tool is lost.
+- **Sandbox** — the same directory is the seed: `sandbox.Seeded(provider,
+  workspace)`. That call is what makes the manifest's `workspace:` key real;
+  `Seeded` was written and tested but **never called** by non-test code, so
+  the key was accepted and ignored — an invariant 13 violation that had been
+  recorded in `docs/TASKS.md` as working.
+
+**The two must never be mixed, and that is a security property.** Kit honours
+`Options.Tools` even when `DisableCoreTools` is set, and `sandbox.Agent`
+applies the caller's options *after* its own (`sandbox/agent.go`) — so using
+the host options on a sandboxed agent would hand the model real host tools
+inside the sandbox. `hostWorkspaceOptions` is therefore called on the
+no-sandbox branch only. Guard test: `TestSandboxedAgentGetsNoHostTools`.
+
+Limits, stated plainly: `WithWorkDir` sets a base, **not a jail**. An absolute
+path, or one with enough `../`, still reaches the wider filesystem. Rooting
+the agent stops the accident — a model tidying up its own files does not
+overwrite the manifest or the journal — it does not contain a determined one.
+That is what the sandbox is for, and §4.9 still applies.
+
+Serving without a tree (`bonnie serve` with no `--agent`) has nothing to
+anchor to, so the process's own directory stays the root, as before.
+
+Verified live against `opencode/kimi-k2.5`: a `write` and a shell redirect
+both landed in `workspace/` with the tree root untouched, `pwd` reported the
+workspace, and under `--sandbox docker` the seed file arrived at `/workspace`.
+Tests: `cmd/bonnie/workspace_test.go`.
+
 ### 4.10 RESOLVED — sandbox lifecycle is journalled
 
 **Resolved by T-012.** A `RecordSandbox` entry now carries the backend name,

@@ -89,14 +89,14 @@ func TestSandboxProviderSelection(t *testing.T) {
 // choice for a local developer and the wrong one for an exposed server, which
 // is why the help text and the startup banner both say so.
 func TestNoSandboxIsTheDefault(t *testing.T) {
-	f, err := agentFactory("none", "", nil, nil)
+	f, err := agentFactory("none", "", nil, "", nil)
 	if err != nil {
 		t.Fatalf("agentFactory: %v", err)
 	}
 	if f == nil {
 		t.Fatal("no factory returned")
 	}
-	if f, err = agentFactory("", "", nil, nil); err != nil || f == nil {
+	if f, err = agentFactory("", "", nil, "", nil); err != nil || f == nil {
 		t.Fatalf("empty kind must behave like none: %v", err)
 	}
 }
@@ -104,7 +104,7 @@ func TestNoSandboxIsTheDefault(t *testing.T) {
 // TestDenyNetworkNeedsASandbox stops a false sense of safety: asking for no
 // egress without a sandbox must fail, not quietly run with full network.
 func TestDenyNetworkNeedsASandbox(t *testing.T) {
-	_, err := agentFactory("none", "", &sandbox.NetworkPolicy{Mode: sandbox.NetworkDenyAll}, nil)
+	_, err := agentFactory("none", "", &sandbox.NetworkPolicy{Mode: sandbox.NetworkDenyAll}, "", nil)
 	if err == nil {
 		t.Fatal("want an error for a network policy without a sandbox")
 	}
@@ -118,7 +118,7 @@ func TestDenyNetworkNeedsASandbox(t *testing.T) {
 func TestDenyNetworkOnLocalIsRejected(t *testing.T) {
 	// Local cannot control egress at all, so it does not implement
 	// sandbox.Networked and the request must fail.
-	if _, err := agentFactory("local", "", &sandbox.NetworkPolicy{Mode: sandbox.NetworkDenyAll}, nil); err == nil {
+	if _, err := agentFactory("local", "", &sandbox.NetworkPolicy{Mode: sandbox.NetworkDenyAll}, "", nil); err == nil {
 		t.Fatal("want an error: the local sandbox cannot control the network")
 	}
 }
@@ -143,7 +143,7 @@ func TestSandboxImageIsPassedThrough(t *testing.T) {
 // must learn that Docker is down when the server starts, not on the first tool
 // call an hour later.
 func TestUnavailableSandboxFailsAtStartup(t *testing.T) {
-	_, err := agentFactory("microsandbox", "", nil, []kit.Option{})
+	_, err := agentFactory("microsandbox", "", nil, "", []kit.Option{})
 	if err == nil {
 		t.Skip("msb is installed here, so this path cannot be exercised")
 	}
