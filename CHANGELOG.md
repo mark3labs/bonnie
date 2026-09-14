@@ -5,64 +5,61 @@ All notable changes to BONNIE are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.4.0] — 2026-09-14
 
-**Breaking: the journal is SQLite.** `runtime.FileJournal` and
-`runtime.OpenFileJournal` are replaced by `runtime.SQLiteJournal` and
-`runtime.OpenSQLiteJournal`. One `<root>/journal.db` holds every run instead
-of one JSONL file per run plus a lock file per run. The driver is pure Go
-(`modernc.org/sqlite`), so BONNIE still builds and cross-compiles with
-`CGO_ENABLED=0` and `bonnie build` still ships one static binary. See
-`docs/SPEC.md` §4.14 and `docs/TASKS.md` T-025.
+The configuration-is-code increment, and the journal becomes a database.
+Three breaking changes land together: the manifest is gone, the root package
+`bonnie` owns the serving path, and the journal is SQLite instead of one JSONL
+file per run. The TUI renders assistant messages as markdown, the agent's
+files are rooted in its workspace, and the defects a read-only audit found are
+closed.
+
+### The claims
+
+Unchanged by this release, and still what BONNIE is for:
+
+- **A run survives process death.** The conversation is journalled as it
+  happens, so another process — after a crash, on another machine — resumes
+  the run with the whole history, including which tools it already called, so
+  a side effect is not repeated. A tool-calling step now commits as one SQLite
+  transaction: whole, or absent.
+- **A run parks indefinitely.** A run waiting on a person holds no process and
+  no compute — the sandbox opens lazily, so a parked run costs a row in a
+  database. Exit the process and answer tomorrow.
+- **A run is reachable over HTTP.** `channel/http` mounts six routes and an
+  NDJSON event stream that survives a reconnect and a restart; the Slack,
+  Discord, and Telegram adapters carry the same durable run into a chat
+  thread.
+
+The limits are under **Known limits** below, stated as plainly. A framework
+that hides its limits gets deployed into situations it cannot handle.
+
+### Breaking changes
+
+1. **The manifest is gone. Configuration is code.** `agent.yaml` (and
+   `agent.toml`, `agent.json`) no longer exist. A tree's data lives at fixed
+   paths and everything else is a Go option on `bonnie.New`, so a setting that
+   does not exist is a compile error rather than a key nothing reads. See
+   **Migration** below, `docs/TASKS.md` T-024, and `docs/L2.md`.
+2. **`bonnie.New().Serve()` replaces `bonnie.Main()`.** The root package is
+   new in this release and owns the serving path.
+3. **The journal is SQLite.** `runtime.FileJournal` and
+   `runtime.OpenFileJournal` are replaced by `runtime.SQLiteJournal` and
+   `runtime.OpenSQLiteJournal`. One `<root>/journal.db` holds every run
+   instead of one JSONL file per run plus a lock file per run. The driver is
+   pure Go (`modernc.org/sqlite`), so BONNIE still builds and cross-compiles
+   with `CGO_ENABLED=0` and `bonnie build` still ships one static binary. See
+   `docs/SPEC.md` §4.14 and `docs/TASKS.md` T-025.
 
 **Your existing runs are migrated, not lost.** A `.bonnie` that still holds
 `runs/*.jsonl` is imported the first time the new journal opens it: records
 keep their sequence numbers, and each source file is renamed to
 `<run>.jsonl.imported` rather than deleted. The import is idempotent.
 
-**Breaking: the manifest is gone. Configuration is code.** `agent.yaml` (and
-`agent.toml`, `agent.json`) no longer exist. A tree's data lives at fixed
-paths and everything else is a Go option on `bonnie.New`, so a setting that
-does not exist is a compile error rather than a key nothing reads. See
-`docs/TASKS.md` T-024 and `docs/L2.md`.
-
-### Changed — journal
-
-- **A tool-calling step is one transaction.** The "torn single write" window
-  the JSONL journal documented is closed, not narrowed: a step commits whole
-  or is absent. `Restore`'s torn-write repair stays, because imported runs
-  and third-party journals can still carry the shape.
-- **Concurrent writers are safe instead of refused.** SQLite serialises write
-  transactions across processes and the `(run_id, seq)` primary key makes a
-  reused sequence number a constraint violation. The per-run `flock`, the
-  `.lock` files, and the refusal they produced are gone.
-  `runtime.ErrRunOwnedElsewhere` stays exported for journals backed by a
-  store that admits one writer — `channel/http` still maps it to 409 — but
-  the built-in journal never returns it. **Journal integrity is not turn
-  coordination:** two servers executing the same run still interleave the
-  conversation, and `SECURITY.md` says so.
-- **A read of an unknown run costs nothing.** There is no per-run handle to
-  create, so the growth the previous release had to fix cannot recur.
-- **`FsyncInterval` is now `FsyncRelaxed`, and `WithFsyncInterval` is
-  removed.** SQLite's `synchronous=NORMAL` fsyncs at write-ahead-log
-  checkpoints, not on a clock, so the old name promised something the store
-  cannot deliver. `WithFsync(FsyncAlways)` is still the default and still
-  means every commit is on the platter.
-- **A record payload that is not valid JSON is refused at write time.** The
-  JSONL encoder caught this for free; a blob column does not.
-- **A store written by a newer BONNIE is refused** with
-  `runtime.ErrJournalSchema` rather than read with the wrong shape.
-- Inspecting a run is now `sqlite3 .bonnie/journal.db "SELECT ... FROM
-  records WHERE run_id = ..."` instead of `jq` over a JSONL file.
-- The binary grows about **3.8 MB** stripped (measured: 77.4 → 81.1 MB,
-  linux/amd64), and a **cold-cache** `go build ./...` grows about 12%
-  (98 → 110 s). The driver is transpiled C, so it adds roughly 1.6 million
-  generated lines to the dependency graph. Warm builds are unaffected.
-
 ### Added
 
-- **The root package `github.com/mark3labs/bonnie`.** `bonnie.New().Serve()` is a
-  complete agent: it reads `instructions.md`, roots the agent's files in
+- **The root package `github.com/mark3labs/bonnie`.** `bonnie.New().Serve()`
+  is a complete agent: it reads `instructions.md`, roots the agent's files in
   `workspace/`, journals to `.bonnie`, serves the HTTP channel, and drains
   in-flight turns on a signal. The scaffolded `main.go` is now one call.
 
@@ -75,10 +72,11 @@ does not exist is a compile error rather than a key nothing reads. See
   ```
 
 - **Options for everything that is not a file**, passed to `New`: `WithModel`,
-  `WithSandbox`, `WithNetwork`, `WithTools`, `WithKit`, `WithSlack`,
-  `WithDiscord`, `WithTelegram`, `WithChannel`, `WithWorkspace`,
-  `WithInstructions`, `WithJournal`, `WithAddr`, `WithShutdownTimeout`, and
-  `WithAgentFactory` for a host that brings its own agent.
+  `WithSystemPrompt`, `WithSandbox`, `WithNetwork`, `WithTools`, `WithKit`,
+  `WithSlack`, `WithDiscord`, `WithTelegram`, `WithChannel`, `WithWorkspace`,
+  `WithInstructions`, `WithJournal`, `WithAddr`, `WithListener`,
+  `WithShutdownTimeout`, and `WithAgentFactory` for a host that brings its own
+  agent.
 - **`Agent.Run(ctx) error`** is `Serve` without the process — no flags, no
   signal handler, no exit — for a host that already owns those.
 - **The default layout as exported constants**: `DefaultInstructions`,
@@ -86,10 +84,25 @@ does not exist is a compile error rather than a key nothing reads. See
   scaffold, codegen, the dev loop, and the runtime all read them, so the
   layout is defined once.
 - **`bonnie.Register` / `Registered` / `Tree`.** The generated
-  `bonnie_gen.go` registers the tree's tools and embedded data from `init`,
-  so `main.go` never names a tool or an embed.
+  `bonnie_gen.go` registers the tree's tools and embedded data from `init`, so
+  `main.go` never names a tool or an embed.
 - `-addr` and `-model` are operator flags on every serving binary, applied
   after the options, so one binary can move port or model without a rebuild.
+- Assistant messages render as **markdown** in `bonnie dev` and `bonnie chat`
+  (a T-021 extension): headings, bold, lists, tables, and code blocks render
+  through herald-md — the same typography stack upstream Kit's TUI uses — in
+  the TUI's existing palette. Streaming text renders live, so the answer
+  arrives already shaped; user messages, tool lines, and reasoning stay as
+  they were, because typed text is not markdown.
+- `sandbox.Imaged`, the optional interface a provider implements to report the
+  image it really runs. It is what makes the image testable and the banner
+  honest.
+- `chat.DeliveryText` and `chat.FirstLine`: the rule for what a person sees at
+  the end of a turn, which lived three times, byte for byte, in the Slack,
+  Discord, and Telegram adapters.
+- `TestCancelledRunContinuesInASecondRunner`: `Runner.Cancel` promises a
+  cancelled run can be continued, and every durability claim needs a test that
+  crosses a process boundary. This one had only a same-process `Restore`.
 
 ### Changed
 
@@ -103,27 +116,73 @@ does not exist is a compile error rather than a key nothing reads. See
 - **The startup banner reports the address actually bound**, so `-addr :0`
   names the real port.
 - **Chat channels mount through options** rather than manifest keys. Their
-  credentials still come only from the environment, and a missing one is
-  still a startup error naming the variable.
+  credentials still come only from the environment, and a missing one is still
+  a startup error naming the variable.
+- **The agent's root is now the workspace.** A tool call's relative path
+  resolves inside the tree's `workspace/` (or `bonnie.WithWorkspace`) instead
+  of wherever the server was started from. Serving a tree used to drop a
+  model's files on the tree itself — beside `instructions.md` and `.bonnie/`,
+  the journal a run's durability depends on. A sandboxed run already rooted
+  everything at `/workspace`, so the two modes now agree. The banner names the
+  resolved workspace. Serving without a tree is unchanged: the process's own
+  directory stays the root. Note that this is a root, not a jail — an absolute
+  path still escapes, which is what the sandbox is for (`docs/SPEC.md` §4.9.1).
 - `gopkg.in/yaml.v3` and `github.com/pelletier/go-toml/v2` return to indirect
   dependencies. `go.sum` is unchanged.
 
-### Removed
+#### The journal
 
-- `agent.Manifest`, `agent.Load`, `agent.LoadFile`, `agent.ParseManifestData`,
-  `agent.APIVersion`, and every manifest sentinel error.
-- `serve --agent`, `serve --config`, `init --format`, `init --title`,
-  `build --config`.
-- The generated `discoveredTools()`, `embeddedInstructions()`,
-  `embeddedManifest()`, `embeddedSkills()`, and `embeddedWorkspace()`
-  symbols, replaced by `bonnie.Register`.
-- **The zero-Go path.** A host with no Go toolchain can no longer serve a
-  tree from data. Authoring an agent now needs Go from the first step, as it
-  did from the fifth before. The binary `bonnie build` produces still needs
-  nothing on the host, which is the end of the arc that matters.
+- **A tool-calling step is one transaction.** The "torn single write" window
+  the JSONL journal documented is closed, not narrowed: a step commits whole
+  or is absent. `Restore`'s torn-write repair stays, because imported runs and
+  third-party journals can still carry the shape.
+- **Concurrent writers are safe instead of refused.** SQLite serialises write
+  transactions across processes and the `(run_id, seq)` primary key makes a
+  reused sequence number a constraint violation. The per-run `flock`, the
+  `.lock` files, and the refusal they produced are gone.
+  `runtime.ErrRunOwnedElsewhere` stays exported for journals backed by a store
+  that admits one writer — `channel/http` still maps it to 409 — but the
+  built-in journal never returns it. **Journal integrity is not turn
+  coordination:** two servers executing the same run still interleave the
+  conversation, and `SECURITY.md` says so.
+- **A read of an unknown run costs nothing.** There is no per-run handle to
+  create, so the growth the previous release had to fix cannot recur.
+- **`FsyncInterval` is now `FsyncRelaxed`, and `WithFsyncInterval` is
+  removed.** SQLite's `synchronous=NORMAL` fsyncs at write-ahead-log
+  checkpoints, not on a clock, so the old name promised something the store
+  cannot deliver. `WithFsync(FsyncAlways)` is still the default and still
+  means every commit is on the platter.
+- **A record payload that is not valid JSON is refused at write time.** The
+  JSONL encoder caught this for free; a blob column does not.
+- **A store written by a newer BONNIE is refused** with
+  `runtime.ErrJournalSchema` rather than read with the wrong shape.
+- Inspecting a run is now `sqlite3 .bonnie/journal.db "SELECT ... FROM records
+  WHERE run_id = ..."` instead of `jq` over a JSONL file.
+- The binary grows about **3.8 MB** stripped (measured: 77.4 → 81.1 MB,
+  linux/amd64), and a **cold-cache** `go build ./...` grows about 12%
+  (98 → 110 s). The driver is transpiled C, so it adds roughly 1.6 million
+  generated lines to the dependency graph. Warm builds are unaffected.
 
 ### Fixed
 
+- **A run's event stream no longer leaks goroutines when a client
+  disconnects.** `Runner.StreamEvents` forwarded on an unbuffered channel, so
+  a client that went away between two events left the forwarder parked on its
+  send and the bus subscriber's pump parked behind it. A goroutine blocked in
+  a send cannot see the unsubscribe. Every reconnect that raced an event cost
+  a long-lived server two goroutines and their queued events, for the life of
+  the process. Stopping a stream now releases every send it owns.
+- **`--sandbox-image` reaches every backend that runs an image.**
+  `--sandbox auto` built its candidates without the image, so an operator who
+  named one silently got the default; `--sandbox local` accepted an image it
+  cannot run and is now refused. The startup banner names the image in force.
+- **Reserved runs are no longer addressable.** BONNIE keeps its address map in
+  a run under `runtime.ReservedRunPrefix`. A caller who knew the prefix could
+  start a turn on it through any chat transport, and `bonnie sandbox prune`
+  listed it to operators. Both now refuse and filter.
+- **`channel/http` caps a request body at 1 MiB**, with a 413 that names the
+  limit — the webhook adapters always did. A write refused because another
+  process owns the run (`ErrRunOwnedElsewhere`) now answers 409, not 500.
 - **A chat-channel option can be reused.** `WithSlack`, `WithDiscord`, and
   `WithTelegram` filled their captured `Config` from the environment, and the
   fill only writes an empty field — so the first use left the credentials
@@ -132,6 +191,47 @@ does not exist is a compile error rather than a key nothing reads. See
   called twice, served the credentials read at the first call rather than the
   ones set now. Each option now copies its config per call. Guard test:
   `TestChatChannelOptionsMount`.
+- **The workspace really is seeded.** `sandbox.Seeded` was written and tested
+  but never called, so the configured workspace was accepted and ignored —
+  what invariant 13 exists to forbid. A sandboxed run now receives its seed
+  files at `/workspace`.
+- `bonnie dev` watched the workspace, so the agent restarted itself for doing
+  its job: a model writing a file — the ordinary case now that the workspace
+  is the agent's root — tripped a rebuild that SIGTERMed the child still
+  serving the turn. The workspace is the loop's output, not its input, and is
+  no longer watched. Edits to instructions, tools, and `go.mod` still
+  hot-reload; verified live in both directions. Guard tests:
+  `TestWorkspaceIsNotWatched`, `TestWorkspaceDirIsTheRuntimeWorkspace`.
+- Assistant lines longer than 100 columns were silently truncated by the old
+  `MaxWidth` style: every cell past the limit was lost, on every message.
+  Assistant prose now wraps at the terminal width and keeps everything —
+  verified live against a real model, including a wrapped 300-character
+  paragraph and the hot-reload reconnect path.
+- The TUI's cursor landed below the footer once the transcript grew taller
+  than the terminal: the view reported a frame-relative row, while inline mode
+  moves the terminal cursor to that exact screen position, so the terminal
+  clamped the move to its bottom row. The view now subtracts the rows the
+  screen has scrolled past. Pinned by a test and verified in tmux at three
+  window heights.
+
+### Removed
+
+- `runtime.FileJournal` and `runtime.OpenFileJournal`, the per-run `.lock`
+  files, and `runtime.WithFsyncInterval`.
+- `agent.Manifest`, `agent.Load`, `agent.LoadFile`, `agent.ParseManifestData`,
+  `agent.APIVersion`, and every manifest sentinel error.
+- `serve --agent`, `serve --config`, `init --format`, `init --title`,
+  `build --config`.
+- The generated `discoveredTools()`, `embeddedInstructions()`,
+  `embeddedManifest()`, `embeddedSkills()`, and `embeddedWorkspace()` symbols,
+  replaced by `bonnie.Register`.
+- `EventBus.Backlog`, which had no caller in the repository.
+  `Runner.StreamEvents` is the supported way to read a run's events, and it
+  has been since journal-backed catch-up landed.
+- **The zero-Go path.** A host with no Go toolchain can no longer serve a tree
+  from data. Authoring an agent now needs Go from the first step, as it did
+  from the fifth before. The binary `bonnie build` produces still needs
+  nothing on the host, which is the end of the arc that matters.
 
 ### Migration
 
@@ -153,114 +253,42 @@ Then delete `agent.yaml` and run `bonnie build`. A tree that has no `main.go`
 (the old zero-Go scaffold) gets one from `bonnie init .`, which never
 overwrites what is already there.
 
----
+Your journal needs no action: point the new binary at the same `.bonnie` and
+the `runs/*.jsonl` files are imported on first open.
 
-The audit increment: a read-only pass over every non-test file against the
-invariants in `docs/SPEC.md` §8. It found no boundary violation and no
-journal-integrity hole; it found two resource leaks, two settings that were
-accepted and ignored, and one durability claim with no test in the shape the
-project demands. All are closed here. See `docs/SPEC.md` §4.12.
+### Known limits
 
-### Fixed
+Stated as plainly as the claims, because a framework that hides its limits
+gets deployed into situations it cannot handle.
 
-- **A run's event stream no longer leaks goroutines when a client
-  disconnects.** `Runner.StreamEvents` forwarded on an unbuffered channel, so
-  a client that went away between two events left the forwarder parked on its
-  send and the bus subscriber's pump parked behind it. A goroutine blocked in
-  a send cannot see the unsubscribe. Every reconnect that raced an event cost
-  a long-lived server two goroutines and their queued events, for the life of
-  the process. Stopping a stream now releases every send it owns.
-- **Reading an unknown run no longer grows the file journal.** `FileJournal`
-  kept a handle for every run ID it was ever asked about, so a server
-  reachable from outside paid a permanent map entry for each 404. Reads now
-  keep a handle only for a run that exists.
-- **`--sandbox-image` reaches every backend that runs an image.**
-  `--sandbox auto` built its candidates without the image, so an operator who
-  named one silently got the default; `--sandbox local` accepted an image it
-  cannot run and is now refused. The startup banner names the image in force.
-- **Reserved runs are no longer addressable.** BONNIE keeps its address map
-  in a run under `runtime.ReservedRunPrefix`. A caller who knew the prefix
-  could start a turn on it through any chat transport, and `bonnie sandbox
-  prune` listed it to operators. Both now refuse and filter.
-- **`channel/http` caps a request body at 1 MiB**, with a 413 that names the
-  limit — the webhook adapters always did. A write refused because another
-  process owns the run (`ErrRunOwnedElsewhere`) now answers 409, not 500.
-
-### Added
-
-- `sandbox.Imaged`, the optional interface a provider implements to report
-  the image it really runs. It is what makes the image testable and the
-  banner honest.
-- `chat.DeliveryText` and `chat.FirstLine`: the rule for what a person sees
-  at the end of a turn, which lived three times, byte for byte, in the Slack,
-  Discord, and Telegram adapters.
-- `Manifest.WorkspaceDir`, one answer for the agent's root. The serve
-  wiring, the dev loop's watcher, and codegen each held their own copy of the
-  default, so a renamed workspace could be honored by one and missed by
-  another.
-- `TestCancelledRunContinuesInASecondRunner`: `Runner.Cancel` promises a
-  cancelled run can be continued, and every durability claim needs a test
-  that crosses a process boundary. This one had only a same-process
-  `Restore`.
-
-### Removed
-
-- `EventBus.Backlog`, which had no caller in the repository.
-  `Runner.StreamEvents` is the supported way to read a run's events, and it
-  has been since journal-backed catch-up landed.
-
-## [0.4.0] — 2026-09-14
-
-The readable-answer increment: assistant messages in the TUI render as
-markdown — headings, lists, tables, and code blocks in the same palette as
-the rest of the surface — and assistant prose wraps at the terminal width
-instead of being cut.
-
-### Added
-
-- Assistant messages render as markdown in `bonnie dev` and `bonnie chat`
-  (a T-021 extension): headings, bold, lists, tables, and code blocks render
-  through herald-md — the same typography stack upstream Kit's TUI uses — in
-  the TUI's existing palette. Streaming text renders live, so the answer
-  arrives already shaped; user messages, tool lines, and reasoning stay as
-  they were, because typed text is not markdown.
-
-### Changed
-
-- **The agent's root is now the workspace.** A tool call's relative path
-  resolves inside the tree's `workspace/` (or the manifest's `workspace:`)
-  instead of wherever the server was started from. `serve --agent .` used to
-  drop a model's files on the tree itself — beside `agent.yaml`,
-  `instructions.md`, and `.bonnie/`, the journal a run's durability depends
-  on. A sandboxed run already rooted everything at `/workspace`, so the two
-  modes now agree. The banner names the resolved workspace. Serving without
-  a tree is unchanged: the process's own directory stays the root. Note that
-  this is a root, not a jail — an absolute path still escapes, which is what
-  the sandbox is for (`docs/SPEC.md` §4.9.1).
-
-### Fixed
-
-- `bonnie dev` watched the workspace, so the agent restarted itself for doing
-  its job: a model writing a file — the ordinary case now that the workspace
-  is the agent's root — tripped a rebuild that SIGTERMed the child still
-  serving the turn. The workspace is the loop's output, not its input, and is
-  no longer watched. Edits to the manifest, instructions, tools, and go.mod
-  still hot-reload; verified live in both directions.
-- The manifest's `workspace:` key seeded nothing. `sandbox.Seeded` was
-  written and tested but never called, so the key was accepted and ignored —
-  what invariant 13 exists to forbid. A sandboxed run now really does receive
-  the seed files at `/workspace`.
-- Assistant lines longer than 100 columns were silently truncated by the old
-  `MaxWidth` style: every cell past the limit was lost, on every message.
-  Assistant prose now wraps at the terminal width and keeps everything —
-  verified live against a real model, including a wrapped 300-character
-  paragraph and the hot-reload reconnect path.
-- The TUI's cursor landed below the footer once the transcript grew taller
-  than the terminal: the view reported a frame-relative row, while inline
-  mode moves the terminal cursor to that exact screen position, so the
-  terminal clamped the move to its bottom row. The view now subtracts the
-  rows the screen has scrolled past. Pinned by a test and verified in tmux
-  at three window heights.
+- **Early and experimental.** Pre-1.0: the API can change without notice, and
+  no release is suitable for workloads whose loss would hurt.
+- **Sandboxing is opt-in.** Without it, tool calls run as the host process.
+- **Docker is namespaces, not a guest kernel.** Use microsandbox when the
+  threat model includes hostile code.
+- **Sandbox egress is open** unless a policy is set.
+- **microsandbox is verified on Linux with KVM only**, not on macOS with Apple
+  Silicon. Every network policy mode is enforced, but the policy is fixed at
+  create time; reattaching under a different one fails with
+  `ErrPolicyMismatch`.
+- **No auth verification on the HTTP channel.** It carries a `Principal`; it
+  does not check one. Authenticate in front of it. The chat channels each
+  verify their platform's signature, which verifies the platform, not the
+  person.
+- **Run ownership is per host, and the journal no longer refuses a second
+  writer.** SQLite serialises write transactions and rejects a reused sequence
+  number, so two processes writing one run cannot corrupt it. That is journal
+  integrity, not turn coordination: two servers that both execute the same run
+  still interleave the conversation. SQLite's locking also needs working POSIX
+  locks, so a journal on a network filesystem is still unsafe.
+- **Events are journal-anchored.** The stream replays the journal past the
+  in-memory backlog, so a reconnect — even after a restart — has no gap.
+  Kit's mid-turn deltas stay live-only, marked as ephemeral.
+- **Reclaiming sandboxes is manual.** `bonnie sandbox prune` deletes the
+  sandboxes of terminal runs; `serve` does not sweep them on its own yet.
+- **Authoring needs Go.** A scaffolded module resolves `bonnie` and `kit` from
+  the public proxy; the binary `bonnie build` produces needs nothing on the
+  host.
 
 ## [0.3.0] — 2026-09-13
 
@@ -478,5 +506,7 @@ gets deployed into situations it cannot handle.
 
 ---
 
+[0.4.0]: https://github.com/mark3labs/bonnie/releases/tag/v0.4.0
+[0.3.0]: https://github.com/mark3labs/bonnie/releases/tag/v0.3.0
 [0.2.0]: https://github.com/mark3labs/bonnie/releases/tag/v0.2.0
 [0.1.0]: https://github.com/mark3labs/bonnie/releases/tag/v0.1.0
