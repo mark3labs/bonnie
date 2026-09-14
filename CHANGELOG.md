@@ -7,6 +7,95 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**Breaking: the manifest is gone. Configuration is code.** `agent.yaml` (and
+`agent.toml`, `agent.json`) no longer exist. A tree's data lives at fixed
+paths and everything else is a Go option on `bonnie.Main`, so a setting that
+does not exist is a compile error rather than a key nothing reads. See
+`docs/TASKS.md` T-024 and `docs/L2.md`.
+
+### Added
+
+- **The root package `github.com/mark3labs/bonnie`.** `bonnie.Main()` is a
+  complete agent: it reads `instructions.md`, roots the agent's files in
+  `workspace/`, journals to `.bonnie`, serves the HTTP channel, and drains
+  in-flight turns on a signal. The scaffolded `main.go` is now one call.
+
+  ```go
+  package main
+
+  import "github.com/mark3labs/bonnie"
+
+  func main() { bonnie.Main() }
+  ```
+
+- **Options for everything that is not a file**: `WithModel`, `WithSandbox`,
+  `WithNetwork`, `WithTools`, `WithKit`, `WithSlack`, `WithDiscord`,
+  `WithTelegram`, `WithChannel`, `WithWorkspace`, `WithInstructions`,
+  `WithJournal`, `WithAddr`, `WithShutdownTimeout`, and `WithAgentFactory`
+  for a host that brings its own agent.
+- **The default layout as exported constants**: `DefaultInstructions`,
+  `DefaultWorkspace`, `DefaultSkills`, `DefaultJournal`, `DefaultAddr`. The
+  scaffold, codegen, the dev loop, and the runtime all read them, so the
+  layout is defined once.
+- **`bonnie.Register` / `Registered` / `Tree`.** The generated
+  `bonnie_gen.go` registers the tree's tools and embedded data from `init`,
+  so `main.go` never names a tool or an embed.
+- `-addr` and `-model` are operator flags on every serving binary, applied
+  after the options, so one binary can move port or model without a rebuild.
+
+### Changed
+
+- **`bonnie init`** scaffolds `main.go`, `instructions.md`, `go.mod`,
+  `bonnie_gen.go`, `skills/`, `workspace/`. `--model` writes the option into
+  `main.go`. `--format` and `--title` are gone.
+- **`bonnie build`** names its output from the module path in `go.mod`.
+- **`bonnie serve`** is the flag-only generic host, for running an agent with
+  no tree. `--agent` and `--config` are gone: a tree's configuration is Go in
+  its own `main.go`, so a tree is served by running it.
+- **The startup banner reports the address actually bound**, so `-addr :0`
+  names the real port.
+- **Chat channels mount through options** rather than manifest keys. Their
+  credentials still come only from the environment, and a missing one is
+  still a startup error naming the variable.
+- `gopkg.in/yaml.v3` and `github.com/pelletier/go-toml/v2` return to indirect
+  dependencies. `go.sum` is unchanged.
+
+### Removed
+
+- `agent.Manifest`, `agent.Load`, `agent.LoadFile`, `agent.ParseManifestData`,
+  `agent.APIVersion`, and every manifest sentinel error.
+- `serve --agent`, `serve --config`, `init --format`, `init --title`,
+  `build --config`.
+- The generated `discoveredTools()`, `embeddedInstructions()`,
+  `embeddedManifest()`, `embeddedSkills()`, and `embeddedWorkspace()`
+  symbols, replaced by `bonnie.Register`.
+- **The zero-Go path.** A host with no Go toolchain can no longer serve a
+  tree from data. Authoring an agent now needs Go from the first step, as it
+  did from the fifth before. The binary `bonnie build` produces still needs
+  nothing on the host, which is the end of the arc that matters.
+
+### Migration
+
+For each key in your `agent.yaml`, write the option in `main.go`:
+
+| Manifest | `main.go` |
+|---|---|
+| `model:` | `bonnie.WithModel(...)` |
+| `instructions:` | `bonnie.WithInstructions(...)` — or rename the file to `instructions.md` |
+| `workspace:` | `bonnie.WithWorkspace(...)` — or rename the directory to `workspace/` |
+| `sandbox.kind`, `sandbox.image` | `bonnie.WithSandbox(sandbox.Docker(...))` |
+| `sandbox.network` | `bonnie.WithNetwork(sandbox.NetworkPolicy{...})` |
+| `channels.http.addr` | `bonnie.WithAddr(...)` |
+| `channels.slack` / `discord` / `telegram` | `bonnie.WithSlack(...)` / `WithDiscord(...)` / `WithTelegram(...)` |
+| `title:` | the directory name — `bonnie build` reads it from `go.mod` |
+| `apiVersion:` | nothing; the Go type system replaced it |
+
+Then delete `agent.yaml` and run `bonnie build`. A tree that has no `main.go`
+(the old zero-Go scaffold) gets one from `bonnie init .`, which never
+overwrites what is already there.
+
+---
+
 The audit increment: a read-only pass over every non-test file against the
 invariants in `docs/SPEC.md` §8. It found no boundary violation and no
 journal-integrity hole; it found two resource leaks, two settings that were

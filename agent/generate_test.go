@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/mark3labs/bonnie/internal/treetest"
 )
 
 // scaffoldTools builds a fresh --tools tree with a single sample tool, and
@@ -167,7 +169,7 @@ func allowedImport(imp, module string) bool {
 	if imp == "github.com/mark3labs/kit/pkg/kit" {
 		return true
 	}
-	if strings.HasPrefix(imp, "github.com/mark3labs/bonnie/") {
+	if strings.HasPrefix(imp, "github.com/mark3labs/bonnie/") || imp == "github.com/mark3labs/bonnie" {
 		return true
 	}
 	if strings.HasPrefix(imp, module+"/tools/") {
@@ -237,22 +239,16 @@ func TestPlanStringNamesDiscovery(t *testing.T) {
 	}
 }
 
-// A custom workspace path must still bind to the canonical _workspace
-// accessor, so a manifest that names a non-default directory is exposed the
-// same way the default is.
-func TestCodegenBindsCustomWorkspaceToCanonicalVar(t *testing.T) {
+// The workspace and skills slots bind to their canonical variables when they
+// hold real files, and a tree ships no manifest for codegen to embed: the
+// tree's data is at the default paths, and there is nowhere else to look.
+func TestCodegenEmbedsTheDefaultLayout(t *testing.T) {
 	t.Parallel()
 	root := scaffoldTools(t)
-	// The scaffold's manifest names workspace: workspace/. Overwrite it to a
-	// custom directory and create one real file there.
-	yamlW := strings.Replace(string(mustReadFile(t, filepath.Join(root, "agent.yaml"))), "workspace: workspace/", "workspace: seeds/", 1)
-	if err := os.WriteFile(filepath.Join(root, "agent.yaml"), []byte(yamlW), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "workspace", "a.txt"), []byte("seed\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(filepath.Join(root, "seeds"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "seeds", "a.txt"), []byte("seed\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "skills", "review.md"), []byte("# review\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -261,34 +257,53 @@ func TestCodegenBindsCustomWorkspaceToCanonicalVar(t *testing.T) {
 		t.Fatalf("Generate: %v", err)
 	}
 	text := string(out)
-	if !strings.Contains(text, "//go:embed seeds/") && !strings.Contains(text, "//go:embed seeds") {
-		t.Fatalf("the generated file does not embed the custom workspace:\n%s", text)
+	for _, want := range []string{
+		"//go:embed instructions.md",
+		"//go:embed skills",
+		"//go:embed workspace",
+		"var _workspace embed.FS",
+		"bonnie.Register(bonnie.Tree{",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("the generated file does not contain %q:\n%s", want, text)
+		}
 	}
-	if !strings.Contains(text, "var _workspace embed.FS") {
-		t.Fatalf("the custom workspace is not bound to _workspace:\n%s", text)
+	for _, gone := range []string{"_manifest", "agent.yaml", "ParseManifestData"} {
+		if strings.Contains(text, gone) {
+			t.Fatalf("the generated file still carries the manifest (%q):\n%s", gone, text)
+		}
 	}
 }
 
-func mustReadFile(t *testing.T, path string) []byte {
-	t.Helper()
-	b, err := os.ReadFile(path)
+// A bare .gitkeep is not real content: an empty slot must not emit an embed
+// directive, because the pattern would demand a match the compiler cannot
+// find.
+func TestCodegenSkipsEmptySlots(t *testing.T) {
+	t.Parallel()
+	root := scaffoldTools(t)
+
+	out, _, err := Generate(root)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("Generate: %v", err)
 	}
-	return b
+	text := string(out)
+	if strings.Contains(text, "//go:embed skills") || strings.Contains(text, "//go:embed workspace") {
+		t.Fatalf("an empty slot emitted an embed directive:\n%s", text)
+	}
+	// The slots are still declared, so the accessors always compile.
+	for _, want := range []string{"var _skills embed.FS", "var _workspace embed.FS"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("the generated file does not declare %q:\n%s", want, text)
+		}
+	}
 }
 
 // The generated file must compile as the tree's wiring. This is the guard test
-// that leans on the compiler: codegen emits a valid Go file. It is skipped
-// when no kit checkout is beside the repo, like the scaffold build test.
+// that leans on the compiler: codegen emits a valid Go file, and the symbols it
+// emits are the ones the runtime exposes.
 func TestGeneratedFileCompiles(t *testing.T) {
-	kitRoot, ok := findUpstream(t)
-	if !ok {
-		t.Skip("no kit checkout beside this repo; the workspace build cannot be simulated")
-	}
-
-	parent := t.TempDir()
-	root := filepath.Join(parent, "my-agent")
+	t.Parallel()
+	root := filepath.Join(t.TempDir(), "my-agent")
 	if _, err := Scaffold(root, InitOptions{Tools: true}); err != nil {
 		t.Fatalf("Scaffold: %v", err)
 	}
@@ -304,15 +319,11 @@ func TestGeneratedFileCompiles(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "bonnie_gen.go"), out, 0o644); err != nil {
 		t.Fatal(err)
 	}
-
-	work := filepath.Join(parent, "go.work")
-	if err := os.WriteFile(work, []byte("go 1.27.1\n\nuse (\n\t./my-agent\n\t"+bonnieRoot()+"\n\t"+kitRoot+"\n)\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	treetest.LinkToCheckout(t, root)
 
 	build := exec.Command("go", "build", "./...")
 	build.Dir = root
-	build.Env = append(os.Environ(), "GOWORK="+work)
+	build.Env = treetest.BuildEnv()
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("the generated file does not compile: %v\n%s", err, out)
 	}

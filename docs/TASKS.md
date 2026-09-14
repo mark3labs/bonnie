@@ -32,11 +32,12 @@ the known risks, and the invariants every task must preserve.
 
 | ID | Delivered | Where |
 |---|---|---|
-| T-023 | Audit fixes: the event stream releases a parked send on disconnect (goroutine leak), reads of unknown runs no longer grow the file journal, `--sandbox-image` reaches `auto` and is refused by `local`, reserved runs are off the wire and out of `sandbox prune`, `channel/http` caps a body and maps `ErrRunOwnedElsewhere` to 409; `chat.DeliveryText` and `Manifest.WorkspaceDir` replace three copies each; `EventBus.Backlog` removed | `runtime/events.go`, `runtime/runner.go`, `runtime/filejournal.go`, `channel/chat/chat.go`, `channel/http/http.go`, `cmd/bonnie/serve.go`, `cmd/bonnie/sandbox.go`, `docs/SPEC.md` §4.12 |
+| T-024 | The manifest is gone: configuration is code. The root `bonnie` package owns the serving path (`Main`, `Run`, options) and the default layout as constants; codegen registers the tree through `bonnie.Register` from `init`; `bonnie init` scaffolds a one-call `main.go`; `serve` is the flag-only generic host; `yaml` and `toml` return to indirect | `bonnie.go`, `run.go`, `options.go`, `agent/scaffold.go`, `agent/generate.go`, `cmd/bonnie/`, `internal/treetest/`, `docs/L2.md` |
+| T-023 | Audit fixes: the event stream releases a parked send on disconnect (goroutine leak), reads of unknown runs no longer grow the file journal, `--sandbox-image` reaches `auto` and is refused by `local`, reserved runs are off the wire and out of `sandbox prune`, `channel/http` caps a body and maps `ErrRunOwnedElsewhere` to 409; `chat.DeliveryText` and the workspace-default rule replace three copies each; `EventBus.Backlog` removed | `runtime/events.go`, `runtime/runner.go`, `runtime/filejournal.go`, `channel/chat/chat.go`, `channel/http/http.go`, `cmd/bonnie/sandbox.go`, `docs/SPEC.md` §4.12 |
 | T-021 | Built-in terminal TUI: `bonnie dev` opens a scrollback chat; `bonnie chat` connects to an HTTP channel; cursor reconnect and cancel; assistant messages render as markdown through herald-md (Kit's typography patterns) | `cmd/bonnie/tui/`, `cmd/bonnie/chat.go`, `cmd/bonnie/dev.go` |
 | T-018 | L2 codegen: tool discovery (`agent/gen`), `bonnie dev` (fsnotify loop), `bonnie build` (go:embed + static binary), `--dry-run`; import allowlist; duplicate-name refusal; idempotent codegen | `agent/generate.go`, `agent/generate_test.go`, `cmd/bonnie/build.go`, `cmd/bonnie/dev.go`, `cmd/bonnie/l2_test.go` |
-| T-020 | Chat channels: Slack, Discord, Telegram adapters with verified webhooks, dispatch (a reply to a parked run resumes it), threaded delivery; `channel/chat` shared plumbing; the manifest's `channels:` keys with env-only credentials | `channel/slack/`, `channel/discord/`, `channel/telegram/`, `channel/chat/`, `cmd/bonnie/serve.go`, `docs/CHANNELS.md` |
-| T-017 | L2 core: the strict manifest loader (`agent/`), `bonnie init` (always a Go module; `--tools` adds a sample tool — the zero-Go fork was replaced in `v0.2.0`), `serve --agent` with flag-over-manifest precedence and source-annotated banner, the go-tree refusal, workspace seeding | `agent/manifest.go`, `agent/scaffold.go`, `cmd/bonnie/init.go`, `cmd/bonnie/serve.go`, `sandbox/seed.go` |
+| T-020 | Chat channels: Slack, Discord, Telegram adapters with verified webhooks, dispatch (a reply to a parked run resumes it), threaded delivery; `channel/chat` shared plumbing; mounted by `bonnie.WithSlack`/`WithDiscord`/`WithTelegram` with env-only credentials (manifest keys until T-024) | `channel/slack/`, `channel/discord/`, `channel/telegram/`, `channel/chat/`, `options.go`, `docs/CHANNELS.md` |
+| T-017 | L2 core: `bonnie init` (always a Go module; `--tools` adds a sample tool), workspace seeding, and the strict manifest loader — the loader and `serve --agent` were removed by T-024 | `agent/scaffold.go`, `cmd/bonnie/init.go`, `sandbox/seed.go` |
 | T-012 | The sandbox lifecycle is journalled: `RecordSandbox`, a resume note when a workspace is gone, `runs show` timeline, `bonnie sandbox prune` | `runtime/journal.go`, `runtime/session.go`, `sandbox/lifecycle.go`, `cmd/bonnie/sandbox.go` |
 | T-014 | Cross-process run ownership: `flock` per run, `ErrRunOwnedElsewhere` on a second writer, reads unlocked, per-host limit stated | `runtime/filejournal.go`, `filejournal_test.go` |
 | T-015 | `channeltest` conformance suite; compile-time assertions in `channel`; unknown `TurnPolicy` refused, not guessed | `channeltest/`, `channel/channel_test.go` |
@@ -662,10 +663,6 @@ single static binary at the end.
 
 ### Watch for
 
-- **The hermetic build/dev tests skip without a kit checkout.** They build a
-  real child binary through a temp `go.work`, so like
-  `TestScaffoldToolsModuleBuilds` they need the upstream `kit` checkout beside
-  the repo. CI green does not mean they ran unless that checkout exists.
 - **`go:embed` patterns cannot climb** with `..`. The generated file is at the
   module root and embeds `instructions.md`, `skills`, and `workspace` relative
   to it. Do not move authored files under a nested directory without moving
@@ -773,8 +770,8 @@ is what deletes that gap.
   it opens at the served cursor by design, and no wire endpoint returns the
   past conversation (now T-022) — and a dev child built from a scaffold links
   the **published** release pinned in the tree's `go.mod`, not the working
-  tree; testing a local change through `bonnie dev` needs the hermetic
-  `go.work` beside the tree that `agent/generate_test.go` already uses.
+  tree; testing a local change through `bonnie dev` needs a `replace` in the
+  tree's `go.mod`, which is what `internal/treetest` writes for the tests.
 - **The inline cursor is a screen coordinate, not a frame coordinate.**
   bubbletea v2's inline renderer moves the terminal cursor to the exact row
   the view reports. A scrollback transcript grows past the terminal height,
@@ -826,6 +823,126 @@ durable events only — tool calls and live Kit deltas are live-only by design
 (SPEC §4.8), so a cursor-0 stream would render a half transcript (responses
 and questions, no user lines, no tool calls) and look like a fix while it is
 not.
+
+---
+
+## T-024 — Remove the manifest: configuration is code
+
+**RESOLVED.** `agent.yaml` is gone. A tree's data lives at fixed paths and
+everything else is a Go option on `bonnie.Main`. The scaffolded `main.go` is
+one call.
+
+**Priority** P1 · **Size** L · **Spec** [`docs/L2.md`](L2.md) §2, §4, §5
+
+### Why
+
+The scaffolded `main.go` had grown to 170 lines. It was authored, so BONNIE
+could never rewrite it, which meant it carried a **copy** of the CLI's serve
+wiring into user space — manifest loading, precedence, workspace rooting,
+journal, mux, signal handling — and the two copies had already drifted (the
+scaffold had no sandbox branch, no chat channels, no stream close on
+shutdown). Every one of those pieces was `package main` in `cmd/bonnie`, so
+no user could call them.
+
+Underneath that was the real defect: **two places to configure one setting.**
+The workspace path was written five times (`serve.go`, the scaffold's
+`main.go`, `generate.go`, `dev.go`, `manifest.go`), and only one of the five
+had been collapsed — after a defect where a renamed workspace was honoured by
+one caller and missed by another (SPEC §4.9.1). The manifest's strictness was
+the mitigation for having a second source of truth. Deleting the source beats
+policing it.
+
+eve reached the same place from the other direction: its config is
+`defineAgent` in `agent/agent.ts`, the file is optional, and framework
+defaults occupy the slot when it is absent. `docs/L2.md` §7 had recorded the
+declarative manifest as BONNIE's own invention, not an eve adoption. It was
+the wrong invention.
+
+### What shipped
+
+1. **The root `bonnie` package.** `Main` (flags, signals, exit) and `Run`
+   (the serving path) with the wiring lifted out of `cmd/bonnie/serve.go`:
+   the agent factory, the sandbox branch, `hostWorkspaceOptions`, the mux,
+   `closeStreamsOnShutdown`, the drain. The CLI now calls the same code a
+   user calls, so the two cannot drift again.
+2. **The default layout as constants.** `DefaultInstructions`,
+   `DefaultWorkspace`, `DefaultSkills`, `DefaultJournal`, `DefaultAddr`. The
+   scaffold, codegen, the dev loop's watch set, and the runtime all read
+   them.
+3. **`Register` / `Registered` / `Tree`.** The generated `bonnie_gen.go`
+   calls `Register` from `init` with the discovered tools and the embedded
+   instructions, skills, and workspace. `main.go` never names a tool or an
+   embed, so adding a tool changes only the generated file.
+4. **Options for everything else**, including `WithAgentFactory` for a host
+   that brings its own agent, and `WithSlack`/`WithDiscord`/`WithTelegram`
+   which take their credentials from the environment.
+5. **Deleted:** `agent/manifest.go` and its tests, `serve --agent`,
+   `--config`, `--format`, `--title`, `resolveServe`'s precedence and
+   banner, `refuseGoTree`, `embeddedManifest`, the `_manifest` embed slot.
+   `yaml.v3` and `go-toml/v2` are indirect again; `go.sum` is unchanged.
+6. **`internal/treetest`** replaced the `go.work` the build tests used.
+
+### Decisions, and why
+
+- **The zero-Go path is gone, deliberately.** A host with no Go toolchain can
+  no longer serve a tree from data. This was the manifest's one real
+  capability, and it cost a second source of truth for every setting. eve
+  requires Node on the desk and nothing on the host; BONNIE now requires Go
+  on the desk and nothing on the host. The end of the arc — a static binary
+  the user owns — is unchanged, and that is the end that matters.
+- **`Register` rather than generated symbols `main.go` must call.** The old
+  generated file defined `discoveredTools()` and `embeddedInstructions()`,
+  which the authored `main.go` had to know about and call. Registration
+  inverts it, which is what lets the minimum `main.go` be one line.
+- **`Registered` is a run-time read, and the doc says so.** Go initialises
+  package-level variables before any `init`, so `var p = bonnie.Registered()`
+  silently reads the empty tree. Found by the hermetic build test, which
+  served an empty prompt. This is an API trap, so it is documented on the
+  function rather than left for the next person to rediscover.
+- **The banner reports the bound address, not the configured one.** `Run`
+  binds before it prints, so `-addr :0` reports the real port. The old code
+  printed the request back.
+- **`WithAgentFactory` refuses the options it would shadow.** A host factory
+  owns the agent, so `WithModel` beside it would be a model setting that
+  silently does nothing — invariant 13, applied to the option surface.
+- **`serve` kept, narrowed.** It is the flag-only generic host for trying the
+  runtime with no tree. It cannot serve a tree, and says so, naming
+  `bonnie dev` and `bonnie build`.
+
+### Acceptance criteria
+
+- [x] The scaffolded `main.go` is one call and wires no server by hand
+      (`TestScaffoldedMainIsOneCall`)
+- [x] The scaffold writes no manifest in any format
+      (`TestScaffoldIsTheDefaultLayout`)
+- [x] A fresh scaffold builds and the generated file compiles against this
+      checkout (`TestScaffoldToolsModuleBuilds`, `TestGeneratedFileCompiles`)
+- [x] The defaults are the scaffolded layout
+      (`TestDefaultsAreTheScaffoldedLayout`)
+- [x] The generated file carries no manifest and registers the tree
+      (`TestCodegenEmbedsTheDefaultLayout`, `TestCodegenSkipsEmptySlots`)
+- [x] The prompt falls back to the embedded copy, and a tree with neither is
+      refused (`TestSystemPromptFallsBackToTheEmbeddedCopy`)
+- [x] The security guards survived the move
+      (`TestSandboxedAgentGetsNoHostTools`, `TestSandboxedWorkspaceBecomesASeed`)
+- [x] An option that cannot apply is refused, naming it
+      (`TestAgentFactoryRefusesConflictingOptions`, `TestDenyNetworkNeedsASandbox`)
+- [x] The dev-restart and graduation tests still cross a process boundary,
+      and now **run** rather than skip (`TestDevRestartCompletesParkedRun`,
+      `TestBuildOutputServesEmbeddedInstructions`)
+- [x] `go.sum` gains no entries; yaml and toml return to indirect
+- [x] Verified live: `bonnie init`, `bonnie build`, run the binary from a
+      directory with no tree — it answered as its own agent from the embedded
+      instructions; `bonnie dev` hot-reloaded and the codegen-wired `echo`
+      tool was called by the model
+
+### Watch for
+
+Do not reintroduce a config file for "just one setting". The next pressure
+will be a sandbox or a channel that feels too verbose in `main.go`; the
+answer is slot discovery (`sandbox/sandbox.go`, `channels/<name>/`) wired by
+the same generator through the same `Register` seam — code, discovered by
+path, exactly like `tools/`. See `docs/L2.md` §12.
 
 ---
 

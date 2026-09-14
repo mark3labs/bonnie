@@ -15,7 +15,6 @@ import (
 type buildOpts struct {
 	dryRun bool
 	output string
-	config string
 
 	// env overrides the environment the go build inherits. It is test-only
 	// plumbing: a hermetic test points a temp go.work at the tree.
@@ -33,9 +32,10 @@ tool wiring, embed the instructions, skills, and workspace, and build the
 module. The output binary serves the agent on a host with no Go toolchain and
 no BONNIE install — the tree graduates into a binary it owns.
 
-The build machine needs Go. The host needs nothing. Binary output is ./<title>
-(or --output). The mark3labs modules are public, so the tree's go.mod resolves
-them from the proxy — no go.work or repository access needed.
+The build machine needs Go. The host needs nothing. Binary output is ./<module>
+(or --output), where module is the base name from the tree's go.mod. The
+mark3labs modules are public, so the tree's go.mod resolves them from the proxy
+— no go.work or repository access needed.
 
 --dry-run prints the discovery plan — the files found, the tools generated, the
 embed set — without writing or building.`,
@@ -50,8 +50,7 @@ embed set — without writing or building.`,
 	}
 	f := cmd.Flags()
 	f.BoolVar(&o.dryRun, "dry-run", false, "print the discovery plan without writing or building")
-	f.StringVar(&o.output, "output", "", "binary output path (default: ./<title>)")
-	f.StringVar(&o.config, "config", "", "path of the manifest, instead of discovering one")
+	f.StringVar(&o.output, "output", "", "binary output path (default: ./<module>)")
 	return cmd
 }
 
@@ -83,7 +82,7 @@ func runBuild(root string, o buildOpts) error {
 
 	output := o.output
 	if output == "" {
-		output = defaultBinaryName(root, plan.Module)
+		output = defaultBinaryName(plan.Module)
 	}
 
 	build := exec.Command("go", "build", "-o", output, ".")
@@ -100,24 +99,23 @@ func runBuild(root string, o buildOpts) error {
 	return nil
 }
 
-// defaultBinaryName is the output path when --output is empty: ./<title>, where
-// title is the manifest title, else the module's base name.
-func defaultBinaryName(root, module string) string {
-	if m, _, err := agent.Load(root); err == nil && m.Title != "" {
-		// The binary name must be a plain file name; a title with a slash or
-		// spaces is folded into a single element.
-		return "./" + agentName(m.Title)
-	}
+// defaultBinaryName is the output path when --output is empty: ./<module>,
+// the base name of the module path in the tree's go.mod. The agent is named
+// by the directory it lives in, the way every tool in the tree is named by
+// its own — naming from paths, with no second place to say it.
+func defaultBinaryName(module string) string {
 	if module != "" {
-		return "./" + filepath.Base(module)
+		// The binary name must be a plain file name; a module element with an
+		// awkward character is folded into a safe one.
+		return "./" + agentName(filepath.Base(module))
 	}
 	return "./agent"
 }
 
-// agentName sanitises a title into a binary file name element.
-func agentName(title string) string {
+// agentName sanitises a name into a binary file name element.
+func agentName(name string) string {
 	var b []byte
-	for _, r := range title {
+	for _, r := range name {
 		switch {
 		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_', r == '.':
 			b = append(b, byte(r))

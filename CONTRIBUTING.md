@@ -41,29 +41,35 @@ If Kit cannot do a thing at all, do these steps in order:
 
 BONNIE and Kit are separate repositories.
 
-### Setting up go.work
+### Working against the pinned Kit
 
-Create a `go.work` file in the **parent directory** above both:
+Nothing is needed. `go.mod` pins the Kit version BONNIE is built and tested
+against, and every test — including the ones that compile a scaffolded agent
+tree in a temporary directory — uses that version. Clone and run `task check`.
 
+### Working against Kit HEAD
+
+When you are changing Kit and BONNIE together, add a `replace` directive to
+your local `go.mod` and **do not commit it**:
+
+```bash
+go mod edit -replace github.com/mark3labs/kit=../kit
+# ... work ...
+go mod edit -dropreplace github.com/mark3labs/kit
 ```
-~/Workspace/go.work
 
-with paths:
-use (
-  ./kit
-  ./bonnie
-)
-```
-
-This lets you develop against Kit HEAD without publishing intermediate versions.
+A `go.work` in the parent directory also works, and is equally uncommitted.
+Prefer the `replace`: a workspace silently covers every module in the graph,
+so it is easy to build against a stale local checkout without noticing.
+BONNIE used to require one for its build tests and no longer does.
 
 ### Publishing
 
-Never commit a `replace` directive in `go.mod` to GitHub.
+Never commit a `replace` directive in `go.mod`, and never commit a `go.work`.
 
 CI runs with `GOWORK=off`, so the published module builds against the Kit
-version pinned in `go.mod`. This verifies the release works for users who do
-not have `go.work`.
+version pinned in `go.mod`. This verifies the release works for users who
+have neither.
 
 ## Building and testing
 

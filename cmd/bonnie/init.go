@@ -11,10 +11,8 @@ import (
 
 // initOpts carries the parsed flags of `bonnie init`.
 type initOpts struct {
-	format string
-	title  string
-	model  string
-	tools  bool
+	model string
+	tools bool
 }
 
 // newInitCmd mounts `bonnie init`.
@@ -23,21 +21,25 @@ func newInitCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "init [dir]",
 		Short: "Scaffold an agent tree",
-		Long: `Scaffold an agent tree: a manifest, an instructions file, a Go
-module, and a main.go that defines the default agent. The freshly scaffolded
-tree is a Go project that builds out of the box.
+		Long: `Scaffold an agent tree: an instructions file, a Go module, and a main.go
+that is one call. The freshly scaffolded tree builds and serves out of the box.
 
   bonnie init my-agent       a new tree
   bonnie init .              adopt this directory — init never overwrites
 
   cd my-agent
   go mod tidy                fetch bonnie and kit from the public proxy
-  go run .                   serve the default agent over HTTP
+  bonnie dev                 serve it with hot reload and a terminal
   bonnie build               compile it into one static binary
+
+There is no manifest. The tree's data lives at its default paths —
+instructions.md is the system prompt, workspace/ is the agent's root for
+files — and everything else is an option in main.go, so a setting that does
+not exist is a compile error rather than a key nothing reads.
 
 --tools adds a sample Go tool (tools/echo) so there is something wired by
 codegen to see. The mark3labs modules are public; no go.work or private access
-is needed. The model goes into the manifest with --model.`,
+is needed. The model goes into main.go with --model.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			dir := "."
@@ -45,8 +47,6 @@ is needed. The model goes into the manifest with --model.`,
 				dir = args[0]
 			}
 			created, err := agent.Scaffold(dir, agent.InitOptions{
-				Format:  o.format,
-				Title:   o.title,
 				Model:   o.model,
 				Tools:   o.tools,
 				Version: buildVersion(),
@@ -61,9 +61,9 @@ is needed. The model goes into the manifest with --model.`,
 			}
 			_, _ = fmt.Fprintf(os.Stdout, `
 Next:
-  edit instructions.md      make the agent yours
+  edit instructions.md     make the agent yours
   go mod tidy              fetch bonnie and kit from the public proxy
-  go run .                 serve the default agent
+  bonnie dev               serve it with hot reload and a terminal
   bonnie build             compile it into one static binary
 `)
 			if o.tools {
@@ -76,9 +76,7 @@ it with tools of your own.
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&o.format, "format", "yaml", "manifest format: yaml, toml, or json")
-	f.StringVar(&o.title, "title", "", "agent title (default: the directory's name)")
-	f.StringVar(&o.model, "model", "", "model to write into the manifest, for example anthropic/claude-sonnet-4-5")
+	f.StringVar(&o.model, "model", "", "model to write into main.go, for example anthropic/claude-sonnet-4-5")
 	f.BoolVar(&o.tools, "tools", false, "add a sample Go tool to the module")
 	return cmd
 }

@@ -79,11 +79,10 @@ to the workspace, then set:
 | `SLACK_SIGNING_SECRET` | verifies that Slack sent the request |
 | `SLACK_API_URL` | optional override; tests point it at a fake |
 
-Enable it in the manifest:
+Mount it in `main.go`:
 
-```yaml
-channels:
-  slack: {}
+```go
+bonnie.Main(bonnie.WithSlack(slack.Config{}))
 ```
 
 ## Discord
@@ -116,11 +115,10 @@ set the webhook URL as the Interactions Endpoint URL, then set:
 | `DISCORD_PUBLIC_KEY` | the application's public key, hex |
 | `DISCORD_API_URL` | optional override; tests point it at a fake |
 
-Enable it in the manifest:
+Mount it in `main.go`:
 
-```yaml
-channels:
-  discord: {}
+```go
+bonnie.Main(bonnie.WithDiscord(discord.Config{}))
 ```
 
 ## Telegram
@@ -147,25 +145,23 @@ you configure here (the URL must be HTTPS), then set:
 | `TELEGRAM_WEBHOOK_SECRET` | the `setWebhook` secret — required |
 | `TELEGRAM_API_URL` | optional override; tests point it at a fake |
 
-Enable it in the manifest:
+Mount it in `main.go`:
 
-```yaml
-channels:
-  telegram:
-    username: mybot
+```go
+bonnie.Main(bonnie.WithTelegram(telegram.Config{Username: "mybot"}))
 ```
 
 ---
 
-## Secrets never live in the manifest
+## Secrets never live in code
 
-A channel's manifest key enables and configures it — the webhook path, the
-command name, the bot username. The credentials come from the environment,
-and their absence is a startup error that names the variable. The rule is
-the invariant-10 ethic one level up: **a channel that cannot verify its
-caller refuses to serve.** A webhook that does not check Slack's signature,
+A channel's option enables and configures it — the webhook path, the command
+name, the bot username. The credentials come from the environment, and their
+absence is a startup error that names the variable. The rule is the
+invariant-10 ethic one level up: **a channel that cannot verify its caller
+refuses to serve.** A webhook that does not check Slack's signature,
 Discord's Ed25519, or Telegram's secret token is a door with no lock, and
-`bonnie serve --agent` will not open one.
+BONNIE will not open one.
 
 Verification is of the platform, not the person: a verified request says
 the message came from Slack; the user ID inside it is Slack's word. The

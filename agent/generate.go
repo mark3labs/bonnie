@@ -1,3 +1,19 @@
+// Package agent implements BONNIE's L2 discovery: the authored agent tree.
+//
+// An agent is a directory of files with meaning from their paths. This
+// package scaffolds new trees and generates the wiring for them, and holds
+// the rules that keep discovery honest:
+//
+//   - Discovery refuses what it cannot fully honor. A tool directory that
+//     does not export Tool(), or two tools that declare one name, is an
+//     error naming the directories — never a partial generation.
+//   - Generated files are disposable; authored files are sacred. Only
+//     bonnie_gen.go is written by BONNIE, and init never overwrites.
+//
+// There is no manifest. A tree's data lives at the default paths the
+// [github.com/mark3labs/bonnie] package names, embedded at build time; its
+// code resolves at build time by codegen. There is no run-time plugin
+// loading anywhere in BONNIE.
 package agent
 
 import (
@@ -11,6 +27,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/mark3labs/bonnie"
 )
 
 // This file is BONNIE's L2 codegen: the build-time half of discovery. A tree's
@@ -91,8 +109,8 @@ var (
 
 // Discover walks the agent tree at root and returns its build-time discovery
 // plan. It reads go.mod for the module path, walks tools/ for one directory
-// per tool, and computes the embed set from the manifest (instructions,
-// workspace) and the skills/ convention.
+// per tool, and computes the embed set from the default layout: the
+// instructions file, skills/, and workspace/.
 //
 // Discovery is a build-time idea. It fails on anything it cannot fully honor:
 // a tool directory that does not export Tool(), or two tools that declare the
@@ -159,56 +177,23 @@ func Discover(root string) (*Plan, error) {
 		return nil, fmt.Errorf("%w: %s — a provider would silently keep only one", ErrDuplicateTool, strings.Join(dup, "; "))
 	}
 
-	// The embed set. The manifest and instructions.md are always present in an
-	// authored tree; skills/ and workspace/ appear only when they hold real
-	// files. The order is stable so two runs are byte-identical. The manifest
-	// path is whatever discovery found, so its scalar slot takes the resolved
-	// path; skills and workspace always bind to their canonical accessor
-	// variables, so a custom workspace directory is still exposed as
-	// _workspace. The manifest is [Plan]'s own data file. The instructions
-	// path may be any file the manifest names.
-	inst := "instructions.md"
-	var manifestPath string
-	if m, mp, merr := Load(root); merr == nil {
-		manifestPath = mp
-		if m.Instructions != "" {
-			inst = m.Instructions
-		}
-	}
-	if hasRealFile(filepath.Join(root, inst)) {
-		plan.Embeds = append(plan.Embeds, Embed{Path: inst, Var: "_instructions"})
-	}
-	if manifestPath != "" && hasRealFile(manifestPath) {
-		// go:embed patterns are relative to the generated file's package (the
-		// module root) and cannot be absolute, so the manifest is embedded by
-		// its path relative to root.
-		if rel, err := filepath.Rel(root, manifestPath); err == nil {
-			plan.Embeds = append(plan.Embeds, Embed{Path: filepath.ToSlash(rel), Var: "_manifest"})
-		}
+	// The embed set: the tree's data files, at the default layout's paths.
+	// instructions.md is always present in an authored tree; skills/ and
+	// workspace/ appear only when they hold real files. The order is stable,
+	// so two runs over one tree are byte-identical.
+	if hasRealFile(filepath.Join(root, bonnie.DefaultInstructions)) {
+		plan.Embeds = append(plan.Embeds, Embed{Path: bonnie.DefaultInstructions, Var: "_instructions"})
 	}
 	for _, slot := range []struct{ path, varName string }{
-		{"skills", "_skills"},
-		{workspaceDir(root), "_workspace"},
+		{bonnie.DefaultSkills, "_skills"},
+		{bonnie.DefaultWorkspace, "_workspace"},
 	} {
-		if slot.path == "" {
-			continue
-		}
 		if hasRealContent(filepath.Join(root, slot.path)) {
 			plan.Embeds = append(plan.Embeds, Embed{Path: slot.path, Var: slot.varName, Dir: true})
 		}
 	}
 
 	return plan, nil
-}
-
-// workspaceDir is the tree's workspace, relative to the module root, for an
-// embed pattern. It is empty when nothing should be embedded.
-func workspaceDir(root string) string {
-	m, _, err := Load(root)
-	if err != nil {
-		m = nil
-	}
-	return m.WorkspaceDir("")
 }
 
 // discoverTool validates one tools/<name> directory and returns its Tool.
@@ -315,10 +300,13 @@ func firstToolName(path string) string {
 }
 
 // Render produces the byte-identical content of the generated wiring file for
-// a plan. It is pure, so two runs over one tree are identical. The three
-// embed slots — instructions, skills, workspace — are always declared, so the
-// accessors and the embed import compile whether or not a slot is embedded;
-// a //go:embed directive is emitted only for the slots the plan found.
+// a plan. It is pure, so two runs over one tree are identical.
+//
+// The file declares nothing the author could collide with: it binds the embed
+// slots to unexported variables and hands everything to [bonnie.Register]
+// from init. The three slots — instructions, skills, workspace — are always
+// declared, so the embed import always compiles; a //go:embed directive is
+// emitted only for the slots the plan found.
 func (p *Plan) Render() ([]byte, error) {
 	var b strings.Builder
 	b.WriteString(`// Code generated by BONNIE (bonnie build / bonnie dev). DO NOT EDIT.
@@ -332,7 +320,7 @@ package main
 import (
 	"embed"
 
-	"github.com/mark3labs/bonnie/agent"
+	"github.com/mark3labs/bonnie"
 `)
 	for i, t := range p.Tools {
 		fmt.Fprintf(&b, "\ttool%d %q\n", i, t.ImportPath)
@@ -346,81 +334,45 @@ import (
 `)
 
 	// The embed slots, in the plan's stable order. A scalar binds to a
-	// string, a directory to an embed.FS, and the manifest to []byte. Any of
-	// the canonical slots — instructions, manifest, skills, workspace — that
-	// the plan did not find is declared empty so the accessors and the embed
-	// import always compile.
+	// string, a directory to an embed.FS. Any canonical slot the plan did not
+	// find is declared empty, so the init below and the embed import always
+	// compile.
 	done := map[string]bool{}
-	renderEmbed := func(e Embed) {
+	for _, e := range p.Embeds {
 		done[e.Var] = true
 		fmt.Fprintf(&b, "//go:embed %s\n", e.Path)
-		switch {
-		case e.Var == "_manifest":
-			fmt.Fprintf(&b, "var %s []byte\n\n", e.Var)
-		case e.Dir:
+		if e.Dir {
 			fmt.Fprintf(&b, "var %s embed.FS\n\n", e.Var)
-		default:
-			fmt.Fprintf(&b, "var %s string\n\n", e.Var)
+			continue
 		}
+		fmt.Fprintf(&b, "var %s string\n\n", e.Var)
 	}
-	for _, e := range p.Embeds {
-		renderEmbed(e)
-	}
-	for _, slot := range []struct {
-		path, varName, typ string
-	}{
-		{"instructions.md", "_instructions", "string"},
-		{"", "_manifest", "[]byte"},
-		{"skills", "_skills", "embed.FS"},
-		{"workspace", "_workspace", "embed.FS"},
+	for _, slot := range []struct{ varName, typ string }{
+		{"_instructions", "string"},
+		{"_skills", "embed.FS"},
+		{"_workspace", "embed.FS"},
 	} {
 		if !done[slot.varName] {
 			fmt.Fprintf(&b, "var %s %s\n\n", slot.varName, slot.typ)
 		}
 	}
 
-	b.WriteString(`// discoveredTools returns the tree's tools, wired by codegen. Each
+	b.WriteString(`// init hands the tree's discovered code and embedded data to the runtime
+// before main runs, so main.go never has to name a tool or an embed. Each
 // tools/<name>/tool.go exports func Tool() kit.Tool.
-func discoveredTools() []kit.Tool {
-	return []kit.Tool{
+func init() {
+	bonnie.Register(bonnie.Tree{
+		Instructions: _instructions,
+		Skills:       _skills,
+		Workspace:    _workspace,
+		Tools: []kit.Tool{
 `)
 	for i := range p.Tools {
-		fmt.Fprintf(&b, "\t\ttool%d.Tool(),\n", i)
+		fmt.Fprintf(&b, "\t\t\ttool%d.Tool(),\n", i)
 	}
-	b.WriteString(`	}
+	b.WriteString(`		},
+	})
 }
-
-`)
-
-	// The manifest embed's file name decides which format parses it; default
-	// to yaml when a tree ships no manifest.
-	manifestName := "agent.yaml"
-	for _, e := range p.Embeds {
-		if e.Var == "_manifest" {
-			manifestName = filepath.Base(e.Path)
-			break
-		}
-	}
-
-	b.WriteString(`// embeddedInstructions is the agent's system prompt, embedded at build
-// time so a bonnie build binary serves it with no instructions.md on the
-// host.
-func embeddedInstructions() string { return _instructions }
-
-// embeddedManifest is the manifest a bonnie build embedded, so the binary
-// honors the model and address on a host with no agent tree beside it.
-func embeddedManifest() *agent.Manifest {
-	if len(_manifest) == 0 {
-		return nil
-	}
-`)
-	fmt.Fprintf(&b, "\tm, err := agent.ParseManifestData(%q, _manifest)\n", manifestName)
-	fmt.Fprintf(&b, "\tif err != nil {\n\t\treturn nil\n\t}\n\treturn m\n}\n\n")
-	b.WriteString(`// embeddedSkills is the tree's skills directory.
-func embeddedSkills() embed.FS { return _skills }
-
-// embeddedWorkspace is the tree's workspace seed directory.
-func embeddedWorkspace() embed.FS { return _workspace }
 `)
 	return []byte(b.String()), nil
 }

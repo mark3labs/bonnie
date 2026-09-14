@@ -14,11 +14,21 @@
 # go-task cache
 /.task/
 
-# Go workspace — BONNIE and Kit are separate repos. Keep go.work out of both;
-# put it in the parent directory that holds them. CI runs with GOWORK=off so
-# it builds against the Kit version pinned in go.mod.
+# Go workspace. BONNIE and Kit are separate repos, and nothing here needs a
+# workspace: go.mod pins the Kit version, and the tests that compile a
+# scaffolded tree write a replace into that tree's own go.mod. To work against
+# Kit HEAD, use an uncommitted replace. CI runs with GOWORK=off so a stray
+# workspace file cannot make a green local run lie.
 go.work
 go.work.sum
+
+# Scratch agent trees. The repository root is a Go library, not an agent tree:
+# a stray instructions.md, skills/, or workspace/ here belongs to someone's
+# `bonnie init .` and is not part of the project.
+/instructions.md
+/skills/
+/workspace/
+/bonnie_gen.go
 
 # Test and coverage output
 *.test

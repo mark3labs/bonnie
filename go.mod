@@ -11,10 +11,8 @@ require (
 	github.com/indaco/herald v0.13.0
 	github.com/indaco/herald-md v0.3.0
 	github.com/mark3labs/kit v0.106.0
-	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
-	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -88,6 +86,7 @@ require (
 	github.com/muesli/termenv v0.16.0 // indirect
 	github.com/openai/openai-go/v3 v3.56.0 // indirect
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
+	github.com/pelletier/go-toml/v2 v2.4.3 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/sagikazarmark/locafero v0.12.0 // indirect
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3 // indirect
@@ -125,4 +124,5 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260908043556-f8649ddbbfe6 // indirect
 	google.golang.org/grpc v1.83.2 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

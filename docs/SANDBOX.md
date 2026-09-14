@@ -99,7 +99,7 @@ approval, and event path as any other tool.
 ### Seeding: `sandbox.Seeded` wraps any provider
 
 [sandbox.Seeded](../sandbox/seed.go) is a `Provider` decorator that mirrors a
-local directory into every sandbox it opens. It is how an agent manifest's
+local directory into every sandbox it opens. It is how an agent tree's
 `workspace:` seed reaches the run — the mirror travels over the `Sandbox`
 interface alone (`ReadFile` probe, then `WriteFile`), so it works identically
 on local, Docker, and microsandbox, and a new backend gets it for free.
@@ -277,7 +277,7 @@ The live tests cover the claims that matter:
   and it would double the lifecycle `prune` must reconcile. The durable
   artifact is the conversation; the workspace is best-effort and
   re-derivable. If a user's runs hold genuinely expensive state, the right
-  shape is an opt-in `sandbox.persist` manifest key — a candidate task,
+  shape is an opt-in persistence option — a candidate task,
   not a default.
 - **Sandbox lifecycle is journalled.** A sandbox that opens for a run writes
   a record naming the backend and the sandbox, so `bonnie runs show` can say

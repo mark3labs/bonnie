@@ -46,11 +46,17 @@ If you need something Kit does not export:
 ```
 L4  CLI, evals, traces                 CLI implemented; evals planned
 L3  channel/    inbound transports     channel/http implemented
-L2  discovery   agent/ tree + codegen  manifest + init + serve --agent
-                                       implemented; codegen: T-018
+L2  discovery   agent/ tree + codegen  default layout, init, codegen, dev,
+                                       build; configuration is code (T-024)
 L1  runtime/    durable run executor   implemented
 L0  kit/pkg/kit                        upstream, unmodified
 ```
+
+The root package `github.com/mark3labs/bonnie` is the entry point an agent
+tree calls: `bonnie.Main()` is a complete agent. It owns the serving path and
+the default layout constants, and the CLI calls the same code, so the two
+cannot drift. **There is no manifest file** — a setting is a file at a fixed
+path or a Go option, never both (invariant 14). Do not add a config file back.
 
 ### L1 durability seams (runtime/)
 BONNIE gets durability from four public Kit extension points. Know these before
@@ -107,11 +113,16 @@ channel. The hard boundary is the public-Kit-SDK rule above, and it extends
 here: the TUI talks to the wire the channel exposes, never to Kit internals.
 
 ## Local development
-BONNIE and Kit are separate repos. Use a `go.work` in the PARENT directory:
+BONNIE and Kit are separate repos. Nothing is needed to work against the
+pinned Kit: `go.mod` names the version, and every test — including the ones
+that compile a scaffolded tree in a temp directory — uses it.
+
+To work against Kit HEAD, add an **uncommitted** replace:
 
 ```
-~/Workspace/go.work   ->  use (./kit ./bonnie)
+go mod edit -replace github.com/mark3labs/kit=../kit
 ```
 
-Never put a `replace` directive in the published `go.mod`. CI runs with
-`GOWORK=off` so it builds against the Kit version pinned in `go.mod`.
+Never put a `replace` directive in the published `go.mod`, and never commit a
+`go.work`. CI runs with `GOWORK=off` so a stray workspace file cannot make a
+green local run lie about the pinned Kit version.

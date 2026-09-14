@@ -62,7 +62,7 @@ type pruneOpts struct {
 // `serve`; a command an operator can run from cron is a deliberate first
 // step, and it is the same code either way.
 func runSandboxPrune(o pruneOpts) error {
-	provider, err := sandboxProvider(o.kind, o.image)
+	provider, err := sandboxProvider(context.Background(), o.kind, o.image)
 	if err != nil {
 		return err
 	}

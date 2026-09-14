@@ -33,8 +33,8 @@ an eve clone: see §7 for what is deliberately different.
 L4  CLI, evals, traces                 CLI implemented, incl. the built-in TUI
                                        (bonnie dev / bonnie chat); evals planned
 L3  channel/    inbound transports     channel/http implemented
-L2  discovery   agent/ tree + codegen  manifest + init + serve --agent
-                                       implemented (T-017); codegen: T-018
+L2  discovery   agent/ tree + codegen  default layout + init + codegen;
+                                       configuration is code (T-024)
 L1  runtime/    durable run executor   implemented, memory + file journals
 L0  kit/pkg/kit                        upstream, unmodified
 
@@ -471,8 +471,8 @@ right intent, a tool call's *root* was wrong: Kit's file tools resolve a
 relative path against `WorkDir`, falling back to `os.Getwd()`
 (`internal/core/read.go:122-134`), and BONNIE never set it. So a model's
 `write("notes.md")` landed in whatever directory the operator started the
-server from — for `serve --agent .` that is the agent tree itself, on top of
-`agent.yaml`, `instructions.md`, and `.bonnie/`, **the journal that makes a
+server from — for a tree that is the tree itself, on top of `main.go`,
+`instructions.md`, and `.bonnie/`, **the journal that makes a
 run durable**. A sandboxed run rooted everything at `/workspace`
 (`sandbox.Resolve`), so the two modes disagreed about what the agent's root
 meant, and a prompt could not name a stable location.
@@ -486,10 +486,10 @@ The workspace is now the agent's root in both modes:
   forwards one, so rebuilding the set is the only public route.
   `kit.AllTools` is that same default set, so no tool is lost.
 - **Sandbox** — the same directory is the seed: `sandbox.Seeded(provider,
-  workspace)`. That call is what makes the manifest's `workspace:` key real;
+  workspace)`. That call is what makes the workspace real with a sandbox;
   `Seeded` was written and tested but **never called** by non-test code, so
-  the key was accepted and ignored — an invariant 13 violation that had been
-  recorded in `docs/TASKS.md` as working.
+  the setting was accepted and ignored — an invariant 13 violation that had
+  been recorded in `docs/TASKS.md` as working.
 
 **The two must never be mixed, and that is a security property.** Kit honours
 `Options.Tools` even when `DisableCoreTools` is set, and `sandbox.Agent`
@@ -501,11 +501,11 @@ no-sandbox branch only. Guard test: `TestSandboxedAgentGetsNoHostTools`.
 Limits, stated plainly: `WithWorkDir` sets a base, **not a jail**. An absolute
 path, or one with enough `../`, still reaches the wider filesystem. Rooting
 the agent stops the accident — a model tidying up its own files does not
-overwrite the manifest or the journal — it does not contain a determined one.
+overwrite the source or the journal — it does not contain a determined one.
 That is what the sandbox is for, and §4.9 still applies.
 
-Serving without a tree (`bonnie serve` with no `--agent`) has nothing to
-anchor to, so the process's own directory stays the root, as before.
+Serving without a tree (`bonnie serve`) has nothing to anchor to, so the
+process's own directory stays the root, as before.
 
 **The dev loop must not watch the workspace.** Rooting the agent there made a
 model's write an ordinary event in a watched directory, so `bonnie dev`
@@ -513,10 +513,10 @@ rebuilt and SIGTERMed the child that was still serving the turn — the agent
 restarted itself for doing its job. The workspace is the loop's output, like
 `.bonnie` and `bonnie_gen.go`, and is skipped both by the watcher and by the
 event filter (the second catches the directory's own create event, which the
-child raises on first boot). Guard tests: `TestWorkspaceIsNotWatched`,
-`TestWorkspaceDirFollowsTheManifest` — the manifest can rename the workspace,
-so the dev loop resolves it the same way the scaffold and serve do, or a
-renamed one would stay watched.
+child raises on first boot). Guard test: `TestWorkspaceIsNotWatched`. Since
+T-024 the workspace path is the constant `bonnie.DefaultWorkspace`, read by
+the scaffold, codegen, the dev loop, and the runtime alike, so the four
+cannot disagree about which directory must not be watched.
 
 Verified live against `opencode/kimi-k2.5`: a `write` and a shell redirect
 both landed in `workspace/` with the tree root untouched, `pwd` reported the
@@ -758,7 +758,7 @@ Telegram channels · scheduler · memory providers · multi-tenancy ·
 subagent orchestration · structured output · web client SDK.
 
 The L2 spec is now drafted: [`docs/L2.md`](L2.md) covers the agent tree, the
-manifest, `init`/`dev`/`build`, and the codegen contract for `v0.2`.
+default layout, `init`/`dev`/`build`, and the codegen contract.
 
 All are valuable. None is load-bearing for the claim. A narrow true v0.1 beats
 a broad shaky one.
@@ -818,7 +818,7 @@ edge cases. Consult them for **design questions**, not for implementation.
 | `channel/chat` dispatch, steering, delivery | Chat SDK `send`, turn policies, default handlers | [Chat SDK](https://eve.dev/docs/channels/chat-sdk) |
 | `AppendExtensionData` | `defineState` | [State](https://eve.dev/docs/concepts/state) |
 | `bonnie init` / `dev` / `build` | `eve init`, `npm run dev`, deploy | [Getting Started](https://eve.dev/docs/getting-started) |
-| `agent.yaml` (or `.toml` / `.json`) | *no analogue* — eve's config is `agent/agent.ts` code (`defineAgent`) plus `package.json`; a declarative manifest is BONNIE's, because Go compiles and data-shaped config must resolve at run time without code | [Getting Started](https://eve.dev/docs/getting-started) |
+| `main.go` options on `bonnie.Main` | `agent/agent.ts` (`defineAgent`) — configuration is code in both. BONNIE shipped a declarative `agent.yaml` in `v0.2` and removed it in `v0.3` (T-024): two places for one setting is worse than requiring Go on the desk | [Getting Started](https://eve.dev/docs/getting-started) |
 | Kit compaction (inherited) | `compaction.thresholdPercent` | [Default Harness](https://eve.dev/docs/concepts/default-harness) |
 | *deferred* | `defineEval`, `eve eval` | [Evals](https://eve.dev/docs/evals/overview) |
 | *deferred* | `instrumentation.ts` | [Observability](https://eve.dev/docs/guides/instrumentation) |
@@ -879,23 +879,29 @@ Any change must preserve these. Each has, or must gain, a test.
 
 L2 — [`docs/L2.md`](L2.md) — drafts four more (11–14: generated-code
 allowlist, disposable-generated versus sacred-authored files, refusal of
-partial discovery, strict manifest). Two of them are enforced and tested as
-of T-017 and join the list now; 11 and 12 land with T-018's generator.
+partial discovery, one place per setting). All four are enforced and tested
+as of T-018 and T-024, and join the list here.
 
-13. **Discovery refuses what it cannot fully honor.** `serve --agent` on a
-    tree that carries Go tools is an error naming `bonnie build`, not a
-    partial run. A manifest key whose loading story does not exist is
-    refused (`mcp`, `skills`), never accepted and ignored. A key the chosen
+13. **Discovery refuses what it cannot fully honor.** A tool directory
+    without `Tool()`, or two tools declaring one runtime name, is an error
+    naming the directories, not a partial generation. A setting the chosen
     backend cannot apply is refused too: `sandbox.image` on the local
-    backend, which runs no image. Guard tests:
-    `TestResolveServeRefusesGoTree`, `TestReservedKeysAreRefused`,
+    backend, which runs no image; a network policy with no sandbox to
+    enforce it; any agent option beside `WithAgentFactory`, which owns the
+    agent outright. Guard tests: `TestCodegenRejectsDuplicateToolName`,
+    `TestCodegenRejectsToolWithoutToolFunc`,
     `TestSandboxImageReachesEveryBackendThatRunsOne`,
-    `TestLocalSandboxRefusesAnImage`.
-14. **The manifest is strict.** Unknown key, unknown `apiVersion`, two
-    manifests in one root — all errors that name what is wrong. The
-    strictness is one code path for all three formats (decode into the
-    struct and into a generic map, diff key sets), so it cannot drift
-    between formats. Guard tests: `agent/manifest_test.go`.
+    `TestLocalSandboxRefusesAnImage`, `TestDenyNetworkNeedsASandbox`,
+    `TestAgentFactoryRefusesConflictingOptions`.
+14. **There is one place to configure a setting.** A setting is a file at a
+    fixed path or a Go option — never both, and never a third place that can
+    disagree with the other two. The default paths are constants in the root
+    `bonnie` package, read by the scaffold, codegen, the dev loop, and the
+    runtime. This invariant replaced "the manifest is strict" when T-024
+    removed the manifest: strictness was the mitigation for a second source
+    of truth, and deleting the source beat policing it. Guard tests:
+    `TestDefaultsAreTheScaffoldedLayout`, `TestScaffoldIsTheDefaultLayout`,
+    `TestCodegenEmbedsTheDefaultLayout`.
 
 ---
 

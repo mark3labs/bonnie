@@ -3,58 +3,13 @@ package main
 import (
 	"context"
 	"errors"
-	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
-	"time"
 
 	"github.com/mark3labs/bonnie/sandbox"
-	kit "github.com/mark3labs/kit/pkg/kit"
 )
 
-func TestCloseStreamsOnShutdown(t *testing.T) {
-	t.Parallel()
-	shutdownCtx, shutdown := context.WithCancel(context.Background())
-	started := make(chan struct{}, 1)
-	ended := make(chan struct{}, 1)
-	h := closeStreamsOnShutdown(shutdownCtx, http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-		started <- struct{}{}
-		<-r.Context().Done()
-		ended <- struct{}{}
-	}))
-
-	req := httptest.NewRequest(http.MethodGet, "/runs/run-1/stream", nil)
-	go h.ServeHTTP(httptest.NewRecorder(), req)
-	select {
-	case <-started:
-	case <-time.After(time.Second):
-		t.Fatal("stream handler did not start")
-	}
-	shutdown()
-	select {
-	case <-ended:
-	case <-time.After(time.Second):
-		t.Fatal("stream handler did not stop on shutdown")
-	}
-}
-
-func TestCloseStreamsDoesNotCancelTurn(t *testing.T) {
-	t.Parallel()
-	shutdownCtx, shutdown := context.WithCancel(context.Background())
-	defer shutdown()
-	observed := make(chan error, 1)
-	h := closeStreamsOnShutdown(shutdownCtx, http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-		observed <- r.Context().Err()
-	}))
-	shutdown()
-	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/runs/run-1", nil))
-	if err := <-observed; err != nil {
-		t.Fatalf("turn context was cancelled: %v", err)
-	}
-}
-
 func TestSandboxProviderSelection(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		kind    string
 		want    string
@@ -68,7 +23,8 @@ func TestSandboxProviderSelection(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.kind, func(t *testing.T) {
-			p, err := sandboxProvider(c.kind, "")
+			t.Parallel()
+			p, err := sandboxProvider(context.Background(), c.kind, "")
 			if c.wantErr {
 				if err == nil {
 					t.Fatal("want an error for an unknown sandbox")
@@ -85,44 +41,6 @@ func TestSandboxProviderSelection(t *testing.T) {
 	}
 }
 
-// TestNoSandboxIsTheDefault documents the default plainly. It is the right
-// choice for a local developer and the wrong one for an exposed server, which
-// is why the help text and the startup banner both say so.
-func TestNoSandboxIsTheDefault(t *testing.T) {
-	f, err := agentFactory("none", "", nil, "", nil)
-	if err != nil {
-		t.Fatalf("agentFactory: %v", err)
-	}
-	if f == nil {
-		t.Fatal("no factory returned")
-	}
-	if f, err = agentFactory("", "", nil, "", nil); err != nil || f == nil {
-		t.Fatalf("empty kind must behave like none: %v", err)
-	}
-}
-
-// TestDenyNetworkNeedsASandbox stops a false sense of safety: asking for no
-// egress without a sandbox must fail, not quietly run with full network.
-func TestDenyNetworkNeedsASandbox(t *testing.T) {
-	_, err := agentFactory("none", "", &sandbox.NetworkPolicy{Mode: sandbox.NetworkDenyAll}, "", nil)
-	if err == nil {
-		t.Fatal("want an error for a network policy without a sandbox")
-	}
-	if !strings.Contains(err.Error(), "--sandbox") {
-		t.Fatalf("error does not say how to fix it: %v", err)
-	}
-}
-
-// TestDenyNetworkRejectedByIncapableBackend is the same honesty rule one level
-// down: a backend that cannot enforce the policy must refuse it.
-func TestDenyNetworkOnLocalIsRejected(t *testing.T) {
-	// Local cannot control egress at all, so it does not implement
-	// sandbox.Networked and the request must fail.
-	if _, err := agentFactory("local", "", &sandbox.NetworkPolicy{Mode: sandbox.NetworkDenyAll}, "", nil); err == nil {
-		t.Fatal("want an error: the local sandbox cannot control the network")
-	}
-}
-
 // TestSandboxImageReachesEveryBackendThatRunsOne is invariant 13 at the
 // sandbox flag. The image used to reach docker and microsandbox and stop
 // there: `--sandbox auto --sandbox-image python:3.12-slim` built its
@@ -134,7 +52,7 @@ func TestSandboxImageReachesEveryBackendThatRunsOne(t *testing.T) {
 	const image = "python:3.12-slim"
 
 	for _, kind := range []string{"docker", "microsandbox", "msb"} {
-		p, err := sandboxProvider(kind, image)
+		p, err := sandboxProvider(context.Background(), kind, image)
 		if err != nil {
 			t.Fatalf("sandboxProvider(%s): %v", kind, err)
 		}
@@ -150,7 +68,7 @@ func TestSandboxImageReachesEveryBackendThatRunsOne(t *testing.T) {
 	// auto picks a backend at run time, and whichever it picks must carry
 	// the image. The pick needs a live backend, so a host with neither is a
 	// skip, not a failure.
-	p, err := sandboxProvider("auto", image)
+	p, err := sandboxProvider(context.Background(), "auto", image)
 	if errors.Is(err, sandbox.ErrUnavailable) {
 		t.Skip("no sandbox backend is available here")
 	}
@@ -172,24 +90,35 @@ func TestSandboxImageReachesEveryBackendThatRunsOne(t *testing.T) {
 // python:3.12-slim while they run on the host.
 func TestLocalSandboxRefusesAnImage(t *testing.T) {
 	t.Parallel()
-	if _, err := sandboxProvider("local", "python:3.12-slim"); err == nil {
+	if _, err := sandboxProvider(context.Background(), "local", "python:3.12-slim"); err == nil {
 		t.Fatal("the local backend accepted an image it cannot run")
 	}
-	if _, err := sandboxProvider("local", ""); err != nil {
+	if _, err := sandboxProvider(context.Background(), "local", ""); err != nil {
 		t.Fatalf("the local backend refused an empty image: %v", err)
 	}
 }
 
-// TestUnavailableSandboxFailsAtStartup is why Available exists. An operator
-// must learn that Docker is down when the server starts, not on the first tool
-// call an hour later.
-func TestUnavailableSandboxFailsAtStartup(t *testing.T) {
-	_, err := agentFactory("microsandbox", "", nil, "", []kit.Option{})
-	if err == nil {
-		t.Skip("msb is installed here, so this path cannot be exercised")
+// TestServeHasNoTree pins what `bonnie serve` is now: the generic host. A tree
+// is served by running it, so serve takes neither an instructions file nor a
+// workspace, and the process's own directory stays the agent's root — the
+// historical behaviour of serve with no --agent.
+func TestServeHasNoTree(t *testing.T) {
+	t.Parallel()
+	opts, err := serveOptions(context.Background(), serveOpts{addr: ":0", journal: t.TempDir()})
+	if err != nil {
+		t.Fatalf("serveOptions: %v", err)
 	}
-	if !errors.Is(err, sandbox.ErrUnavailable) {
-		t.Fatalf("err = %v, want ErrUnavailable", err)
+	if len(opts) == 0 {
+		t.Fatal("serveOptions returned nothing")
+	}
+
+	// The flags that read a tree are gone. A user who passes them should get
+	// cobra's unknown-flag error, not a silently ignored value.
+	cmd := newServeCmd()
+	for _, gone := range []string{"agent", "config"} {
+		if f := cmd.Flags().Lookup(gone); f != nil {
+			t.Fatalf("serve still carries --%s; a tree is served by running it", gone)
+		}
 	}
 }
 
@@ -197,6 +126,7 @@ func TestUnavailableSandboxFailsAtStartup(t *testing.T) {
 // already carry "bonnie:" by convention, so prefixing unconditionally produced
 // "bonnie: bonnie: ..." for every error raised inside the framework.
 func TestPrefixedAddsExactlyOnePrefix(t *testing.T) {
+	t.Parallel()
 	cases := []struct{ in, want string }{
 		{"bonnie: sandbox: boom", "bonnie: sandbox: boom"},
 		{"unknown sandbox \"frob\"", "bonnie: unknown sandbox \"frob\""},

@@ -40,5 +40,8 @@ items are unrelated root agent files, which are intentionally untracked.
 
 ## Repository hygiene
 
-Do not commit the untracked root files `agent.yaml`, `instructions.md`,
-`skills/`, `workspace/`, or `.kit.yml`. They are not part of T-021.
+The repository root is a Go library, not an agent tree. A `bonnie init .` run
+here leaves `instructions.md`, `skills/`, and `workspace/` behind; they are
+now in `.gitignore` and must not be committed. Neither must `agent.yaml` —
+that file no longer means anything (T-024), and `.kit.yml` is a local tool
+configuration.

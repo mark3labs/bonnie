@@ -6,38 +6,30 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/mark3labs/bonnie/internal/treetest"
 )
 
-// The three formats must scaffold trees that parse to the same struct, and
-// the --model flag must land in every one of them.
-func TestScaffoldParsesInEveryFormat(t *testing.T) {
+// The scaffolded tree is the default layout and nothing else: no manifest,
+// no format flag, and --model lands in main.go as a bonnie option.
+func TestScaffoldIsTheDefaultLayout(t *testing.T) {
 	t.Parallel()
-	cases := []struct {
-		format    string
-		wantFile  string
-		wantModel string
-	}{
-		{format: "", wantFile: "agent.yaml"},
-		{format: "yaml", wantFile: "agent.yaml"},
-		{format: "toml", wantFile: "agent.toml"},
-		{format: "json", wantFile: "agent.json"},
-		{format: "yaml", wantFile: "agent.yaml", wantModel: "opencode/kimi-k2.5"},
-		{format: "toml", wantFile: "agent.toml", wantModel: "opencode/kimi-k2.5"},
-		{format: "json", wantFile: "agent.json", wantModel: "opencode/kimi-k2.5"},
-	}
-	for _, c := range cases {
-		t.Run(c.format+" model="+c.wantModel, func(t *testing.T) {
+	for _, model := range []string{"", "opencode/kimi-k2.5"} {
+		t.Run("model="+model, func(t *testing.T) {
 			t.Parallel()
-			dir := t.TempDir()
-			created, err := Scaffold(dir, InitOptions{Format: c.format, Model: c.wantModel})
+			dir := filepath.Join(t.TempDir(), "my-agent")
+			created, err := Scaffold(dir, InitOptions{Model: model})
 			if err != nil {
 				t.Fatalf("Scaffold: %v", err)
 			}
 			if len(created) == 0 {
 				t.Fatal("no files created")
 			}
-			if _, err := os.Stat(filepath.Join(dir, c.wantFile)); err != nil {
-				t.Fatalf("the %s scaffold did not create %s", c.format, c.wantFile)
+
+			for _, f := range []string{"instructions.md", "go.mod", "main.go", "bonnie_gen.go"} {
+				if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
+					t.Fatalf("the scaffold did not create %s: %v", f, err)
+				}
 			}
 			// Directories exist and are tracked.
 			for _, d := range []string{"skills", "workspace"} {
@@ -46,24 +38,59 @@ func TestScaffoldParsesInEveryFormat(t *testing.T) {
 				}
 			}
 
-			m, path, err := Load(dir)
+			// No manifest, in any format. A tree configured in two places is
+			// a tree whose settings can disagree.
+			for _, name := range []string{"agent.yaml", "agent.yml", "agent.toml", "agent.json"} {
+				if _, err := os.Stat(filepath.Join(dir, name)); !os.IsNotExist(err) {
+					t.Fatalf("the scaffold wrote a manifest (%s); configuration is code", name)
+				}
+			}
+
+			main, err := os.ReadFile(filepath.Join(dir, "main.go"))
 			if err != nil {
-				t.Fatalf("the scaffolded tree does not parse: %v", err)
+				t.Fatal(err)
 			}
-			if filepath.Base(path) != c.wantFile {
-				t.Fatalf("discovered %q, want %q", path, c.wantFile)
+			if !strings.Contains(string(main), "bonnie.Main(") {
+				t.Fatalf("main.go does not call bonnie.Main: %s", main)
 			}
-			// The title defaults to the directory base name — eve's rule.
-			if m.Title != filepath.Base(dir) {
-				t.Fatalf("title = %q, want the directory base name", m.Title)
+			wantModel := `bonnie.WithModel("` + model + `")`
+			if model == "" {
+				wantModel = `// bonnie.WithModel("anthropic/claude-sonnet-4-5")`
 			}
-			if m.Instructions != "instructions.md" || m.Workspace != "workspace/" {
-				t.Fatalf("paths did not survive: %+v", m)
-			}
-			if m.Model != c.wantModel {
-				t.Fatalf("model = %q, want %q", m.Model, c.wantModel)
+			if !strings.Contains(string(main), wantModel) {
+				t.Fatalf("main.go does not carry %q:\n%s", wantModel, main)
 			}
 		})
+	}
+}
+
+// The minimum a user writes is one call. A scaffold that grows boilerplate
+// back is a scaffold that has started to copy the framework into user space,
+// where it drifts.
+func TestScaffoldedMainIsOneCall(t *testing.T) {
+	t.Parallel()
+	dir := filepath.Join(t.TempDir(), "my-agent")
+	if _, err := Scaffold(dir, InitOptions{}); err != nil {
+		t.Fatalf("Scaffold: %v", err)
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "main.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var code int
+	for line := range strings.Lines(string(b)) {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "//") {
+			continue
+		}
+		code++
+	}
+	// package, import block (3), func main, bonnie.Main(, ), }
+	if code > 12 {
+		t.Fatalf("the scaffolded main.go carries %d lines of code; it is meant to be one call:\n%s", code, b)
+	}
+	if strings.Contains(string(b), "net/http") || strings.Contains(string(b), "runtime.NewRunner") {
+		t.Fatalf("main.go wires the server by hand; that belongs in the framework:\n%s", b)
 	}
 }
 
@@ -122,8 +149,8 @@ func TestScaffoldToolsModule(t *testing.T) {
 	}
 
 	// The generated wiring stub is the disposable placeholder; the generator
-	// rewrites it from tools/ on the next build. It carries the banner but,
-	// alone, discovers no tools — the sample tool is wired by codegen.
+	// rewrites it from the tree on the next build. It carries the banner but,
+	// alone, registers no tools — the sample tool is wired by codegen.
 	gen, err := os.ReadFile(filepath.Join(dir, "bonnie_gen.go"))
 	if err != nil {
 		t.Fatal(err)
@@ -131,8 +158,9 @@ func TestScaffoldToolsModule(t *testing.T) {
 	if !strings.Contains(string(gen), "DO NOT EDIT") {
 		t.Fatalf("bonnie_gen.go is not the expected stub: %s", gen)
 	}
-	if !strings.Contains(string(gen), "func discoveredTools() []kit.Tool { return nil }") {
-		t.Fatalf("the stub should discover no tools until codegen runs: %s", gen)
+	if !strings.Contains(string(gen), "bonnie.Register(bonnie.Tree{") ||
+		!strings.Contains(string(gen), "Tools:        []kit.Tool{}") {
+		t.Fatalf("the stub should register an empty tree until codegen runs: %s", gen)
 	}
 
 	// The scaffold carries its own .gitignore? No — it does not. Assert the
@@ -186,51 +214,23 @@ func TestScaffoldPinsReleasedVersion(t *testing.T) {
 	}
 }
 
-// The scaffold's main.go must compile. The mark3labs modules are public, so a
-// developer can `go mod tidy` and build directly off the proxy. This test
-// stays hermetic: it builds through a go.work over the local bonnie and kit
-// checkouts, so it needs no network and skips when the kit checkout is absent.
+// The scaffold's main.go must compile against this checkout. The mark3labs
+// modules are public, so a user can `go mod tidy` and build straight off the
+// proxy; this test instead points the tree's go.mod at the local checkout, so
+// it exercises the code under test and needs no network and no second
+// repository.
 func TestScaffoldToolsModuleBuilds(t *testing.T) {
 	t.Parallel()
-	kitRoot, ok := findUpstream(t)
-	if !ok {
-		t.Skip("no kit checkout beside this repo; the workspace build cannot be simulated")
-	}
-
-	parent := t.TempDir()
-	dir := filepath.Join(parent, "my-agent")
+	dir := filepath.Join(t.TempDir(), "my-agent")
 	if _, err := Scaffold(dir, InitOptions{Tools: true}); err != nil {
 		t.Fatalf("Scaffold: %v", err)
 	}
-
-	work := filepath.Join(parent, "go.work")
-	if err := os.WriteFile(work, []byte("go 1.27.1\n\nuse (\n\t./my-agent\n\t"+bonnieRoot()+"\n\t"+kitRoot+"\n)\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	treetest.LinkToCheckout(t, dir)
 
 	build := exec.Command("go", "build", "./...")
 	build.Dir = dir
-	build.Env = append(os.Environ(), "GOWORK="+work)
+	build.Env = treetest.BuildEnv()
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("the fresh scaffold does not build: %v\n%s", err, out)
 	}
-}
-
-// bonnieRoot returns this repository's absolute path.
-func bonnieRoot() string {
-	wd, err := os.Getwd()
-	if err != nil {
-		return "."
-	}
-	return filepath.Clean(filepath.Join(wd, ".."))
-}
-
-// findUpstream looks for the kit checkout the local go.work names.
-func findUpstream(t *testing.T) (string, bool) {
-	t.Helper()
-	p := filepath.Join(filepath.Dir(bonnieRoot()), "kit")
-	if _, err := os.Stat(filepath.Join(p, "go.mod")); err != nil {
-		return "", false
-	}
-	return p, true
 }

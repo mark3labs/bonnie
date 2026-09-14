@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/mark3labs/bonnie/agent"
+	"github.com/mark3labs/bonnie/internal/treetest"
 	"github.com/mark3labs/bonnie/runtime"
 )
 
@@ -38,29 +39,32 @@ func (s *syncBuffer) String() string {
 	return s.b.String()
 }
 
-// hermeticMain is a main.go for the hermetic agent tree. It serves an HTTP
-// channel from a fake agent that needs no provider: a fresh run parks on
-// ask_human, and a resume completes with the tree's instructions as the
-// response. The instructions come from embeddedInstructions(), the copy a
-// bonnie build embeds, so a test can prove they were served without the file
-// on disk. The listen address is printed to stdout so a test can connect.
+// hermeticMain is a main.go for the hermetic agent tree. It is the scaffolded
+// one-call shape with a single option: an agent factory that needs no
+// provider. A fresh run parks on ask_human, and a resume completes with the
+// tree's instructions as the response — taken from bonnie.Registered(), the
+// copy a bonnie build embeds, so a test can prove they were served without the
+// file on disk.
+//
+// Everything else — the journal, the HTTP channel, the listen address, the
+// graceful stop — comes from bonnie.Main, which is the point: this is the real
+// serving path, with only the model replaced.
 const hermeticMain = `package main
 
 import (
 	"context"
 	"fmt"
-	"net"
-	"net/http"
-	"os"
-	"time"
 
-	bonniehttp "github.com/mark3labs/bonnie/channel/http"
+	"github.com/mark3labs/bonnie"
 	"github.com/mark3labs/bonnie/runtime"
 	kit "github.com/mark3labs/kit/pkg/kit"
 )
 
 // prompt is the tree's system prompt: the embedded copy a bonnie build ships.
-var prompt = embeddedInstructions()
+// It is read inside the turn, not into a package-level variable, because the
+// generated file registers from init and Go initialises package variables
+// first.
+func prompt() string { return bonnie.Registered().Instructions }
 
 type parkingAgent struct{ session *runtime.Session }
 
@@ -88,41 +92,22 @@ func (a *parkingAgent) PromptResult(ctx context.Context, msg string) (*kit.TurnR
 		return nil, err
 	}
 	if _, err := a.session.AppendMessage(kit.LLMMessage{Role: kit.LLMMessageRole("assistant"),
-		Content: []kit.LLMMessagePart{kit.LLMTextPart{Text: prompt}}}); err != nil {
+		Content: []kit.LLMMessagePart{kit.LLMTextPart{Text: prompt()}}}); err != nil {
 		return nil, err
 	}
-	return &kit.TurnResult{Response: prompt}, nil
+	return &kit.TurnResult{Response: prompt()}, nil
 }
 
 func (a *parkingAgent) InjectSteer(string) {}
 func (a *parkingAgent) Close() error       { return nil }
 
 func main() {
-	journal, err := runtime.OpenFileJournal(".bonnie")
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	defer journal.Close()
-
-	runner := runtime.NewRunner(journal, func(_ context.Context, s *runtime.Session) (runtime.Agent, error) {
-		return &parkingAgent{session: s}, nil
-	})
-	httpCh := bonniehttp.New(runner)
-
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-	fmt.Println(ln.Addr().String())
-
-	srv := &http.Server{Handler: httpCh.Handler(), ReadTimeout: 30 * time.Second}
-	go func() { _ = srv.Serve(ln) }()
-
-	// Run until stopped. A SIGTERM ends the process; the journal keeps the
-	// finished steps.
-	select {}
+	bonnie.Main(
+		bonnie.WithAddr("127.0.0.1:0"),
+		bonnie.WithAgentFactory(func(_ context.Context, s *runtime.Session) (runtime.Agent, error) {
+			return &parkingAgent{session: s}, nil
+		}),
+	)
 }
 `
 
@@ -136,84 +121,39 @@ type httpRun struct {
 	} `json:"suspend"`
 }
 
-// buildHermeticTree scaffolds a --tools tree and installs the hermetic main.go,
-// returning its root and the temp go.work that covers it with the bonnie and
-// kit checkouts. It skips when no kit checkout is beside the repo.
-func buildHermeticTree(t *testing.T) (root, work string) {
+// buildHermeticTree scaffolds a --tools tree, installs the hermetic main.go,
+// and points its go.mod at this checkout so a subprocess build compiles the
+// code under test. It returns the tree's root.
+func buildHermeticTree(t *testing.T) string {
 	t.Helper()
-	kitRoot, ok := findUpstream()
-	if !ok {
-		t.Skip("no kit checkout beside this repo; the hermetic build cannot be simulated")
-	}
-	parent := t.TempDir()
-	root = filepath.Join(parent, "my-agent")
+	root := filepath.Join(t.TempDir(), "my-agent")
 	if _, err := agent.Scaffold(root, agent.InitOptions{Tools: true}); err != nil {
 		t.Fatalf("Scaffold: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "main.go"), []byte(hermeticMain), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	work = filepath.Join(parent, "go.work")
-	if err := os.WriteFile(work, []byte("go 1.27.1\n\nuse (\n\t./my-agent\n\t"+bonnieRoot()+"\n\t"+kitRoot+"\n)\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	return root, work
+	treetest.LinkToCheckout(t, root)
+	return root
 }
 
-// findUpstream looks for the kit checkout the local go.work names.
-func findUpstream() (string, bool) {
-	p := filepath.Join(filepath.Dir(bonnieRoot()), "kit")
-	if _, err := os.Stat(filepath.Join(p, "go.mod")); err != nil {
-		return "", false
-	}
-	return p, true
-}
-
-// bonnieRoot returns this repository's absolute path, found by climbing to
-// the go.mod whose module is bonnie. The test's working directory is the
-// cmd/bonnie package, two levels below the module root.
-func bonnieRoot() string {
-	wd, err := os.Getwd()
-	if err != nil {
-		return "."
-	}
-	for dir := wd; ; dir = filepath.Dir(dir) {
-		raw, err := os.ReadFile(filepath.Join(dir, "go.mod"))
-		if err == nil && strings.Contains(string(raw), "module github.com/mark3labs/bonnie") {
-			return dir
-		}
-		if parent := filepath.Dir(dir); parent == dir {
-			return filepath.Clean(filepath.Join(wd, "..", ".."))
-		}
-	}
-}
-
-// withGoWork returns a child environment that replaces the inherited GOWORK
-// with the given file, so a subprocess build resolves the hermetic tree.
-func withGoWork(work string) []string {
-	var env []string
-	for _, kv := range os.Environ() {
-		if strings.HasPrefix(kv, "GOWORK=") {
-			continue
-		}
-		env = append(env, kv)
-	}
-	return append(env, "GOWORK="+work)
-}
-
-// waitForChild reads the first listen address from the child log, retrying
-// until the child prints it or the timeout elapses.
-func waitForChild(t *testing.T, log *syncBuffer) string {
+// waitForStart waits until the child log holds n startup banners and returns
+// the address the nth one reports.
+//
+// The count, not a change of address, is what marks a restart: the dev loop
+// deliberately reuses the address across restarts so a connected TUI survives
+// one, so two consecutive children report the same port.
+func waitForStart(t *testing.T, log *syncBuffer, n int) string {
 	t.Helper()
-	re := regexp.MustCompile(`127\.0\.0\.1:\d+`)
-	deadline := time.Now().Add(15 * time.Second)
+	re := regexp.MustCompile(`serving on (\S+)`)
+	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
-		if m := re.FindString(log.String()); m != "" {
-			return m
+		if m := re.FindAllStringSubmatch(log.String(), -1); len(m) >= n {
+			return m[n-1][1]
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	t.Fatalf("child never printed a listen address; log:\n%s", log.String())
+	t.Fatalf("child never reported start %d; log:\n%s", n, log.String())
 	return ""
 }
 
@@ -253,7 +193,8 @@ func postRun(t *testing.T, addr, path string, body any) httpRun {
 // is run from a fresh directory with no instructions.md, so the only source of
 // the prompt is the build's embed.
 func TestBuildOutputServesEmbeddedInstructions(t *testing.T) {
-	root, work := buildHermeticTree(t)
+	t.Parallel()
+	root := buildHermeticTree(t)
 
 	// The tree's instructions are what the binary must embed.
 	wantPrompt, err := os.ReadFile(filepath.Join(root, "instructions.md"))
@@ -261,7 +202,7 @@ func TestBuildOutputServesEmbeddedInstructions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := runBuild(root, buildOpts{output: filepath.Join(root, "agent"), env: withGoWork(work)}); err != nil {
+	if err := runBuild(root, buildOpts{output: filepath.Join(root, "agent"), env: treetest.BuildEnv()}); err != nil {
 		t.Fatalf("runBuild: %v", err)
 	}
 	bin := filepath.Join(root, "agent")
@@ -285,7 +226,7 @@ func TestBuildOutputServesEmbeddedInstructions(t *testing.T) {
 	}
 	defer func() { _ = cmd.Process.Kill() }()
 
-	addr := waitForAddr(t, &log)
+	addr := waitForStart(t, &log, 1)
 
 	// A full run: start (parks), then answer it — the response is the
 	// embedded instructions.
@@ -308,32 +249,30 @@ func TestBuildOutputServesEmbeddedInstructions(t *testing.T) {
 // parks in a child, the dev loop restarts it, and the respond in the new child
 // completes it — crossing a process boundary with only the journal shared.
 func TestDevRestartCompletesParkedRun(t *testing.T) {
-	root, work := buildHermeticTree(t)
+	t.Parallel()
+	root := buildHermeticTree(t)
 
 	var log syncBuffer
 	d := newDevServer(root, devOpts{shutdown: 10 * time.Second})
-	d.env = withGoWork(work)
+	d.env = treetest.BuildEnv()
 	d.log = &log
 	if err := d.restart(); err != nil {
 		t.Fatalf("first restart: %v", err)
 	}
 	defer d.stopChild()
 
-	addrA := waitForChild(t, &log)
+	addrA := waitForStart(t, &log, 1)
 
 	started := postRun(t, addrA, "/runs", map[string]any{"text": "deploy the app"})
 	if started.State != string(runtime.RunWaiting) {
 		t.Fatalf("start state = %q, want %q", started.State, runtime.RunWaiting)
 	}
 
-	// The dev loop restarts: a new process, same journal.
+	// The dev loop restarts: a new process, same journal, same address.
 	if err := d.restart(); err != nil {
 		t.Fatalf("restart after park: %v", err)
 	}
-	addrB := waitForChildAddr(t, &log, addrA)
-	if addrB == "" {
-		t.Fatal("restarted child never printed a new address")
-	}
+	addrB := waitForStart(t, &log, 2)
 
 	// The respond goes to the new child and completes the parked run.
 	done := postRun(t, addrB, "/runs/"+started.RunID+"/respond", map[string]any{
@@ -342,34 +281,15 @@ func TestDevRestartCompletesParkedRun(t *testing.T) {
 	if done.State != string(runtime.RunCompleted) {
 		t.Fatalf("done state = %q, want %q", done.State, runtime.RunCompleted)
 	}
-}
-
-// waitForChildAddr waits until the log holds an address different from the
-// previous one — the restarted child's listen address.
-func waitForChildAddr(t *testing.T, log *syncBuffer, previous string) string {
-	t.Helper()
-	re := regexp.MustCompile(`127\.0\.0\.1:\d+`)
-	deadline := time.Now().Add(30 * time.Second)
-	for time.Now().Before(deadline) {
-		for _, addr := range re.FindAllString(log.String(), -1) {
-			if addr != previous {
-				return addr
-			}
-		}
-		time.Sleep(50 * time.Millisecond)
+	if addrB != addrA {
+		t.Fatalf("the restarted child moved from %s to %s; a connected client would be dropped", addrA, addrB)
 	}
-	return ""
-}
-
-// waitForAddr waits for any listen address in the log.
-func waitForAddr(t *testing.T, log *syncBuffer) string {
-	t.Helper()
-	return waitForChildAddr(t, log, "\x00\x00")
 }
 
 // TestRunBuildDryRun prints the discovery plan without writing or building.
 func TestRunBuildDryRun(t *testing.T) {
-	root, _ := buildHermeticTree(t)
+	t.Parallel()
+	root := buildHermeticTree(t)
 	// A dry run does not require the module to resolve; it only discovers.
 
 	// A dry run must not write. Delete the scaffold's generated stub first, so

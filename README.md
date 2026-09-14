@@ -54,7 +54,7 @@ called — so it does not repeat a side effect it has already performed.
 
 ## Contents
 
-- [Install](#install) · [Quickstart: no Go](#quickstart-no-go-required) · [Quickstart](#quickstart) · [Park and resume](#park-and-resume)
+- [Install](#install) · [Quickstart: scaffold an agent](#quickstart-scaffold-an-agent) · [Quickstart](#quickstart) · [Park and resume](#park-and-resume)
 - [Your own tools](#your-own-tools) · [Sandboxing](#sandboxing) · [Serve over HTTP](#serve-over-http) · [Chat channels](#chat-channels)
 - [CLI](#cli) · [Storage](#storage) · [Streaming](#streaming) · [Steer and cancel](#steer-and-cancel)
 - [How it works](#how-it-works) · [Limits](#limits) · [Docs](#documentation)
@@ -110,22 +110,36 @@ Other flake outputs:
 | `apps.msb` | `nix run github:mark3labs/bonnie#msb` |
 | `overlays.default` | both packages, for your own nixpkgs |
 
-## Quickstart: no Go required
+## Quickstart: scaffold an agent
 
-Scaffold an agent, edit one file, serve it. No Go toolchain, no build.
+Scaffold an agent, edit one file, run it.
 
 ```bash
 bonnie init my-agent --model anthropic/claude-sonnet-4-5
 cd my-agent
+go mod tidy
 # edit instructions.md — that file is the agent's system prompt
-bonnie serve --agent .
+bonnie dev
 ```
 
-The tree is four things: `agent.yaml` (the manifest: model, sandbox,
-channels), `instructions.md` (the system prompt, read fresh at every
-start), and `skills/` and `workspace/` (seed directories — files under
-`workspace/` are mirrored into every run's sandbox, and a file the model
-already wrote is never overwritten).
+The tree is four things: `main.go` (one call — this is where the model, the
+sandbox, and the channels are configured, in code), `instructions.md` (the
+system prompt, read fresh at every start), and `skills/` and `workspace/`
+(seed directories — files under `workspace/` are mirrored into every run's
+sandbox, and a file the model already wrote is never overwritten).
+
+```go
+// main.go — the whole default agent
+package main
+
+import "github.com/mark3labs/bonnie"
+
+func main() {
+	bonnie.Main(
+		bonnie.WithModel("anthropic/claude-sonnet-4-5"),
+	)
+}
+```
 
 ```bash
 # talk to it over HTTP
@@ -135,15 +149,15 @@ curl -s localhost:8080/runs -d '{"text":"What are you?"}'
 bonnie chat --addr :8080
 ```
 
-Every serve setting comes from the manifest or a flag, and the startup
-banner says which source won. Flags win: `--model`, `--addr`, `--sandbox`,
-and the rest override the manifest when both are given.
+There is no config file. A setting is either a file at a known path
+(`instructions.md`, `workspace/`, `tools/`) or an option in `main.go`, so a
+setting that does not exist is a compile error rather than a key nothing
+reads. `-addr` and `-model` are operator flags on the built binary and win
+over the options, so one binary can move port or model without a rebuild.
 
-The manifest is strict: an unknown key, an unknown `apiVersion`, or two
-manifests in one directory is an error that names what is wrong — never a
-silent default. A tree that carries Go tools cannot be served this way;
-`serve` refuses it and names `bonnie build` (the codegen path, coming in
-`v0.2`).
+When you are ready to ship it, `bonnie build` compiles the tree — tools,
+instructions, and seed files embedded — into one static binary that serves
+on a host with no Go and no BONNIE install.
 
 ## Quickstart
 
@@ -298,8 +312,8 @@ The run stops, `Start` returns with `State == RunWaiting`, and
 Prefer scaffolding over hand-wiring? `bonnie init --tools` creates a tree
 with one sample tool and a `main.go` you own; tools there live in
 `tools/<name>/tool.go` as `func Tool() kit.Tool`, and the directory name is
-the tool's name. Codegen that regenerates the wiring (and `bonnie dev`/
-`bonnie build`) lands in `v0.2`; the scaffold builds today.
+the tool's name. `bonnie dev` and `bonnie build` regenerate the wiring, so
+`main.go` never has to name a tool.
 
 ## Sandboxing
 
@@ -354,12 +368,13 @@ holds no container. Read [`docs/SANDBOX.md`](docs/SANDBOX.md) before deploying.
 bonnie serve --journal .bonnie --model anthropic/claude-sonnet-4-5 --sandbox docker
 ```
 
-Or serve a discovered agent tree — manifest, instructions, sandbox and
-channels from files, no build. See [Quickstart: no Go
-required](#quickstart-no-go-required):
+Or run an agent tree — its configuration is Go in its own `main.go`, so the
+tree is served by running it. See [Quickstart: scaffold an
+agent](#quickstart-scaffold-an-agent):
 
 ```bash
-bonnie serve --agent my-agent
+bonnie dev my-agent          # hot reload while you work on it
+bonnie build my-agent        # one static binary, then run it anywhere
 ```
 
 Or mount it in your own server:
@@ -405,24 +420,25 @@ opposite: it targets one exact run and returns `404` rather than creating one.
 ## Chat channels
 
 Slack, Discord, and Telegram put the same durable runs into a conversation.
-Enable one in the manifest, put its credentials in the environment, and
-serve:
+Mount one in `main.go`, put its credentials in the environment, and run:
 
-```yaml
-# agent.yaml
-channels:
-  slack: {}
-  discord: {}
-  telegram:
-    username: mybot
+```go
+bonnie.Main(
+	bonnie.WithSlack(slack.Config{}),
+	bonnie.WithDiscord(discord.Config{}),
+	bonnie.WithTelegram(telegram.Config{Username: "mybot"}),
+)
 ```
 
 ```bash
 export SLACK_BOT_TOKEN=xoxb-... SLACK_SIGNING_SECRET=...
 export DISCORD_BOT_TOKEN=... DISCORD_PUBLIC_KEY=...
 export TELEGRAM_BOT_TOKEN=... TELEGRAM_WEBHOOK_SECRET=...
-bonnie serve --agent .
+bonnie dev
 ```
+
+Credentials are read from the environment and never from code; a missing one
+is a startup error that names the variable.
 
 Each channel mounts one webhook (`/slack/events`, `/discord/interactions`,
 `/telegram`), verifies its platform's signature — Slack's v0 HMAC, Discord's
@@ -439,9 +455,10 @@ transports).
 ## CLI
 
 ```
-bonnie init     Scaffold an agent tree (manifest, instructions, seeds)
-bonnie serve    Mount the HTTP channel and serve durable runs
+bonnie init     Scaffold an agent tree (main.go, instructions, seeds)
 bonnie dev      Run an agent tree with hot reload and the built-in TUI
+bonnie build    Compile an agent tree into one static binary
+bonnie serve    Mount the HTTP channel and serve durable runs, with no tree
 bonnie chat     Talk to a running agent in a terminal
 bonnie runs     List and inspect durable runs
 bonnie sandbox  Reclaim the sandboxes of terminal runs (prune)
@@ -451,14 +468,12 @@ bonnie version  Print the version
 ```bash
 bonnie init my-agent --model anthropic/claude-sonnet-4-5
 bonnie init .                      adopt this directory; never overwrites
-bonnie init my-agent --format toml # or json; yaml is the default
-bonnie init my-agent --tools       add a Go module with a sample tool
+bonnie init my-agent --tools       add a sample Go tool
 
 bonnie dev my-agent                hot reload + the terminal interface
+bonnie build my-agent              one static binary at ./my-agent
 bonnie chat --addr :8080           talk to any running channel in a terminal
 
-bonnie serve --agent my-agent      serve a discovered tree, no build
-bonnie serve --agent . --config agent.toml
 bonnie serve --addr :8080 --journal .bonnie \
              --model anthropic/claude-sonnet-4-5 \
              --sandbox docker --sandbox-deny-network
@@ -602,10 +617,10 @@ Stated plainly, because the failure modes are not obvious:
 - **Sandbox lifecycle is journalled, and reclaiming is manual.**
   `bonnie sandbox prune` deletes the sandboxes of terminal runs; `serve`
   does not sweep them on its own yet.
-- **The mark3labs modules are publicly fetchable.** A scaffolded module
-  (`bonnie init --tools`) runs `go mod tidy` and resolves `bonnie` and `kit`
-  from the proxy; no `go.work`, no `GOPRIVATE`. The zero-Go path
-  (`serve --agent`) needs neither Go nor a module.
+- **The mark3labs modules are publicly fetchable.** A scaffolded module runs
+  `go mod tidy` and resolves `bonnie` and `kit` from the proxy; no `go.work`,
+  no `GOPRIVATE`. Authoring an agent needs Go on your machine; the binary
+  `bonnie build` produces needs nothing on the host.
 
 ## Examples
 
@@ -627,7 +642,7 @@ See [`examples/README.md`](examples/README.md) for copy-pasteable commands.
 | [`docs/HANDOVER.md`](docs/HANDOVER.md) | Picking up the project: state, pitfalls, what to do next |
 | [`docs/SANDBOX.md`](docs/SANDBOX.md) | Sandbox backends and the contracts an adapter must honour |
 | [`docs/SPEC.md`](docs/SPEC.md) | Specification: scope, verified Kit facts, known risks, invariants |
-| [`docs/L2.md`](docs/L2.md) | Draft spec for `v0.2`: the agent tree, manifest, `init`/`dev`/`build` |
+| [`docs/L2.md`](docs/L2.md) | The agent tree: the default layout, configuration as code, `init`/`dev`/`build`, and the codegen contract |
 | [`docs/TASKS.md`](docs/TASKS.md) | Open work, and an archive of what shipped |
 | [`docs/UPSTREAM.md`](docs/UPSTREAM.md) | The home for BONNIE's future asks of Kit; answered ones live in `docs/archive/` |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Boundary rule, workspace setup, commands |

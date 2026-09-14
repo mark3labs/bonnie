@@ -17,6 +17,7 @@ import (
 	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/cobra"
 
+	"github.com/mark3labs/bonnie"
 	"github.com/mark3labs/bonnie/agent"
 	"github.com/mark3labs/bonnie/cmd/bonnie/tui"
 )
@@ -41,11 +42,11 @@ func newDevCmd() *cobra.Command {
 tree, regenerate the tool wiring, rebuild, and gracefully restart the serving child —
 while you interact with the agent in a terminal.
 
-The loop watches the manifest, instructions, skills/, tools/**, and go.mod and
-go.sum. The workspace is deliberately NOT watched: it is where the running agent
-writes the files a model asks it to write, so rebuilding on it would let the
-agent restart itself mid-turn. A change rebuilds the wrapper and restarts the
-child with SIGTERM, waiting
+The loop watches the tree: main.go, instructions.md, skills/, tools/**, go.mod
+and go.sum. The workspace is deliberately NOT watched: it is where the running
+agent writes the files a model asks it to write, so rebuilding on it would let
+the agent restart itself mid-turn. A change rebuilds the wrapper and restarts
+the child with SIGTERM, waiting
 out its drain (--shutdown-timeout) before the next starts. A parked run keeps no
 compute and lives in the journal; a restarted child resumes it, and the TUI reconnects
 to the stream (the journal is the durable record).
@@ -400,15 +401,13 @@ func underDir(path, dir string) bool {
 	return rel == "." || (!strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != "..")
 }
 
-// workspaceDir is the tree's workspace, absolute. It is the manifest's
-// workspace, or workspace/ when the key is absent — the same default the
-// scaffold and the serve wiring use, so all three agree on the agent's root.
+// workspaceDir is the tree's workspace, absolute: [bonnie.DefaultWorkspace]
+// under the root. It is one constant rather than a copy of the path, so the
+// scaffold, codegen, the runtime, and this loop cannot disagree about which
+// directory the agent writes into — and therefore about which one must not
+// be watched.
 func workspaceDir(root string) string {
-	m, _, err := agent.Load(root)
-	if err != nil {
-		m = nil
-	}
-	return m.WorkspaceDir(root)
+	return filepath.Join(root, bonnie.DefaultWorkspace)
 }
 
 // runDev is the bonnie dev entry, separated from cobra for testing.
