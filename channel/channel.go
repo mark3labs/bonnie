@@ -154,7 +154,33 @@ type Inbound interface {
 type Route struct {
 	Method  string
 	Path    string
-	Handler func(w http.ResponseWriter, r *http.Request, in Inbound)
+	Handler func(w http.ResponseWriter, r *http.Request, in Inbound, out Outbound)
+}
+
+// Outbound is handed to a channel's route handlers next to [Inbound]: it
+// reaches the channels mounted beside this one. A handler that needs none
+// ignores the parameter.
+//
+// Calling another channel is an agent hand-off, not a notification: the
+// message becomes turn input and the model runs on the destination
+// channel. A caller that only wants to post text calls the platform's API;
+// a notification that must survive a crash goes through an outbox of its
+// own.
+type Outbound interface {
+	// To returns the named channel's [Receiver], or false when no channel
+	// with that name is mounted.
+	To(name string) (Receiver, bool)
+}
+
+// Receiver is what a mounted channel exposes to the others: start a
+// conversation on its surface without an inbound message. The destination
+// channel owns what target means (a Slack channel ID, a GitHub issue),
+// creates whatever surface the reply needs, and binds the address before
+// the turn runs, so a platform event that arrives while the turn is in
+// flight continues this run instead of racing it. The options carry the
+// initiating principal, so the destination run records who started it.
+type Receiver interface {
+	Receive(ctx context.Context, target any, text string, opts SendOptions) error
 }
 
 // Channel is an inbound transport.

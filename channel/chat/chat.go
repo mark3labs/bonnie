@@ -669,6 +669,38 @@ func Dispatch(ctx context.Context, core *Core, turn Turn, deliver func(address s
 	}()
 }
 
+// Proactive starts a conversation on an address without an inbound
+// message: the same dispatch a webhook drives, driven by another channel
+// or a schedule instead. The binding is written before the turn runs, so a
+// platform event that arrives while the turn is in flight continues this
+// run instead of racing it. eve's `receive(...)` and
+// `ctx.to(channel, target).send(...)` end here.
+//
+// The turn must carry an address — the destination channel derives it from
+// its own target type. A nil-Auth turn records no principal; the run then
+// has no one to attribute.
+func (c *Core) Proactive(ctx context.Context, turn Turn, deliver func(address string, run *runtime.Run, err error)) error {
+	if turn.Address == "" {
+		return errors.New("bonnie: channel: a proactive turn needs an address")
+	}
+	if turn.Title == "" {
+		turn.Title = TitleFrom(turn.Text)
+	}
+	if err := c.addresses.Bind(ctx, c.Address(turn.Address), c.NewID()); err != nil {
+		return fmt.Errorf("bonnie: channel: bind a proactive address: %w", err)
+	}
+	if turn.Auth != nil {
+		id, ok, err := c.Lookup(ctx, turn.Address)
+		if err == nil && ok {
+			if err := c.addresses.NotePrincipal(ctx, id, turn.Auth); err != nil {
+				return err
+			}
+		}
+	}
+	Dispatch(ctx, c, turn, deliver)
+	return nil
+}
+
 // SplitText splits a reply into platform-sized chunks. It breaks on line
 // boundaries when one exists, falls back to a hard cut when a single line
 // exceeds the limit, and caps the number of parts so a runaway response

@@ -124,7 +124,7 @@ func adapter(t *testing.T, script []*kit.TurnResult, secret, username string) *h
 	mux := http.NewServeMux()
 	for _, r := range ch.Routes() {
 		mux.HandleFunc(r.Method+" "+r.Path, func(w http.ResponseWriter, req *http.Request) {
-			r.Handler(w, req, ch)
+			r.Handler(w, req, ch, nil)
 		})
 	}
 	h := &harness{ch: ch, agent: agent, fake: fake, server: httptest.NewServer(mux)}

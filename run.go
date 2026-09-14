@@ -158,10 +158,19 @@ func (a *Agent) Run(ctx context.Context) error {
 		info.Channels = append(info.Channels, ch.Name())
 	}
 
-	mux := http.NewServeMux()
-	mount(mux, bonniehttp.New(runner, bonniehttp.WithInfo(info)))
+	// The outbound registry: the channels that implement [channel.Receiver]
+	// answer a hand-off from any route handler.
+	out := outbound{byName: make(map[string]channel.Receiver)}
 	for _, ch := range channels {
-		mount(mux, ch)
+		if r, ok := ch.(channel.Receiver); ok {
+			out.byName[ch.Name()] = r
+		}
+	}
+
+	mux := http.NewServeMux()
+	mount(mux, bonniehttp.New(runner, bonniehttp.WithInfo(info)), out)
+	for _, ch := range channels {
+		mount(mux, ch, out)
 	}
 
 	// Bind before the banner, so the banner reports the address the process
@@ -449,15 +458,25 @@ func closeStreamsOnShutdown(ctx context.Context, next http.Handler) http.Handler
 }
 
 // mount puts a channel's routes on the mux, with the channel itself as the
-// inbound side. Every BONNIE adapter is both: the webhook is its route, and
-// the address map is its inbound surface.
-func mount(mux *http.ServeMux, ch Channel) {
+// inbound side and the mounted channels as the outbound registry. Every
+// BONNIE adapter is both: the webhook is its route, and the address map is
+// its inbound surface.
+func mount(mux *http.ServeMux, ch Channel, out channel.Outbound) {
 	for _, rt := range ch.Routes() {
 		handler := rt.Handler
 		mux.HandleFunc(rt.Method+" "+rt.Path, func(w http.ResponseWriter, r *http.Request) {
-			handler(w, r, ch)
+			handler(w, r, ch, out)
 		})
 	}
+}
+
+// outbound is the [channel.Outbound] registry Run builds from the mounted
+// channels.
+type outbound struct{ byName map[string]channel.Receiver }
+
+func (o outbound) To(name string) (channel.Receiver, bool) {
+	r, ok := o.byName[name]
+	return r, ok
 }
 
 // refuseReserved rejects a channel that wants a route in the framework's

@@ -19,7 +19,6 @@ the known risks, and the invariants every task must preserve.
 
 | ID | Title | Priority | Size | Blocks |
 |---|---|---|---|---|
-| T-033 | Cross-channel hand-off and proactive sessions | P3 | M | — |
 | T-027 | goreleaser publishes a commit list, not the release notes | P2 | S | — |
 | T-026 | microsandbox `Open` races its own create under load | P2 | S | — |
 | T-022 | TUI transcript replay on reopen | P2 | M | — |
@@ -35,6 +34,7 @@ the known risks, and the invariants every task must preserve.
 
 | ID | Delivered | Where |
 |---|---|---|
+| T-033 | Cross-channel hand-offs and proactive sessions: `channel.Outbound` in every route handler, `channel.Receiver` on all four platform adapters, `chat.Core.Proactive` (bind before dispatch so a mid-turn reply continues the run), the initiating principal carried to the destination run | `channel/channel.go`, `channel/chat/chat.go`, all four adapters, `run.go`, `handoff_test.go` |
 | T-029 | The GitHub App channel: comment mentions and bound-thread replies become turns; issue, PR, and review-thread addresses; the PR diff as per-turn context; `eyes` reactions; signature verification and delivery dedup; per-event installation tokens that never reach the journal; `OnIssue`/`OnPullRequest`/`OnCheckSuite` hooks; `bonnie.WithGitHub` | `channel/github/`, `options.go`, `docs/CHANNELS.md` |
 | T-031 | Idempotent start (`operation_id`, namespaced per authenticated principal, refused anonymous) and a stable `code` on every error body, listed in `docs/CHANNELS.md` | `channel/http/http.go`, `channel/http/errors_test.go` |
 | T-032 | Session controls: `Reset`/`Clear`/`Compact` on `SessionRef` and the HTTP channel, `RunRetired` (the only non-revivable terminal state), `RecordClear` (an append-only forget), `/new` in every chat surface, the core owns the address prefix with the channel's name | `runtime/controls.go`, `runtime/session.go`, `channel/channel.go`, `channel/chat/chat.go`, `channeltest/` |
@@ -1641,7 +1641,13 @@ Do not delete history on `Clear`. The journal is append-only (invariant in
 
 ## T-033 — Cross-channel hand-off and proactive sessions
 
-**Priority** P3 · **Size** M · **Blocked by** T-032
+**Priority** P3 · **Size** M · **Blocked by** T-032 (shipped)
+
+**SHIPPED.** One note against the plan: the destination's `Receive` is a
+`channel.Receiver` on the adapter, not a `To(name, target) SessionRef`,
+because creating the surface (open a Slack thread, mint an installation
+token) is adapter logic a generic SessionRef cannot carry. The registry
+shape — `To(name)` — is the same.
 
 ### Why
 
@@ -1670,12 +1676,12 @@ chat adapter to own both halves.
 
 ### Acceptance criteria
 
-- [ ] A test channel's route starts a run on a fake Slack adapter, and the
+- [x] A test channel's route starts a run on a fake Slack adapter, and the
       reply lands in the thread the adapter opened
-- [ ] A run started through `Receive` is bound to its address, so a later
+- [x] A run started through `Receive` is bound to its address, so a later
       platform reply continues it
-- [ ] `Principal` on the destination run is the initiator's
-- [ ] `docs/CHANNELS.md` removes proactive sessions from "not implemented"
+- [x] `Principal` on the destination run is the initiator's
+- [x] `docs/CHANNELS.md` removes proactive sessions from "not implemented"
 
 ### Watch for
 

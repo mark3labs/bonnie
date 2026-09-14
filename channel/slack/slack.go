@@ -53,6 +53,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -170,7 +171,7 @@ type slackEvent struct {
 }
 
 // handleEvent implements the webhook.
-func (c *Channel) handleEvent(w http.ResponseWriter, r *http.Request, _ channel.Inbound) {
+func (c *Channel) handleEvent(w http.ResponseWriter, r *http.Request, _ channel.Inbound, _ channel.Outbound) {
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
 	if err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
@@ -353,8 +354,15 @@ func (c *Channel) deliver(address string, run *runtime.Run, err error) {
 // postMessage posts one message. Fire-and-log: a delivery failure must not
 // take the process down, and the journal keeps the truth.
 func (c *Channel) postMessage(ctx context.Context, channelID, threadTS, text string) {
+	_, _ = c.postMessageTS(ctx, channelID, threadTS, text)
+}
+
+// postMessageTS posts one message and returns its timestamp, which is the
+// thread ID a reply needs. The boolean is false on any failure; the
+// message still posts or it does not — fire-and-log.
+func (c *Channel) postMessageTS(ctx context.Context, channelID, threadTS, text string) (string, bool) {
 	if c.cfg.BotToken == "" {
-		return // nothing to send with; the conformance suite drives Inbound
+		return "", false // nothing to send with; the conformance suite drives Inbound
 	}
 	payload := map[string]any{"channel": channelID, "text": text}
 	if threadTS != "" {
@@ -363,19 +371,54 @@ func (c *Channel) postMessage(ctx context.Context, channelID, threadTS, text str
 	body, _ := json.Marshal(payload)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.api+"/chat.postMessage", bytes.NewReader(body))
 	if err != nil {
-		return
+		return "", false
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.cfg.BotToken)
 	resp, err := c.http.Do(req)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "bonnie: slack: deliver: %v\n", err)
-		return
+		return "", false
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		fmt.Fprintf(os.Stderr, "bonnie: slack: deliver: %s\n", resp.Status)
+		return "", false
 	}
+	var out struct {
+		TS string `json:"ts"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&out)
+	return out.TS, true
+}
+
+// Receive implements [channel.Receiver]. The target is a Slack channel ID:
+// the instruction is posted as a thread root, the address binds to that
+// thread before the turn runs, and the reply lands inside it. A failure to
+// post the root is a failure to start the conversation, and is returned —
+// unlike delivery, which is fire-and-log, because here the person waiting
+// is a program.
+func (c *Channel) Receive(ctx context.Context, target any, text string, opts channel.SendOptions) error {
+	channelID, ok := target.(string)
+	if !ok || channelID == "" {
+		return fmt.Errorf("bonnie: channel/slack: the target of a hand-off is the channel ID, not %T", target)
+	}
+	root, ok := c.postMessageTS(ctx, channelID, "", text)
+	if !ok {
+		return errors.New("bonnie: channel/slack: the thread could not be opened")
+	}
+	turn := chat.Turn{
+		Address:    channelID + "/" + root,
+		Text:       text,
+		Kind:       chat.KindThread,
+		Context:    opts.Context,
+		Title:      opts.Title,
+		TurnPolicy: opts.TurnPolicy,
+	}
+	if opts.Auth != nil {
+		turn.Auth = opts.Auth
+	}
+	return c.core.Proactive(ctx, turn, c.deliver)
 }
 
 // writeOK answers Slack's webhook with the ack it expects.

@@ -228,6 +228,30 @@ bonnie.New(bonnie.WithGitHub(github.Config{BotName: "my-agent"})).Serve()
 
 ---
 
+## Hand-offs and proactive sessions
+
+A channel can start a conversation on another channel. `out.To("slack")` in
+a route handler returns the Slack adapter's receiver, and
+`Receive(ctx, "C123", "summarise the incident", opts)` posts the
+instruction there as a thread root, binds the thread's address **before**
+the turn runs (so a platform event that arrives mid-turn continues this
+run instead of racing it), and dispatches. The reply lands in the thread.
+The options carry the initiating `Principal`, so the destination run
+records who started it.
+
+| Channel | Target | Surface the reply lands on |
+|---|---|---|
+| Slack | the channel ID | a new thread under the posted root message |
+| Discord | the channel or thread ID | the channel |
+| Telegram | the chat ID, or `<chat_id>/<topic>` | the chat or topic |
+| GitHub | `github.Target{Owner, Repo, Number}` | a comment on the issue or PR timeline; needs `GITHUB_INSTALLATION_ID` |
+
+A hand-off is agent input, not a notification API. A caller that only wants
+to post text calls the platform; a notification that must survive a crash
+goes through an outbox of its own.
+
+---
+
 ## Secrets never live in code
 
 A channel's option enables and configures it — the webhook path, the command
@@ -252,7 +276,7 @@ the message came from Slack; the user ID inside it is Slack's word. The
 - **Button-driven HITL** (Slack Block Kit actions, Discord message
   components). A parked run is answered in text. The resume path behind it
   is the same; only the gesture is missing.
-- **Proactive sessions** — a bot that starts the conversation. T-033.
+- **Proactive sessions** — done in T-033: see "Hand-offs" below.
 - **Message attachments.** Text in, text out. The GitHub channel fetches
   the PR diff itself, which is what a file-bearing surface needs before an
   attachment slot does.
@@ -266,4 +290,6 @@ the message came from Slack; the user ID inside it is Slack's word. The
   are on `SessionRef` and the HTTP channel, and `/new` works in every chat
   surface; `operation_id` makes a start idempotent, and every error body
   carries a stable `code`.
-- **Cross-channel hand-off** (`to(channel).send`). T-033.
+- **Cross-channel hand-off** (`to(channel).send`) — done in T-033; see
+  "Hand-offs and proactive sessions" above. Schedules get the same surface
+  when one exists.

@@ -1044,7 +1044,7 @@ edge cases. Consult them for **design questions**, not for implementation.
 | `runtime.Input{Text, Context, Title, Origin}` + `chat.Turn` (T-028, shipped) | `message` + per-turn `context` / `clientContext` | [Custom Channels](https://eve.dev/docs/channels/custom) |
 | *T-031* — **shipped** | `operationId` create-once, `code` on errors | [eve channel](https://eve.dev/docs/channels/eve) |
 | *T-032* | `reset`, `clear`, `compact`; channel-name prefix on every token — **shipped** | [Custom Channels](https://eve.dev/docs/channels/custom) |
-| *T-033* | `to(channel, target).send`, `receive` (proactive) | [Custom Channels](https://eve.dev/docs/channels/custom) |
+| `channel.Outbound` / `Receiver.Receive` (T-033, shipped) | `to(channel, target).send`, `receive` (proactive) | [Custom Channels](https://eve.dev/docs/channels/custom) |
 | `channel/github` (T-029, shipped) | `githubChannel`, `<github_context>`, PR diff in context | [GitHub](https://eve.dev/docs/channels/github) |
 | *deferred* | `instrumentation.ts` | [Observability](https://eve.dev/docs/guides/instrumentation) |
 | *deferred* | `defineDynamic` | [Dynamic Capabilities](https://eve.dev/docs/guides/dynamic-capabilities) |

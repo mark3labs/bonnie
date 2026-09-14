@@ -169,13 +169,20 @@ func (c *Channel) Routes() []channel.Route {
 
 // Handler mounts [Channel.Routes] on a fresh mux with the channel as the
 // inbound side. Mount it under a prefix with http.StripPrefix if the host
-// serves other things.
+// serves other things. The outbound registry is empty: a standalone
+// handler has no channels to hand work to.
 func (c *Channel) Handler() http.Handler {
+	return c.HandlerWithOutbound(nil)
+}
+
+// HandlerWithOutbound is [Channel.Handler] with a registry of the other
+// mounted channels, for a host that serves hand-offs.
+func (c *Channel) HandlerWithOutbound(out channel.Outbound) http.Handler {
 	mux := http.NewServeMux()
 	for _, route := range c.Routes() {
 		handler := route.Handler
 		mux.HandleFunc(route.Method+" "+route.Path, func(w http.ResponseWriter, r *http.Request) {
-			handler(w, r, c)
+			handler(w, r, c, out)
 		})
 	}
 	return mux
@@ -328,15 +335,15 @@ func runResponse(run *runtime.Run) RunResponse {
 // journal: it says the process is up and routing, which is what a deployment
 // probe asks. It is deliberately not a journal check — a probe that fails
 // when the disk is slow would restart a server that is doing its job.
-func (c *Channel) handleHealth(w http.ResponseWriter, _ *http.Request, _ channel.Inbound) {
+func (c *Channel) handleHealth(w http.ResponseWriter, _ *http.Request, _ channel.Inbound, _ channel.Outbound) {
 	writeJSON(w, http.StatusOK, healthResponse{OK: true, Status: "ready"})
 }
 
-func (c *Channel) handleInfo(w http.ResponseWriter, _ *http.Request, _ channel.Inbound) {
+func (c *Channel) handleInfo(w http.ResponseWriter, _ *http.Request, _ channel.Inbound, _ channel.Outbound) {
 	writeJSON(w, http.StatusOK, c.info)
 }
 
-func (c *Channel) handleStart(w http.ResponseWriter, r *http.Request, in channel.Inbound) {
+func (c *Channel) handleStart(w http.ResponseWriter, r *http.Request, in channel.Inbound, _ channel.Outbound) {
 	var req StartRequest
 	if !decode(w, r, &req) {
 		return
@@ -375,7 +382,7 @@ func (c *Channel) handleStart(w http.ResponseWriter, r *http.Request, in channel
 	writeJSON(w, http.StatusOK, runResponse(run))
 }
 
-func (c *Channel) handleAddress(w http.ResponseWriter, r *http.Request, _ channel.Inbound) {
+func (c *Channel) handleAddress(w http.ResponseWriter, r *http.Request, _ channel.Inbound, _ channel.Outbound) {
 	runID, ok, err := c.core.Lookup(r.Context(), r.PathValue("address"))
 	if err != nil {
 		writeError(w, err)
@@ -392,7 +399,7 @@ func (c *Channel) handleAddress(w http.ResponseWriter, r *http.Request, _ channe
 	writeJSON(w, http.StatusOK, RunResponse{RunID: runID, Cursor: cursor})
 }
 
-func (c *Channel) handleGet(w http.ResponseWriter, r *http.Request, in channel.Inbound) {
+func (c *Channel) handleGet(w http.ResponseWriter, r *http.Request, in channel.Inbound, _ channel.Outbound) {
 	runID, ok := attachedRunID(w, r, in)
 	if !ok {
 		return
@@ -405,7 +412,7 @@ func (c *Channel) handleGet(w http.ResponseWriter, r *http.Request, in channel.I
 	writeJSON(w, http.StatusOK, runResponse(run))
 }
 
-func (c *Channel) handleSend(w http.ResponseWriter, r *http.Request, in channel.Inbound) {
+func (c *Channel) handleSend(w http.ResponseWriter, r *http.Request, in channel.Inbound, _ channel.Outbound) {
 	var req SendRequest
 	if !decode(w, r, &req) {
 		return
@@ -424,7 +431,7 @@ func (c *Channel) handleSend(w http.ResponseWriter, r *http.Request, in channel.
 	writeJSON(w, http.StatusOK, runResponse(run))
 }
 
-func (c *Channel) handleRespond(w http.ResponseWriter, r *http.Request, in channel.Inbound) {
+func (c *Channel) handleRespond(w http.ResponseWriter, r *http.Request, in channel.Inbound, _ channel.Outbound) {
 	var req RespondRequest
 	if !decode(w, r, &req) {
 		return
@@ -437,7 +444,7 @@ func (c *Channel) handleRespond(w http.ResponseWriter, r *http.Request, in chann
 	writeJSON(w, http.StatusOK, runResponse(run))
 }
 
-func (c *Channel) handleCancel(w http.ResponseWriter, r *http.Request, in channel.Inbound) {
+func (c *Channel) handleCancel(w http.ResponseWriter, r *http.Request, in channel.Inbound, _ channel.Outbound) {
 	if err := in.Attach(r.PathValue("id")).Cancel(r.Context()); err != nil {
 		writeError(w, err)
 		return
@@ -448,7 +455,7 @@ func (c *Channel) handleCancel(w http.ResponseWriter, r *http.Request, in channe
 // handleReset retires the run. The route is ID-addressed, so it retires
 // that run and no other; the address that pointed at it is freed by the
 // core, and a later start on that address creates a fresh run.
-func (c *Channel) handleReset(w http.ResponseWriter, r *http.Request, in channel.Inbound) {
+func (c *Channel) handleReset(w http.ResponseWriter, r *http.Request, in channel.Inbound, _ channel.Outbound) {
 	var req ResetRequest
 	if r.ContentLength != 0 && !decode(w, r, &req) {
 		return
@@ -460,7 +467,7 @@ func (c *Channel) handleReset(w http.ResponseWriter, r *http.Request, in channel
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (c *Channel) handleClear(w http.ResponseWriter, r *http.Request, in channel.Inbound) {
+func (c *Channel) handleClear(w http.ResponseWriter, r *http.Request, in channel.Inbound, _ channel.Outbound) {
 	if err := in.Attach(r.PathValue("id")).Clear(r.Context()); err != nil {
 		writeError(w, err)
 		return
@@ -468,7 +475,7 @@ func (c *Channel) handleClear(w http.ResponseWriter, r *http.Request, in channel
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (c *Channel) handleCompact(w http.ResponseWriter, r *http.Request, in channel.Inbound) {
+func (c *Channel) handleCompact(w http.ResponseWriter, r *http.Request, in channel.Inbound, _ channel.Outbound) {
 	if err := in.Attach(r.PathValue("id")).Compact(r.Context()); err != nil {
 		writeError(w, err)
 		return
@@ -485,7 +492,7 @@ func (c *Channel) handleCompact(w http.ResponseWriter, r *http.Request, in chann
 // backlog is served from the journal, so no reconnect sees a gap — the
 // catch-up is [Runner.StreamEvents], and it is the reason every event
 // carries the journal position it is anchored to.
-func (c *Channel) handleStream(w http.ResponseWriter, r *http.Request, in channel.Inbound) {
+func (c *Channel) handleStream(w http.ResponseWriter, r *http.Request, in channel.Inbound, _ channel.Outbound) {
 	runID, ok := attachedRunID(w, r, in)
 	if !ok {
 		return

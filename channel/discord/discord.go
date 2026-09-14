@@ -192,7 +192,7 @@ type discordInteraction struct {
 }
 
 // handleInteraction implements the webhook.
-func (c *Channel) handleInteraction(w http.ResponseWriter, r *http.Request, _ channel.Inbound) {
+func (c *Channel) handleInteraction(w http.ResponseWriter, r *http.Request, _ channel.Inbound, _ channel.Outbound) {
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
 	if err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
@@ -253,6 +253,21 @@ func (c *Channel) handleInteraction(w http.ResponseWriter, r *http.Request, _ ch
 			},
 		},
 	}, c.deliver)
+}
+
+// Receive implements [channel.Receiver]. The target is a channel or thread
+// ID: the instruction is posted there, the address binds before the turn
+// runs, and the reply lands in the same place.
+func (c *Channel) Receive(ctx context.Context, target any, text string, opts channel.SendOptions) error {
+	channelID, ok := target.(string)
+	if !ok || channelID == "" {
+		return fmt.Errorf("bonnie: channel/discord: the target of a hand-off is the channel ID, not %T", target)
+	}
+	turn := chat.Turn{Address: channelID, Text: text, Kind: chat.KindChannel, Context: opts.Context, Title: opts.Title, TurnPolicy: opts.TurnPolicy}
+	if opts.Auth != nil {
+		turn.Auth = opts.Auth
+	}
+	return c.core.Proactive(ctx, turn, c.deliver)
 }
 
 // commandText extracts the command's `message` option.

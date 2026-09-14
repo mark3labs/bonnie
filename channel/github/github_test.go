@@ -136,7 +136,7 @@ func newHarnessOn(t *testing.T, cfg github.Config, fake *fakeAPI) *harness {
 	mux := http.NewServeMux()
 	for _, rt := range ch.Routes() {
 		mux.HandleFunc(rt.Method+" "+rt.Path, func(w http.ResponseWriter, req *http.Request) {
-			rt.Handler(w, req, ch)
+			rt.Handler(w, req, ch, nil)
 		})
 	}
 	h := &harness{ch: ch, agent: agent, fake: fake, server: httptest.NewServer(mux), journal: j}

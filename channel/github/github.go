@@ -114,6 +114,12 @@ type Config struct {
 	// MaxPatchBytes caps the whole PR-context block. The default is
 	// DefaultMaxPatchBytes.
 	MaxPatchBytes int
+	// InstallationID is the installation a proactive turn posts with. A
+	// webhook carries its own installation; a hand-off from another
+	// channel does not, so proactive use sets this one. It is not a
+	// secret, but it comes from the environment like the rest
+	// (GITHUB_INSTALLATION_ID) because it is deployment-specific.
+	InstallationID int64
 
 	// OnIssue, OnPullRequest, and OnCheckSuite are the opt-in hooks for
 	// events that are not a comment. Return a turn to dispatch one, or nil
@@ -291,7 +297,7 @@ type checkSuite struct {
 	PullRequests []pullRequest `json:"pull_requests"`
 }
 
-func (c *Channel) handleEvent(w http.ResponseWriter, r *http.Request, _ channel.Inbound) {
+func (c *Channel) handleEvent(w http.ResponseWriter, r *http.Request, _ channel.Inbound, _ channel.Outbound) {
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxDeliveryBody))
 	if err != nil {
 		http.Error(w, "bad request", http.StatusBadRequest)
@@ -915,6 +921,50 @@ func deliveryPath(address, owner, repoName string) (string, bool) {
 	default:
 		return "", false
 	}
+}
+
+// Target is what a proactive GitHub turn anchors to: an issue's or a
+// pull request's timeline. The reply is posted there as a comment.
+type Target struct {
+	Owner, Repo string
+	Number      int
+}
+
+// Receive implements [channel.Receiver]. The target is a [Target]: the
+// address binds to the issue's or PR's timeline before the turn runs, and
+// the reply lands there as a comment. No root message is posted — the
+// reply is the conversation's visible start. A webhook carries its own
+// installation; a hand-off does not, so proactive use sets
+// [Config.InstallationID], and its absence is an error, not a silent
+// no-op.
+func (c *Channel) Receive(ctx context.Context, target any, text string, opts channel.SendOptions) error {
+	t, ok := target.(Target)
+	if !ok || t.Owner == "" || t.Repo == "" || t.Number == 0 {
+		return fmt.Errorf("bonnie: channel/github: the target of a hand-off is a github.Target{Owner, Repo, Number}, not %T", target)
+	}
+	if c.cfg.InstallationID == 0 {
+		return errors.New("bonnie: channel/github: proactive turns need GITHUB_INSTALLATION_ID: a webhook carries its own, a hand-off does not")
+	}
+	turn := chat.Turn{
+		Address:    AddressIssue(t.Owner, t.Repo, t.Number),
+		Text:       text,
+		Kind:       chat.KindIssue,
+		Context:    opts.Context,
+		Title:      opts.Title,
+		TurnPolicy: opts.TurnPolicy,
+	}
+	if opts.Auth != nil {
+		turn.Auth = opts.Auth
+	}
+	// The delivery needs an installation and a repository; a hand-off has
+	// no webhook to take them from, so the config supplies both.
+	env := &envelope{
+		Repository:   repo{Owner: actor{Login: t.Owner}, Name: t.Repo},
+		Installation: &installation{ID: c.cfg.InstallationID},
+	}
+	return c.core.Proactive(ctx, turn, func(address string, run *runtime.Run, err error) {
+		c.deliver(env, address, run, err)
+	})
 }
 
 // get fetches a GitHub API resource with an installation token.

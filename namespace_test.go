@@ -19,15 +19,17 @@ type squatter struct{ path string }
 
 func (s squatter) Name() string { return "squatter" }
 func (s squatter) Routes() []channel.Route {
-	return []channel.Route{{Method: http.MethodGet, Path: s.path, Handler: func(http.ResponseWriter, *http.Request, channel.Inbound) {}}}
+	return []channel.Route{{Method: http.MethodGet, Path: s.path, Handler: func(http.ResponseWriter, *http.Request, channel.Inbound, channel.Outbound) {}}}
 }
 func (squatter) From(string) channel.SessionRef   { return nil }
 func (squatter) Attach(string) channel.SessionRef { return nil }
 
-// serveForTest runs an agent on a free port and returns its base URL. The
-// agent stops when the test ends.
-func serveForTest(t *testing.T, opts ...Option) string {
+// serveForTest runs an agent on a free port and returns its base URL and
+// the directory its journal is written to. The agent stops when the test
+// ends.
+func serveForTest(t *testing.T, opts ...Option) (string, string) {
 	t.Helper()
+	journalDir := t.TempDir()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -37,7 +39,7 @@ func serveForTest(t *testing.T, opts ...Option) string {
 	go func() {
 		done <- New(append([]Option{
 			WithAgentFactory(stubFactory),
-			WithJournal(t.TempDir()),
+			WithJournal(journalDir),
 			WithInstructions(""),
 			WithWorkspace(""),
 			WithListener(ln),
@@ -52,7 +54,7 @@ func serveForTest(t *testing.T, opts ...Option) string {
 			t.Error("the agent did not stop")
 		}
 	})
-	return "http://" + ln.Addr().String()
+	return "http://" + ln.Addr().String(), journalDir
 }
 
 // A channel that mounts under /bonnie/ is refused before the listener opens,
@@ -90,7 +92,7 @@ func TestReservedNamespaceIsRefused(t *testing.T) {
 // Health answers before any run exists; info names every mounted channel.
 func TestHealthAndInfoServeUnderThePrefix(t *testing.T) {
 	t.Parallel()
-	base := serveForTest(t,
+	base, _ := serveForTest(t,
 		WithName("test-agent"),
 		WithChannel(func(*runtime.Runner) (Channel, error) { return squatter{path: "/elsewhere"}, nil }),
 	)

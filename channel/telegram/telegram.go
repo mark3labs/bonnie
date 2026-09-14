@@ -183,7 +183,7 @@ type tgUpdate struct {
 }
 
 // handleUpdate implements the webhook.
-func (c *Channel) handleUpdate(w http.ResponseWriter, r *http.Request, _ channel.Inbound) {
+func (c *Channel) handleUpdate(w http.ResponseWriter, r *http.Request, _ channel.Inbound, _ channel.Outbound) {
 	if c.cfg.Secret != "" && r.Header.Get("X-Telegram-Bot-Api-Secret-Token") != c.cfg.Secret {
 		// Not Telegram. Say nothing about why: a probe learns only that the
 		// door did not open.
@@ -306,6 +306,21 @@ func (c *Channel) deliver(address string, run *runtime.Run, err error) {
 	for _, p := range chat.SplitText(text, messageLimit, maxParts) {
 		c.sendMessage(context.Background(), chatID, thread, p)
 	}
+}
+
+// Receive implements [channel.Receiver]. The target is the chat ID, or
+// "<chat_id>/<topic>" for a forum topic: the address binds before the
+// turn runs, and the reply lands in the same chat.
+func (c *Channel) Receive(ctx context.Context, target any, text string, opts channel.SendOptions) error {
+	s, ok := target.(string)
+	if !ok || s == "" {
+		return fmt.Errorf("bonnie: channel/telegram: the target of a hand-off is the chat ID, or \"<chat_id>/<topic>\", not %T", target)
+	}
+	turn := chat.Turn{Address: s, Text: text, Kind: chat.KindChannel, Context: opts.Context, Title: opts.Title, TurnPolicy: opts.TurnPolicy}
+	if opts.Auth != nil {
+		turn.Auth = opts.Auth
+	}
+	return c.core.Proactive(ctx, turn, c.deliver)
 }
 
 // sendMessage posts one message. Fire-and-log: a delivery failure must not

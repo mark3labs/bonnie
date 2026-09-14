@@ -18,6 +18,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Cross-channel hand-offs and proactive sessions.** Route handlers get
+  `channel.Outbound` beside their `Inbound`, and any mounted channel that
+  implements `channel.Receiver` can be asked to start a conversation with
+  no inbound message. Slack opens a thread and threads the reply; Discord,
+  Telegram, and GitHub post where their target says. The address is bound
+  before the turn runs, so a reply that arrives mid-turn continues the
+  run. The initiating principal is recorded on the destination run.
+  (T-033)
 - **GitHub channel.** `channel/github` and `bonnie.WithGitHub`: a GitHub
   App whose webhooks turn comments into turns. A `@<bot>` mention on an
   issue, a PR, or a review thread starts or continues a run bound to that
@@ -68,8 +76,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking for adapter authors:** `chat.NewCore` takes the channel's
   name; `chat.Dispatch` and `chat.Route` take a `chat.Turn`; the core
   applies the address prefix itself, so adapters pass the bare platform
-  key; `channel.SessionRef` gains `Reset`, `Clear`, and `Compact`. (T-028,
-  T-032)
+  key; `channel.SessionRef` gains `Reset`, `Clear`, and `Compact`; route
+  handlers take an `channel.Outbound` beside their `Inbound`. (T-028,
+  T-032, T-033)
 
 ## [0.4.0] — 2026-09-14
 

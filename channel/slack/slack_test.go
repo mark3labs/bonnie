@@ -108,7 +108,7 @@ func adapter(t *testing.T, script []*kit.TurnResult) *harness {
 	mux := http.NewServeMux()
 	for _, rt := range ch.Routes() {
 		mux.HandleFunc(rt.Method+" "+rt.Path, func(w http.ResponseWriter, req *http.Request) {
-			rt.Handler(w, req, ch)
+			rt.Handler(w, req, ch, nil)
 		})
 	}
 	h := &harness{ch: ch, agent: agent, fake: fake, server: httptest.NewServer(mux), secret: secret, created: time.Now(), journal: j}
@@ -329,7 +329,7 @@ func TestRedeliveredEventIsDropped(t *testing.T) {
 	mux := http.NewServeMux()
 	for _, rt := range ch.Routes() {
 		mux.HandleFunc(rt.Method+" "+rt.Path, func(w http.ResponseWriter, req *http.Request) {
-			rt.Handler(w, req, ch)
+			rt.Handler(w, req, ch, nil)
 		})
 	}
 	server := httptest.NewServer(mux)
