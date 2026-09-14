@@ -19,6 +19,12 @@ the known risks, and the invariants every task must preserve.
 
 | ID | Title | Priority | Size | Blocks |
 |---|---|---|---|---|
+| T-028 | Normalised inbound turn with a per-turn context slot | P1 | M | T-029 |
+| T-030 | Reserved HTTP namespace and a health route | P1 | S | — |
+| T-029 | GitHub channel: issues, PRs, and review threads become conversations | P2 | L | — |
+| T-031 | Idempotent start and stable error codes on the HTTP channel | P2 | S | — |
+| T-032 | Framework-owned address namespace and session controls (`reset`, `clear`, `compact`) | P2 | M | T-033 |
+| T-033 | Cross-channel hand-off and proactive sessions | P3 | M | — |
 | T-027 | goreleaser publishes a commit list, not the release notes | P2 | S | — |
 | T-026 | microsandbox `Open` races its own create under load | P2 | S | — |
 | T-022 | TUI transcript replay on reopen | P2 | M | — |
@@ -1287,6 +1293,367 @@ the trap T-011's "Watch for" already names.
 Do not "fix" this by serialising the conformance suite. The race is in the
 adapter, and hiding it behind a mutex in the test would leave the defect in
 the path a real host uses.
+
+---
+
+## T-028 — Normalised inbound turn with a per-turn context slot
+
+**Priority** P1 · **Size** M · **Blocks** T-029 · **Found by** comparing
+`channel/chat` with eve's channel contract (2026-09-14)
+
+### Why
+
+eve turns every platform event into one shape before the agent sees it: a
+`message` (the user-visible text with the invocation token removed), a
+`context` (per-turn facts for the model that are **not** conversation
+history), an `auth` principal, and an optional `title`. BONNIE does the
+first and third parts, but only inside each adapter: `forUs` in
+`channel/slack/slack.go:266` and `channel/telegram/telegram.go:225`,
+`stripMention`, `stripCommand`, `commandText`. The shared layer takes
+`(address, text, SendOptions)` and nothing more (`channel/chat/chat.go:422`).
+
+Three things are missing:
+
+1. **No normalised turn type.** There is no struct for "a platform event
+   turned into a turn", so each adapter parses on its own and there is no
+   common shape to test against.
+2. **No per-turn context.** `runtime.Input` is `{Text, Files}`
+   (`runtime/runner.go:106`). A GitHub comment is text, but the PR diff, the
+   event type, the actor, and "was the bot mentioned" are context. Today they
+   would go into `Text`, and the journal would record them as if the user
+   typed them. That is a fidelity problem, not a cosmetic one: replay must
+   stay lossless, and a replayed turn must not carry a diff as user prose.
+3. **No conversation kind and no title from chat.** Nothing tells the agent
+   whether the address is a DM, a thread, an issue, or a review thread.
+   `SendOptions.Title` is set only by the HTTP channel
+   (`channel/http/http.go:224`); the chat adapters never name a run.
+
+`docs/CHANNELS.md` said GitHub was "mechanical now, not structural". It is
+not: the GitHub mapping needs this slot first. The sentence is corrected in
+the same commit that opens this task.
+
+### Do
+
+1. Add a `Context []string` field to `runtime.Input`. The runner injects it
+   into the model call for that turn only, through the seam that already
+   exists (`Kit.OnContextPrepare`, `docs/SPEC.md` §3). It is journalled as
+   its own record kind so replay can reproduce it, and it is never merged
+   into the user message.
+2. Add a `chat.Turn` type: `Address`, `Text`, `Context`, `Auth`, `Title`,
+   `Kind` (`dm`, `thread`, `channel`, `issue`, `pull_request`,
+   `review_thread`), and `TurnPolicy`. Change `chat.Route` and
+   `chat.Dispatch` to take a `Turn`. Keep `channel.SendOptions` as the wire
+   form for `SessionRef.Send`; add `Context` to it.
+3. Make the three adapters build a `Turn`. Each sets `Kind` and a `Title`
+   (the first line of the first message, capped) on the run's first turn.
+4. Expose `Kind` and the channel name to tools and instructions through the
+   run's extension data, so an instruction can say "you are in a GitHub
+   review thread" without the adapter pasting it into the prompt.
+5. Add `context` to the HTTP channel's `StartRequest` and `SendRequest`, so
+   an API client has the same slot.
+
+### Acceptance criteria
+
+- [ ] `runtime.Input.Context` reaches the model on the turn it was sent with
+      and on no later turn — a test with `fakeAgent` asserts both
+- [ ] A replayed run reproduces the context records without changing the
+      user messages; `runtime/replay_fidelity_test.go` gains a case
+- [ ] `chat.Turn` is the only argument `Dispatch` and `Route` take, and the
+      `channeltest` suite drives it
+- [ ] Every chat adapter sets `Kind` and a `Title`; `bonnie runs list` shows
+      the title for a Slack-started run
+- [ ] `docs/CHANNELS.md` describes the normalised turn and lists the kinds
+- [ ] `docs/SPEC.md` §3 records which seam carries the context and how it is
+      journalled
+
+### Watch for
+
+Do not put context into `Record.Text` of the user message and strip it on
+replay. That is exactly the "rebuild from `Text`" shortcut the fidelity guard
+exists to refuse. Context is its own record, or it is not durable.
+
+Keep the runtime blind to platforms. `Kind` values are strings the channel
+layer defines; `runtime/` must not import `channel/` (invariant 6).
+
+---
+
+## T-029 — GitHub channel: issues, PRs, and review threads become conversations
+
+**Priority** P2 · **Size** L · **Blocked by** T-028 · **Prior art** eve's
+[GitHub channel](https://eve.dev/docs/channels/github)
+
+### Why
+
+A GitHub App is the surface where a maintainer agent is most useful: answer a
+mention in an issue, summarise a new PR, triage a failed check. It is also
+the channel that proves the normalisation layer, because a GitHub event is
+far from a chat message: the conversation is an issue or a PR, the text is a
+comment, and most of what the model needs (the diff, the event, the actor)
+is context, not history.
+
+### Do
+
+1. Add `channel/github`. Webhook `POST /github/events`. Verify
+   `X-Hub-Signature-256` (HMAC-SHA256 over the raw body with the webhook
+   secret); refuse a request without one. Dedup by `X-GitHub-Delivery`.
+2. Authenticate as a GitHub App: `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`,
+   `GITHUB_WEBHOOK_SECRET`, all from the environment, all required. Mint an
+   installation token per event; never write it to the journal.
+3. Address format: `github/<owner>/<repo>/issues/<n>` for an issue or a PR
+   timeline, `github/<owner>/<repo>/pulls/<n>/reviews/<thread_id>` for a
+   review thread. A PR and its review threads are separate conversations, as
+   in eve.
+4. Dispatch rules, each a `chat.Turn` from T-028:
+   - `issue_comment` and `pull_request_review_comment` that contain
+     `@<botName>` start or continue a turn. Strip the token from `Text`;
+     record `is_mentioned`, `sender`, `event`, `action` in `Context`.
+   - A comment on an address this channel already bound continues it with no
+     mention, the same rule as a Slack thread.
+   - `issues.opened`, `pull_request.opened`, `check_suite.completed` are
+     opt-in through `Config` hooks that return a `Turn` or nil.
+   - Every event from a bot sender is dropped.
+5. PR context: when the address is a PR, put the PR title, base and head,
+   and the changed-file patch into `Context`, with an exclusion list for
+   generated files and a size cap.
+6. Delivery: a comment on the timeline or in the review thread, split with
+   `chat.SplitText` at GitHub's limit. A parked run posts its prompt as a
+   comment; the next comment on the address answers it (`chat.Route`).
+   Add an `eyes` reaction to the triggering comment when a turn starts.
+7. `bonnie.WithGitHub(github.Config{})` mounts it, with the same
+   missing-secret startup error as the other adapters.
+
+### Acceptance criteria
+
+- [ ] A mention in an issue comment starts a run bound to the issue address;
+      a second comment continues the same run
+- [ ] A review-thread comment and a PR-timeline comment on the same PR are
+      two runs
+- [ ] The PR diff arrives as `Context`, not as user text; the journal shows
+      one user record with the comment only
+- [ ] A reply to a parked run resumes it
+- [ ] An unsigned or badly signed delivery is refused with 401; a replayed
+      delivery ID is dropped
+- [ ] The installation token never appears in a journal record or a log line
+      (a test greps the journal after a full turn)
+- [ ] `docs/CHANNELS.md` gains a GitHub section with setup and env vars
+
+### Watch for
+
+GitHub retries a delivery when the endpoint is slow. Acknowledge at once and
+run the turn through `chat.Dispatch`, the same as the other adapters.
+
+GitHub does not autocomplete or link the App's `@name`; it is a text token.
+Match it case-insensitively at a word boundary, and do not require it to be
+first in the comment.
+
+---
+
+## T-030 — Reserved HTTP namespace and a health route
+
+**Priority** P1 · **Size** S · **Found by** comparing `channel/http` routes
+with eve's `/eve/v1/*` surface (2026-09-14)
+
+### Why
+
+eve mounts its framework API under one versioned prefix, `/eve/v1/*`, and
+forbids custom channels from using it. BONNIE mounts `POST /runs`,
+`GET /runs/{id}`, `GET /addresses/{address}` and friends at the root
+(`channel/http/http.go:86-94`), next to `/slack/events`,
+`/discord/interactions`, and `/telegram`. `run.go:442` registers every
+channel's routes on one `http.ServeMux` with no ownership check. A user
+channel that mounts `/runs/...` panics the mux at startup at best, and
+shadows the framework at worst.
+
+There is no version on the wire. The TUI (`bonnie chat`) and any external
+client depend on the exact paths, so a change later is a breaking change for
+all of them. The time to add the prefix is before more clients exist.
+
+There is also no health route. A deployment probe today has to `GET` a run
+that does not exist and treat 404 as alive.
+
+### Do
+
+1. Mount the HTTP channel under `/bonnie/v1`. Keep the route shape:
+   `/bonnie/v1/runs`, `/bonnie/v1/runs/{id}`, `/bonnie/v1/runs/{id}/stream`,
+   `/bonnie/v1/addresses/{address}`. Put the prefix in one constant in the
+   root `bonnie` package so the CLI, the TUI, and the docs read the same
+   value (invariant 14: one setting, one place).
+2. Refuse any other channel that mounts a path under `/bonnie/`. The refusal
+   is a startup error that names the channel and the path, not a mux panic.
+3. Add `GET /bonnie/v1/health` returning `{"ok":true,"status":"ready"}`
+   with no auth. Add `GET /bonnie/v1/info` returning the agent name, the
+   BONNIE version, and the mounted channel names.
+4. Update `bonnie chat`, `cmd/bonnie/serve.go`'s help text, the examples,
+   `docs/CHANNELS.md`, and `docs/SPEC.md` §4 wherever a path is written.
+5. Note the break in `CHANGELOG.md` under a minor version bump.
+
+### Acceptance criteria
+
+- [ ] Every HTTP-channel route answers under `/bonnie/v1/` and none at the
+      root
+- [ ] A test channel with a `/bonnie/x` route fails `Serve` with an error
+      naming it
+- [ ] `GET /bonnie/v1/health` returns 200 before any run exists
+- [ ] `bonnie chat` works against a server built from the same commit
+- [ ] No file in the repo still says `/runs` without the prefix
+      (`grep -rn '"/runs' --include='*.go' --include='*.md'` is empty)
+
+### Watch for
+
+The chat adapters' webhook paths (`/slack/events`, `/telegram`) stay where
+they are. They are configured in the platform's console and are not part of
+the framework API.
+
+---
+
+## T-031 — Idempotent start and stable error codes on the HTTP channel
+
+**Priority** P2 · **Size** S · **Prior art** eve's `operationId` and
+`session_not_active`
+
+### Why
+
+`POST /runs` (soon `/bonnie/v1/runs`) with no `address` creates a run on
+every call. A client that times out and retries gets two runs and two model
+turns. eve accepts an `operationId`: the same ID from the same authenticated
+principal returns the existing session instead of dispatching again. BONNIE's
+`address` field gives create-once semantics only when the client thinks of
+the address as an idempotency key, and nothing documents that.
+
+`ErrorResponse` carries a free-text `error` only (`channel/http/http.go:184`).
+A client cannot tell `ErrRunOwnedElsewhere` from any other 409 without
+parsing prose. eve returns a stable `code` next to the message.
+
+### Do
+
+1. Add `operation_id` to `StartRequest`. When set with an `Auth` principal,
+   bind `<principal.Authenticator>/<principal.ID>/<operation_id>` in the
+   address map and resolve through it. An anonymous request with an
+   `operation_id` is a 400: an idempotency key with no owner is a way to
+   read someone else's run.
+2. Add `code` to `ErrorResponse`. One code per sentinel `writeError` already
+   maps: `run_not_found`, `run_owned_elsewhere`, `unknown_turn_policy`,
+   `run_not_waiting`, `bad_request`, `internal`. Document the list in
+   `docs/CHANNELS.md`.
+3. Make the TUI and the `channel/http` client helpers switch on `code`, not
+   on the message.
+
+### Acceptance criteria
+
+- [ ] Two `POST` starts with the same `operation_id` and principal return
+      the same run ID and produce one model turn (a `fakeAgent` call count)
+- [ ] The same `operation_id` under a different principal is a different run
+- [ ] Every non-2xx body has a non-empty `code`, asserted by a table test
+      over `writeError`
+- [ ] `docs/CHANNELS.md` lists the codes
+
+---
+
+## T-032 — Framework-owned address namespace and session controls
+
+**Priority** P2 · **Size** M · **Blocks** T-033
+
+### Why
+
+eve prefixes every continuation token with the channel's name before it
+reaches the runtime, so two channels cannot bind the same address by
+accident. BONNIE's adapters each choose a prefix string by hand
+(`"slack/"`, `"discord/"`, `"telegram/"`) and nothing checks it. A custom
+channel that writes `slack/C1/dm` steals a Slack conversation. The `Attach`
+path already refuses reserved run IDs for the same reason
+(`channel/chat/chat.go:307`); addresses need the same guard.
+
+eve also exposes three controls BONNIE lacks: `reset` (retire the run and
+free its address so the next message starts fresh — eve's `/new`), `clear`
+(drop model history but keep the run ID, tools, and workspace), and `compact`
+(summarise on demand). `AddressMap.Bind` can re-key, but no adapter or route
+exposes "start over in this thread", and Kit's compaction runs only on its
+own threshold (`docs/SPEC.md` §5, mapping row for `compaction.thresholdPercent`).
+
+### Do
+
+1. Make `chat.Core` carry the channel name and prefix every address with
+   `<name>/` itself. Adapters pass the bare platform key. An address that
+   already starts with another mounted channel's prefix is refused.
+2. Add `Reset(ctx)` to `channel.SessionRef`: mark the run terminal with a
+   `RecordExtensionData` note, unbind the address, and return. A fixed
+   `Attach` ref keeps pointing at the retired run; a `From` ref creates a
+   new one on the next `Send`.
+3. Add `Clear(ctx)` and `Compact(ctx)`. `Clear` appends a marker record
+   that `Restore` treats as the new start of history, so the journal stays
+   append-only. `Compact` asks Kit to summarise through the public API; if
+   Kit exposes no on-demand entry point, open an upstream issue and mark the
+   gap `// TODO(kit):` per `AGENTS.md`.
+4. Mount the three as `POST /bonnie/v1/runs/{id}/{reset|clear|compact}`.
+   Give the chat adapters a `/new` convention that calls `Reset` on the
+   thread's address.
+5. Update the `channeltest` conformance suite for the new methods.
+
+### Acceptance criteria
+
+- [ ] Two channels mounted together cannot resolve the same bare key to one
+      run; a test proves the prefix is applied by `Core`, not by the adapter
+- [ ] After `Reset`, a `Send` on the same address creates a new run and the
+      old run's state is terminal in `bonnie runs list`
+- [ ] After `Clear`, `Restore` returns a provider-valid conversation with no
+      messages before the marker, and the run ID is unchanged
+- [ ] `/new` in a Slack thread starts a fresh run in the same thread
+- [ ] `channeltest` covers `Reset`, `Clear`, and `Compact`
+
+### Watch for
+
+A delayed duplicate webhook that carries `/new` can retire a newer run.
+Dedup before `Reset`, and have the adapters pass the platform's event ID
+through so the dedup is per event, not per text.
+
+Do not delete history on `Clear`. The journal is append-only (invariant in
+`AGENTS.md`); `Restore` skips, it does not erase.
+
+---
+
+## T-033 — Cross-channel hand-off and proactive sessions
+
+**Priority** P3 · **Size** M · **Blocked by** T-032
+
+### Why
+
+eve lets a route on one channel start or continue a conversation on another
+(`ctx.to(slack, target).send(...)`): an incident webhook opens an
+investigation thread in Slack. It also lets a schedule or another channel
+start a session with no inbound message (`receive`). BONNIE has neither.
+`docs/CHANNELS.md` lists proactive sessions as not implemented and says run
+creation is the HTTP channel's job. That works for a script, but a bot that
+posts a Monday digest and then answers replies in its own thread needs the
+chat adapter to own both halves.
+
+### Do
+
+1. Add `channel.Outbound`: `To(channel string, target any) SessionRef`. The
+   target is the destination channel's own type (a Slack channel ID, a
+   GitHub issue), and the destination channel decides the address and the
+   initial delivery (open a thread, post a comment) before the first turn
+   runs.
+2. Give each chat adapter a `Receive(ctx, target, turn)` that creates the
+   platform surface, binds the address, and dispatches the turn.
+3. Hand the `Outbound` to route handlers next to `Inbound`, and to the
+   scheduler when one exists.
+4. Carry the initiating `Principal` through so the destination run records
+   who started it.
+
+### Acceptance criteria
+
+- [ ] A test channel's route starts a run on a fake Slack adapter, and the
+      reply lands in the thread the adapter opened
+- [ ] A run started through `Receive` is bound to its address, so a later
+      platform reply continues it
+- [ ] `Principal` on the destination run is the initiator's
+- [ ] `docs/CHANNELS.md` removes proactive sessions from "not implemented"
+
+### Watch for
+
+`To(...).Send` is agent input, not a notification API. A caller that only
+wants to post text calls the platform; a notification that must survive a
+crash goes through an outbox, which is a separate task if anyone needs it.
 
 ---
 

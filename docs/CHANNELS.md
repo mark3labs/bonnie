@@ -182,5 +182,14 @@ the message came from Slack; the user ID inside it is Slack's word. The
 - **Attachments and files.** Text in, text out.
 - **Gateway/Socket Mode transports.** Webhook only; both platforms' push
   transports need websocket dependencies BONNIE does not carry.
-- **GitHub, Linear, and other eve channels.** The adapters above are the
-  proof of the pattern; more of them are mechanical now, not structural.
+- **GitHub, Linear, and other eve channels.** The adapters above prove the
+  address and dispatch pattern. GitHub is not mechanical on top of it: a
+  comment is text, but the PR diff, the event, and the actor are per-turn
+  context, and `runtime.Input` has no slot for context today. T-028 adds
+  the normalised turn; T-029 builds GitHub on it.
+- **Framework HTTP namespace.** The HTTP channel's routes sit at the root
+  (`/runs`, `/addresses`) and nothing stops a custom channel from mounting
+  over them. T-030 moves them under `/bonnie/v1/` and adds `health`.
+- **`reset`, `clear`, `compact`, idempotent start, stable error codes.**
+  T-031 and T-032.
+- **Cross-channel hand-off** (`to(channel).send`). T-033.
