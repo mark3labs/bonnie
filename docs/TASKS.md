@@ -772,6 +772,13 @@ is what deletes that gap.
   the **published** release pinned in the tree's `go.mod`, not the working
   tree; testing a local change through `bonnie dev` needs the hermetic
   `go.work` beside the tree that `agent/generate_test.go` already uses.
+- **The inline cursor is a screen coordinate, not a frame coordinate.**
+  bubbletea v2's inline renderer moves the terminal cursor to the exact row
+  the view reports. A scrollback transcript grows past the terminal height,
+  so `View` must convert the frame row to a screen row (subtract the rows
+  the screen scrolled past) — or the terminal clamps the move to its bottom
+  row and the cursor leaves the input. Found in tmux; pinned by
+  `TestViewCursorStaysOnTheInputRowWhenTheFrameExceedsTheScreen`.
 
 ## T-022 — TUI transcript replay on reopen
 

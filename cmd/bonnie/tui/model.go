@@ -278,12 +278,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // View implements tea.Model.
 func (m Model) View() tea.View {
 	prefix := m.renderPrefix()
-	v := tea.NewView(prefix + m.input.View() + footer)
+	content := prefix + m.input.View() + footer
+	v := tea.NewView(content)
 	if c := m.input.Cursor(); c != nil {
 		// prefix ends with the newline directly before the textarea. Count
 		// separators, not rendered lines, or that trailing newline adds one
 		// extra row and puts the cursor on the footer.
 		c.Y += strings.Count(prefix, "\n")
+		// That row is frame-relative. Inline mode moves the terminal cursor to
+		// this exact screen position, and a transcript taller than the terminal
+		// has its top rows in scrollback: the frame's bottom rows are the ones
+		// on screen, so subtract the rows the screen has scrolled past. Without
+		// this the terminal clamps the move to its bottom row and the cursor
+		// lands below the footer.
+		if h := m.height; h > 0 {
+			if rows := strings.Count(content, "\n") + 1; rows > h {
+				c.Y -= rows - h
+			}
+		}
 		v.Cursor = c
 	}
 	v.AltScreen = false

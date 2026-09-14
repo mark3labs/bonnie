@@ -34,6 +34,12 @@ instead of being cut.
   Assistant prose now wraps at the terminal width and keeps everything —
   verified live against a real model, including a wrapped 300-character
   paragraph and the hot-reload reconnect path.
+- The TUI's cursor landed below the footer once the transcript grew taller
+  than the terminal: the view reported a frame-relative row, while inline
+  mode moves the terminal cursor to that exact screen position, so the
+  terminal clamped the move to its bottom row. The view now subtracts the
+  rows the screen has scrolled past. Pinned by a test and verified in tmux
+  at three window heights.
 
 ## [0.3.0] — 2026-09-13
 
