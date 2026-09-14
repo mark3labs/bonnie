@@ -463,7 +463,9 @@ answering it.
       `TestAskAnswersAParkedRun`)
 - [x] `serve --agent` mounts enabled channels from the manifest, banner
       names them, and a missing credential is a named error
-      (`TestServeMountsChatChannels`, `TestChatChannelNeedsItsSecrets`)
+      (`TestServeMountsChatChannels`, `TestChatChannelNeedsItsSecrets` — both
+      removed with the manifest by T-024; the same contract is now guarded
+      at the option surface by `TestChatChannelOptionsMount`)
 - [x] No new `go.sum` entries (verified: `git diff go.sum` is empty)
 
 ### Watch for
@@ -514,6 +516,11 @@ today requires a hand-written `main.go` for anything.
    no-isolation warning.
 
 ### Acceptance criteria
+
+> **Historical.** T-024 removed the manifest and `serve --agent`, and the
+> tests named below went with them. They are kept as the record of what was
+> accepted at the time; do not grep for them. The criteria that outlived the
+> manifest are re-guarded under T-024.
 
 - [x] `bonnie init` in an empty directory produces a tree that
       `bonnie serve --agent .` serves; curl round-trips one run
@@ -942,6 +949,31 @@ the wrong invention.
       instructions; `bonnie dev` hot-reloaded and the codegen-wired `echo`
       tool was called by the model
 
+### Follow-up: what the documentation audit found
+
+The doc pass after the two commits grepped every test name cited in the docs
+against the tests that exist. Four citations had nothing behind them. Two
+were prose debt in T-017's and T-020's historical acceptance criteria, now
+annotated. Two were live invariants whose guard had been deleted because it
+shared a file with a manifest test:
+
+- **`TestWorkspaceIsNotWatched` was restored** and rewritten against
+  `bonnie.DefaultWorkspace`, with `TestWorkspaceDirIsTheRuntimeWorkspace`
+  added beside it. `docs/SPEC.md` §4.9.1 had gone two commits asserting a fix
+  in prose with nothing testing it.
+- **`TestChatChannelOptionsMount` replaces the deleted serve-path tests.**
+  The secrets test that shipped with T-024 exercised the `require` helper
+  directly, which is not the contract — the contract is that each
+  `With<Platform>` option calls it before building a channel.
+
+Writing the second test found a real defect: each option captured its
+`Config` and let `fill` write the environment *into the captured copy*, so
+`fill`'s empty-field guard made every later call reuse the first call's
+credentials. A reused `Option`, or a second `Agent.Run`, would serve
+credentials read at the first call rather than the environment as it stands
+now. Each option now copies per call. Recorded in `docs/SPEC.md` §4.13 with
+the general lesson: a guard test's file name is not its scope.
+
 ### Watch for
 
 Do not reintroduce a config file for "just one setting". The next pressure
@@ -949,6 +981,11 @@ will be a sandbox or a channel that feels too verbose in `main.go`; the
 answer is slot discovery (`sandbox/sandbox.go`, `channels/<name>/`) wired by
 the same generator through the same `Register` seam — code, discovered by
 path, exactly like `tools/`. See `docs/L2.md` §12.
+
+An `Option` is an ordinary Go value a user can hold in a variable and pass to
+two agents. Anything an option's closure captures must be treated as
+read-only — copy before mutating, or the option becomes single-use in a way
+no compiler catches.
 
 ---
 

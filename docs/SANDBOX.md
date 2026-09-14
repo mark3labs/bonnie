@@ -26,7 +26,20 @@ runner := runtime.NewRunner(journal, sandbox.Agent(provider,
 `read_file`, `write_file`, and `list_files`. BONNIE's human-in-the-loop tools
 stay, because they run in the BONNIE process and never touch the sandbox.
 
-From the CLI:
+From an agent tree's `main.go`, where the wiring above is already done:
+
+```go
+bonnie.New(
+    bonnie.WithSandbox(sandbox.Docker(sandbox.WithDockerImage("python:3.12-slim"))),
+    bonnie.WithNetwork(sandbox.NetworkPolicy{Mode: sandbox.NetworkDenyAll}),
+).Serve()
+```
+
+The scaffold writes both lines commented out, so `bonnie init` leaves the
+choice visible rather than silent. Without one, tool calls run as the agent's
+own process and the startup banner says so.
+
+From the CLI, for an agent with no tree:
 
 ```sh
 bonnie serve --sandbox docker --sandbox-image python:3.12-slim
@@ -100,9 +113,10 @@ approval, and event path as any other tool.
 
 [sandbox.Seeded](../sandbox/seed.go) is a `Provider` decorator that mirrors a
 local directory into every sandbox it opens. It is how an agent tree's
-`workspace:` seed reaches the run — the mirror travels over the `Sandbox`
-interface alone (`ReadFile` probe, then `WriteFile`), so it works identically
-on local, Docker, and microsandbox, and a new backend gets it for free.
+`workspace/` directory reaches the run — the mirror travels over the
+`Sandbox` interface alone (`ReadFile` probe, then `WriteFile`), so it works
+identically on local, Docker, and microsandbox, and a new backend gets it for
+free.
 
 Two semantics are deliberate:
 

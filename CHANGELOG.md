@@ -76,6 +76,17 @@ does not exist is a compile error rather than a key nothing reads. See
   did from the fifth before. The binary `bonnie build` produces still needs
   nothing on the host, which is the end of the arc that matters.
 
+### Fixed
+
+- **A chat-channel option can be reused.** `WithSlack`, `WithDiscord`, and
+  `WithTelegram` filled their captured `Config` from the environment, and the
+  fill only writes an empty field — so the first use left the credentials
+  inside the option's closure and every later use skipped the environment. An
+  `Option` held in a variable and passed to two agents, or an `Agent.Run`
+  called twice, served the credentials read at the first call rather than the
+  ones set now. Each option now copies its config per call. Guard test:
+  `TestChatChannelOptionsMount`.
+
 ### Migration
 
 For each key in your `agent.yaml`, write the option in `main.go`:

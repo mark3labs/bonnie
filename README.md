@@ -318,7 +318,19 @@ the tool's name. `bonnie dev` and `bonnie build` regenerate the wiring, so
 ## Sandboxing
 
 By default, tool calls run **as your process** — your files, your network, your
-credentials. For anything untrusted, put them in a sandbox:
+credentials. For anything untrusted, put them in a sandbox.
+
+In an agent tree, that is one option — `bonnie init` scaffolds both lines
+commented out, so the choice is visible rather than silent:
+
+```go
+bonnie.New(
+	bonnie.WithSandbox(sandbox.Docker(sandbox.WithDockerImage("python:3.12-slim"))),
+	bonnie.WithNetwork(sandbox.NetworkPolicy{Mode: sandbox.NetworkDenyAll}),
+).Serve()
+```
+
+Wiring the runner yourself, it is the same provider one layer down:
 
 ```go
 provider := sandbox.Docker(sandbox.WithDockerImage("python:3.12-slim"))
@@ -345,7 +357,8 @@ All three drive a CLI, so BONNIE stays a single static binary.
 > fixed at create time: reattaching under a different policy fails with
 > `ErrPolicyMismatch` rather than silently using the old rules.
 
-Lock down the network:
+Lock down the network. A policy the backend cannot enforce is refused, and so
+is a policy with no sandbox to enforce it — never a silent allow-all:
 
 ```go
 provider := sandbox.Docker()

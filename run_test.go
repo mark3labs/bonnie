@@ -7,10 +7,15 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/mark3labs/bonnie/channel/discord"
+	"github.com/mark3labs/bonnie/channel/slack"
+	"github.com/mark3labs/bonnie/channel/telegram"
+	"github.com/mark3labs/bonnie/runtime"
 	"github.com/mark3labs/bonnie/sandbox"
 	kit "github.com/mark3labs/kit/pkg/kit"
 )
@@ -317,6 +322,85 @@ func TestChannelNeedsItsSecrets(t *testing.T) {
 	}
 	if err := require("slack", named{"SLACK_BOT_TOKEN", "xoxb-1"}); err != nil {
 		t.Fatalf("a complete credential set was refused: %v", err)
+	}
+}
+
+// TestChatChannelOptionsMount drives the option path end to end: with the
+// platform's variables set, each option builds a channel and contributes its
+// webhook route; with one missing, it refuses and names the variable.
+//
+// The refusal is what matters. [require] is tested directly above, but only
+// this test proves each option is actually wired to it — an option that built
+// its channel without checking would mount an unverified webhook, which is the
+// failure docs/CHANNELS.md exists to prevent.
+func TestChatChannelOptionsMount(t *testing.T) {
+	cases := []struct {
+		name  string
+		env   map[string]string
+		opt   Option
+		route string
+	}{
+		{
+			name:  "slack",
+			env:   map[string]string{"SLACK_BOT_TOKEN": "xoxb-1", "SLACK_SIGNING_SECRET": "s3cret"},
+			opt:   WithSlack(slack.Config{}),
+			route: slack.DefaultPath,
+		},
+		{
+			name: "discord",
+			// Discord's public key is 32 bytes of hex and is parsed at mount,
+			// so the fixture has to be well formed.
+			env: map[string]string{
+				"DISCORD_BOT_TOKEN":  "tok",
+				"DISCORD_PUBLIC_KEY": strings.Repeat("ab", 32),
+			},
+			opt:   WithDiscord(discord.Config{}),
+			route: discord.DefaultPath,
+		},
+		{
+			name:  "telegram",
+			env:   map[string]string{"TELEGRAM_BOT_TOKEN": "tok", "TELEGRAM_WEBHOOK_SECRET": "s3cret"},
+			opt:   WithTelegram(telegram.Config{Username: "mybot"}),
+			route: telegram.DefaultPath,
+		},
+	}
+
+	runner := runtime.NewRunner(runtime.NewMemoryJournal(), stubFactory)
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			// Setenv forbids t.Parallel, which is why this test is serial.
+			for k, v := range c.env {
+				t.Setenv(k, v)
+			}
+
+			build := resolve(c.opt).channels
+			if len(build) != 1 {
+				t.Fatalf("the option added %d channels, want 1", len(build))
+			}
+			ch, err := build[0](runner)
+			if err != nil {
+				t.Fatalf("the channel did not mount with its credentials set: %v", err)
+			}
+			var paths []string
+			for _, rt := range ch.Routes() {
+				paths = append(paths, rt.Path)
+			}
+			if !slices.Contains(paths, c.route) {
+				t.Fatalf("%s mounted %v, want its webhook at %s", c.name, paths, c.route)
+			}
+
+			// Drop one credential: the same option must now refuse, naming it.
+			for k := range c.env {
+				t.Setenv(k, "")
+				if _, err := resolve(c.opt).channels[0](runner); err == nil {
+					t.Fatalf("%s mounted with %s empty: an unverified webhook", c.name, k)
+				} else if !strings.Contains(err.Error(), k) {
+					t.Fatalf("the refusal does not name %s: %v", k, err)
+				}
+				t.Setenv(k, c.env[k])
+			}
+		})
 	}
 }
 

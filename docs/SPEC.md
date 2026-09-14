@@ -513,10 +513,12 @@ rebuilt and SIGTERMed the child that was still serving the turn — the agent
 restarted itself for doing its job. The workspace is the loop's output, like
 `.bonnie` and `bonnie_gen.go`, and is skipped both by the watcher and by the
 event filter (the second catches the directory's own create event, which the
-child raises on first boot). Guard test: `TestWorkspaceIsNotWatched`. Since
-T-024 the workspace path is the constant `bonnie.DefaultWorkspace`, read by
-the scaffold, codegen, the dev loop, and the runtime alike, so the four
-cannot disagree about which directory must not be watched.
+child raises on first boot). Guard tests: `TestWorkspaceIsNotWatched`,
+`TestWorkspaceDirIsTheRuntimeWorkspace`. Since T-024 the workspace path is
+the constant `bonnie.DefaultWorkspace`, read by the scaffold, codegen, the
+dev loop, and the runtime alike, so the four cannot disagree about which
+directory must not be watched. Both guards were briefly lost with the
+manifest and restored — see §4.13.
 
 Verified live against `opencode/kimi-k2.5`: a `write` and a shell redirect
 both landed in `workspace/` with the tree root untouched, `pwd` reported the
@@ -720,9 +722,66 @@ answered 500, which reads as "retry" for a conflict no retry can fix.
 The audit also removed `EventBus.Backlog`, which had no caller anywhere
 (§4.8 states `StreamEvents` is the only path), and collapsed three copies of
 the chat delivery text and three copies of the workspace-default rule into
-`chat.DeliveryText` and `Manifest.WorkspaceDir`. One claim had no test in the
+`chat.DeliveryText` and a single workspace rule (`Manifest.WorkspaceDir`
+then; `bonnie.DefaultWorkspace` since T-024). One claim had no test in the
 shape §9 demands — a cancelled run continuing in a second process — and now
 has one: `TestCancelledRunContinuesInASecondRunner`.
+
+### 4.13 RESOLVED — deleting a feature deleted two guards with it
+
+T-024 removed the manifest and the `serve --agent` path. A documentation
+audit afterwards grepped every test name cited in the docs against the tests
+that exist, and found citations with nothing behind them. Two were prose
+debt; two were live invariants whose guard had been deleted along with the
+test file that happened to contain it.
+
+**The dev loop's workspace exclusion lost its only test.**
+`cmd/bonnie/dev_workspace_test.go` held `TestWorkspaceIsNotWatched`, the
+guard on §4.9.1 above, in the same file as a manifest-specific test. T-024
+deleted the file for the manifest test and took the guard with it. The
+behaviour never broke — `watchTree` and `watched` still skip the workspace —
+but for two commits the repository asserted the fix in prose and tested
+nothing, which is the state §4.9.1 exists to prevent: a model writing a file
+would restart the child mid-turn, and only a live tmux session would say so.
+Restored, and rewritten against `bonnie.DefaultWorkspace`. A second test,
+`TestWorkspaceDirIsTheRuntimeWorkspace`, pins the loop's idea of the
+workspace to the runtime's, which is invariant 14 pointed at the dev loop.
+
+**The chat-channel wiring lost its only test.** The same commit deleted
+`TestServeMountsChatChannels` and `TestChatChannelNeedsItsSecrets` with the
+manifest-driven serve path that had carried them, and replaced them with a
+test of the `require` helper alone. The helper is not the contract: the
+contract is that `WithSlack`, `WithDiscord`, and `WithTelegram` each *call*
+it before building a channel. An option that skipped the check would mount an
+unverified webhook and no test would have failed.
+`TestChatChannelOptionsMount` drives each option end to end — routes mounted
+with the credentials present, refusal naming the variable with any one of
+them empty.
+
+**Writing that test found a real defect.** Each `With<Platform>` option
+captured its `Config` by value and then filled the captured copy from the
+environment:
+
+```go
+func WithSlack(cfg slack.Config) Option {
+    return WithChannel(func(r *runtime.Runner) (Channel, error) {
+        fill(&cfg.BotToken, "SLACK_BOT_TOKEN")   // writes into the closure
+```
+
+`fill` only writes when the field is empty, so the first call left the
+credential *inside the closure* and every later call saw a non-empty field
+and skipped the environment entirely. The option was therefore single-use:
+reusing one across two agents, or calling `Agent.Run` twice, silently served
+the credentials read at the first call rather than the ones set now — and a
+credential that has since been removed from the environment would keep
+working. Each option now copies its config per call and fills the copy.
+Since `Option` values are ordinary Go values a user can hold in a variable
+and pass twice, this was a public-API footgun, not a theoretical one.
+
+The general lesson, recorded because it will recur: **a guard test's file
+name is not its scope.** When a feature is deleted, grep the docs for the
+test names in the files being removed before deleting them, and re-home any
+guard whose invariant outlives the feature.
 
 ---
 

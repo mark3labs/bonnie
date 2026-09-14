@@ -192,16 +192,21 @@ func Quiet() Option {
 // variable. A webhook that does not verify its caller is a door with no lock.
 func WithSlack(cfg slack.Config) Option {
 	return WithChannel(func(r *runtime.Runner) (Channel, error) {
-		fill(&cfg.BotToken, "SLACK_BOT_TOKEN")
-		fill(&cfg.SigningSecret, "SLACK_SIGNING_SECRET")
-		fill(&cfg.APIURL, "SLACK_API_URL")
+		// Copy before filling. The closure outlives the call, so writing the
+		// environment into the captured config would make the option
+		// single-use: a second agent built from it would reuse the first
+		// call's credentials instead of reading the environment again.
+		c := cfg
+		fill(&c.BotToken, "SLACK_BOT_TOKEN")
+		fill(&c.SigningSecret, "SLACK_SIGNING_SECRET")
+		fill(&c.APIURL, "SLACK_API_URL")
 		if err := require("slack",
-			named{"SLACK_BOT_TOKEN", cfg.BotToken},
-			named{"SLACK_SIGNING_SECRET", cfg.SigningSecret},
+			named{"SLACK_BOT_TOKEN", c.BotToken},
+			named{"SLACK_SIGNING_SECRET", c.SigningSecret},
 		); err != nil {
 			return nil, err
 		}
-		return slack.New(r, cfg), nil
+		return slack.New(r, c), nil
 	})
 }
 
@@ -209,16 +214,17 @@ func WithSlack(cfg slack.Config) Option {
 // DISCORD_PUBLIC_KEY come from the environment; see [WithSlack].
 func WithDiscord(cfg discord.Config) Option {
 	return WithChannel(func(r *runtime.Runner) (Channel, error) {
-		fill(&cfg.BotToken, "DISCORD_BOT_TOKEN")
-		fill(&cfg.PublicKey, "DISCORD_PUBLIC_KEY")
-		fill(&cfg.APIURL, "DISCORD_API_URL")
+		c := cfg
+		fill(&c.BotToken, "DISCORD_BOT_TOKEN")
+		fill(&c.PublicKey, "DISCORD_PUBLIC_KEY")
+		fill(&c.APIURL, "DISCORD_API_URL")
 		if err := require("discord",
-			named{"DISCORD_BOT_TOKEN", cfg.BotToken},
-			named{"DISCORD_PUBLIC_KEY", cfg.PublicKey},
+			named{"DISCORD_BOT_TOKEN", c.BotToken},
+			named{"DISCORD_PUBLIC_KEY", c.PublicKey},
 		); err != nil {
 			return nil, err
 		}
-		return discord.New(r, cfg)
+		return discord.New(r, c)
 	})
 }
 
@@ -226,21 +232,24 @@ func WithDiscord(cfg discord.Config) Option {
 // TELEGRAM_WEBHOOK_SECRET come from the environment; see [WithSlack].
 func WithTelegram(cfg telegram.Config) Option {
 	return WithChannel(func(r *runtime.Runner) (Channel, error) {
-		fill(&cfg.Token, "TELEGRAM_BOT_TOKEN")
-		fill(&cfg.Secret, "TELEGRAM_WEBHOOK_SECRET")
-		fill(&cfg.APIURL, "TELEGRAM_API_URL")
+		c := cfg
+		fill(&c.Token, "TELEGRAM_BOT_TOKEN")
+		fill(&c.Secret, "TELEGRAM_WEBHOOK_SECRET")
+		fill(&c.APIURL, "TELEGRAM_API_URL")
 		if err := require("telegram",
-			named{"TELEGRAM_BOT_TOKEN", cfg.Token},
-			named{"TELEGRAM_WEBHOOK_SECRET", cfg.Secret},
+			named{"TELEGRAM_BOT_TOKEN", c.Token},
+			named{"TELEGRAM_WEBHOOK_SECRET", c.Secret},
 		); err != nil {
 			return nil, err
 		}
-		return telegram.New(r, cfg), nil
+		return telegram.New(r, c), nil
 	})
 }
 
 // fill takes a value from the environment when the field is empty, so an
-// authored value still wins and a secret never has to be written down.
+// authored value still wins and a secret never has to be written down. It
+// writes through a pointer into a per-call copy, never into the config an
+// option captured — see [WithSlack].
 func fill(field *string, env string) {
 	if *field == "" {
 		*field = os.Getenv(env)
