@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -40,8 +41,11 @@ func newDevCmd() *cobra.Command {
 tree, regenerate the tool wiring, rebuild, and gracefully restart the serving child —
 while you interact with the agent in a terminal.
 
-The loop watches the manifest, instructions, skills/, workspace/, tools/**, and go.mod
-and go.sum. A change rebuilds the wrapper and restarts the child with SIGTERM, waiting
+The loop watches the manifest, instructions, skills/, tools/**, and go.mod and
+go.sum. The workspace is deliberately NOT watched: it is where the running agent
+writes the files a model asks it to write, so rebuilding on it would let the
+agent restart itself mid-turn. A change rebuilds the wrapper and restarts the
+child with SIGTERM, waiting
 out its drain (--shutdown-timeout) before the next starts. A parked run keeps no
 compute and lives in the journal; a restarted child resumes it, and the TUI reconnects
 to the stream (the journal is the durable record).
@@ -179,7 +183,7 @@ func (d *devServer) run(ctx context.Context) error {
 		return fmt.Errorf("bonnie: dev: watcher: %w", err)
 	}
 	defer func() { _ = w.Close() }()
-	if err := watchTree(d.root, w); err != nil {
+	if err := watchTree(d.root, workspaceDir(d.root), w); err != nil {
 		d.stopChild()
 		return err
 	}
@@ -208,7 +212,7 @@ func (d *devServer) run(ctx context.Context) error {
 				d.stopChild()
 				return nil
 			}
-			if !watched(ev.Name) {
+			if !watched(ev.Name, workspaceDir(d.root)) {
 				continue
 			}
 			debounce.Reset(300 * time.Millisecond)
@@ -340,7 +344,10 @@ func stopGracefully(cmd *exec.Cmd, shutdown time.Duration) error {
 
 // watchTree adds every directory under root to the watcher, so a new file in a
 // subdirectory is seen, not only edits to already-watched paths.
-func watchTree(root string, w *fsnotify.Watcher) error {
+//
+// workspace is skipped for the same reason .bonnie is: it holds the loop's
+// own output rather than its input. See [watched].
+func watchTree(root, workspace string, w *fsnotify.Watcher) error {
 	return filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -353,15 +360,55 @@ func watchTree(root string, w *fsnotify.Watcher) error {
 		if entry.Name() == ".bonnie" || entry.Name() == ".git" {
 			return filepath.SkipDir
 		}
+		if workspace != "" && path == workspace {
+			return filepath.SkipDir
+		}
 		return w.Add(path)
 	})
 }
 
-// watched reports whether a changed path should trigger a rebuild. The
-// generated file is the loop's own output, not its input — ignoring it prevents
-// a restart-forever loop.
-func watched(path string) bool {
-	return filepath.Base(path) != "bonnie_gen.go"
+// watched reports whether a changed path should trigger a rebuild.
+//
+// Two kinds of path are the loop's own output rather than its input, and
+// rebuilding on either loops:
+//
+//   - the generated file, which every rebuild rewrites;
+//   - the workspace, which is the agent's root for files. A model that writes
+//     a file — the ordinary case, now that the workspace is the root — would
+//     otherwise trigger a rebuild and SIGTERM the child that is still serving
+//     its turn. The agent would restart itself, mid-answer, for doing its job.
+//
+// The workspace is skipped by [watchTree] as well; this second check catches
+// the events the root watcher reports for the directory itself, such as the
+// child creating it on first boot.
+func watched(path, workspace string) bool {
+	if filepath.Base(path) == "bonnie_gen.go" {
+		return false
+	}
+	return !underDir(path, workspace)
+}
+
+// underDir reports whether path is dir or sits inside it. Both are absolute.
+func underDir(path, dir string) bool {
+	if dir == "" {
+		return false
+	}
+	rel, err := filepath.Rel(dir, path)
+	if err != nil {
+		return false
+	}
+	return rel == "." || (!strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != "..")
+}
+
+// workspaceDir is the tree's workspace, absolute. It is the manifest's
+// workspace, or workspace/ when the key is absent — the same default the
+// scaffold and the serve wiring use, so all three agree on the agent's root.
+func workspaceDir(root string) string {
+	rel := "workspace"
+	if m, _, err := agent.Load(root); err == nil && m.Workspace != "" {
+		rel = m.Workspace
+	}
+	return filepath.Join(root, filepath.Clean(rel))
 }
 
 // runDev is the bonnie dev entry, separated from cobra for testing.

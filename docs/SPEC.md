@@ -507,10 +507,23 @@ That is what the sandbox is for, and §4.9 still applies.
 Serving without a tree (`bonnie serve` with no `--agent`) has nothing to
 anchor to, so the process's own directory stays the root, as before.
 
+**The dev loop must not watch the workspace.** Rooting the agent there made a
+model's write an ordinary event in a watched directory, so `bonnie dev`
+rebuilt and SIGTERMed the child that was still serving the turn — the agent
+restarted itself for doing its job. The workspace is the loop's output, like
+`.bonnie` and `bonnie_gen.go`, and is skipped both by the watcher and by the
+event filter (the second catches the directory's own create event, which the
+child raises on first boot). Guard tests: `TestWorkspaceIsNotWatched`,
+`TestWorkspaceDirFollowsTheManifest` — the manifest can rename the workspace,
+so the dev loop resolves it the same way the scaffold and serve do, or a
+renamed one would stay watched.
+
 Verified live against `opencode/kimi-k2.5`: a `write` and a shell redirect
 both landed in `workspace/` with the tree root untouched, `pwd` reported the
 workspace, and under `--sandbox docker` the seed file arrived at `/workspace`.
-Tests: `cmd/bonnie/workspace_test.go`.
+Under `bonnie dev`, a model's write no longer restarts the child, while an
+edit to `instructions.md` or a tool still does.
+Tests: `cmd/bonnie/workspace_test.go`, `cmd/bonnie/dev_workspace_test.go`.
 
 ### 4.10 RESOLVED — sandbox lifecycle is journalled
 

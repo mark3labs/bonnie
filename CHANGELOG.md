@@ -42,6 +42,12 @@ instead of being cut.
 
 ### Fixed
 
+- `bonnie dev` watched the workspace, so the agent restarted itself for doing
+  its job: a model writing a file — the ordinary case now that the workspace
+  is the agent's root — tripped a rebuild that SIGTERMed the child still
+  serving the turn. The workspace is the loop's output, not its input, and is
+  no longer watched. Edits to the manifest, instructions, tools, and go.mod
+  still hot-reload; verified live in both directions.
 - The manifest's `workspace:` key seeded nothing. `sandbox.Seeded` was
   written and tested but never called, so the key was accepted and ignored —
   what invariant 13 exists to forbid. A sandboxed run now really does receive
