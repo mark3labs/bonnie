@@ -24,6 +24,11 @@ import (
 	"github.com/mark3labs/bonnie/runtime"
 )
 
+// apiPrefix is the framework namespace the channel serves under. It is the
+// same value as channel.APIPrefix; the TUI spells it out because it is a
+// client of the wire, not of the channel package.
+const apiPrefix = "/bonnie/v1"
+
 // Client is the slice of a bonnie HTTP channel the TUI drives. It is an
 // interface so tests can inject a fake and drive a transcript without a
 // network round trip.
@@ -88,7 +93,7 @@ func NewHTTP(base string, hc *http.Client) *HTTP {
 // Lookup implements [Client].
 func (c *HTTP) Lookup(ctx context.Context, address string) (string, int, error) {
 	var out runResponse
-	if err := c.get(ctx, "/addresses/"+url.PathEscape(address), &out); err != nil {
+	if err := c.get(ctx, apiPrefix+"/addresses/"+url.PathEscape(address), &out); err != nil {
 		return "", 0, err
 	}
 	return out.RunID, out.Cursor, nil
@@ -97,7 +102,7 @@ func (c *HTTP) Lookup(ctx context.Context, address string) (string, int, error) 
 // Start implements [Client].
 func (c *HTTP) Start(ctx context.Context, address, text string) (*runtime.Run, error) {
 	var out runResponse
-	err := c.post(ctx, "/runs", map[string]any{"address": address, "text": text}, &out)
+	err := c.post(ctx, apiPrefix+"/runs", map[string]any{"address": address, "text": text}, &out)
 	if err != nil {
 		return nil, err
 	}
@@ -107,7 +112,7 @@ func (c *HTTP) Start(ctx context.Context, address, text string) (*runtime.Run, e
 // Send implements [Client].
 func (c *HTTP) Send(ctx context.Context, runID, text string) (*runtime.Run, error) {
 	var out runResponse
-	err := c.post(ctx, "/runs/"+runID, map[string]any{"text": text}, &out)
+	err := c.post(ctx, apiPrefix+"/runs/"+runID, map[string]any{"text": text}, &out)
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +122,7 @@ func (c *HTTP) Send(ctx context.Context, runID, text string) (*runtime.Run, erro
 // Respond implements [Client].
 func (c *HTTP) Respond(ctx context.Context, runID, text string) (*runtime.Run, error) {
 	var out runResponse
-	err := c.post(ctx, "/runs/"+runID+"/respond",
+	err := c.post(ctx, apiPrefix+"/runs/"+runID+"/respond",
 		map[string]any{"responses": []map[string]any{{"text": text}}}, &out)
 	if err != nil {
 		return nil, err
@@ -127,12 +132,12 @@ func (c *HTTP) Respond(ctx context.Context, runID, text string) (*runtime.Run, e
 
 // Cancel implements [Client].
 func (c *HTTP) Cancel(ctx context.Context, runID string) error {
-	return c.post(ctx, "/runs/"+runID+"/cancel", nil, nil)
+	return c.post(ctx, apiPrefix+"/runs/"+runID+"/cancel", nil, nil)
 }
 
 // Stream implements [Client].
 func (c *HTTP) Stream(ctx context.Context, runID string, after int) (<-chan runtime.Event, func(), error) {
-	url := c.base + "/runs/" + runID + "/stream?cursor=" + strconv.Itoa(after)
+	url := c.base + apiPrefix + "/runs/" + runID + "/stream?cursor=" + strconv.Itoa(after)
 	requestCtx, cancel := context.WithCancel(ctx)
 	c.mu.Lock()
 	c.streamGen++

@@ -152,7 +152,7 @@ Example:
 ```
 feat: add Runner.Cancel for interrupting active turns
 
-- Call it from channel/http when the client sends POST /runs/{id}/cancel
+- Call it from channel/http when the client sends POST /bonnie/v1/runs/{id}/cancel
 - Checkpoint RunCancelled state to the journal
 - Verify the repair from T-003 handles torn writes on cancelled runs
 ```

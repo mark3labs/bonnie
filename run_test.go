@@ -439,7 +439,7 @@ func TestCloseStreamsOnShutdown(t *testing.T) {
 		ended <- struct{}{}
 	}))
 
-	req := httptest.NewRequest(http.MethodGet, "/runs/run-1/stream", nil)
+	req := httptest.NewRequest(http.MethodGet, "/bonnie/v1/runs/run-1/stream", nil)
 	go h.ServeHTTP(httptest.NewRecorder(), req)
 	select {
 	case <-started:
@@ -463,7 +463,7 @@ func TestCloseStreamsDoesNotCancelTurn(t *testing.T) {
 		observed <- r.Context().Err()
 	}))
 	shutdown()
-	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/runs/run-1", nil))
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/bonnie/v1/runs/run-1", nil))
 	if err := <-observed; err != nil {
 		t.Fatalf("turn context was cancelled: %v", err)
 	}

@@ -81,14 +81,14 @@ go run ./cmd/bonnie serve --journal .bonnie
 
 ```bash
 # Start a run.
-curl -s localhost:8080/runs \
+curl -s localhost:8080/bonnie/v1/runs \
   -d '{"text":"Deploy the app. Ask me which region first."}'
 
 # Watch it. The stream is newline-delimited JSON.
-curl -sN localhost:8080/runs/<run-id>/stream
+curl -sN localhost:8080/bonnie/v1/runs/<run-id>/stream
 
 # Answer the question.
-curl -s localhost:8080/runs/<run-id>/respond \
+curl -s localhost:8080/bonnie/v1/runs/<run-id>/respond \
   -d '{"responses":[{"text":"eu-west-1"}]}'
 ```
 
@@ -96,5 +96,5 @@ Reconnect to a stream without a gap by passing the last sequence number you
 saw:
 
 ```bash
-curl -sN "localhost:8080/runs/<run-id>/stream?cursor=12"
+curl -sN "localhost:8080/bonnie/v1/runs/<run-id>/stream?cursor=12"
 ```

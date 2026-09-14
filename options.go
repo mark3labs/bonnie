@@ -31,6 +31,7 @@ type ChannelFunc func(*runtime.Runner) (Channel, error)
 // default from the scaffolded layout; an [Option] replaces one.
 type config struct {
 	addr      string
+	name      string
 	journal   string
 	model     string
 	prompt    string
@@ -85,6 +86,12 @@ func WithJournal(dir string) Option {
 // applies.
 func WithModel(model string) Option {
 	return func(c *config) { c.model = model }
+}
+
+// WithName names the agent. The name is reported by `GET /bonnie/v1/info`
+// and nowhere else today; it is for a client that talks to several agents.
+func WithName(name string) Option {
+	return func(c *config) { c.name = name }
 }
 
 // WithSystemPrompt sets the system prompt directly, instead of reading the

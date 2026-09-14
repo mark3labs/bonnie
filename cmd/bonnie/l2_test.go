@@ -230,11 +230,11 @@ func TestBuildOutputServesEmbeddedInstructions(t *testing.T) {
 
 	// A full run: start (parks), then answer it — the response is the
 	// embedded instructions.
-	started := postRun(t, addr, "/runs", map[string]any{"text": "deploy the app"})
+	started := postRun(t, addr, "/bonnie/v1/runs", map[string]any{"text": "deploy the app"})
 	if started.State != string(runtime.RunWaiting) {
 		t.Fatalf("start state = %q, want %q", started.State, runtime.RunWaiting)
 	}
-	done := postRun(t, addr, "/runs/"+started.RunID+"/respond", map[string]any{
+	done := postRun(t, addr, "/bonnie/v1/runs/"+started.RunID+"/respond", map[string]any{
 		"responses": []map[string]any{{"text": "eu-west-1"}},
 	})
 	if done.State != string(runtime.RunCompleted) {
@@ -263,7 +263,7 @@ func TestDevRestartCompletesParkedRun(t *testing.T) {
 
 	addrA := waitForStart(t, &log, 1)
 
-	started := postRun(t, addrA, "/runs", map[string]any{"text": "deploy the app"})
+	started := postRun(t, addrA, "/bonnie/v1/runs", map[string]any{"text": "deploy the app"})
 	if started.State != string(runtime.RunWaiting) {
 		t.Fatalf("start state = %q, want %q", started.State, runtime.RunWaiting)
 	}
@@ -275,7 +275,7 @@ func TestDevRestartCompletesParkedRun(t *testing.T) {
 	addrB := waitForStart(t, &log, 2)
 
 	// The respond goes to the new child and completes the parked run.
-	done := postRun(t, addrB, "/runs/"+started.RunID+"/respond", map[string]any{
+	done := postRun(t, addrB, "/bonnie/v1/runs/"+started.RunID+"/respond", map[string]any{
 		"responses": []map[string]any{{"text": "eu-west-1"}},
 	})
 	if done.State != string(runtime.RunCompleted) {

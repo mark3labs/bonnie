@@ -40,12 +40,14 @@ func newServeCmd() *cobra.Command {
 		Short: "Mount the HTTP channel and serve durable runs",
 		Long: `Mount the HTTP channel over a file-backed journal and serve durable runs.
 
-  POST /runs                 start a run, or resolve an address to one
-  GET  /runs/{id}            report a run's durable state
-  POST /runs/{id}            send a message to an existing run
-  POST /runs/{id}/respond    answer a suspended run
-  POST /runs/{id}/cancel     stop the turn a run is executing
-  GET  /runs/{id}/stream     NDJSON event stream, resumable with ?cursor=
+  GET  /bonnie/v1/health               liveness probe
+  GET  /bonnie/v1/info                 agent name, version, channels
+  POST /bonnie/v1/runs                 start a run, or resolve an address to one
+  GET  /bonnie/v1/runs/{id}            report a run's durable state
+  POST /bonnie/v1/runs/{id}            send a message to an existing run
+  POST /bonnie/v1/runs/{id}/respond    answer a suspended run
+  POST /bonnie/v1/runs/{id}/cancel     stop the turn a run is executing
+  GET  /bonnie/v1/runs/{id}/stream     NDJSON event stream, resumable with ?cursor=
 
 serve is the generic host: it runs an agent configured entirely by these
 flags, with no agent tree. To serve a tree, run the tree — ` + "`bonnie dev`" + ` while

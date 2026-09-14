@@ -18,9 +18,9 @@ import (
 func TestHTTPClientWire(t *testing.T) {
 	t.Parallel()
 
-	// The fake channel: POST /runs starts a run, /runs/{id}/respond answers it.
+	// The fake channel: POST /bonnie/v1/runs starts a run, /bonnie/v1/runs/{id}/respond answers it.
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /runs", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /bonnie/v1/runs", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Text string `json:"text"`
 		}
@@ -33,7 +33,7 @@ func TestHTTPClientWire(t *testing.T) {
 			},
 		})
 	})
-	mux.HandleFunc("POST /runs/run-42/respond", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /bonnie/v1/runs/run-42/respond", func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"run_id":   "run-42",
 			"state":    "completed",
@@ -41,14 +41,14 @@ func TestHTTPClientWire(t *testing.T) {
 		})
 	})
 	cancelled := make(chan struct{}, 1)
-	mux.HandleFunc("POST /runs/run-42/cancel", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("POST /bonnie/v1/runs/run-42/cancel", func(w http.ResponseWriter, _ *http.Request) {
 		cancelled <- struct{}{}
 		w.WriteHeader(http.StatusNoContent)
 	})
-	mux.HandleFunc("GET /addresses/tui-test", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("GET /bonnie/v1/addresses/tui-test", func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{"run_id": "run-42", "cursor": 3})
 	})
-	mux.HandleFunc("GET /runs/run-42/stream", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /bonnie/v1/runs/run-42/stream", func(w http.ResponseWriter, r *http.Request) {
 		evs := []runtime.Event{
 			{RunID: "run-42", Seq: 1, Type: runtime.EventState, State: runtime.RunRunning},
 			{RunID: "run-42", Seq: 2, Type: runtime.EventSuspend, Text: "which region?"},
@@ -129,7 +129,7 @@ func TestHTTPClientCloseStreams(t *testing.T) {
 	t.Parallel()
 	closed := make(chan struct{})
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /runs/run-1/stream", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("GET /bonnie/v1/runs/run-1/stream", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/x-ndjson")
 		w.WriteHeader(http.StatusOK)
 		if f, ok := w.(http.Flusher); ok {
@@ -167,7 +167,7 @@ func TestHTTPClientCloseStreams(t *testing.T) {
 func TestHTTPClientNotFound(t *testing.T) {
 	t.Parallel()
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /runs/nope", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("POST /bonnie/v1/runs/nope", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 		_, _ = w.Write([]byte(`{"error":"bonnie: run not found"}`))
 	})

@@ -172,7 +172,7 @@ the message came from Slack; the user ID inside it is Slack's word. The
 
 - **Streaming edits.** eve's chat SDK posts an initial message and edits it
   as tokens arrive. BONNIE's chat channels deliver one message per turn —
-  the NDJSON stream (the HTTP channel's `GET /runs/{id}/stream`) is the
+  the NDJSON stream (the HTTP channel's `GET /bonnie/v1/runs/{id}/stream`) is the
   integration surface for live output.
 - **Button-driven HITL** (Slack Block Kit actions, Discord message
   components). A parked run is answered in text. The resume path behind it

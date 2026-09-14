@@ -34,13 +34,13 @@ Run BONNIE's live smoke test: the whole claim against a real provider — a run 
 3. **Reachable over HTTP**:
    ```bash
    task dev -- serve --journal /tmp/bonnie-smoke --addr :8080 &
-   curl -s localhost:8080/runs -d '{"text":"Deploy the app. Ask me which region first."}'
+   curl -s localhost:8080/bonnie/v1/runs -d '{"text":"Deploy the app. Ask me which region first."}'
    ```
    Verify, in order:
-   - `POST /runs` returns a run ID and, if it parked, `state:"waiting"` with a prompt
-   - `curl -sN localhost:8080/runs/<id>/stream` streams NDJSON events
+   - `POST /bonnie/v1/runs` returns a run ID and, if it parked, `state:"waiting"` with a prompt
+   - `curl -sN localhost:8080/bonnie/v1/runs/<id>/stream` streams NDJSON events
    - Reconnect with `?cursor=<last-seen>` — no gap, no duplicate
-   - `curl -s localhost:8080/runs/<id>/respond -d '{"responses":[{"text":"eu-west-1"}]}'` completes the run
+   - `curl -s localhost:8080/bonnie/v1/runs/<id>/respond -d '{"responses":[{"text":"eu-west-1"}]}'` completes the run
    - Kill the server with SIGINT — it must drain gracefully, not die mid-turn
 
 4. **Check the invariants held**:

@@ -20,9 +20,9 @@ func TestOversizedBodyIsRefused(t *testing.T) {
 	s := newTestServer(t, &stubAgent{})
 
 	body := `{"text":"` + strings.Repeat("a", maxRequestBody+1024) + `"}`
-	resp, err := http.Post(s.URL+"/runs", "application/json", bytes.NewReader([]byte(body)))
+	resp, err := http.Post(s.URL+"/bonnie/v1/runs", "application/json", bytes.NewReader([]byte(body)))
 	if err != nil {
-		t.Fatalf("POST /runs: %v", err)
+		t.Fatalf("POST /bonnie/v1/runs: %v", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -45,7 +45,7 @@ func TestBodyAtTheLimitIsAccepted(t *testing.T) {
 	t.Parallel()
 	s := newTestServer(t, &stubAgent{turns: []*kit.TurnResult{{Response: "read it"}}})
 
-	resp, run := s.post(t, "/runs", StartRequest{Text: strings.Repeat("a", 64<<10)})
+	resp, run := s.post(t, "/bonnie/v1/runs", StartRequest{Text: strings.Repeat("a", 64<<10)})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
@@ -65,7 +65,7 @@ func TestReservedRunIsNotAddressable(t *testing.T) {
 	s := newTestServer(t, &stubAgent{})
 
 	// Bind an address, which creates the reserved run for real.
-	if resp, _ := s.post(t, "/runs", StartRequest{Text: "hi", Address: "slack/C1"}); resp.StatusCode != http.StatusOK {
+	if resp, _ := s.post(t, "/bonnie/v1/runs", StartRequest{Text: "hi", Address: "slack/C1"}); resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
 	reserved := runtime.ReservedRunPrefix + "addresses"
@@ -77,10 +77,13 @@ func TestReservedRunIsNotAddressable(t *testing.T) {
 		name string
 		do   func() *http.Response
 	}{
-		{"send", func() *http.Response { r, _ := s.post(t, "/runs/"+reserved, SendRequest{Text: "own it"}); return r }},
-		{"get", func() *http.Response { r, _ := s.get(t, "/runs/"+reserved); return r }},
+		{"send", func() *http.Response {
+			r, _ := s.post(t, "/bonnie/v1/runs/"+reserved, SendRequest{Text: "own it"})
+			return r
+		}},
+		{"get", func() *http.Response { r, _ := s.get(t, "/bonnie/v1/runs/"+reserved); return r }},
 		{"respond", func() *http.Response {
-			r, _ := s.post(t, "/runs/"+reserved+"/respond", RespondRequest{
+			r, _ := s.post(t, "/bonnie/v1/runs/"+reserved+"/respond", RespondRequest{
 				Responses: []runtime.InputResponse{{Text: "no"}},
 			})
 			return r
@@ -93,7 +96,7 @@ func TestReservedRunIsNotAddressable(t *testing.T) {
 
 	// The bookkeeping must be untouched: the address still resolves to the
 	// run it was bound to.
-	resp, addr := s.get(t, "/addresses/slack%2FC1")
+	resp, addr := s.get(t, "/bonnie/v1/addresses/slack%2FC1")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("address lookup = %d, want 200", resp.StatusCode)
 	}

@@ -5,6 +5,24 @@ All notable changes to BONNIE are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Breaking: the HTTP channel lives under `/bonnie/v1`.** `POST /runs`
+  is now `POST /bonnie/v1/runs`, and every other route moved the same way.
+  `/bonnie/` is the framework's reserved namespace: a channel that mounts a
+  route under it is refused at startup with an error naming the channel and
+  the path, instead of a mux panic or a silent shadow. `bonnie chat` and the
+  TUI follow the new paths. (T-030)
+
+### Added
+
+- `GET /bonnie/v1/health` answers `{"ok":true,"status":"ready"}` before any
+  run exists and without touching the journal. `GET /bonnie/v1/info` reports
+  the agent name (`bonnie.WithName`), the BONNIE version, and the mounted
+  channels. (T-030)
+
 ## [0.4.0] — 2026-09-14
 
 The configuration-is-code increment, and the journal becomes a database.

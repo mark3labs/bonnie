@@ -159,7 +159,7 @@ func TestStartRunAndSend(t *testing.T) {
 		{Response: "again"},
 	}})
 
-	resp, run := s.post(t, "/runs", StartRequest{Text: "hi"})
+	resp, run := s.post(t, "/bonnie/v1/runs", StartRequest{Text: "hi"})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
@@ -170,7 +170,7 @@ func TestStartRunAndSend(t *testing.T) {
 		t.Fatal("no run ID in the response")
 	}
 
-	resp, second := s.post(t, "/runs/"+run.RunID, SendRequest{Text: "more"})
+	resp, second := s.post(t, "/bonnie/v1/runs/"+run.RunID, SendRequest{Text: "more"})
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
@@ -188,7 +188,7 @@ func TestAttachNeverCreates(t *testing.T) {
 	t.Parallel()
 	s := newTestServer(t, &stubAgent{})
 
-	resp, _ := s.post(t, "/runs/does-not-exist", SendRequest{Text: "hi"})
+	resp, _ := s.post(t, "/bonnie/v1/runs/does-not-exist", SendRequest{Text: "hi"})
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", resp.StatusCode)
 	}
@@ -212,13 +212,13 @@ func TestFromResolvesAddress(t *testing.T) {
 		{Response: "one"}, {Response: "two"}, {Response: "three"},
 	}})
 
-	_, first := s.post(t, "/runs", StartRequest{Address: "slack:C1/T1", Text: "hi"})
-	_, again := s.post(t, "/runs", StartRequest{Address: "slack:C1/T1", Text: "still here?"})
+	_, first := s.post(t, "/bonnie/v1/runs", StartRequest{Address: "slack:C1/T1", Text: "hi"})
+	_, again := s.post(t, "/bonnie/v1/runs", StartRequest{Address: "slack:C1/T1", Text: "still here?"})
 	if first.RunID != again.RunID {
 		t.Fatalf("address resolved to %q then %q", first.RunID, again.RunID)
 	}
 
-	_, other := s.post(t, "/runs", StartRequest{Address: "slack:C1/T2", Text: "hi"})
+	_, other := s.post(t, "/bonnie/v1/runs", StartRequest{Address: "slack:C1/T2", Text: "hi"})
 	if other.RunID == first.RunID {
 		t.Fatal("two addresses share one run")
 	}
@@ -230,8 +230,8 @@ func TestAddressLookupDoesNotCreate(t *testing.T) {
 	t.Parallel()
 	s := newTestServer(t, &stubAgent{turns: []*kit.TurnResult{{Response: "one"}}})
 
-	_, run := s.post(t, "/runs", StartRequest{Address: "tui-session", Text: "hi"})
-	resp, err := http.Get(s.URL + "/addresses/tui-session")
+	_, run := s.post(t, "/bonnie/v1/runs", StartRequest{Address: "tui-session", Text: "hi"})
+	resp, err := http.Get(s.URL + "/bonnie/v1/addresses/tui-session")
 	if err != nil {
 		t.Fatalf("GET address: %v", err)
 	}
@@ -253,7 +253,7 @@ func TestAddressLookupDoesNotCreate(t *testing.T) {
 		t.Fatal("cursor = 0, want the run's journal position")
 	}
 
-	miss, err := http.Get(s.URL + "/addresses/never-bound")
+	miss, err := http.Get(s.URL + "/bonnie/v1/addresses/never-bound")
 	if err != nil {
 		t.Fatalf("GET miss: %v", err)
 	}
@@ -283,7 +283,7 @@ func TestAddressMapSurvivesJournalReopen(t *testing.T) {
 		t.Fatalf("OpenSQLiteJournal: %v", err)
 	}
 	first := newTestServerOn(t, j, &stubAgent{turns: []*kit.TurnResult{{Response: "one"}}})
-	_, run := first.post(t, "/runs", StartRequest{Address: "slack:C1/T1", Text: "hi"})
+	_, run := first.post(t, "/bonnie/v1/runs", StartRequest{Address: "slack:C1/T1", Text: "hi"})
 	if err := j.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
@@ -296,7 +296,7 @@ func TestAddressMapSurvivesJournalReopen(t *testing.T) {
 	t.Cleanup(func() { _ = next.Close() })
 	second := newTestServerOn(t, next, &stubAgent{turns: []*kit.TurnResult{{Response: "two"}}})
 
-	_, resumed := second.post(t, "/runs", StartRequest{Address: "slack:C1/T1", Text: "still here?"})
+	_, resumed := second.post(t, "/bonnie/v1/runs", StartRequest{Address: "slack:C1/T1", Text: "still here?"})
 	if resumed.RunID != run.RunID {
 		t.Fatalf("after restart the address resolved to %q, want %q", resumed.RunID, run.RunID)
 	}
@@ -316,7 +316,7 @@ func TestSuspendAndRespond(t *testing.T) {
 		{Response: "Deployed to eu-west-1."},
 	}})
 
-	_, run := s.post(t, "/runs", StartRequest{Text: "deploy"})
+	_, run := s.post(t, "/bonnie/v1/runs", StartRequest{Text: "deploy"})
 	if run.State != runtime.RunWaiting {
 		t.Fatalf("state = %q, want waiting", run.State)
 	}
@@ -325,12 +325,12 @@ func TestSuspendAndRespond(t *testing.T) {
 	}
 
 	// A run that is waiting reports its question to anyone who asks.
-	_, snapshot := s.get(t, "/runs/"+run.RunID)
+	_, snapshot := s.get(t, "/bonnie/v1/runs/"+run.RunID)
 	if snapshot.State != runtime.RunWaiting || snapshot.Suspend == nil {
 		t.Fatalf("snapshot = %+v", snapshot)
 	}
 
-	resp, done := s.post(t, "/runs/"+run.RunID+"/respond", RespondRequest{
+	resp, done := s.post(t, "/bonnie/v1/runs/"+run.RunID+"/respond", RespondRequest{
 		Responses: []runtime.InputResponse{{Text: "eu-west-1"}},
 	})
 	if resp.StatusCode != http.StatusOK {
@@ -345,8 +345,8 @@ func TestRespondToRunningRunConflicts(t *testing.T) {
 	t.Parallel()
 	s := newTestServer(t, &stubAgent{turns: []*kit.TurnResult{{Response: "ok"}}})
 
-	_, run := s.post(t, "/runs", StartRequest{Text: "hi"})
-	resp, _ := s.post(t, "/runs/"+run.RunID+"/respond", RespondRequest{
+	_, run := s.post(t, "/bonnie/v1/runs", StartRequest{Text: "hi"})
+	resp, _ := s.post(t, "/bonnie/v1/runs/"+run.RunID+"/respond", RespondRequest{
 		Responses: []runtime.InputResponse{{Text: "nobody asked"}},
 	})
 	if resp.StatusCode != http.StatusConflict {
@@ -366,12 +366,12 @@ func TestCancelRoute(t *testing.T) {
 
 	done := make(chan RunResponse, 1)
 	go func() {
-		_, run := s.post(t, "/runs", StartRequest{Text: "long job"})
+		_, run := s.post(t, "/bonnie/v1/runs", StartRequest{Text: "long job"})
 		done <- run
 	}()
 
 	<-started
-	resp, _ := s.post(t, "/runs/cancel-me/cancel", nil)
+	resp, _ := s.post(t, "/bonnie/v1/runs/cancel-me/cancel", nil)
 	if resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("status = %d, want 204", resp.StatusCode)
 	}
@@ -390,8 +390,8 @@ func TestCancelIdleRunConflicts(t *testing.T) {
 	t.Parallel()
 	s := newTestServer(t, &stubAgent{turns: []*kit.TurnResult{{Response: "ok"}}})
 
-	_, run := s.post(t, "/runs", StartRequest{Text: "hi"})
-	resp, _ := s.post(t, "/runs/"+run.RunID+"/cancel", nil)
+	_, run := s.post(t, "/bonnie/v1/runs", StartRequest{Text: "hi"})
+	resp, _ := s.post(t, "/bonnie/v1/runs/"+run.RunID+"/cancel", nil)
 	if resp.StatusCode != http.StatusConflict {
 		t.Fatalf("status = %d, want 409", resp.StatusCode)
 	}
@@ -409,13 +409,13 @@ func TestStreamEmitsNDJSON(t *testing.T) {
 	turnDone := make(chan struct{})
 	go func() {
 		defer close(turnDone)
-		s.post(t, "/runs", StartRequest{Text: "hi"}) //nolint:errcheck // asserted through the stream
+		s.post(t, "/bonnie/v1/runs", StartRequest{Text: "hi"}) //nolint:errcheck // asserted through the stream
 	}()
 	<-started
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, s.URL+"/runs/stream-me/stream", nil)
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, s.URL+"/bonnie/v1/runs/stream-me/stream", nil)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("GET stream: %v", err)
@@ -480,16 +480,16 @@ func TestStreamResumesFromCursor(t *testing.T) {
 	s := newTestServer(t, &stubAgent{turns: []*kit.TurnResult{{Response: "hello"}}},
 		WithIDGenerator(func() string { return "cursor-me" }))
 
-	s.post(t, "/runs", StartRequest{Text: "hi"}) //nolint:errcheck // state asserted below
+	s.post(t, "/bonnie/v1/runs", StartRequest{Text: "hi"}) //nolint:errcheck // state asserted below
 
-	first := readStream(t, s, "/runs/cursor-me/stream?cursor=0", 2)
+	first := readStream(t, s, "/bonnie/v1/runs/cursor-me/stream?cursor=0", 2)
 	if first[0].Seq != 1 || first[1].Seq != 3 {
 		t.Fatalf("first read = %v, want [1 3] — the response anchors to the assistant message record", seqs(first))
 	}
 
 	// A client that dropped after event 3 comes back with its cursor: the
 	// closing state of the turn is the next durable event.
-	second := readStream(t, s, "/runs/cursor-me/stream?cursor=3", 1)
+	second := readStream(t, s, "/bonnie/v1/runs/cursor-me/stream?cursor=3", 1)
 	if second[0].Seq != 4 || second[0].State != runtime.RunCompleted {
 		t.Fatalf("reconnect delivered %v, want the completed state at seq 4 — a gap or a duplicate", seqs(second))
 	}
@@ -499,9 +499,9 @@ func TestStreamRejectsBadCursor(t *testing.T) {
 	t.Parallel()
 	s := newTestServer(t, &stubAgent{turns: []*kit.TurnResult{{Response: "hello"}}},
 		WithIDGenerator(func() string { return "bad-cursor" }))
-	s.post(t, "/runs", StartRequest{Text: "hi"}) //nolint:errcheck // status asserted below
+	s.post(t, "/bonnie/v1/runs", StartRequest{Text: "hi"}) //nolint:errcheck // status asserted below
 
-	resp, err := http.Get(s.URL + "/runs/bad-cursor/stream?cursor=abc")
+	resp, err := http.Get(s.URL + "/bonnie/v1/runs/bad-cursor/stream?cursor=abc")
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
@@ -515,7 +515,7 @@ func TestStreamUnknownRunIs404(t *testing.T) {
 	t.Parallel()
 	s := newTestServer(t, &stubAgent{})
 
-	resp, err := http.Get(s.URL + "/runs/nope/stream")
+	resp, err := http.Get(s.URL + "/bonnie/v1/runs/nope/stream")
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
@@ -537,11 +537,11 @@ func TestSteerPolicyReachesActiveTurn(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		s.post(t, "/runs", StartRequest{Text: "long job"}) //nolint:errcheck // steering asserted below
+		s.post(t, "/bonnie/v1/runs", StartRequest{Text: "long job"}) //nolint:errcheck // steering asserted below
 	}()
 	<-started
 
-	resp, run := s.post(t, "/runs/steer-me", SendRequest{
+	resp, run := s.post(t, "/bonnie/v1/runs/steer-me", SendRequest{
 		Text: "actually, eu-west-1", TurnPolicy: channel.PolicySteer,
 	})
 	if resp.StatusCode != http.StatusOK {
@@ -573,14 +573,14 @@ func TestQueuePolicySerialises(t *testing.T) {
 
 	firstDone := make(chan RunResponse, 1)
 	go func() {
-		_, run := s.post(t, "/runs", StartRequest{Text: "first"})
+		_, run := s.post(t, "/bonnie/v1/runs", StartRequest{Text: "first"})
 		firstDone <- run
 	}()
 	<-started
 
 	secondDone := make(chan RunResponse, 1)
 	go func() {
-		_, run := s.post(t, "/runs/queue-me", SendRequest{
+		_, run := s.post(t, "/bonnie/v1/runs/queue-me", SendRequest{
 			Text: "second", TurnPolicy: channel.PolicyQueue,
 		})
 		secondDone <- run
@@ -614,7 +614,7 @@ func TestConcurrentRunsAreRaceClean(t *testing.T) {
 	for i := range 8 {
 		wg.Go(func() {
 			address := fmt.Sprintf("slack:C1/T%d", i)
-			resp, run := s.post(t, "/runs", StartRequest{Address: address, Text: "hi"})
+			resp, run := s.post(t, "/bonnie/v1/runs", StartRequest{Address: address, Text: "hi"})
 			if resp.StatusCode != http.StatusOK {
 				t.Errorf("status = %d", resp.StatusCode)
 				return
@@ -633,7 +633,7 @@ func TestPrincipalIsCarried(t *testing.T) {
 	t.Parallel()
 	s := newTestServer(t, &stubAgent{turns: []*kit.TurnResult{{Response: "ok"}}})
 
-	_, run := s.post(t, "/runs", StartRequest{
+	_, run := s.post(t, "/bonnie/v1/runs", StartRequest{
 		Text: "hi",
 		Auth: &channel.Principal{Authenticator: "test", Kind: "user", ID: "u-1"},
 	})
@@ -665,19 +665,19 @@ func TestRebindStartsAFreshConversation(t *testing.T) {
 	}})
 	ctx := context.Background()
 
-	_, first := s.post(t, "/runs", StartRequest{Address: "slack:C1/T1", Text: "hi"})
+	_, first := s.post(t, "/bonnie/v1/runs", StartRequest{Address: "slack:C1/T1", Text: "hi"})
 
 	if err := s.channel.Rebind(ctx, "slack:C1/T1", "fresh-run"); err != nil {
 		t.Fatalf("Rebind: %v", err)
 	}
 
-	_, after := s.post(t, "/runs", StartRequest{Address: "slack:C1/T1", Text: "start over"})
+	_, after := s.post(t, "/bonnie/v1/runs", StartRequest{Address: "slack:C1/T1", Text: "start over"})
 	if after.RunID != "fresh-run" {
 		t.Fatalf("after Rebind the address resolved to %q, want fresh-run", after.RunID)
 	}
 
 	// The old run keeps its history and is still reachable by ID.
-	resp, old := s.get(t, "/runs/"+first.RunID)
+	resp, old := s.get(t, "/bonnie/v1/runs/"+first.RunID)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200 — Rebind destroyed the old run", resp.StatusCode)
 	}
@@ -690,7 +690,7 @@ func TestMalformedBodyIs400(t *testing.T) {
 	t.Parallel()
 	s := newTestServer(t, &stubAgent{})
 
-	resp, err := http.Post(s.URL+"/runs", "application/json", strings.NewReader("{not json"))
+	resp, err := http.Post(s.URL+"/bonnie/v1/runs", "application/json", strings.NewReader("{not json"))
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
@@ -753,7 +753,7 @@ func TestUnknownTurnPolicyIs400(t *testing.T) {
 	t.Parallel()
 	ts := newTestServer(t, &stubAgent{})
 
-	resp, _ := ts.post(t, "/runs", StartRequest{
+	resp, _ := ts.post(t, "/bonnie/v1/runs", StartRequest{
 		Address:    "addr-policy",
 		Text:       "hello",
 		TurnPolicy: channel.TurnPolicy("steer "),
@@ -796,7 +796,7 @@ func TestStreamCatchUpPastTheBacklog(t *testing.T) {
 		}
 	}
 
-	events := readStream(t, ts, "/runs/catch-up/stream?cursor=0", 18)
+	events := readStream(t, ts, "/bonnie/v1/runs/catch-up/stream?cursor=0", 18)
 	if len(events) != 18 {
 		t.Fatalf("read %d events, want the full 18-event history (6 turns × running, response, completed)", len(events))
 	}

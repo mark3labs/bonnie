@@ -15,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mark3labs/bonnie/channel"
 	bonniehttp "github.com/mark3labs/bonnie/channel/http"
 	"github.com/mark3labs/bonnie/runtime"
 	"github.com/mark3labs/bonnie/sandbox"
@@ -138,14 +139,28 @@ func (a *Agent) Run(ctx context.Context) error {
 	runner := runtime.NewRunner(journal, factory)
 
 	// One mux carries every channel: the HTTP transport always, then
-	// whatever an option added.
-	mux := http.NewServeMux()
-	mount(mux, bonniehttp.New(runner))
+	// whatever an option added. The others are built first so the HTTP
+	// channel's info route can name them, and each is refused a route in
+	// the framework's namespace before anything is served.
+	var channels []Channel
 	for _, build := range c.channels {
 		ch, err := build(runner)
 		if err != nil {
 			return err
 		}
+		if err := refuseReserved(ch); err != nil {
+			return err
+		}
+		channels = append(channels, ch)
+	}
+	info := bonniehttp.Info{Agent: c.name, Channels: []string{"http"}}
+	for _, ch := range channels {
+		info.Channels = append(info.Channels, ch.Name())
+	}
+
+	mux := http.NewServeMux()
+	mount(mux, bonniehttp.New(runner, bonniehttp.WithInfo(info)))
+	for _, ch := range channels {
 		mount(mux, ch)
 	}
 
@@ -443,4 +458,17 @@ func mount(mux *http.ServeMux, ch Channel) {
 			handler(w, r, ch)
 		})
 	}
+}
+
+// refuseReserved rejects a channel that wants a route in the framework's
+// namespace. The error names the channel and the path, which a mux panic
+// would not; and it is returned before the listener opens, so the operator
+// reads it instead of a client.
+func refuseReserved(ch Channel) error {
+	for _, rt := range ch.Routes() {
+		if strings.HasPrefix(rt.Path, channel.ReservedPathPrefix) {
+			return fmt.Errorf("%w: channel %q mounts %s %s", channel.ErrReservedPath, ch.Name(), rt.Method, rt.Path)
+		}
+	}
+	return nil
 }

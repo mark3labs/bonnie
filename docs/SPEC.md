@@ -440,7 +440,7 @@ result events, so one call does not render as duplicate transcript lines.
 **TUI restart.** A second defect had the same symptom: a TUI that reopened an
 existing address learned its run ID only after the first turn, so it opened the
 event stream too late and missed every tool and reasoning event of that turn.
-The channel now exposes `GET /addresses/{address}` — a read-only lookup that
+The channel now exposes `GET /bonnie/v1/addresses/{address}` — a read-only lookup that
 returns the bound run ID and its current journal cursor, and creates nothing on
 a miss (the From/Attach rule of the HTTP adapter, applied to addresses). The
 TUI resolves the address at startup and opens the stream from the served
@@ -725,7 +725,7 @@ streams, live and mid-replay. Without the fix the live case leaks 40.
 **A read of an unknown run grew the journal for ever.** `FileJournal.run`
 created the in-memory handle for any ID it was asked about, and nothing ever
 deleted one. A server reachable from outside answers 404 to
-`GET /runs/<invented-id>` and paid a permanent map entry for each one, so an
+`GET /bonnie/v1/runs/<invented-id>` and paid a permanent map entry for each one, so an
 ID scan was unbounded memory growth with no run behind it. Reads went
 through `readRun`, which threw its probe handle away when the run did not
 exist and adopted it when it did. **T-025 deleted the whole mechanism**:

@@ -10,13 +10,20 @@
 //
 // # Routes
 //
-//	POST /runs                 start a run, or resolve an address to one
-//	GET  /addresses/{address}  look up an address without creating a run
-//	GET  /runs/{id}            report a run's durable state
-//	POST /runs/{id}            send a message to an existing run
-//	POST /runs/{id}/respond    answer a suspended run
-//	POST /runs/{id}/cancel     stop the turn a run is executing
-//	GET  /runs/{id}/stream     NDJSON event stream, resumable with ?cursor=
+// Every route lives under [channel.APIPrefix], `/bonnie/v1`:
+//
+//	GET  /bonnie/v1/health               liveness, no auth, no run needed
+//	GET  /bonnie/v1/info                 agent name, BONNIE version, channels
+//	POST /bonnie/v1/runs                 start a run, or resolve an address to one
+//	GET  /bonnie/v1/addresses/{address}  look up an address without creating a run
+//	GET  /bonnie/v1/runs/{id}            report a run's durable state
+//	POST /bonnie/v1/runs/{id}            send a message to an existing run
+//	POST /bonnie/v1/runs/{id}/respond    answer a suspended run
+//	POST /bonnie/v1/runs/{id}/cancel     stop the turn a run is executing
+//	GET  /bonnie/v1/runs/{id}/stream     NDJSON event stream, resumable with ?cursor=
+//
+// The prefix is the framework's reserved namespace: the host refuses any
+// other channel a route under `/bonnie/`, so nothing can shadow these.
 //
 // # From versus Attach
 //
@@ -33,6 +40,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"runtime/debug"
 	"strconv"
 
 	"github.com/mark3labs/bonnie/channel"
@@ -46,6 +54,7 @@ type Channel struct {
 	core   *chat.Core
 	policy channel.TurnPolicy
 	idGen  []chat.CoreOption
+	info   Info
 }
 
 var (
@@ -68,6 +77,32 @@ func WithIDGenerator(fn func() string) Option {
 	return func(c *Channel) { c.idGen = append(c.idGen, chat.WithIDGenerator(fn)) }
 }
 
+// WithInfo sets what `GET /bonnie/v1/info` reports. The host fills it in
+// once every channel is built, which is the first moment the channel list is
+// known. An empty Version is replaced by the BONNIE module version from the
+// binary's build info.
+func WithInfo(info Info) Option {
+	return func(c *Channel) { c.info = info }
+}
+
+// Info is the body of `GET /bonnie/v1/info`: enough for a client to say what
+// it is talking to, and nothing an operator would call a secret.
+type Info struct {
+	// Agent is the agent's name, when the host has one.
+	Agent string `json:"agent,omitempty"`
+	// Version is the BONNIE version the server was built with.
+	Version string `json:"version"`
+	// Channels lists the names of every mounted channel, the HTTP channel
+	// included.
+	Channels []string `json:"channels"`
+}
+
+// healthResponse is the body of `GET /bonnie/v1/health`.
+type healthResponse struct {
+	OK     bool   `json:"ok"`
+	Status string `json:"status"`
+}
+
 // New returns an HTTP channel over a runner.
 func New(r *runtime.Runner, opts ...Option) *Channel {
 	c := &Channel{policy: channel.PolicySteer}
@@ -75,22 +110,54 @@ func New(r *runtime.Runner, opts ...Option) *Channel {
 		opt(c)
 	}
 	c.core = chat.NewCore(r, c.policy, c.idGen...)
+	if c.info.Version == "" {
+		c.info.Version = moduleVersion()
+	}
+	if len(c.info.Channels) == 0 {
+		c.info.Channels = []string{c.Name()}
+	}
 	return c
+}
+
+// moduleVersion is the BONNIE version compiled into this binary, read from
+// the module's build info. A binary built from a checkout reports "(devel)".
+func moduleVersion() string {
+	bi, ok := debug.ReadBuildInfo()
+	if !ok {
+		return "unknown"
+	}
+	const path = "github.com/mark3labs/bonnie"
+	if bi.Main.Path == path {
+		return bi.Main.Version
+	}
+	for _, dep := range bi.Deps {
+		if dep.Path == path {
+			if dep.Replace != nil && dep.Replace.Version != "" {
+				return dep.Replace.Version
+			}
+			return dep.Version
+		}
+	}
+	return "unknown"
 }
 
 // Name implements [channel.Channel].
 func (c *Channel) Name() string { return "http" }
 
-// Routes implements [channel.Channel].
+// Routes implements [channel.Channel]. Every path is under
+// [channel.APIPrefix].
 func (c *Channel) Routes() []channel.Route {
+	p := channel.APIPrefix
 	return []channel.Route{
-		{Method: http.MethodPost, Path: "/runs", Handler: c.handleStart},
-		{Method: http.MethodGet, Path: "/addresses/{address}", Handler: c.handleAddress},
-		{Method: http.MethodGet, Path: "/runs/{id}", Handler: c.handleGet},
-		{Method: http.MethodPost, Path: "/runs/{id}", Handler: c.handleSend},
-		{Method: http.MethodPost, Path: "/runs/{id}/respond", Handler: c.handleRespond},
-		{Method: http.MethodPost, Path: "/runs/{id}/cancel", Handler: c.handleCancel},
-		{Method: http.MethodGet, Path: "/runs/{id}/stream", Handler: c.handleStream},
+		{Method: http.MethodGet, Path: p + "/health", Handler: c.handleHealth},
+		{Method: http.MethodGet, Path: p + "/info", Handler: c.handleInfo},
+		{Method: http.MethodPost, Path: p + "/runs", Handler: c.handleStart},
+		{Method: http.MethodGet, Path: p + "/addresses/{address}", Handler: c.handleAddress},
+		{Method: http.MethodGet, Path: p + "/runs/{id}", Handler: c.handleGet},
+		{Method: http.MethodPost, Path: p + "/runs/{id}", Handler: c.handleSend},
+		{Method: http.MethodPost, Path: p + "/runs/{id}/respond", Handler: c.handleRespond},
+		{Method: http.MethodPost, Path: p + "/runs/{id}/cancel", Handler: c.handleCancel},
+		{Method: http.MethodGet, Path: p + "/runs/{id}/stream", Handler: c.handleStream},
 	}
 }
 
@@ -204,6 +271,18 @@ func runResponse(run *runtime.Run) RunResponse {
 // ---------------------------------------------------------------------------
 // Handlers
 // ---------------------------------------------------------------------------
+
+// handleHealth answers before any run exists and without touching the
+// journal: it says the process is up and routing, which is what a deployment
+// probe asks. It is deliberately not a journal check — a probe that fails
+// when the disk is slow would restart a server that is doing its job.
+func (c *Channel) handleHealth(w http.ResponseWriter, _ *http.Request, _ channel.Inbound) {
+	writeJSON(w, http.StatusOK, healthResponse{OK: true, Status: "ready"})
+}
+
+func (c *Channel) handleInfo(w http.ResponseWriter, _ *http.Request, _ channel.Inbound) {
+	writeJSON(w, http.StatusOK, c.info)
+}
 
 func (c *Channel) handleStart(w http.ResponseWriter, r *http.Request, in channel.Inbound) {
 	var req StartRequest

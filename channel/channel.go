@@ -23,6 +23,28 @@ import (
 	"github.com/mark3labs/bonnie/runtime"
 )
 
+// ReservedPathPrefix is the URL namespace BONNIE keeps for itself. The
+// framework's own API — the HTTP channel, health, info — is mounted under
+// [APIPrefix]; every other channel is refused a route that starts with this
+// prefix, so a custom adapter cannot shadow the framework or collide with a
+// route a later BONNIE version adds. eve makes the same promise with
+// `/eve/v1/*`.
+//
+// The webhook paths of the chat adapters (`/slack/events`, `/telegram`) are
+// not framework API: they are configured in the platform's console and stay
+// where they are.
+const ReservedPathPrefix = "/bonnie/"
+
+// APIPrefix is where the framework HTTP API lives. The version segment is
+// the wire contract: a breaking change to a route or a body bumps it, and
+// clients built against `v1` keep working until `v1` is removed.
+const APIPrefix = "/bonnie/v1"
+
+// ErrReservedPath is returned when a channel that is not the framework's
+// asks for a route under [ReservedPathPrefix]. The host refuses to serve
+// rather than let the mux decide who wins.
+var ErrReservedPath = errors.New("bonnie: channel: route under the reserved /bonnie/ namespace")
+
 // TurnPolicy decides what happens when a message arrives while a turn is
 // already running for the same address.
 //

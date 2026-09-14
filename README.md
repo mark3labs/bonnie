@@ -143,7 +143,7 @@ func main() {
 
 ```bash
 # talk to it over HTTP
-curl -s localhost:8080/runs -d '{"text":"What are you?"}'
+curl -s localhost:8080/bonnie/v1/runs -d '{"text":"What are you?"}'
 
 # or talk to it in the terminal — one durable conversation, live streamed
 bonnie chat --addr :8080
@@ -399,21 +399,23 @@ http.ListenAndServe(":8080", bonniehttp.New(runner).Handler())
 
 | Route | Does |
 |---|---|
-| `POST /runs` | start a run, or route to the one serving an address |
-| `GET /runs/{id}` | report a run's durable state |
-| `POST /runs/{id}` | send a message to an existing run |
-| `POST /runs/{id}/respond` | answer a parked run |
-| `POST /runs/{id}/cancel` | stop the turn in flight |
-| `GET /runs/{id}/stream` | NDJSON event stream, resumable via `?cursor=` |
+| `GET /bonnie/v1/health` | liveness: `{"ok":true,"status":"ready"}`, no run needed |
+| `GET /bonnie/v1/info` | agent name, BONNIE version, mounted channels |
+| `POST /bonnie/v1/runs` | start a run, or route to the one serving an address |
+| `GET /bonnie/v1/runs/{id}` | report a run's durable state |
+| `POST /bonnie/v1/runs/{id}` | send a message to an existing run |
+| `POST /bonnie/v1/runs/{id}/respond` | answer a parked run |
+| `POST /bonnie/v1/runs/{id}/cancel` | stop the turn in flight |
+| `GET /bonnie/v1/runs/{id}/stream` | NDJSON event stream, resumable via `?cursor=` |
 
 ```bash
 # Start a run. It parks on a question.
-curl -s localhost:8080/runs -d '{"text":"Deploy the app. Ask me the region first."}'
+curl -s localhost:8080/bonnie/v1/runs -d '{"text":"Deploy the app. Ask me the region first."}'
 # {"run_id":"run-e8b3fa...","state":"waiting",
 #  "suspend":{"kind":"question","prompt":"Which region?"}}
 
 # Answer it.
-curl -s localhost:8080/runs/run-e8b3fa.../respond \
+curl -s localhost:8080/bonnie/v1/runs/run-e8b3fa.../respond \
   -d '{"responses":[{"text":"eu-west-1"}]}'
 # {"run_id":"run-e8b3fa...","state":"completed","response":"Deployed to eu-west-1."}
 ```
@@ -424,10 +426,10 @@ Chat platforms have threads, not run IDs. Pass an `address` and BONNIE keeps
 the mapping **in the journal**, so a restart does not orphan a conversation:
 
 ```bash
-curl -s localhost:8080/runs -d '{"address":"slack:C123/T456","text":"hi"}'
+curl -s localhost:8080/bonnie/v1/runs -d '{"address":"slack:C123/T456","text":"hi"}'
 ```
 
-The same address always resolves to the same run. `POST /runs/{id}` is the
+The same address always resolves to the same run. `POST /bonnie/v1/runs/{id}` is the
 opposite: it targets one exact run and returns `404` rather than creating one.
 
 ## Chat channels
@@ -567,14 +569,14 @@ for ev := range events {
 Or over HTTP, one JSON object per line:
 
 ```bash
-curl -sN localhost:8080/runs/run-1/stream
+curl -sN localhost:8080/bonnie/v1/runs/run-1/stream
 ```
 
 Every event carries a monotonic `seq`. If a client drops, reconnect with the
 last one it saw and lose nothing:
 
 ```bash
-curl -sN "localhost:8080/runs/run-1/stream?cursor=12"
+curl -sN "localhost:8080/bonnie/v1/runs/run-1/stream?cursor=12"
 ```
 
 ## Steer and cancel
