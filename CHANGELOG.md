@@ -18,6 +18,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Idempotent start and stable error codes.** `POST /bonnie/v1/runs`
+  accepts `operation_id`: the same ID from the same authenticated principal
+  returns the run the first call created instead of dispatching again (it
+  is an entry in the journalled address map, so it survives a restart).
+  Without a principal it is refused. Every error body carries a stable
+  `code` beside the message — `run_not_found`, `run_retired`,
+  `run_owned_elsewhere`, `compaction_unsupported`, `bad_request`, and
+  friends — so a client switches on it instead of parsing prose. (T-031)
 - **Session controls.** `channel.SessionRef` gains `Reset`, `Clear`, and
   `Compact`; the runner implements them once (`runtime/controls.go`) and
   every transport shares them. `POST /bonnie/v1/runs/{id}/reset` retires a

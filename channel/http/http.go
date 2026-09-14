@@ -214,6 +214,13 @@ type StartRequest struct {
 	// Address is a channel-local conversation key. When set, the run is
 	// resolved through it, and created on first use.
 	Address string `json:"address,omitempty"`
+	// OperationID makes the start idempotent: the same operation ID from
+	// the same authenticated principal resolves to the run the first call
+	// created, instead of creating another. A client that times out and
+	// retries gets one run, not two. It needs an authenticated principal —
+	// an idempotency key with no owner would let one caller read another's
+	// run by guessing the key.
+	OperationID string `json:"operation_id,omitempty"`
 	// Text is the message to send.
 	Text string `json:"text"`
 	// Title names the run in operator-facing listings.
@@ -265,10 +272,37 @@ type usage struct {
 	OutputTokens int64 `json:"output_tokens,omitempty"`
 }
 
-// ErrorResponse is the body of every non-2xx reply.
+// ErrorResponse is the body of every non-2xx reply. Code is the stable
+// machine-readable one; Error is the human-readable one and may change
+// wording between versions. A client switches on Code.
 type ErrorResponse struct {
 	Error string `json:"error"`
+	// Code is one of the Err* constants of this package, stable across
+	// versions: "run_not_found", "invalid_run_id", "run_not_waiting",
+	// "run_active", "run_not_active", "run_retired",
+	// "run_owned_elsewhere", "compaction_unsupported",
+	// "unknown_turn_policy", "client_closed", "bad_request",
+	// "too_large", "internal".
+	Code string `json:"code"`
 }
+
+// The codes writeError maps to. They are values, not an enum, so the JSON
+// body never carries a Go type name.
+const (
+	errNotFound           = "run_not_found"
+	errInvalidID          = "invalid_run_id"
+	errNotWaiting         = "run_not_waiting"
+	errActive             = "run_active"
+	errNotActive          = "run_not_active"
+	errRetired            = "run_retired"
+	errOwnedElsewhere     = "run_owned_elsewhere"
+	errCompactUnsupported = "compaction_unsupported"
+	errUnknownPolicy      = "unknown_turn_policy"
+	errClientClosed       = "client_closed"
+	errBadRequest         = "bad_request"
+	errTooLarge           = "too_large"
+	errInternal           = "internal"
+)
 
 func runResponse(run *runtime.Run) RunResponse {
 	out := RunResponse{
@@ -307,10 +341,22 @@ func (c *Channel) handleStart(w http.ResponseWriter, r *http.Request, in channel
 	if !decode(w, r, &req) {
 		return
 	}
+	if req.OperationID != "" && req.Auth == nil {
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{
+			Error: "operation_id needs an authenticated principal: an idempotency key with no owner is a way to read someone else's run",
+			Code:  errBadRequest,
+		})
+		return
+	}
 
 	var sess channel.SessionRef
 	if req.Address != "" {
 		sess = in.From(req.Address)
+	} else if req.OperationID != "" {
+		// The address map is the idempotency store: a namespaced key the
+		// principal owns. Resolving through it is create-once by the same
+		// rule every address follows, and the binding survives a restart.
+		sess = in.From(operationAddress(req.Auth, req.OperationID))
 	} else {
 		sess = in.From(c.core.NewID())
 	}
@@ -336,7 +382,7 @@ func (c *Channel) handleAddress(w http.ResponseWriter, r *http.Request, _ channe
 		return
 	}
 	if !ok {
-		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "address is not bound"})
+		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "address is not bound", Code: errNotFound})
 		return
 	}
 	cursor := 0
@@ -449,7 +495,7 @@ func (c *Channel) handleStream(w http.ResponseWriter, r *http.Request, in channe
 	if raw := r.URL.Query().Get("cursor"); raw != "" {
 		n, err := strconv.Atoi(raw)
 		if err != nil || n < 0 {
-			writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "cursor must be a non-negative integer"})
+			writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "cursor must be a non-negative integer", Code: errBadRequest})
 			return
 		}
 		cursor = n
@@ -510,10 +556,10 @@ func decode(w http.ResponseWriter, r *http.Request, v any) bool {
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRequestBody)).Decode(v); err != nil {
 		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 			writeJSON(w, http.StatusRequestEntityTooLarge,
-				ErrorResponse{Error: fmt.Sprintf("request body is larger than %d bytes", maxRequestBody)})
+				ErrorResponse{Error: fmt.Sprintf("request body is larger than %d bytes", maxRequestBody), Code: errTooLarge})
 			return false
 		}
-		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "malformed JSON body: " + err.Error()})
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "malformed JSON body: " + err.Error(), Code: errBadRequest})
 		return false
 	}
 	return true
@@ -525,30 +571,47 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-// writeError maps a runtime sentinel to a status code. Anything unrecognised
-// is a 500: guessing would hide a real fault behind a plausible 4xx.
+// writeError maps a runtime sentinel to a status code and a stable code.
+// Anything unrecognised is a 500: guessing would hide a real fault behind a
+// plausible 4xx.
 func writeError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, runtime.ErrRunNotFound):
-		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: err.Error()})
+		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: err.Error(), Code: errNotFound})
 	case errors.Is(err, runtime.ErrInvalidRunID):
-		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
-	case errors.Is(err, runtime.ErrNotWaiting),
-		errors.Is(err, runtime.ErrRunActive),
-		errors.Is(err, runtime.ErrRunNotActive),
-		errors.Is(err, runtime.ErrRunRetired),
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error(), Code: errInvalidID})
+	case errors.Is(err, runtime.ErrNotWaiting):
+		writeJSON(w, http.StatusConflict, ErrorResponse{Error: err.Error(), Code: errNotWaiting})
+	case errors.Is(err, runtime.ErrRunActive):
+		writeJSON(w, http.StatusConflict, ErrorResponse{Error: err.Error(), Code: errActive})
+	case errors.Is(err, runtime.ErrRunNotActive):
+		writeJSON(w, http.StatusConflict, ErrorResponse{Error: err.Error(), Code: errNotActive})
+	case errors.Is(err, runtime.ErrRunRetired):
+		writeJSON(w, http.StatusConflict, ErrorResponse{Error: err.Error(), Code: errRetired})
+	case errors.Is(err, runtime.ErrRunOwnedElsewhere):
 		// Another process owns this run's journal. That is a conflict
 		// over who may write, not a fault in this server, and a client
 		// that reads 500 would retry a request no retry can fix.
-		errors.Is(err, runtime.ErrRunOwnedElsewhere):
-		writeJSON(w, http.StatusConflict, ErrorResponse{Error: err.Error()})
+		writeJSON(w, http.StatusConflict, ErrorResponse{Error: err.Error(), Code: errOwnedElsewhere})
 	case errors.Is(err, runtime.ErrCompactionUnsupported):
-		writeJSON(w, http.StatusNotImplemented, ErrorResponse{Error: err.Error()})
+		writeJSON(w, http.StatusNotImplemented, ErrorResponse{Error: err.Error(), Code: errCompactUnsupported})
 	case errors.Is(err, channel.ErrUnknownTurnPolicy):
-		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error(), Code: errUnknownPolicy})
 	case errors.Is(err, context.Canceled):
-		writeJSON(w, 499, ErrorResponse{Error: err.Error()})
+		writeJSON(w, 499, ErrorResponse{Error: err.Error(), Code: errClientClosed})
 	default:
-		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: err.Error()})
+		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: err.Error(), Code: errInternal})
 	}
+}
+
+// opPrefix namespaces idempotency keys inside the address map, so an
+// operation ID cannot collide with a channel-local address a client chose.
+const opPrefix = "operation/"
+
+// operationAddress is the address-map key of one idempotent start: the
+// principal's identity, the fixed prefix, and the caller's operation ID. A
+// key another principal chose cannot resolve to this one's run, which is
+// the whole security property.
+func operationAddress(p *channel.Principal, operationID string) string {
+	return opPrefix + p.Authenticator + "/" + p.ID + "/" + operationID
 }

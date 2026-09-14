@@ -1042,7 +1042,7 @@ edge cases. Consult them for **design questions**, not for implementation.
 | *deferred* | `defineEval`, `eve eval` | [Evals](https://eve.dev/docs/evals/overview) |
 | `channel/http` under `/bonnie/v1` (T-030, shipped) | `/eve/v1/*`, reserved for the framework | [eve channel](https://eve.dev/docs/channels/eve) |
 | `runtime.Input{Text, Context, Title, Origin}` + `chat.Turn` (T-028, shipped) | `message` + per-turn `context` / `clientContext` | [Custom Channels](https://eve.dev/docs/channels/custom) |
-| *T-031* | `operationId` create-once, `code` on errors | [eve channel](https://eve.dev/docs/channels/eve) |
+| *T-031* — **shipped** | `operationId` create-once, `code` on errors | [eve channel](https://eve.dev/docs/channels/eve) |
 | *T-032* | `reset`, `clear`, `compact`; channel-name prefix on every token — **shipped** | [Custom Channels](https://eve.dev/docs/channels/custom) |
 | *T-033* | `to(channel, target).send`, `receive` (proactive) | [Custom Channels](https://eve.dev/docs/channels/custom) |
 | *T-029* | `githubChannel`, `<github_context>`, PR diff in context | [GitHub](https://eve.dev/docs/channels/github) |

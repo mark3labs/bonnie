@@ -20,7 +20,6 @@ the known risks, and the invariants every task must preserve.
 | ID | Title | Priority | Size | Blocks |
 |---|---|---|---|---|
 | T-029 | GitHub channel: issues, PRs, and review threads become conversations | P2 | L | — |
-| T-031 | Idempotent start and stable error codes on the HTTP channel | P2 | S | — |
 | T-033 | Cross-channel hand-off and proactive sessions | P3 | M | — |
 | T-027 | goreleaser publishes a commit list, not the release notes | P2 | S | — |
 | T-026 | microsandbox `Open` races its own create under load | P2 | S | — |
@@ -37,6 +36,7 @@ the known risks, and the invariants every task must preserve.
 
 | ID | Delivered | Where |
 |---|---|---|
+| T-031 | Idempotent start (`operation_id`, namespaced per authenticated principal, refused anonymous) and a stable `code` on every error body, listed in `docs/CHANNELS.md` | `channel/http/http.go`, `channel/http/errors_test.go` |
 | T-032 | Session controls: `Reset`/`Clear`/`Compact` on `SessionRef` and the HTTP channel, `RunRetired` (the only non-revivable terminal state), `RecordClear` (an append-only forget), `/new` in every chat surface, the core owns the address prefix with the channel's name | `runtime/controls.go`, `runtime/session.go`, `channel/channel.go`, `channel/chat/chat.go`, `channeltest/` |
 | T-028 | Normalised turn: `runtime.Input{Context, Title, Origin}`, `RecordContext` journalled and shown to the model through `OnContextPrepare` for one turn only, `chat.Turn` with kinds, adapters set kind/title/context, HTTP accepts `context`/`kind`, `runs list` shows the title | `runtime/context.go`, `channel/chat/chat.go`, `channel/{slack,discord,telegram}`, `channeltest/`, `docs/SPEC.md` §3.7 |
 | T-030 | The HTTP channel serves under `/bonnie/v1`; `/bonnie/` is reserved and a channel that mounts there is refused at startup by name; `GET /bonnie/v1/health` and `GET /bonnie/v1/info`; `bonnie.WithName` | `channel/channel.go`, `channel/http/http.go`, `run.go`, `namespace_test.go`, `cmd/bonnie/tui/client.go` |
@@ -1522,9 +1522,13 @@ the framework API.
 **Priority** P2 · **Size** S · **Prior art** eve's `operationId` and
 `session_not_active`
 
+**SHIPPED.** One note against the plan: the TUI already switched on the HTTP
+status, which is stable, so no change there; `code` is for clients that read
+bodies.
+
 ### Why
 
-`POST /runs` (soon `/bonnie/v1/runs`) with no `address` creates a run on
+`POST /bonnie/v1/runs` (soon `/bonnie/v1/runs`) with no `address` creates a run on
 every call. A client that times out and retries gets two runs and two model
 turns. eve accepts an `operationId`: the same ID from the same authenticated
 principal returns the existing session instead of dispatching again. BONNIE's
@@ -1551,12 +1555,12 @@ parsing prose. eve returns a stable `code` next to the message.
 
 ### Acceptance criteria
 
-- [ ] Two `POST` starts with the same `operation_id` and principal return
+- [x] Two `POST` starts with the same `operation_id` and principal return
       the same run ID and produce one model turn (a `fakeAgent` call count)
-- [ ] The same `operation_id` under a different principal is a different run
-- [ ] Every non-2xx body has a non-empty `code`, asserted by a table test
+- [x] The same `operation_id` under a different principal is a different run
+- [x] Every non-2xx body has a non-empty `code`, asserted by a table test
       over `writeError`
-- [ ] `docs/CHANNELS.md` lists the codes
+- [x] `docs/CHANNELS.md` lists the codes
 
 ---
 
