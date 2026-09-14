@@ -462,11 +462,7 @@ func instructions(m *agent.Manifest) string {
 // the manifest's workspace, or workspace/ when the key is absent — the
 // directory bonnie init scaffolds.
 func workspaceDir(m *agent.Manifest) string {
-	rel := "workspace"
-	if m != nil && m.Workspace != "" {
-		rel = m.Workspace
-	}
-	abs, err := filepath.Abs(filepath.Clean(rel))
+	abs, err := filepath.Abs(m.WorkspaceDir(""))
 	if err != nil {
 		return ""
 	}

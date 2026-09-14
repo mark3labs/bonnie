@@ -296,8 +296,19 @@ func (c *Core) Attach(runID string) *Ref {
 var _ channel.SessionRef = (*Ref)(nil)
 
 // RunID implements [channel.SessionRef].
+//
+// A reserved run is not addressable from a transport. BONNIE keeps its own
+// bookkeeping — the address map — in a run under
+// [runtime.ReservedRunPrefix], and that run has a state, so Attach used to
+// accept it and a caller who knew the prefix could run a model turn inside
+// the store every address binding lives in. Reserved runs stay BONNIE's
+// (docs/SPEC.md §8, invariant 8), so the answer is the same one an unknown
+// ID gets.
 func (s *Ref) RunID(ctx context.Context) (string, error) {
 	if !s.create {
+		if runtime.IsReservedRun(s.runID) {
+			return "", fmt.Errorf("%w: %s is reserved for BONNIE's own bookkeeping", runtime.ErrRunNotFound, s.runID)
+		}
 		// Attach: the run must already exist.
 		if _, err := s.core.runner.Journal().State(ctx, s.runID); err != nil {
 			return "", err
@@ -460,6 +471,51 @@ func SplitText(s string, limit int, maxParts int) []string {
 }
 
 const truncationNote = "\n\n… message truncated"
+
+// DeliveryText renders the boundary of a turn for a person, not for a model:
+// the answer, the question the run parked on, a cancellation, or the reason
+// it failed. answerHint tells the reader how to answer a parked run, and is
+// the only part that differs between transports — a Slack thread, a Telegram
+// chat, and a Discord slash command each take an answer their own way.
+//
+// It lives here because all three adapters had a byte-identical copy. The
+// rule for what a person sees at the end of a turn is one rule, and a change
+// to it must not reach two transports out of three.
+func DeliveryText(run *runtime.Run, err error, answerHint string) string {
+	switch {
+	case err != nil:
+		return "the run failed: " + FirstLine(err.Error())
+	case run == nil:
+		return ""
+	case run.State == runtime.RunWaiting && run.Suspend != nil:
+		if answerHint == "" {
+			return run.Suspend.Prompt
+		}
+		return run.Suspend.Prompt + "\n\n" + answerHint
+	case run.State == runtime.RunCancelled:
+		return "(cancelled)"
+	case run.Response != "":
+		return run.Response
+	default:
+		return ""
+	}
+}
+
+// errorLineLimit caps the error text a chat reply carries. A stack of
+// wrapped context helps an operator reading the journal; it only buries the
+// answer in a chat window.
+const errorLineLimit = 200
+
+// FirstLine is the first line of an error, capped, for a chat reply.
+func FirstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = s[:i]
+	}
+	if len(s) > errorLineLimit {
+		s = s[:errorLineLimit]
+	}
+	return s
+}
 
 // NewRunID returns a run ID that is safe as a file name, which is what the
 // file journal needs.

@@ -31,6 +31,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -369,8 +370,18 @@ func attachedRunID(w http.ResponseWriter, r *http.Request, in channel.Inbound) (
 // Encoding helpers
 // ---------------------------------------------------------------------------
 
+// maxRequestBody caps a request body. A turn's text is a message, not a
+// file: the webhook adapters have always capped theirs, and the channel's
+// own routes buffered whatever a client sent until the decoder gave up.
+const maxRequestBody = 1 << 20
+
 func decode(w http.ResponseWriter, r *http.Request, v any) bool {
-	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRequestBody)).Decode(v); err != nil {
+		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
+			writeJSON(w, http.StatusRequestEntityTooLarge,
+				ErrorResponse{Error: fmt.Sprintf("request body is larger than %d bytes", maxRequestBody)})
+			return false
+		}
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "malformed JSON body: " + err.Error()})
 		return false
 	}
@@ -393,7 +404,11 @@ func writeError(w http.ResponseWriter, err error) {
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
 	case errors.Is(err, runtime.ErrNotWaiting),
 		errors.Is(err, runtime.ErrRunActive),
-		errors.Is(err, runtime.ErrRunNotActive):
+		errors.Is(err, runtime.ErrRunNotActive),
+		// Another process owns this run's journal. That is a conflict
+		// over who may write, not a fault in this server, and a client
+		// that reads 500 would retry a request no retry can fix.
+		errors.Is(err, runtime.ErrRunOwnedElsewhere):
 		writeJSON(w, http.StatusConflict, ErrorResponse{Error: err.Error()})
 	case errors.Is(err, channel.ErrUnknownTurnPolicy):
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})

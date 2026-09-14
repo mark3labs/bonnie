@@ -69,7 +69,7 @@ outside. See docs/SANDBOX.md.`,
 	}
 	f := cmd.Flags()
 	f.StringVar(&o.addr, "addr", ":8080", "address to listen on")
-	f.StringVar(&o.journal, "journal", ".bonnie", "journal directory")
+	addJournalFlag(f, &o.journal)
 	f.StringVar(&o.model, "model", "", "model to use, for example anthropic/claude-sonnet-4-5")
 	f.StringVar(&o.prompt, "system-prompt", "", "system prompt override")
 	f.StringVar(&o.sandboxKind, "sandbox", "none", "tool sandbox: none, docker, microsandbox, local, or auto")
@@ -183,13 +183,13 @@ func resolveServe(flags *pflag.FlagSet, o serveOpts) (*serveConfig, error) {
 	}
 
 	cfg := &serveConfig{}
-	var addrSrc, journalSrc, modelSrc, sandboxSrc settingSource
-	cfg.journal, journalSrc = pick("journal", "", ".bonnie")
+	var addrSrc, journalSrc, modelSrc, sandboxSrc, imageSrc settingSource
+	cfg.journal, journalSrc = pick("journal", "", defaultJournalDir)
 	cfg.addr, addrSrc = pick("addr", manifestChannelAddr(manifest), ":8080")
 	cfg.model, modelSrc = pick("model", manifestModel(manifest), "")
 	sb := manifestSandbox(manifest)
 	cfg.sandboxKind, sandboxSrc = pick("sandbox", sb.Kind, "none")
-	cfg.sandboxImage, _ = pick("sandbox-image", sb.Image, "")
+	cfg.sandboxImage, imageSrc = pick("sandbox-image", sb.Image, "")
 	if manifest != nil {
 		cfg.title = manifest.Title
 	}
@@ -201,13 +201,10 @@ func resolveServe(flags *pflag.FlagSet, o serveOpts) (*serveConfig, error) {
 	// process's own directory stays the root.
 	workspaceSrc := srcDefault
 	if manifest != nil {
-		rel := manifest.Workspace
-		if rel != "" {
+		if manifest.Workspace != "" {
 			workspaceSrc = manifestSrc
-		} else {
-			rel = "workspace/"
 		}
-		abs, err := filepath.Abs(filepath.Join(root, filepath.Clean(rel)))
+		abs, err := filepath.Abs(manifest.WorkspaceDir(root))
 		if err != nil {
 			return nil, fmt.Errorf("bonnie: workspace path: %w", err)
 		}
@@ -311,6 +308,9 @@ func resolveServe(flags *pflag.FlagSet, o serveOpts) (*serveConfig, error) {
 		line("model", cfg.model, modelSrc)
 	}
 	line("sandbox", cfg.sandboxKind, sandboxSrc)
+	if cfg.sandboxImage != "" {
+		line("sandbox image", cfg.sandboxImage, imageSrc)
+	}
 	line("network", networkLabel(cfg.network), networkSrc)
 	if cfg.workspace != "" {
 		line("workspace", cfg.workspace, workspaceSrc)
@@ -580,6 +580,12 @@ func hostWorkspaceOptions(workspace string) []kit.Option {
 }
 
 // sandboxProvider maps the flag to a backend.
+//
+// The image reaches every backend that can honour it, and a backend that
+// cannot is refused rather than left to run its default in silence: the
+// manifest says the key "overrides the backend's default image", so
+// accepting it and ignoring it would be the same broken promise a backend
+// makes when it swallows a network policy (docs/SPEC.md §8, invariant 13).
 func sandboxProvider(kind, image string) (sandbox.Provider, error) {
 	switch kind {
 	case "docker":
@@ -597,6 +603,9 @@ func sandboxProvider(kind, image string) (sandbox.Provider, error) {
 		return sandbox.Microsandbox(o...), nil
 
 	case "local":
+		if image != "" {
+			return nil, fmt.Errorf("the local sandbox runs no image: drop sandbox-image, or pick --sandbox docker")
+		}
 		// Say this out loud. A user who picks "local" expecting isolation
 		// gets none, and nothing else in the output would tell them.
 		fmt.Fprintln(os.Stderr,
@@ -607,9 +616,21 @@ func sandboxProvider(kind, image string) (sandbox.Provider, error) {
 	case "auto":
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
+		// Whichever backend auto lands on must run the image the operator
+		// asked for. Building the candidates without it made the image a
+		// setting that worked or not depending on what the host had
+		// installed.
+		var (
+			msb []sandbox.MicrosandboxOption
+			dkr []sandbox.DockerOption
+		)
+		if image != "" {
+			msb = append(msb, sandbox.WithMicrosandboxImage(image))
+			dkr = append(dkr, sandbox.WithDockerImage(image))
+		}
 		// Never auto-select local: falling back from isolation to none must
 		// be a decision someone wrote down.
-		return sandbox.Select(ctx, sandbox.Microsandbox(), sandbox.Docker())
+		return sandbox.Select(ctx, sandbox.Microsandbox(msb...), sandbox.Docker(dkr...))
 
 	default:
 		return nil, fmt.Errorf("unknown sandbox %q: want none, docker, microsandbox, local, or auto", kind)

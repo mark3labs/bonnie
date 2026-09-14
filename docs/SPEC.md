@@ -1,6 +1,6 @@
 # BONNIE MVP Specification
 
-**Status:** `v0.1.0` scope complete, not yet tagged · **Audience:** implementing agent
+**Status:** released through `v0.4.0` · **Audience:** implementing agent
 
 This document is the authoritative specification for BONNIE's first release. It
 records what is built, what must be built, the facts about Kit that the design
@@ -560,9 +560,11 @@ says the sandbox is gone produces a gone record plus the note. A record that
 points at a backend this host no longer uses — BONNIE cannot ask the other
 backend — produces the note only, because nothing verified the loss.
 
-The reconciler is a command, not a background sweep. The sweep in `serve` is
-the complete answer for a long-lived server; the command is the same code an
-operator can run from cron, and it is deliberately the first step.
+The reconciler is a command, not a background sweep. A background sweep in
+`serve` would be the complete answer for a long-lived server; **it does not
+exist yet**, and `README.md` says so. The command is deliberately the first
+step: it is the same code an operator can run from cron, and it is honest
+about what it does not do.
 
 Tests: `runtime/sandbox_record_test.go` (the record survives restore; the
 note is written once; an unverified loss writes no gone record; the record
@@ -658,6 +660,69 @@ to prevent. It now refuses any policy it cannot apply.
 The general lesson is worth keeping: an adapter that compiles and skips is not
 an adapter that works. Three real defects sat behind a green suite because the
 only thing proving them absent was a skip.
+
+### 4.12 RESOLVED — what a read-only audit found
+
+A full-repository audit on 2026-09-14 read every non-test file against the
+invariants. It found no boundary violation and no journal-integrity hole:
+`Record.Payload` is the only source a message is rebuilt from, nothing
+rewrites or reorders records, and `repairTrailingOrphan` still touches the
+tail alone. It found four defects worth recording, all fixed in the same
+commit as this section.
+
+**A stream leaked two goroutines per disconnect.** `Runner.StreamEvents`
+forwarded events on an unbuffered channel. An HTTP client that went away
+between two events left the forwarding goroutine parked on `out <- ev`, and
+the bus subscriber's pump parked behind it: `unsubscribe` closed the
+subscriber, but a goroutine blocked *in* a send never looks at the closed
+flag, which is read before the send and never during it. Every reconnect
+that raced an event cost a server two goroutines and their queued events,
+for the life of the process — and the reconnect path is the one the TUI uses
+most. The stop function now closes a `done` channel that every send selects
+on, in the forwarder, in `replayEvents`, and in the pump. Tests:
+`runtime/stream_leak_test.go`, which counts goroutines around 20 abandoned
+streams, live and mid-replay. Without the fix the live case leaks 40.
+
+**A read of an unknown run grew the journal for ever.** `FileJournal.run`
+created the in-memory handle for any ID it was asked about, and nothing ever
+deleted one. A server reachable from outside answers 404 to
+`GET /runs/<invented-id>` and paid a permanent map entry for each one, so an
+ID scan was unbounded memory growth with no run behind it. Reads now go
+through `readRun`, which throws its probe handle away when the run does not
+exist and adopts it when it does — an existing run still has exactly one
+handle, which is what the flock and the sequence counter require. Test:
+`TestReadsOfUnknownRunsDoNotGrowTheJournal`, plus
+`TestReadOfAKnownRunIsCached` for the half that must not regress.
+
+**Two settings were accepted and ignored** — the failure mode invariants 10
+and 13 exist to prevent, found in two new places:
+
+- `--sandbox-image` reached docker and microsandbox only. `--sandbox auto`
+  built its candidates with no image, so an operator who named one got
+  alpine, silently; `--sandbox local` took an image it cannot run. `auto`
+  now passes the image to every candidate, and `local` refuses one. The old
+  guard test asserted the provider's *name*, so it passed either way; it now
+  asserts the image through the new `sandbox.Imaged` interface, which is
+  also what lets the startup banner name the image in force.
+- Reserved runs were addressable from a transport. `chat.Ref.RunID` accepted
+  any ID with a state, and BONNIE's own address map lives in a run with a
+  state, so a caller who knew `ReservedRunPrefix` could run a model turn
+  inside the store every address binding lives in. `bonnie sandbox prune`
+  listed the same run to operators as "kept". Both now filter. Tests:
+  `TestReservedRunIsNotAddressable`, `TestSandboxPruneHidesReservedRuns`.
+
+**`channel/http` buffered an unbounded request body.** The three webhook
+adapters had always capped theirs at 1 MiB; the channel's own routes had no
+cap. Added, with a 413 that names the limit, plus the missing
+`ErrRunOwnedElsewhere` → 409 mapping: a second server hitting a locked run
+answered 500, which reads as "retry" for a conflict no retry can fix.
+
+The audit also removed `EventBus.Backlog`, which had no caller anywhere
+(§4.8 states `StreamEvents` is the only path), and collapsed three copies of
+the chat delivery text and three copies of the workspace-default rule into
+`chat.DeliveryText` and `Manifest.WorkspaceDir`. One claim had no test in the
+shape §9 demands — a cancelled run continuing in a second process — and now
+has one: `TestCancelledRunContinuesInASecondRunner`.
 
 ---
 
@@ -797,9 +862,13 @@ Any change must preserve these. Each has, or must gain, a test.
 6. **L1 does not import L3.** `runtime/` must not depend on `channel/`.
 7. **Kit opens no session of its own.** `Options.SessionManager` is always set
    before `kit.New` (§3.1).
-8. **Reserved runs stay out of operator listings.** A transport that keeps
-   bookkeeping in the journal uses [`runtime.ReservedRunPrefix`], and anything
-   operator-facing filters with `runtime.IsReservedRun`.
+8. **Reserved runs stay out of operator listings, and off the wire.** A
+   transport that keeps bookkeeping in the journal uses
+   [`runtime.ReservedRunPrefix`], anything operator-facing filters with
+   `runtime.IsReservedRun` (`bonnie runs list`, `bonnie sandbox prune`), and
+   no transport may attach to one: `chat.Ref.RunID` answers a reserved ID
+   with `ErrRunNotFound`. Guard tests: `TestReservedRunIsNotAddressable`,
+   `TestSandboxPruneHidesReservedRuns`.
 9. **A sandbox never caches a tool call.** Every `Exec` must really run the
    command. A memoizing backend makes a repeated side effect invisible to the
    model. `TestEveryCallExecutes` enforces this for every adapter.
@@ -816,8 +885,12 @@ of T-017 and join the list now; 11 and 12 land with T-018's generator.
 13. **Discovery refuses what it cannot fully honor.** `serve --agent` on a
     tree that carries Go tools is an error naming `bonnie build`, not a
     partial run. A manifest key whose loading story does not exist is
-    refused (`mcp`, `skills`), never accepted and ignored. Guard tests:
-    `TestResolveServeRefusesGoTree`, `TestReservedKeysAreRefused`.
+    refused (`mcp`, `skills`), never accepted and ignored. A key the chosen
+    backend cannot apply is refused too: `sandbox.image` on the local
+    backend, which runs no image. Guard tests:
+    `TestResolveServeRefusesGoTree`, `TestReservedKeysAreRefused`,
+    `TestSandboxImageReachesEveryBackendThatRunsOne`,
+    `TestLocalSandboxRefusesAnImage`.
 14. **The manifest is strict.** Unknown key, unknown `apiVersion`, two
     manifests in one root — all errors that name what is wrong. The
     strictness is one code path for all three formats (decode into the

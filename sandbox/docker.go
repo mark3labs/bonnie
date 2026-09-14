@@ -33,6 +33,7 @@ type DockerProvider struct {
 var (
 	_ Provider  = (*DockerProvider)(nil)
 	_ Networked = (*DockerProvider)(nil)
+	_ Imaged    = (*DockerProvider)(nil)
 )
 
 // DockerOption configures a [DockerProvider].
@@ -77,6 +78,9 @@ func Docker(opts ...DockerOption) *DockerProvider {
 
 // Name implements [Provider].
 func (p *DockerProvider) Name() string { return "docker" }
+
+// Image implements [Imaged].
+func (p *DockerProvider) Image() string { return p.image }
 
 // Available implements [Provider]. It checks the binary and then the daemon,
 // because a present CLI with a dead daemon is the common case and deserves its

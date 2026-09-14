@@ -130,6 +130,84 @@ func TestCancelUnknownRun(t *testing.T) {
 	}
 }
 
+// TestCancelledRunContinuesInASecondRunner is the claim [Runner.Cancel]
+// makes, tested the way every durability claim must be: a second Runner that
+// shares only the journal.
+//
+// A cancelled run is not a failed one. Kit persists a step's messages before
+// it looks at the context (docs/SPEC.md §3.3), so the finished work is on
+// disk and the conversation a resume rebuilds is provider-valid. Until this
+// test, the claim rested on a Restore in the first process — which proves
+// the records survive, not that another process can carry the run on.
+func TestCancelledRunContinuesInASecondRunner(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	journalA, err := OpenFileJournal(dir)
+	if err != nil {
+		t.Fatalf("OpenFileJournal: %v", err)
+	}
+
+	// Process A: a turn that is cancelled while it works.
+	fa, _, release, started := blockingFactory(&kit.TurnResult{Response: "too late"})
+	runA := NewRunner(journalA, fa)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if _, err := runA.Start(ctx, "cancel-resume", Input{Text: "long job"}); err != nil {
+			t.Errorf("Start: %v", err)
+		}
+	}()
+
+	<-started
+	if err := runA.Cancel("cancel-resume"); err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+	<-done
+	close(release)
+
+	// Process A dies. Closing the journal releases the run's flock, which is
+	// what a dead process looks like to the next owner.
+	if err := journalA.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// Process B: a new Runner over the same directory, nothing else shared.
+	journalB, err := OpenFileJournal(dir)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer func() { _ = journalB.Close() }()
+
+	if state, err := journalB.State(ctx, "cancel-resume"); err != nil {
+		t.Fatalf("State: %v", err)
+	} else if state != RunCancelled {
+		t.Fatalf("state = %q, want %q: a cancelled run must not look failed", state, RunCancelled)
+	}
+
+	fb, _ := fakeFactory(&kit.TurnResult{Response: "finished after the cancel"})
+	runB := NewRunner(journalB, fb)
+	run, err := runB.Start(ctx, "cancel-resume", Input{Text: "carry on"})
+	if err != nil {
+		t.Fatalf("Start in the second Runner: %v", err)
+	}
+	if run.State != RunCompleted {
+		t.Fatalf("state = %q, want %q", run.State, RunCompleted)
+	}
+	if run.Response != "finished after the cancel" {
+		t.Fatalf("response = %q", run.Response)
+	}
+
+	// The conversation the second Runner built must be one a provider
+	// accepts, and it must still hold what the cancelled turn finished.
+	s, err := Restore(ctx, "cancel-resume", journalB)
+	if err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	assertNoOrphan(t, s.GetMessages())
+}
+
 func TestCancelIdleRun(t *testing.T) {
 	t.Parallel()
 	f, _ := fakeFactory(&kit.TurnResult{Response: "ok"})

@@ -78,7 +78,7 @@ var (
 
 // Position implements [Positioner].
 func (j *FileJournal) Position(_ context.Context, runID string) (int, error) {
-	rf, err := j.run(runID)
+	rf, err := j.readRun(runID)
 	if err != nil {
 		return 0, err
 	}
@@ -149,8 +149,10 @@ type runFile struct {
 	lockFile *os.File
 }
 
-// run returns the handle for a run, creating the in-memory entry but not the
-// file.
+// run returns the shared handle for a run, creating the in-memory entry but
+// not the file. Every write path goes through it: the handle owns the run's
+// mutex, its sequence counter, and its flock, so the writers of one run must
+// share one handle.
 func (j *FileJournal) run(runID string) (*runFile, error) {
 	if err := validRunID(runID); err != nil {
 		return nil, err
@@ -160,10 +162,58 @@ func (j *FileJournal) run(runID string) (*runFile, error) {
 
 	rf, ok := j.runs[runID]
 	if !ok {
-		rf = &runFile{path: filepath.Join(j.runsDir(), runID+".jsonl")}
+		rf = &runFile{path: j.runPath(runID)}
 		j.runs[runID] = rf
 	}
 	return rf, nil
+}
+
+// readRun returns a handle for a read-only path, and keeps the map free of
+// runs that do not exist.
+//
+// A read of an unknown ID must cost nothing durable. [FileJournal.run] used
+// to serve reads too, and it records every ID it is asked about: a server
+// reachable from outside answers 404 to a scan of invented run IDs and grows
+// its map by one entry each time, for the life of the process. A probe
+// handle is therefore thrown away when the run turns out not to exist, and
+// adopted into the map when it does — so an existing run still has exactly
+// one handle, which is what the write paths need.
+func (j *FileJournal) readRun(runID string) (*runFile, error) {
+	if err := validRunID(runID); err != nil {
+		return nil, err
+	}
+	j.mu.Lock()
+	rf, ok := j.runs[runID]
+	j.mu.Unlock()
+	if ok {
+		return rf, nil
+	}
+
+	probe := &runFile{path: j.runPath(runID)}
+	probe.mu.Lock()
+	err := probe.loadLocked()
+	exists := probe.exists
+	probe.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return probe, nil
+	}
+
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if cur, ok := j.runs[runID]; ok {
+		// A writer got there first. Its handle is the canonical one.
+		return cur, nil
+	}
+	j.runs[runID] = probe
+	return probe, nil
+}
+
+// runPath is where a run's records live.
+func (j *FileJournal) runPath(runID string) string {
+	return filepath.Join(j.runsDir(), runID+".jsonl")
 }
 
 // validRunID rejects any ID that would escape the runs directory or collide
@@ -413,7 +463,7 @@ func (j *FileJournal) AppendStep(_ context.Context, recs []Record) ([]int, error
 
 // Replay implements [Journal].
 func (j *FileJournal) Replay(_ context.Context, runID string) ([]Record, error) {
-	rf, err := j.run(runID)
+	rf, err := j.readRun(runID)
 	if err != nil {
 		return nil, err
 	}
@@ -448,7 +498,7 @@ func (j *FileJournal) Checkpoint(_ context.Context, runID string, state RunState
 
 // State implements [Journal].
 func (j *FileJournal) State(_ context.Context, runID string) (RunState, error) {
-	rf, err := j.run(runID)
+	rf, err := j.readRun(runID)
 	if err != nil {
 		return "", err
 	}

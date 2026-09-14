@@ -182,27 +182,18 @@ func (b *EventBus) Subscribe(runID string, after int) (<-chan Event, func()) {
 	}
 }
 
-// Backlog returns the buffered events for a run after the given cursor. It is
-// the polling counterpart of [EventBus.Subscribe].
-func (b *EventBus) Backlog(runID string, after int) []Event {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	var out []Event
-	for _, ev := range b.backlog[runID] {
-		if ev.Seq > after {
-			out = append(out, ev)
-		}
-	}
-	return out
-}
-
 // subscriber owns an unbounded queue in front of a bounded channel. A slow
 // reader therefore costs memory, never lost events — dropping would break the
 // cursor contract that reconnecting clients rely on.
+//
+// done is closed by [subscriber.close] and releases a send that no one is
+// reading. A client that goes away mid-event leaves the pump blocked on
+// out <- ev, and the closed flag alone cannot reach it there: the flag is
+// read before the send, never during it.
 type subscriber struct {
 	out  chan Event
 	wake chan struct{}
+	done chan struct{}
 
 	mu     sync.Mutex
 	queue  []Event
@@ -213,6 +204,7 @@ func newSubscriber() *subscriber {
 	s := &subscriber{
 		out:  make(chan Event),
 		wake: make(chan struct{}, 1),
+		done: make(chan struct{}),
 	}
 	go s.pump()
 	return s
@@ -240,6 +232,7 @@ func (s *subscriber) close() {
 		return
 	}
 	s.closed = true
+	close(s.done)
 	s.mu.Unlock()
 
 	select {
@@ -261,12 +254,20 @@ func (s *subscriber) pump() {
 			if closed {
 				return
 			}
-			s.out <- ev
+			select {
+			case s.out <- ev:
+			case <-s.done:
+				return
+			}
 		}
 		if closed {
 			return
 		}
-		<-s.wake
+		select {
+		case <-s.wake:
+		case <-s.done:
+			return
+		}
 	}
 }
 

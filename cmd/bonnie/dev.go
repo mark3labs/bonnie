@@ -404,11 +404,11 @@ func underDir(path, dir string) bool {
 // workspace, or workspace/ when the key is absent — the same default the
 // scaffold and the serve wiring use, so all three agree on the agent's root.
 func workspaceDir(root string) string {
-	rel := "workspace"
-	if m, _, err := agent.Load(root); err == nil && m.Workspace != "" {
-		rel = m.Workspace
+	m, _, err := agent.Load(root)
+	if err != nil {
+		m = nil
 	}
-	return filepath.Join(root, filepath.Clean(rel))
+	return m.WorkspaceDir(root)
 }
 
 // runDev is the bonnie dev entry, separated from cobra for testing.

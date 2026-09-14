@@ -123,19 +123,60 @@ func TestDenyNetworkOnLocalIsRejected(t *testing.T) {
 	}
 }
 
-func TestSandboxImageIsPassedThrough(t *testing.T) {
-	p, err := sandboxProvider("docker", "python:3.12-slim")
+// TestSandboxImageReachesEveryBackendThatRunsOne is invariant 13 at the
+// sandbox flag. The image used to reach docker and microsandbox and stop
+// there: `--sandbox auto --sandbox-image python:3.12-slim` built its
+// candidates with no image at all, so an operator who named an image got
+// alpine and no warning. The old test asserted only the provider's name, so
+// it passed either way.
+func TestSandboxImageReachesEveryBackendThatRunsOne(t *testing.T) {
+	t.Parallel()
+	const image = "python:3.12-slim"
+
+	for _, kind := range []string{"docker", "microsandbox", "msb"} {
+		p, err := sandboxProvider(kind, image)
+		if err != nil {
+			t.Fatalf("sandboxProvider(%s): %v", kind, err)
+		}
+		imaged, ok := p.(sandbox.Imaged)
+		if !ok {
+			t.Fatalf("%s provider (%T) reports no image", kind, p)
+		}
+		if got := imaged.Image(); got != image {
+			t.Fatalf("%s runs %q, want the image that was asked for, %q", kind, got, image)
+		}
+	}
+
+	// auto picks a backend at run time, and whichever it picks must carry
+	// the image. The pick needs a live backend, so a host with neither is a
+	// skip, not a failure.
+	p, err := sandboxProvider("auto", image)
+	if errors.Is(err, sandbox.ErrUnavailable) {
+		t.Skip("no sandbox backend is available here")
+	}
 	if err != nil {
-		t.Fatalf("sandboxProvider: %v", err)
+		t.Fatalf("sandboxProvider(auto): %v", err)
 	}
-	d, ok := p.(*sandbox.DockerProvider)
+	imaged, ok := p.(sandbox.Imaged)
 	if !ok {
-		t.Fatalf("got %T", p)
+		t.Fatalf("auto picked %T, which reports no image", p)
 	}
-	// The field is unexported, so check the behaviour that depends on it:
-	// the provider is usable and named correctly.
-	if d.Name() != "docker" {
-		t.Fatalf("name = %q", d.Name())
+	if got := imaged.Image(); got != image {
+		t.Fatalf("auto picked %s running %q, want %q", p.Name(), got, image)
+	}
+}
+
+// TestLocalSandboxRefusesAnImage is the other half of invariant 13: a
+// backend that cannot honor a setting says so. The local backend runs no
+// image, so accepting one would tell an operator their tools run in
+// python:3.12-slim while they run on the host.
+func TestLocalSandboxRefusesAnImage(t *testing.T) {
+	t.Parallel()
+	if _, err := sandboxProvider("local", "python:3.12-slim"); err == nil {
+		t.Fatal("the local backend accepted an image it cannot run")
+	}
+	if _, err := sandboxProvider("local", ""); err != nil {
+		t.Fatalf("the local backend refused an empty image: %v", err)
 	}
 }
 

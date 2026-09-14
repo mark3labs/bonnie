@@ -281,7 +281,7 @@ func (c *Channel) address(m *tgMessage) string {
 // a loop — the run's result is in the journal, and `bonnie runs show` reads
 // it back.
 func (c *Channel) deliver(address string, run *runtime.Run, err error) {
-	text := deliveryText(run, err)
+	text := chat.DeliveryText(run, err, "(Reply in this chat to answer.)")
 	if text == "" {
 		return
 	}
@@ -294,39 +294,6 @@ func (c *Channel) deliver(address string, run *runtime.Run, err error) {
 	for _, p := range chat.SplitText(text, messageLimit, maxParts) {
 		c.sendMessage(context.Background(), chatID, thread, p)
 	}
-}
-
-// deliveryText renders a boundary for a person, not for a model. The rules
-// are the same on every chat adapter: a completed turn says its response, a
-// parked run asks its question with a note on how to answer, and a failure
-// says so instead of leaving a silence that looks like indifference.
-func deliveryText(run *runtime.Run, err error) string {
-	switch {
-	case err != nil:
-		return "the run failed: " + firstLine(err.Error())
-	case run == nil:
-		return ""
-	case run.State == runtime.RunWaiting && run.Suspend != nil:
-		return run.Suspend.Prompt + "\n\n(Reply in this chat to answer.)"
-	case run.State == runtime.RunCancelled:
-		return "(cancelled)"
-	case run.Response != "":
-		return run.Response
-	default:
-		return ""
-	}
-}
-
-// firstLine is the first line of an error, capped, for a chat reply. Errors
-// can be long and structural; a chat message should not be.
-func firstLine(s string) string {
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		s = s[:i]
-	}
-	if len(s) > 200 {
-		s = s[:200]
-	}
-	return s
 }
 
 // sendMessage posts one message. Fire-and-log: a delivery failure must not

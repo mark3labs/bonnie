@@ -41,6 +41,7 @@ type MicrosandboxProvider struct {
 var (
 	_ Provider  = (*MicrosandboxProvider)(nil)
 	_ Networked = (*MicrosandboxProvider)(nil)
+	_ Imaged    = (*MicrosandboxProvider)(nil)
 )
 
 // MicrosandboxOption configures a [MicrosandboxProvider].
@@ -82,6 +83,9 @@ func Microsandbox(opts ...MicrosandboxOption) *MicrosandboxProvider {
 
 // Name implements [Provider].
 func (p *MicrosandboxProvider) Name() string { return "microsandbox" }
+
+// Image implements [Imaged].
+func (p *MicrosandboxProvider) Image() string { return p.image }
 
 // Available implements [Provider].
 func (p *MicrosandboxProvider) Available(ctx context.Context) error {

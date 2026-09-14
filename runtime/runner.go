@@ -240,10 +240,25 @@ func (r *Runner) Events() *EventBus { return r.bus }
 // needs the conversation reads it from the run or the journal; the events
 // tell it where the run stands.
 //
-// The returned function unsubscribes and closes the channel.
+// The returned function unsubscribes and closes the channel. Call it when
+// the client goes away: it also releases the forwarding goroutine, which may
+// be parked on a send the client stopped reading.
 func (r *Runner) StreamEvents(runID string, after int) (<-chan Event, func()) {
 	out := make(chan Event)
 	live, unsubscribe := r.bus.Subscribe(runID, after)
+
+	// done releases every send this stream owns. An HTTP client that
+	// disconnects between two events leaves the forwarder parked on
+	// out <- ev, and the subscriber's pump parked behind it, so a server
+	// that streams to the outside world leaked two goroutines and their
+	// queued events per disconnect. Closing the channel is what a reader
+	// going away has to mean.
+	done := make(chan struct{})
+	var once sync.Once
+	stop := func() {
+		once.Do(func() { close(done) })
+		unsubscribe()
+	}
 
 	// Journal-backed catch-up only applies when the journal can anchor a
 	// position; otherwise this is the live backlog, exactly as before.
@@ -256,7 +271,11 @@ func (r *Runner) StreamEvents(runID string, after int) (<-chan Event, func()) {
 		emitted := after
 
 		if needReplay {
-			if err := r.replayEvents(runID, after, out, &emitted); err != nil {
+			switch err := r.replayEvents(runID, after, out, done, &emitted); {
+			case errors.Is(err, errStreamClosed):
+				// The client left during catch-up. Nothing to serve.
+				return
+			case err != nil:
 				// The journal could not be read; degrade to the live
 				// backlog rather than fail a stream that may still
 				// deliver everything from here on. Observability, not
@@ -280,16 +299,34 @@ func (r *Runner) StreamEvents(runID string, after int) (<-chan Event, func()) {
 			if ev.Seq > emitted {
 				emitted = ev.Seq
 			}
-			out <- ev
+			if !sendEvent(out, done, ev) {
+				return
+			}
 		}
 	}()
 
-	return out, unsubscribe
+	return out, stop
+}
+
+// errStreamClosed reports that the reader of a stream went away. It is not a
+// fault: it ends the catch-up quietly.
+var errStreamClosed = errors.New("bonnie: event stream closed by its reader")
+
+// sendEvent delivers one event unless the stream's reader has gone. It
+// reports whether the send happened.
+func sendEvent(out chan<- Event, done <-chan struct{}, ev Event) bool {
+	select {
+	case out <- ev:
+		return true
+	case <-done:
+		return false
+	}
 }
 
 // replayEvents projects journal records into events and pushes them to out,
 // advancing *emitted past every record covered. It stops at the journal's
-// current end; the live stream takes over from there.
+// current end; the live stream takes over from there. It returns
+// [errStreamClosed] when the reader of out went away.
 //
 // The projection is the durable counterpart of the runner's own publishes:
 // a state record becomes an EventState; a suspend record becomes
@@ -298,7 +335,7 @@ func (r *Runner) StreamEvents(runID string, after int) (<-chan Event, func()) {
 // completed turn — as the last assistant text before the closing state
 // record, anchored to the last message record of the turn. Everything else
 // in the journal is conversation state, not an event.
-func (r *Runner) replayEvents(runID string, after int, out chan<- Event, emitted *int) error {
+func (r *Runner) replayEvents(runID string, after int, out chan<- Event, done <-chan struct{}, emitted *int) error {
 	recs, err := r.journal.Replay(context.Background(), runID)
 	if err != nil {
 		return err
@@ -331,7 +368,9 @@ func (r *Runner) replayEvents(runID string, after int, out chan<- Event, emitted
 				RunID: runID, Type: EventSuspend, Seq: rec.Seq,
 				Text: rec.Text, Data: rec.Payload,
 			}
-			out <- ev
+			if !sendEvent(out, done, ev) {
+				return errStreamClosed
+			}
 			*emitted = rec.Seq
 
 		case RecordResume:
@@ -339,7 +378,9 @@ func (r *Runner) replayEvents(runID string, after int, out chan<- Event, emitted
 				continue
 			}
 			ev := Event{RunID: runID, Type: EventResume, Seq: rec.Seq, Text: rec.Text}
-			out <- ev
+			if !sendEvent(out, done, ev) {
+				return errStreamClosed
+			}
 			*emitted = rec.Seq
 
 		case RecordState:
@@ -347,12 +388,17 @@ func (r *Runner) replayEvents(runID string, after int, out chan<- Event, emitted
 			// its closing state, anchored to the last message record —
 			// replay reproduces that order and those Seqs exactly.
 			if rec.State == RunCompleted && lastResponse != "" && lastMsgSeq > *emitted {
-				out <- Event{RunID: runID, Type: EventResponse, Seq: lastMsgSeq, Text: lastResponse}
+				ev := Event{RunID: runID, Type: EventResponse, Seq: lastMsgSeq, Text: lastResponse}
+				if !sendEvent(out, done, ev) {
+					return errStreamClosed
+				}
 				*emitted = lastMsgSeq
 			}
 			if rec.Seq > *emitted {
 				ev := Event{RunID: runID, Type: EventState, Seq: rec.Seq, State: rec.State}
-				out <- ev
+				if !sendEvent(out, done, ev) {
+					return errStreamClosed
+				}
 				*emitted = rec.Seq
 			}
 			lastResponse = ""

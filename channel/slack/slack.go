@@ -326,7 +326,7 @@ func stripMention(text string) string {
 // A failed post is logged, never retried in a loop — the run's result is in
 // the journal, and `bonnie runs show` reads it back.
 func (c *Channel) deliver(address string, run *runtime.Run, err error) {
-	text := deliveryText(run, err)
+	text := chat.DeliveryText(run, err, "(Reply in this thread to answer.)")
 	if text == "" {
 		return
 	}
@@ -338,37 +338,6 @@ func (c *Channel) deliver(address string, run *runtime.Run, err error) {
 	for _, p := range chat.SplitText(text, messageLimit, maxParts) {
 		c.postMessage(context.Background(), parts[1], thread, p)
 	}
-}
-
-// deliveryText renders a boundary for a person, not for a model. The rules
-// are the same on every chat adapter; see the telegram package for the
-// reasoning.
-func deliveryText(run *runtime.Run, err error) string {
-	switch {
-	case err != nil:
-		return "the run failed: " + firstLine(err.Error())
-	case run == nil:
-		return ""
-	case run.State == runtime.RunWaiting && run.Suspend != nil:
-		return run.Suspend.Prompt + "\n\n(Reply in this thread to answer.)"
-	case run.State == runtime.RunCancelled:
-		return "(cancelled)"
-	case run.Response != "":
-		return run.Response
-	default:
-		return ""
-	}
-}
-
-// firstLine is the first line of an error, capped, for a chat reply.
-func firstLine(s string) string {
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		s = s[:i]
-	}
-	if len(s) > 200 {
-		s = s[:200]
-	}
-	return s
 }
 
 // postMessage posts one message. Fire-and-log: a delivery failure must not

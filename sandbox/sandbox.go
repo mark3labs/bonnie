@@ -217,6 +217,16 @@ type Networked interface {
 	SetNetworkPolicy(p NetworkPolicy) error
 }
 
+// Imaged is implemented by a [Provider] that runs a named image. It is how a
+// host reports the image that is really in force — the default one, or the
+// override it asked for — rather than the one it hopes reached the backend.
+// A provider that runs no image, such as [LocalProvider], does not implement
+// it.
+type Imaged interface {
+	// Image returns the image reference sandboxes are opened from.
+	Image() string
+}
+
 // Resolve anchors a path to [Workspace]. An absolute path passes through
 // unchanged; a relative one resolves from the workspace root.
 //

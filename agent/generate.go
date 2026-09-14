@@ -201,13 +201,14 @@ func Discover(root string) (*Plan, error) {
 	return plan, nil
 }
 
-// workspaceDir reads the workspace path from the manifest, defaulting to
-// "workspace". It returns "" when the manifest names no workspace.
+// workspaceDir is the tree's workspace, relative to the module root, for an
+// embed pattern. It is empty when nothing should be embedded.
 func workspaceDir(root string) string {
-	if m, _, err := Load(root); err == nil && m.Workspace != "" {
-		return strings.TrimSuffix(m.Workspace, "/")
+	m, _, err := Load(root)
+	if err != nil {
+		m = nil
 	}
-	return "workspace"
+	return m.WorkspaceDir("")
 }
 
 // discoverTool validates one tools/<name> directory and returns its Tool.

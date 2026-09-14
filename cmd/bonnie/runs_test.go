@@ -336,3 +336,39 @@ func TestSandboxPruneReclaimsTerminalRuns(t *testing.T) {
 		t.Fatalf("prune output:\n%s", out)
 	}
 }
+
+// TestSandboxPruneHidesReservedRuns is invariant 8 at the prune command. The
+// address map lives in a reserved run that never reaches a terminal state,
+// so every prune printed it as "kept (run is not terminal)" — BONNIE's own
+// bookkeeping presented to an operator as a run they own.
+func TestSandboxPruneHidesReservedRuns(t *testing.T) {
+	t.Chdir(t.TempDir())
+
+	ctx := context.Background()
+	j, err := runtime.OpenFileJournal(".bonnie")
+	if err != nil {
+		t.Fatalf("OpenFileJournal: %v", err)
+	}
+	if err := j.Checkpoint(ctx, "visible-run", runtime.RunCompleted); err != nil {
+		t.Fatalf("Checkpoint: %v", err)
+	}
+	if _, err := j.Append(ctx, runtime.Record{
+		RunID: runtime.ReservedRunPrefix + "addresses",
+		Kind:  runtime.RecordExtensionData, ExtType: "channel.address", Text: "slack:C1",
+	}); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+	if err := j.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	out := capture(t, func() error {
+		return execute(newSandboxPruneCmd(), "--journal", ".bonnie", "--sandbox", "local")
+	})
+	if strings.Contains(out, runtime.ReservedRunPrefix) {
+		t.Fatalf("prune listed a reserved run:\n%s", out)
+	}
+	if !strings.Contains(out, "visible-run") {
+		t.Fatalf("prune hid an ordinary run:\n%s", out)
+	}
+}

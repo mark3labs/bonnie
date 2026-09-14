@@ -95,6 +95,28 @@ type Manifest struct {
 	Workspace string `yaml:"workspace" toml:"workspace" json:"workspace"`
 }
 
+// DefaultWorkspace is the workspace directory of a tree whose manifest names
+// none.
+const DefaultWorkspace = "workspace"
+
+// WorkspaceDir returns the directory the agent's files live in, joined to
+// root: the manifest's workspace key, or [DefaultWorkspace] when the key is
+// absent. A nil manifest, which is what a tree with no manifest and a failed
+// load both produce, takes the default too.
+//
+// It is one function because three callers must agree on the answer — the
+// serve wiring that roots the agent's tools there, the dev loop that must
+// not watch it, and codegen that embeds it. Three copies of the rule meant a
+// renamed workspace could be honored by one and missed by another
+// (docs/SPEC.md §4.9.1).
+func (m *Manifest) WorkspaceDir(root string) string {
+	rel := DefaultWorkspace
+	if m != nil && m.Workspace != "" {
+		rel = m.Workspace
+	}
+	return filepath.Join(root, filepath.Clean(rel))
+}
+
 // SandboxConfig selects the sandbox backend and its network policy.
 type SandboxConfig struct {
 	// Kind is one of: none, docker, microsandbox, local, auto. Empty means

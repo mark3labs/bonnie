@@ -7,9 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+The audit increment: a read-only pass over every non-test file against the
+invariants in `docs/SPEC.md` §8. It found no boundary violation and no
+journal-integrity hole; it found two resource leaks, two settings that were
+accepted and ignored, and one durability claim with no test in the shape the
+project demands. All are closed here. See `docs/SPEC.md` §4.12.
+
+### Fixed
+
+- **A run's event stream no longer leaks goroutines when a client
+  disconnects.** `Runner.StreamEvents` forwarded on an unbuffered channel, so
+  a client that went away between two events left the forwarder parked on its
+  send and the bus subscriber's pump parked behind it. A goroutine blocked in
+  a send cannot see the unsubscribe. Every reconnect that raced an event cost
+  a long-lived server two goroutines and their queued events, for the life of
+  the process. Stopping a stream now releases every send it owns.
+- **Reading an unknown run no longer grows the file journal.** `FileJournal`
+  kept a handle for every run ID it was ever asked about, so a server
+  reachable from outside paid a permanent map entry for each 404. Reads now
+  keep a handle only for a run that exists.
+- **`--sandbox-image` reaches every backend that runs an image.**
+  `--sandbox auto` built its candidates without the image, so an operator who
+  named one silently got the default; `--sandbox local` accepted an image it
+  cannot run and is now refused. The startup banner names the image in force.
+- **Reserved runs are no longer addressable.** BONNIE keeps its address map
+  in a run under `runtime.ReservedRunPrefix`. A caller who knew the prefix
+  could start a turn on it through any chat transport, and `bonnie sandbox
+  prune` listed it to operators. Both now refuse and filter.
+- **`channel/http` caps a request body at 1 MiB**, with a 413 that names the
+  limit — the webhook adapters always did. A write refused because another
+  process owns the run (`ErrRunOwnedElsewhere`) now answers 409, not 500.
+
 ### Added
 
-- Nothing yet. The next release starts here.
+- `sandbox.Imaged`, the optional interface a provider implements to report
+  the image it really runs. It is what makes the image testable and the
+  banner honest.
+- `chat.DeliveryText` and `chat.FirstLine`: the rule for what a person sees
+  at the end of a turn, which lived three times, byte for byte, in the Slack,
+  Discord, and Telegram adapters.
+- `Manifest.WorkspaceDir`, one answer for the agent's root. The serve
+  wiring, the dev loop's watcher, and codegen each held their own copy of the
+  default, so a renamed workspace could be honored by one and missed by
+  another.
+- `TestCancelledRunContinuesInASecondRunner`: `Runner.Cancel` promises a
+  cancelled run can be continued, and every durability claim needs a test
+  that crosses a process boundary. This one had only a same-process
+  `Restore`.
+
+### Removed
+
+- `EventBus.Backlog`, which had no caller in the repository.
+  `Runner.StreamEvents` is the supported way to read a run's events, and it
+  has been since journal-backed catch-up landed.
 
 ## [0.4.0] — 2026-09-14
 

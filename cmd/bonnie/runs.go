@@ -48,7 +48,7 @@ func newRunsListCmd() *cobra.Command {
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&dir, "journal", ".bonnie", "journal directory")
+	addJournalFlag(f, &dir)
 	f.StringVar(&state, "state", "", "only list runs in this state")
 	f.BoolVar(&asJSON, "json", false, "print JSON instead of a table")
 	return cmd
@@ -130,7 +130,7 @@ func newRunsShowCmd() *cobra.Command {
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&dir, "journal", ".bonnie", "journal directory")
+	addJournalFlag(f, &dir)
 	f.BoolVar(&asJSON, "json", false, "print the raw records as JSON")
 	return cmd
 }

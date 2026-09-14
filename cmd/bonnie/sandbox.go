@@ -34,7 +34,7 @@ func newSandboxPruneCmd() *cobra.Command {
 		RunE:  func(*cobra.Command, []string) error { return runSandboxPrune(o) },
 	}
 	f := cmd.Flags()
-	f.StringVar(&o.journal, "journal", ".bonnie", "journal directory")
+	addJournalFlag(f, &o.journal)
 	f.StringVar(&o.kind, "sandbox", "docker", "sandbox backend the runs used: docker, microsandbox, msb, or local")
 	f.StringVar(&o.image, "sandbox-image", "", "sandbox image, only needed to construct the backend")
 	f.BoolVar(&o.dryRun, "dry-run", false, "report what would be deleted, delete nothing")
@@ -91,6 +91,12 @@ func runSandboxPrune(o pruneOpts) error {
 
 	reaped := 0
 	for _, runID := range runIDs {
+		// BONNIE's own bookkeeping runs are not agent runs: they hold the
+		// address map, never a sandbox, and they stay out of operator
+		// output (docs/SPEC.md §8, invariant 8).
+		if runtime.IsReservedRun(runID) {
+			continue
+		}
 		state, err := journal.State(ctx, runID)
 		if err != nil {
 			return fmt.Errorf("bonnie: state of %s: %w", runID, err)

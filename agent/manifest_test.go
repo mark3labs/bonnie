@@ -317,3 +317,35 @@ func TestDefaultsAreEmptyNotFilled(t *testing.T) {
 		t.Fatalf("path = %q", path)
 	}
 }
+
+// TestWorkspaceDirIsOneRule pins the answer three callers need to agree on:
+// the serve wiring that roots the agent's file tools, the dev loop that must
+// not watch the workspace, and codegen that embeds it. Each held its own
+// copy of the default, so a renamed workspace could be honored by one and
+// missed by another (docs/SPEC.md §4.9.1).
+func TestWorkspaceDirIsOneRule(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		m    *Manifest
+		root string
+		want string
+	}{
+		{"no manifest takes the default", nil, "/srv/agent", filepath.Join("/srv/agent", "workspace")},
+		{"an empty key takes the default", &Manifest{}, "/srv/agent", filepath.Join("/srv/agent", "workspace")},
+		{"the manifest wins", &Manifest{Workspace: "files"}, "/srv/agent", filepath.Join("/srv/agent", "files")},
+		{"a trailing slash is not a new directory", &Manifest{Workspace: "seed/"}, "/srv/agent", filepath.Join("/srv/agent", "seed")},
+		{"an empty root leaves the path relative", &Manifest{Workspace: "seed/"}, "", "seed"},
+		{"a nested path is kept", &Manifest{Workspace: "var/seed"}, "/srv/agent", filepath.Join("/srv/agent", "var", "seed")},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			if got := c.m.WorkspaceDir(c.root); got != c.want {
+				t.Fatalf("WorkspaceDir(%q) = %q, want %q", c.root, got, c.want)
+			}
+		})
+	}
+}
