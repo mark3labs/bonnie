@@ -19,8 +19,6 @@ the known risks, and the invariants every task must preserve.
 
 | ID | Title | Priority | Size | Blocks |
 |---|---|---|---|---|
-| T-028 | Normalised inbound turn with a per-turn context slot | P1 | M | T-029 |
-| T-030 | Reserved HTTP namespace and a health route | P1 | S | — |
 | T-029 | GitHub channel: issues, PRs, and review threads become conversations | P2 | L | — |
 | T-031 | Idempotent start and stable error codes on the HTTP channel | P2 | S | — |
 | T-032 | Framework-owned address namespace and session controls (`reset`, `clear`, `compact`) | P2 | M | T-033 |
@@ -40,6 +38,8 @@ the known risks, and the invariants every task must preserve.
 
 | ID | Delivered | Where |
 |---|---|---|
+| T-028 | Normalised turn: `runtime.Input{Context, Title, Origin}`, `RecordContext` journalled and shown to the model through `OnContextPrepare` for one turn only, `chat.Turn` with kinds, adapters set kind/title/context, HTTP accepts `context`/`kind`, `runs list` shows the title | `runtime/context.go`, `channel/chat/chat.go`, `channel/{slack,discord,telegram}`, `channeltest/`, `docs/SPEC.md` §3.7 |
+| T-030 | The HTTP channel serves under `/bonnie/v1`; `/bonnie/` is reserved and a channel that mounts there is refused at startup by name; `GET /bonnie/v1/health` and `GET /bonnie/v1/info`; `bonnie.WithName` | `channel/channel.go`, `channel/http/http.go`, `run.go`, `namespace_test.go`, `cmd/bonnie/tui/client.go` |
 | T-011 | Applied again for `v0.4.0`, tagged at `9ccb959` and published 2026-09-14. Verified post-publish: the downloaded `linux_amd64` artifact prints `bonnie 0.4.0` (the injected version, not `dev`), its checksum matches, it is statically linked, and it serves. The auto-generated notes were again only a commit list, so the body was replaced with the `CHANGELOG.md` section — claims and limits both stated | `CHANGELOG.md`, [release v0.4.0](https://github.com/mark3labs/bonnie/releases/tag/v0.4.0) |
 | T-025 | The journal is SQLite, pure Go (no CGO): `SQLiteJournal` over one `<root>/journal.db`, WAL, one transaction per step, concurrent writers safe instead of refused, legacy `runs/*.jsonl` imported on open. `FileJournal`, the per-run lock file, and the handle map are gone | `runtime/sqlitejournal.go`, `runtime/legacy_journal.go`, `runtime/journal.go`, `docs/SPEC.md` §4.14 |
 | T-024 | The manifest is gone: configuration is code. The root `bonnie` package owns the serving path (`Main`, `Run`, options) and the default layout as constants; codegen registers the tree through `bonnie.Register` from `init`; `bonnie init` scaffolds a one-call `main.go`; `serve` is the flag-only generic host; `yaml` and `toml` return to indirect | `bonnie.go`, `run.go`, `options.go`, `agent/scaffold.go`, `agent/generate.go`, `cmd/bonnie/`, `internal/treetest/`, `docs/L2.md` |
@@ -1301,6 +1301,12 @@ the path a real host uses.
 **Priority** P1 · **Size** M · **Blocks** T-029 · **Found by** comparing
 `channel/chat` with eve's channel contract (2026-09-14)
 
+**SHIPPED.** Two notes against the plan: step 4 records the origin as
+extension data (`bonnie.origin`) *and* tells the model through the same
+context hook ("This conversation is on channel slack (thread)"), because a
+record nobody reads helps no one; and `Runner.Resume` carries no context — an
+answer to a question is the answer.
+
 ### Why
 
 eve turns every platform event into one shape before the agent sees it: a
@@ -1354,16 +1360,16 @@ the same commit that opens this task.
 
 ### Acceptance criteria
 
-- [ ] `runtime.Input.Context` reaches the model on the turn it was sent with
+- [x] `runtime.Input.Context` reaches the model on the turn it was sent with
       and on no later turn — a test with `fakeAgent` asserts both
-- [ ] A replayed run reproduces the context records without changing the
+- [x] A replayed run reproduces the context records without changing the
       user messages; `runtime/replay_fidelity_test.go` gains a case
-- [ ] `chat.Turn` is the only argument `Dispatch` and `Route` take, and the
+- [x] `chat.Turn` is the only argument `Dispatch` and `Route` take, and the
       `channeltest` suite drives it
-- [ ] Every chat adapter sets `Kind` and a `Title`; `bonnie runs list` shows
+- [x] Every chat adapter sets `Kind` and a `Title`; `bonnie runs list` shows
       the title for a Slack-started run
-- [ ] `docs/CHANNELS.md` describes the normalised turn and lists the kinds
-- [ ] `docs/SPEC.md` §3 records which seam carries the context and how it is
+- [x] `docs/CHANNELS.md` describes the normalised turn and lists the kinds
+- [x] `docs/SPEC.md` §3 records which seam carries the context and how it is
       journalled
 
 ### Watch for
@@ -1379,7 +1385,7 @@ layer defines; `runtime/` must not import `channel/` (invariant 6).
 
 ## T-029 — GitHub channel: issues, PRs, and review threads become conversations
 
-**Priority** P2 · **Size** L · **Blocked by** T-028 · **Prior art** eve's
+**Priority** P2 · **Size** L · **Blocked by** T-028 (shipped) · **Prior art** eve's
 [GitHub channel](https://eve.dev/docs/channels/github)
 
 ### Why
@@ -1453,6 +1459,11 @@ first in the comment.
 **Priority** P1 · **Size** S · **Found by** comparing `channel/http` routes
 with eve's `/eve/v1/*` surface (2026-09-14)
 
+**SHIPPED.** One note: the prefix constant lives in `channel`
+(`channel.APIPrefix`, `channel.ReservedPathPrefix`), not the root package,
+because `channel/http` cannot import the root. The root package's `mount`
+reads the same constant.
+
 ### Why
 
 eve mounts its framework API under one versioned prefix, `/eve/v1/*`, and
@@ -1489,13 +1500,13 @@ that does not exist and treat 404 as alive.
 
 ### Acceptance criteria
 
-- [ ] Every HTTP-channel route answers under `/bonnie/v1/` and none at the
+- [x] Every HTTP-channel route answers under `/bonnie/v1/` and none at the
       root
-- [ ] A test channel with a `/bonnie/x` route fails `Serve` with an error
+- [x] A test channel with a `/bonnie/x` route fails `Serve` with an error
       naming it
-- [ ] `GET /bonnie/v1/health` returns 200 before any run exists
-- [ ] `bonnie chat` works against a server built from the same commit
-- [ ] No file in the repo still says `/runs` without the prefix
+- [x] `GET /bonnie/v1/health` returns 200 before any run exists
+- [x] `bonnie chat` works against a server built from the same commit
+- [x] No file in the repo still says `/runs` without the prefix
       (`grep -rn '"/runs' --include='*.go' --include='*.md'` is empty)
 
 ### Watch for

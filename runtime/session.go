@@ -41,6 +41,10 @@ type Session struct {
 	sandboxID      string
 	sandboxGone    bool
 	sandboxNoted   bool
+
+	// turnContext is the context for the turn being run. It lives on the
+	// session only for the duration of the turn; see [Session.SetTurnContext].
+	turnContext []string
 }
 
 type sessionEntry struct {

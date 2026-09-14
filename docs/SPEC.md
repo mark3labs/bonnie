@@ -206,6 +206,32 @@ Part of `kit.SessionManager`, branch-aware, already public. This is BONNIE's
 equivalent of eve's [`defineState`](https://eve.dev/docs/concepts/state) and
 needs no upstream change.
 
+BONNIE writes two entries of its own: `bonnie.origin` (the channel and the
+kind of surface a run's conversation lives on) and `bonnie.title`. Both are
+written once, on the first turn that names them, by `Runner.Start`
+(`runtime/context.go`). `runs list` shows the title.
+
+### 3.7 `OnContextPrepare` runs once per turn and its result is not persisted
+
+`kit.go:3216` (v0.106.0): after `BuildContext`, before `generate`, the hook
+runs once with the assembled window, and a non-nil result replaces the
+window for that call only. Nothing the hook adds reaches `AppendMessage`.
+
+That is the property per-turn context needs. `runtime.Input.Context` is a
+list of strings a channel hands the runner with one message — the event that
+fired, the diff a comment refers to, who is speaking. `Runner.Start` journals
+it as a `RecordContext` (no entry ID: run metadata, not a tree entry) and
+sets it on the session; the hook registered in `attachCheckpoints` puts it in
+front of the last user message as user-role messages with a `[context] `
+prefix, and the run's origin ahead of that. `Restore` skips the record, so a
+resumed run replays the conversation without the context, and a later turn
+never sees an earlier turn's. Guard tests: `runtime/context_test.go`,
+`TestReplayKeepsContextOutOfTheConversation`.
+
+The placement rule is a pure function, `prepareContext`, so it is tested
+without Kit. `Runner.Resume` carries no context: an answer to a question is
+the answer.
+
 ---
 
 ## 4. Known risks

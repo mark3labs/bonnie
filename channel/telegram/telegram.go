@@ -125,7 +125,7 @@ func New(r *runtime.Runner, cfg Config, opts ...chat.CoreOption) *Channel {
 		api = "https://api.telegram.org"
 	}
 	return &Channel{
-		core: chat.NewCore(r, channel.PolicySteer, opts...),
+		core: chat.NewCore(r, "telegram", channel.PolicySteer, opts...),
 		cfg:  cfg,
 		api:  api,
 		http: &http.Client{Timeout: 15 * time.Second},
@@ -207,17 +207,28 @@ func (c *Channel) handleUpdate(w http.ResponseWriter, r *http.Request, _ channel
 		return
 	}
 
-	opts := channel.SendOptions{Auth: &channel.Principal{
-		Authenticator: "telegram",
-		Kind:          "user",
-		ID:            strconv.FormatInt(u.Message.From.ID, 10),
-		Attributes: map[string]any{
-			"username": u.Message.From.Username,
-			"chat_id":  u.Message.Chat.ID,
+	kind := chat.KindChannel
+	switch {
+	case u.Message.Chat.Type == "private":
+		kind = chat.KindDM
+	case u.Message.MessageThreadID != 0:
+		kind = chat.KindThread
+	}
+	chat.Dispatch(r.Context(), c.core, chat.Turn{
+		Address: c.address(u.Message),
+		Text:    text,
+		Kind:    kind,
+		Context: []string{fmt.Sprintf("Telegram user %s wrote in a %s chat.", u.Message.From.Username, u.Message.Chat.Type)},
+		Auth: &channel.Principal{
+			Authenticator: "telegram",
+			Kind:          "user",
+			ID:            strconv.FormatInt(u.Message.From.ID, 10),
+			Attributes: map[string]any{
+				"username": u.Message.From.Username,
+				"chat_id":  u.Message.Chat.ID,
+			},
 		},
-	}}
-	addr := c.address(u.Message)
-	chat.Dispatch(r.Context(), c.core, addr, text, opts, c.deliver)
+	}, c.deliver)
 }
 
 // forUs reports whether a message reaches the agent, and returns the text

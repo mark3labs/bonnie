@@ -18,10 +18,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Per-turn context and a normalised turn.** `runtime.Input` gains
+  `Context` (facts for the model on this turn only — journalled as a
+  `RecordContext`, shown in front of the prompt through Kit's
+  context-prepare hook, never kept as history), `Title`, and `Origin`
+  (channel and kind, recorded once). `chat.Turn` is the one shape every
+  adapter normalises a platform event to; `chat.Dispatch` and `chat.Route`
+  take it. Slack, Discord, and Telegram set a kind and a title and pass the
+  sender as context. The HTTP channel accepts `context` and `kind`.
+  `runs list` shows the title. (T-028)
 - `GET /bonnie/v1/health` answers `{"ok":true,"status":"ready"}` before any
   run exists and without touching the journal. `GET /bonnie/v1/info` reports
   the agent name (`bonnie.WithName`), the BONNIE version, and the mounted
   channels. (T-030)
+
+### Changed
+
+- **Breaking for adapter authors:** `chat.NewCore` takes the channel's
+  name; `chat.Dispatch` and `chat.Route` take a `chat.Turn`. (T-028)
 
 ## [0.4.0] — 2026-09-14
 

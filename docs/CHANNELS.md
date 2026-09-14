@@ -21,6 +21,21 @@ Every adapter implements the same two interfaces:
 
 Everything under those two methods is shared, in `channel/chat`:
 
+- **Every event becomes one `chat.Turn`.** An adapter's only job on the
+  way in is to turn a platform payload into `Turn{Address, Text, Context,
+  Auth, Title, Kind}` and hand it to `chat.Dispatch`. `Text` is what the
+  person said with the invocation token removed — the one thing that
+  enters the conversation as a user message. `Context` is what the model
+  should know for this turn only: who spoke, which event fired, the diff a
+  comment refers to. It is shown to the model in front of the text and
+  journalled as its own record (`RecordContext`), never as history; a
+  resumed run replays the conversation without it. `Kind` names the
+  surface — `dm`, `thread`, `channel`, `issue`, `pull_request`,
+  `review_thread` — and is recorded with the channel's name as the run's
+  origin, which the model is also told. `Title` names the run in `runs
+  list`; an adapter that sets none gets the first line of the first
+  message. This is eve's `{ message, context, auth, title }` dispatch
+  result, as a Go struct.
 - **The address map is journalled.** A chat address (a Slack thread, a
   Telegram chat, a Discord channel) binds to a run in a reserved run of the
   journal — the same mechanism `channel/http` uses for its address
@@ -65,6 +80,8 @@ Everything under those two methods is shared, in `channel/chat`:
 - **For the agent:** `app_mention` always; direct messages always (one
   conversation per DM); a threaded reply only when this channel bound that
   thread — a busy channel's other threads are not the agent's business.
+  A mention or a thread reply is kind `thread`; a DM is kind `dm`. The
+  sender and channel reach the model as context.
 - **Dedup:** Slack retries when an endpoint is slow to acknowledge. Events
   are deduplicated by `event_id` before they reach the runner.
 - **Delivery:** `chat.postMessage`, threaded to the mention's message.
@@ -100,7 +117,8 @@ bonnie.New(bonnie.WithSlack(slack.Config{})).Serve()
   websocket dependency BONNIE does not carry.
 - **One channel or thread is one conversation.** `/ask` again continues it;
   `/ask` while a turn runs steers that turn; `/ask <answer>` on a parked
-  run is the answer.
+  run is the answer. The kind is always `channel`: an interaction carries
+  the channel ID and nothing that says whether it is a thread.
 - **Delivery:** `POST /channels/{id}/messages` with the bot token — not the
   interaction token, which expires in fifteen minutes and would lose the
   reply of a long turn.
@@ -133,7 +151,8 @@ bonnie.New(bonnie.WithDiscord(discord.Config{})).Serve()
   commands and mentions, which is exactly what the adapter expects.
 - **One chat is one conversation**; a forum topic is its own conversation
   (`message_thread_id` is part of the address, and the reply lands in the
-  topic).
+  topic). A private chat is kind `dm`, a topic is `thread`, a group is
+  `channel`.
 - **Delivery:** `sendMessage`.
 
 Setup: create the bot with BotFather, set the webhook with the same secret
@@ -183,13 +202,11 @@ the message came from Slack; the user ID inside it is Slack's word. The
 - **Gateway/Socket Mode transports.** Webhook only; both platforms' push
   transports need websocket dependencies BONNIE does not carry.
 - **GitHub, Linear, and other eve channels.** The adapters above prove the
-  address and dispatch pattern. GitHub is not mechanical on top of it: a
-  comment is text, but the PR diff, the event, and the actor are per-turn
-  context, and `runtime.Input` has no slot for context today. T-028 adds
-  the normalised turn; T-029 builds GitHub on it.
-- **Framework HTTP namespace.** The HTTP channel's routes sit at the root
-  (`/runs`, `/addresses`) and nothing stops a custom channel from mounting
-  over them. T-030 moves them under `/bonnie/v1/` and adds `health`.
+  address and dispatch pattern, and `chat.Turn` carries the per-turn
+  context a GitHub event needs (T-028). T-029 builds GitHub on it.
+- **Framework HTTP namespace.** Done in T-030: the HTTP channel serves
+  under `/bonnie/v1/`, `/bonnie/` is reserved, and `GET /bonnie/v1/health`
+  answers before any run exists.
 - **`reset`, `clear`, `compact`, idempotent start, stable error codes.**
   T-031 and T-032.
 - **Cross-channel hand-off** (`to(channel).send`). T-033.

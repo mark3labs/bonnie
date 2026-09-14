@@ -73,3 +73,50 @@ func TestReplayPreservesToolCalls(t *testing.T) {
 		t.Fatalf("restored %d tool results, want 1 — replay is lossy", toolResults)
 	}
 }
+
+// TestReplayKeepsContextOutOfTheConversation guards the other half of
+// fidelity: a turn's context is journalled so the record shows what the
+// model saw, but it is run metadata, not a message. A Restore that turned a
+// context record into a user message would replay a diff as if a person had
+// typed it, and every later turn would carry it.
+func TestReplayKeepsContextOutOfTheConversation(t *testing.T) {
+	t.Parallel()
+
+	journal := NewMemoryJournal()
+	s := NewSession("replay-context", journal)
+	ctx := context.Background()
+
+	if err := s.journalContext(ctx, []string{"event: issues.opened", "diff: +1 -1"}); err != nil {
+		t.Fatalf("journalContext: %v", err)
+	}
+	if _, err := s.AppendMessage(kit.NewLLMUserMessage("what changed?")); err != nil {
+		t.Fatalf("AppendMessage: %v", err)
+	}
+
+	restored, err := Restore(ctx, "replay-context", journal)
+	if err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	msgs := restored.GetMessages()
+	if len(msgs) != 1 || messageText(msgs[0]) != "what changed?" {
+		t.Fatalf("restored messages = %v, want the user message alone", msgs)
+	}
+	if len(restored.TurnContext()) != 0 {
+		t.Fatalf("restored session has turn context %v: context is not replayed into a turn", restored.TurnContext())
+	}
+
+	// The record itself is still there for an operator reading the journal.
+	recs, err := journal.Replay(ctx, "replay-context")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, rec := range recs {
+		if rec.Kind == RecordContext && rec.Text == "event: issues.opened\ndiff: +1 -1" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("the context record is missing from the journal")
+	}
+}

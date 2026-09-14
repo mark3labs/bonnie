@@ -218,6 +218,86 @@ func (l *Locks) Lock(runID string) func() {
 	return mu.Unlock
 }
 
+// Conversation kinds. A channel sets one on every [Turn] so the run records
+// where it lives, and the model is told ("This conversation is on channel
+// github (pull_request)"). The vocabulary is the union of what the shipped
+// adapters can name; a new adapter that needs another kind adds it here.
+const (
+	// KindDM is a direct message: one person, one bot.
+	KindDM = "dm"
+	// KindThread is a thread inside a channel: a Slack thread, a forum topic.
+	KindThread = "thread"
+	// KindChannel is a whole channel or group with no thread.
+	KindChannel = "channel"
+	// KindIssue is an issue's timeline.
+	KindIssue = "issue"
+	// KindPullRequest is a pull request's timeline.
+	KindPullRequest = "pull_request"
+	// KindReviewThread is one review thread on a pull request.
+	KindReviewThread = "review_thread"
+)
+
+// Turn is one platform event turned into agent input. It is the shape every
+// adapter normalises to before anything reaches the runner, so the rule for
+// what the model sees is one rule:
+//
+//   - Text is what the person said, with the invocation token removed. It
+//     is the only part that enters the conversation as a user message.
+//   - Context is what the model should know for this turn only — the event,
+//     the diff, the sender. It is shown to the model in front of Text and
+//     journalled as its own record, never as history.
+//   - Auth is who spoke, as the platform asserts it.
+//   - Title and Kind are recorded on the run's first turn.
+//
+// eve's channels return the same four parts from their dispatch hooks.
+type Turn struct {
+	// Address is the channel-local conversation key.
+	Address string
+	// Text is the user's message.
+	Text string
+	// Context is per-turn model context. See [runtime.Input].
+	Context []string
+	// Auth is the platform-asserted identity of the sender.
+	Auth *channel.Principal
+	// Title names the run in operator-facing listings.
+	Title string
+	// Kind is one of the Kind constants.
+	Kind string
+	// TurnPolicy overrides the core's default for this message.
+	TurnPolicy channel.TurnPolicy
+}
+
+// Options is the [channel.SendOptions] form of the turn, for the wire.
+func (t Turn) Options() channel.SendOptions {
+	return channel.SendOptions{
+		Auth:       t.Auth,
+		TurnPolicy: t.TurnPolicy,
+		Title:      t.Title,
+		Context:    t.Context,
+		Kind:       t.Kind,
+	}
+}
+
+// TitleFrom derives a run title from the first message: its first line,
+// cut at a word boundary. A conversation started by "deploy the app to
+// staging and tell me when it is up" is listed as that, not as run-3f2a.
+func TitleFrom(text string) string {
+	const limit = 60
+	line := text
+	if i := strings.IndexByte(line, '\n'); i >= 0 {
+		line = line[:i]
+	}
+	line = strings.TrimSpace(line)
+	if len(line) <= limit {
+		return line
+	}
+	cut := line[:limit]
+	if i := strings.LastIndexByte(cut, ' '); i > limit/2 {
+		cut = cut[:i]
+	}
+	return cut + "…"
+}
+
 // Ref is a [channel.SessionRef] over one address or one run ID. Every method
 // resolves the address first, so a reference stays correct after the address
 // is re-keyed. A reference from [Core.From] returns [runtime.ErrRunNotFound]
@@ -233,8 +313,13 @@ type Ref struct {
 // journalled address map, the per-run locks, the run-ID generator, and the
 // default turn policy. Adapters embed it and hand it out through [Core.From]
 // and [Core.Attach], which build [channel.SessionRef] implementations.
+//
+// The core carries the channel's name. It is recorded on every run the
+// channel starts, as the run's origin, so a tool or an instruction can tell a
+// Slack thread from a GitHub issue.
 type Core struct {
 	runner    *runtime.Runner
+	name      string
 	addresses *AddressMap
 	locks     *Locks
 	newID     func() string
@@ -250,12 +335,14 @@ func WithIDGenerator(fn func() string) CoreOption {
 	return func(c *Core) { c.newID = fn }
 }
 
-// NewCore returns the shared plumbing over a runner. The policy is the
-// turn policy used when a message arrives while a turn is already running;
-// the empty value means [channel.PolicySteer].
-func NewCore(r *runtime.Runner, policy channel.TurnPolicy, opts ...CoreOption) *Core {
+// NewCore returns the shared plumbing over a runner. name is the channel's
+// name, recorded on every run it starts. The policy is the turn policy used
+// when a message arrives while a turn is already running; the empty value
+// means [channel.PolicySteer].
+func NewCore(r *runtime.Runner, name string, policy channel.TurnPolicy, opts ...CoreOption) *Core {
 	c := &Core{
 		runner:    r,
+		name:      name,
 		addresses: NewAddressMap(r.Journal()),
 		locks:     NewLocks(),
 		newID:     NewRunID,
@@ -269,6 +356,9 @@ func NewCore(r *runtime.Runner, policy channel.TurnPolicy, opts ...CoreOption) *
 	}
 	return c
 }
+
+// Name is the channel's name.
+func (c *Core) Name() string { return c.name }
 
 // Addresses exposes the address map, for re-keying and for the platform
 // filters adapters need (a thread this channel never started is not for the
@@ -356,7 +446,12 @@ func (s *Ref) Send(ctx context.Context, text string, opts channel.SendOptions) (
 
 	unlock := s.core.locks.Lock(runID)
 	defer unlock()
-	return s.core.runner.Start(ctx, runID, runtime.Input{Text: text})
+	return s.core.runner.Start(ctx, runID, runtime.Input{
+		Text:    text,
+		Context: opts.Context,
+		Title:   opts.Title,
+		Origin:  runtime.Origin{Channel: s.core.name, Kind: opts.Kind},
+	})
 }
 
 // Respond implements [channel.SessionRef].
@@ -387,7 +482,10 @@ func (s *Ref) Cancel(ctx context.Context) error {
 // lock, so two platform messages cannot race the decision.
 //
 // An unknown run (the address was never bound) is a Send, which creates.
-func Route(ctx context.Context, ref *Ref, text string, opts channel.SendOptions) (*runtime.Run, error) {
+// The turn's context does not reach a resume: an answer to a question is
+// the answer, and the facts the question was asked with are already in the
+// conversation.
+func Route(ctx context.Context, ref *Ref, turn Turn) (*runtime.Run, error) {
 	runID, err := ref.RunID(ctx)
 	if err != nil {
 		return nil, err
@@ -397,9 +495,9 @@ func Route(ctx context.Context, ref *Ref, text string, opts channel.SendOptions)
 		return nil, err
 	}
 	if state == runtime.RunWaiting {
-		return ref.Respond(ctx, []runtime.InputResponse{{Text: text}})
+		return ref.Respond(ctx, []runtime.InputResponse{{Text: turn.Text}})
 	}
-	return ref.Send(ctx, text, opts)
+	return ref.Send(ctx, turn.Text, turn.Options())
 }
 
 // Dispatch delivers one inbound platform message and reports the outcome.
@@ -419,12 +517,18 @@ func Route(ctx context.Context, ref *Ref, text string, opts channel.SendOptions)
 // A start failure (no model configured, the journal refused a write)
 // delivers as an error, so the person typing learns the run died instead of
 // waiting on a reply that never comes.
-func Dispatch(ctx context.Context, core *Core, address, text string, opts channel.SendOptions, deliver func(address string, run *runtime.Run, err error)) {
+//
+// A turn with no title gets one from its text, so a run started from a chat
+// surface is listed by what was asked.
+func Dispatch(ctx context.Context, core *Core, turn Turn, deliver func(address string, run *runtime.Run, err error)) {
+	if turn.Title == "" {
+		turn.Title = TitleFrom(turn.Text)
+	}
 	go func() {
 		bg := context.WithoutCancel(ctx)
-		run, err := Route(bg, core.From(address), text, opts)
+		run, err := Route(bg, core.From(turn.Address), turn)
 		if err != nil {
-			deliver(address, nil, err)
+			deliver(turn.Address, nil, err)
 			return
 		}
 		if run.State == runtime.RunRunning || run.State == runtime.RunPending {
@@ -432,7 +536,7 @@ func Dispatch(ctx context.Context, core *Core, address, text string, opts channe
 			// owns the turn delivers its result.
 			return
 		}
-		deliver(address, run, nil)
+		deliver(turn.Address, run, nil)
 	}()
 }
 

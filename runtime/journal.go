@@ -70,6 +70,15 @@ const (
 	// reconciler can find the sandboxes of terminal runs. See
 	// docs/SPEC.md §4.10.
 	RecordSandbox RecordKind = "sandbox"
+	// RecordContext records the per-turn context a channel handed the
+	// runner with one input: facts for the model that are not conversation
+	// history — the pull-request diff a comment refers to, who sent a
+	// message, which event fired. It is run metadata, not a tree entry: the
+	// context reaches the model through the context-prepare hook on the
+	// turn it was sent with, and never again. Journalling it keeps replay
+	// honest — the record shows what the model saw — without turning it
+	// into a user message on resume. See docs/SPEC.md §3.7.
+	RecordContext RecordKind = "context"
 )
 
 // Record is one durable entry in a run's journal. Records are append-only and
@@ -88,6 +97,7 @@ const (
 //   - [RecordRepair]: the entry IDs a torn-write repair dropped.
 //   - [RecordSandbox]: the backend and sandbox ID, and whether the sandbox
 //     was seen to be gone.
+//   - [RecordContext]: the context strings, as a JSON array.
 //
 // Every record that carries an EntryID takes part in the conversation tree, so
 // each one must be journalled. An entry that reaches the tree but not the

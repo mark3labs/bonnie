@@ -365,6 +365,58 @@ func RunConformance(t *testing.T, build func(t *testing.T) *Fixture) {
 			t.Fatal("the turn never returned after cancel")
 		}
 	})
+	t.Run("send records title, origin, and context", func(t *testing.T) {
+		f := build(t)
+		ctx := context.Background()
+
+		ref := f.Inbound.From("norm-addr")
+		run, err := ref.Send(ctx, "what changed?", channel.SendOptions{
+			Title:   "PR #42",
+			Kind:    "pull_request",
+			Context: []string{"event: pull_request.opened"},
+		})
+		if err != nil {
+			t.Fatalf("Send: %v", err)
+		}
+		// A second turn with different metadata and no context.
+		if _, err := ref.Send(ctx, "and now?", channel.SendOptions{Title: "ignored", Kind: "dm"}); err != nil {
+			t.Fatalf("second Send: %v", err)
+		}
+
+		sess, err := runtime.Restore(ctx, run.ID, f.Journal)
+		if err != nil {
+			t.Fatalf("Restore: %v", err)
+		}
+		if sess.Title() != "PR #42" {
+			t.Fatalf("title = %q, want the first turn's", sess.Title())
+		}
+		o := sess.Origin()
+		if o.Channel == "" || o.Kind != "pull_request" {
+			t.Fatalf("origin = %+v, want the channel's name and the first turn's kind", o)
+		}
+
+		recs, err := f.Journal.Replay(ctx, run.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var contexts, users []string
+		for _, rec := range recs {
+			switch {
+			case rec.Kind == runtime.RecordContext:
+				contexts = append(contexts, rec.Text)
+			case rec.Kind == runtime.RecordMessage && rec.Role == "user":
+				users = append(users, rec.Text)
+			}
+		}
+		if len(contexts) != 1 || contexts[0] != "event: pull_request.opened" {
+			t.Fatalf("context records = %q, want the first turn's only", contexts)
+		}
+		for _, u := range users {
+			if u != "what changed?" && u != "and now?" {
+				t.Fatalf("user message %q: context leaked into the conversation", u)
+			}
+		}
+	})
 }
 
 // refSend is Send with an explicit policy, so the table cases stay flat.

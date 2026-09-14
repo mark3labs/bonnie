@@ -9,7 +9,7 @@
 //   - [kit.SessionManager] via [Session], so every appended message is
 //     journalled before it is kept.
 //   - Kit.OnStepFinish, to checkpoint at the agent-step boundary.
-//   - Kit.OnContextPrepare, to inject a replayed context window on resume.
+//   - Kit.OnContextPrepare, to put a turn's context in front of its prompt.
 //   - kit.ToolOutput{Halt, FinalValue}, as the suspension contract.
 //
 // None of these require access to Kit's internal packages. BONNIE is a
@@ -93,19 +93,38 @@ func attachCheckpoints(k *kit.Kit, s *Session) {
 		})
 	})
 
-	// On resume, the replayed session already holds the full conversation, so
-	// the default context window is correct. The hook is registered anyway as
-	// the documented injection point for custom replay policy.
+	// The context-prepare hook is where a turn's context reaches the model.
+	// The replayed session already holds the full conversation, so the
+	// window is correct as assembled; the hook adds the per-turn context and
+	// the run's origin in front of the prompt, for this one call. A turn
+	// with neither returns nil, which keeps Kit's window unchanged.
 	k.OnContextPrepare(kit.HookPriorityHigh,
 		func(h kit.ContextPrepareHook) *kit.ContextPrepareResult {
-			return nil // nil keeps Kit's assembled context unchanged
+			msgs := prepareContext(h.Messages, s.Origin(), s.TurnContext())
+			if msgs == nil {
+				return nil
+			}
+			return &kit.ContextPrepareResult{Messages: msgs}
 		})
 }
 
 // Input starts or continues a run.
 type Input struct {
+	// Text is the user's message: the one thing that enters the
+	// conversation as a user turn.
 	Text  string
 	Files []kit.LLMFilePart
+	// Context is what the model should know for this turn and this turn
+	// only: the event that fired, the diff a comment refers to, who is
+	// speaking. It is journalled as a [RecordContext] and shown to the
+	// model in front of Text; it never becomes conversation history.
+	Context []string
+	// Title names the run in operator-facing listings. It is recorded on
+	// the first turn that carries one and ignored after that.
+	Title string
+	// Origin says where the conversation lives. It is recorded on the
+	// first turn that carries one and ignored after that.
+	Origin Origin
 }
 
 // Run is a snapshot of a durable run after a turn boundary.
@@ -410,6 +429,10 @@ func (r *Runner) replayEvents(runID string, after int, out chan<- Event, done <-
 // Start begins a run, or continues an existing one that is not suspended. If
 // runID is already known to the journal, its conversation is replayed first,
 // so Start doubles as crash recovery.
+//
+// The input's title and origin are recorded on the run the first time they
+// are seen; its context is journalled and handed to the model for this turn
+// only.
 func (r *Runner) Start(ctx context.Context, runID string, in Input) (*Run, error) {
 	turnCtx, act, err := r.acquire(ctx, runID)
 	if err != nil {
@@ -421,6 +444,16 @@ func (r *Runner) Start(ctx context.Context, runID string, in Input) (*Run, error
 	if err != nil {
 		return nil, err
 	}
+	if err := s.recordTitle(in.Title); err != nil {
+		return nil, err
+	}
+	if err := s.recordOrigin(in.Origin); err != nil {
+		return nil, err
+	}
+	if err := s.journalContext(turnCtx, in.Context); err != nil {
+		return nil, err
+	}
+	s.SetTurnContext(in.Context)
 	return r.turn(turnCtx, act, s, in.Text)
 }
 

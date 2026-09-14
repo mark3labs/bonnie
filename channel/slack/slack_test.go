@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mark3labs/bonnie/channel/chat"
 	"github.com/mark3labs/bonnie/channeltest"
 	"github.com/mark3labs/bonnie/runtime"
 
@@ -86,6 +87,7 @@ type harness struct {
 	server  *httptest.Server
 	secret  string
 	created time.Time
+	journal runtime.Journal
 }
 
 // adapter builds the channel with signature verification on, because
@@ -113,7 +115,7 @@ func adapter(t *testing.T, script []*kit.TurnResult) *harness {
 			rt.Handler(w, req, ch)
 		})
 	}
-	h := &harness{ch: ch, agent: agent, fake: fake, server: httptest.NewServer(mux), secret: secret, created: time.Now()}
+	h := &harness{ch: ch, agent: agent, fake: fake, server: httptest.NewServer(mux), secret: secret, created: time.Now(), journal: j}
 	t.Cleanup(h.server.Close)
 	return h
 }
@@ -233,6 +235,42 @@ func TestMentionStartsAConversationAndThreadsTheReply(t *testing.T) {
 	}
 	if calls := h.agent.Calls(); calls != 2 {
 		t.Fatalf("agent ran %d turns, want 2", calls)
+	}
+
+	// The event was normalised: the run is titled by what was asked, its
+	// origin names this channel and the thread kind, and the sender
+	// reached the model as context, not as part of the message.
+	runID, ok := h.ch.core.Addresses().Lookup("slack/C1/1719000000.000100")
+	if !ok {
+		t.Fatal("the thread is not bound")
+	}
+	sess, err := runtime.Restore(context.Background(), runID, h.journal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sess.Title() != "what is a durable run?" {
+		t.Fatalf("title = %q, want the first message", sess.Title())
+	}
+	if o := sess.Origin(); o != (runtime.Origin{Channel: "slack", Kind: chat.KindThread}) {
+		t.Fatalf("origin = %+v", o)
+	}
+	recs, _ := h.journal.Replay(context.Background(), runID)
+	var contexts, users []string
+	for _, rec := range recs {
+		switch {
+		case rec.Kind == runtime.RecordContext:
+			contexts = append(contexts, rec.Text)
+		case rec.Kind == runtime.RecordMessage && rec.Role == "user":
+			users = append(users, rec.Text)
+		}
+	}
+	if len(contexts) != 2 || !strings.Contains(contexts[0], "U7") {
+		t.Fatalf("context records = %q, want one per turn naming the sender", contexts)
+	}
+	for _, u := range users {
+		if strings.Contains(u, "U7") || strings.Contains(u, "<@") {
+			t.Fatalf("user message %q carries platform noise", u)
+		}
 	}
 }
 

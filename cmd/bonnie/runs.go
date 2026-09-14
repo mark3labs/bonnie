@@ -69,6 +69,7 @@ func runsList(dir, state string, asJSON bool) error {
 
 	type row struct {
 		RunID string           `json:"run_id"`
+		Title string           `json:"title,omitempty"`
 		State runtime.RunState `json:"state"`
 		Turns int              `json:"turns"`
 		Last  string           `json:"last,omitempty"`
@@ -96,6 +97,9 @@ func runsList(dir, state string, asJSON bool) error {
 			if rec.Text != "" && (rec.Kind == runtime.RecordMessage || rec.Kind == runtime.RecordSuspend) {
 				r.Last = rec.Text
 			}
+			if rec.Kind == runtime.RecordExtensionData && rec.ExtType == runtime.ExtTitle {
+				r.Title = rec.Text
+			}
 		}
 		rows = append(rows, r)
 	}
@@ -109,9 +113,9 @@ func runsList(dir, state string, asJSON bool) error {
 	}
 
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	_, _ = fmt.Fprintln(tw, "RUN\tSTATE\tSTEPS\tLAST")
+	_, _ = fmt.Fprintln(tw, "RUN\tTITLE\tSTATE\tSTEPS\tLAST")
 	for _, r := range rows {
-		_, _ = fmt.Fprintf(tw, "%s\t%s\t%d\t%s\n", r.RunID, r.State, r.Turns, oneLine(r.Last, 60))
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\n", r.RunID, oneLine(r.Title, 40), r.State, r.Turns, oneLine(r.Last, 60))
 	}
 	return tw.Flush()
 }

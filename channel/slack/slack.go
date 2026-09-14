@@ -123,7 +123,7 @@ func New(r *runtime.Runner, cfg Config, opts ...chat.CoreOption) *Channel {
 		api = "https://slack.com/api"
 	}
 	return &Channel{
-		core: chat.NewCore(r, channel.PolicySteer, opts...),
+		core: chat.NewCore(r, "slack", channel.PolicySteer, opts...),
 		cfg:  cfg,
 		api:  api,
 		http: &http.Client{Timeout: 15 * time.Second},
@@ -207,20 +207,20 @@ func (c *Channel) handleEvent(w http.ResponseWriter, r *http.Request, _ channel.
 		return
 	}
 
-	text, address, ok := c.forUs(ev.Event)
+	turn, ok := c.forUs(ev.Event)
 	if !ok {
 		return
 	}
-
-	opts := channel.SendOptions{Auth: &channel.Principal{
+	turn.Auth = &channel.Principal{
 		Authenticator: "slack",
 		Kind:          "user",
 		ID:            ev.Event.User,
 		Attributes: map[string]any{
 			"channel": ev.Event.Channel,
 		},
-	}}
-	chat.Dispatch(r.Context(), c.core, address, text, opts, c.deliver)
+	}
+	turn.Context = []string{"Slack user " + ev.Event.User + " wrote in channel " + ev.Event.Channel + "."}
+	chat.Dispatch(r.Context(), c.core, turn, c.deliver)
 }
 
 // verify checks Slack's v0 signature: HMAC-SHA256 over "v0:<timestamp>:<body>"
@@ -261,8 +261,9 @@ func (c *Channel) claim(eventID string) bool {
 	return true
 }
 
-// forUs decides whether an event reaches the agent, and derives the address:
-// the mention's thread, the DM channel, or a thread this channel bound.
+// forUs decides whether an event reaches the agent, and normalises it: the
+// address is the mention's thread, the DM channel, or a thread this channel
+// bound; the text has the mention stripped; the kind says which.
 func (c *Channel) forUs(e *struct {
 	Type        string `json:"type"`
 	Text        string `json:"text"`
@@ -273,9 +274,9 @@ func (c *Channel) forUs(e *struct {
 	BotID       string `json:"bot_id"`
 	User        string `json:"user"`
 	Subtype     string `json:"subtype"`
-}) (string, string, bool) {
+}) (chat.Turn, bool) {
 	if e.BotID != "" || e.Subtype != "" {
-		return "", "", false // bots and edits: never
+		return chat.Turn{}, false // bots and edits: never
 	}
 	switch {
 	case e.Type == "app_mention":
@@ -284,22 +285,30 @@ func (c *Channel) forUs(e *struct {
 		if thread == "" {
 			thread = e.TS
 		}
-		return stripMention(e.Text), fmt.Sprintf("slack/%s/%s", e.Channel, thread), true
+		return chat.Turn{
+			Address: fmt.Sprintf("slack/%s/%s", e.Channel, thread),
+			Text:    stripMention(e.Text),
+			Kind:    chat.KindThread,
+		}, true
 
 	case e.Type == "message" && e.ChannelType == "im":
-		return strings.TrimSpace(e.Text), fmt.Sprintf("slack/%s/dm", e.Channel), true
+		return chat.Turn{
+			Address: fmt.Sprintf("slack/%s/dm", e.Channel),
+			Text:    strings.TrimSpace(e.Text),
+			Kind:    chat.KindDM,
+		}, true
 
 	case e.Type == "message" && e.ThreadTS != "":
 		// A reply in a thread: for the agent only when it bound that
 		// thread. Everything else in a busy channel is not its business.
 		address := fmt.Sprintf("slack/%s/%s", e.Channel, e.ThreadTS)
 		if _, bound := c.core.Addresses().Lookup(address); bound {
-			return strings.TrimSpace(e.Text), address, true
+			return chat.Turn{Address: address, Text: strings.TrimSpace(e.Text), Kind: chat.KindThread}, true
 		}
-		return "", "", false
+		return chat.Turn{}, false
 
 	default:
-		return "", "", false
+		return chat.Turn{}, false
 	}
 }
 

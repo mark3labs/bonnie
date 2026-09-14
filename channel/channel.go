@@ -88,8 +88,19 @@ type Principal struct {
 type SendOptions struct {
 	Auth       *Principal
 	TurnPolicy TurnPolicy
-	// Title names the run for operator-facing listings.
+	// Title names the run for operator-facing listings. It is recorded on
+	// the run's first turn and ignored after that.
 	Title string
+	// Context is what the model should know for this turn only: the event
+	// that fired, the diff a comment refers to, who is speaking. It is
+	// shown to the model in front of the text and never becomes
+	// conversation history. See [runtime.Input].
+	Context []string
+	// Kind is the kind of surface the address names: a DM, a thread, an
+	// issue. It is recorded on the run's first turn so instructions and
+	// tools can tell where the conversation lives. The chat package owns
+	// the vocabulary.
+	Kind string
 }
 
 // SessionRef is a handle to the run that serves an address.

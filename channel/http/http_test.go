@@ -473,8 +473,9 @@ func TestStreamEmitsNDJSON(t *testing.T) {
 }
 
 // TestStreamResumesFromCursor is the reconnect contract: no gap, no duplicate.
-// The seqs are journal anchors, so they are not dense — the response sits
-// between the running and completed state records.
+// The seqs are journal anchors, so they are not dense — the origin record
+// comes first, and the response sits between the running and completed
+// state records.
 func TestStreamResumesFromCursor(t *testing.T) {
 	t.Parallel()
 	s := newTestServer(t, &stubAgent{turns: []*kit.TurnResult{{Response: "hello"}}},
@@ -483,15 +484,15 @@ func TestStreamResumesFromCursor(t *testing.T) {
 	s.post(t, "/bonnie/v1/runs", StartRequest{Text: "hi"}) //nolint:errcheck // state asserted below
 
 	first := readStream(t, s, "/bonnie/v1/runs/cursor-me/stream?cursor=0", 2)
-	if first[0].Seq != 1 || first[1].Seq != 3 {
-		t.Fatalf("first read = %v, want [1 3] — the response anchors to the assistant message record", seqs(first))
+	if first[0].Seq != 2 || first[1].Seq != 4 {
+		t.Fatalf("first read = %v, want [2 4] — the response anchors to the assistant message record", seqs(first))
 	}
 
-	// A client that dropped after event 3 comes back with its cursor: the
+	// A client that dropped after event 4 comes back with its cursor: the
 	// closing state of the turn is the next durable event.
-	second := readStream(t, s, "/bonnie/v1/runs/cursor-me/stream?cursor=3", 1)
-	if second[0].Seq != 4 || second[0].State != runtime.RunCompleted {
-		t.Fatalf("reconnect delivered %v, want the completed state at seq 4 — a gap or a duplicate", seqs(second))
+	second := readStream(t, s, "/bonnie/v1/runs/cursor-me/stream?cursor=4", 1)
+	if second[0].Seq != 5 || second[0].State != runtime.RunCompleted {
+		t.Fatalf("reconnect delivered %v, want the completed state at seq 5 — a gap or a duplicate", seqs(second))
 	}
 }
 

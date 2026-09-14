@@ -128,7 +128,7 @@ func New(r *runtime.Runner, cfg Config, opts ...chat.CoreOption) (*Channel, erro
 		api = "https://discord.com/api/v10"
 	}
 	c := &Channel{
-		core: chat.NewCore(r, channel.PolicySteer, opts...),
+		core: chat.NewCore(r, "discord", channel.PolicySteer, opts...),
 		cfg:  cfg,
 		api:  api,
 		http: &http.Client{Timeout: 15 * time.Second},
@@ -235,16 +235,24 @@ func (c *Channel) handleInteraction(w http.ResponseWriter, r *http.Request, _ ch
 	if user == nil {
 		user = in.User
 	}
-	opts := channel.SendOptions{Auth: &channel.Principal{
-		Authenticator: "discord",
-		Kind:          "user",
-		ID:            user.ID,
-		Attributes: map[string]any{
-			"username":   user.Username,
-			"channel_id": in.ChannelID,
+	chat.Dispatch(r.Context(), c.core, chat.Turn{
+		Address: "discord/" + in.ChannelID,
+		Text:    commandText(in.Data),
+		// Discord's webhook does not say whether the channel is a thread;
+		// the interaction carries only its ID. One channel is one
+		// conversation either way.
+		Kind:    chat.KindChannel,
+		Context: []string{"Discord user " + user.Username + " used /" + c.cfg.Command + " in channel " + in.ChannelID + "."},
+		Auth: &channel.Principal{
+			Authenticator: "discord",
+			Kind:          "user",
+			ID:            user.ID,
+			Attributes: map[string]any{
+				"username":   user.Username,
+				"channel_id": in.ChannelID,
+			},
 		},
-	}}
-	chat.Dispatch(r.Context(), c.core, "discord/"+in.ChannelID, commandText(in.Data), opts, c.deliver)
+	}, c.deliver)
 }
 
 // commandText extracts the command's `message` option.

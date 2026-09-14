@@ -109,7 +109,7 @@ func New(r *runtime.Runner, opts ...Option) *Channel {
 	for _, opt := range opts {
 		opt(c)
 	}
-	c.core = chat.NewCore(r, c.policy, c.idGen...)
+	c.core = chat.NewCore(r, c.Name(), c.policy, c.idGen...)
 	if c.info.Version == "" {
 		c.info.Version = moduleVersion()
 	}
@@ -212,6 +212,12 @@ type StartRequest struct {
 	Text string `json:"text"`
 	// Title names the run in operator-facing listings.
 	Title string `json:"title,omitempty"`
+	// Kind says what kind of surface the address names ("dm", "thread",
+	// "issue", ...). Recorded on the run's first turn.
+	Kind string `json:"kind,omitempty"`
+	// Context is per-turn model context: shown to the model in front of
+	// the text on this turn only, never kept as history.
+	Context []string `json:"context,omitempty"`
 	// TurnPolicy overrides the channel default for this message.
 	TurnPolicy channel.TurnPolicy `json:"turn_policy,omitempty"`
 	// Auth carries the caller's identity. It is recorded, not verified.
@@ -221,6 +227,7 @@ type StartRequest struct {
 // SendRequest sends a message to a run that already exists.
 type SendRequest struct {
 	Text       string             `json:"text"`
+	Context    []string           `json:"context,omitempty"`
 	TurnPolicy channel.TurnPolicy `json:"turn_policy,omitempty"`
 	Auth       *channel.Principal `json:"auth,omitempty"`
 }
@@ -301,6 +308,8 @@ func (c *Channel) handleStart(w http.ResponseWriter, r *http.Request, in channel
 		Auth:       req.Auth,
 		TurnPolicy: req.TurnPolicy,
 		Title:      req.Title,
+		Kind:       req.Kind,
+		Context:    req.Context,
 	})
 	if err != nil {
 		writeError(w, err)
@@ -349,6 +358,7 @@ func (c *Channel) handleSend(w http.ResponseWriter, r *http.Request, in channel.
 	run, err := sess.Send(r.Context(), req.Text, channel.SendOptions{
 		Auth:       req.Auth,
 		TurnPolicy: req.TurnPolicy,
+		Context:    req.Context,
 	})
 	if err != nil {
 		writeError(w, err)
