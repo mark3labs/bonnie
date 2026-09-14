@@ -53,7 +53,7 @@ L0  kit/pkg/kit                        upstream, unmodified
 ```
 
 The root package `github.com/mark3labs/bonnie` is the entry point an agent
-tree calls: `bonnie.Main()` is a complete agent. It owns the serving path and
+tree calls: `bonnie.New().Serve()` is a complete agent. It owns the serving
 the default layout constants, and the CLI calls the same code, so the two
 cannot drift. **There is no manifest file** — a setting is a file at a fixed
 path or a Go option, never both (invariant 14). Do not add a config file back.

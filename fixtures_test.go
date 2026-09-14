@@ -17,7 +17,7 @@ import (
 var testSeed embed.FS
 
 // stubAgent is an agent that is never asked to do anything: the tests that use
-// it check which factory [Run] picks, not what a turn does.
+// it check which factory [Agent.Run] picks, not what a turn does.
 type stubAgent struct{}
 
 func (stubAgent) PromptResult(context.Context, string) (*kit.TurnResult, error) { return nil, nil }

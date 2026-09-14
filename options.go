@@ -27,7 +27,7 @@ type Channel interface {
 // once at start; an error stops the process before it listens.
 type ChannelFunc func(*runtime.Runner) (Channel, error)
 
-// config is the resolved configuration of one [Run]. Every field has a
+// config is the resolved configuration of one [Agent]. Every field has a
 // default from the scaffolded layout; an [Option] replaces one.
 type config struct {
 	addr      string
@@ -47,7 +47,7 @@ type config struct {
 	quiet     bool
 }
 
-// Option configures [Run] and [Main]. This is where a setting that is not a
+// Option configures [New]. This is where a setting that is not a
 // file in the tree lives: the model, a sandbox, an extra channel. A setting
 // that does not exist is a compile error, which is the point.
 type Option func(*config)
@@ -113,7 +113,7 @@ func WithWorkspace(dir string) Option {
 // WithSandbox runs every tool call in p instead of in this process.
 //
 // Without it, a model-chosen tool call has this process's files, network, and
-// credentials, and [Run] says so at startup. See docs/SANDBOX.md.
+// credentials, and [Agent.Run] says so at startup. See docs/SANDBOX.md.
 func WithSandbox(p sandbox.Provider) Option {
 	return func(c *config) { c.sandbox = p }
 }
@@ -145,7 +145,8 @@ func WithKit(opts ...kit.Option) Option {
 // It cannot be combined with the options that configure the agent BONNIE
 // would have built ([WithModel], [WithSystemPrompt], [WithSandbox],
 // [WithNetwork], [WithTools], [WithKit]): the factory owns the agent, so those
-// settings would be accepted and ignored. [Run] refuses instead, naming both.
+// settings would be accepted and ignored. [Agent.Run] refuses instead, naming
+// both.
 //
 // What the factory owns, it owns completely: the tree's instructions and the
 // tools codegen discovered do not reach it either. They are available through
@@ -161,7 +162,7 @@ func WithChannel(f ChannelFunc) Option {
 	return func(c *config) { c.channels = append(c.channels, f) }
 }
 
-// WithShutdownTimeout is how long [Run] waits for in-flight turns to reach a
+// WithShutdownTimeout is how long [Agent.Run] waits for in-flight turns to reach a
 // checkpoint after a signal. A turn that is cut short still keeps its
 // finished steps — the journal is what survives — but a clean stop is
 // cheaper.

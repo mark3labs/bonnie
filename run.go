@@ -21,52 +21,76 @@ import (
 	kit "github.com/mark3labs/kit/pkg/kit"
 )
 
-// Main is the whole default agent: it parses the operator flags a serving
-// binary accepts, serves until the process is interrupted, and exits.
+// Agent is a configured agent: the tree's defaults with the options applied
+// over them. Build one with [New], then [Agent.Serve] it.
 //
-//	func main() { bonnie.Main() }
+// Nothing is opened, bound, or read until it serves, so building an agent
+// cannot fail and [New] returns no error. A setting that cannot apply — a
+// network policy with no sandbox to enforce it, a model beside a
+// host-supplied agent factory — is refused when serving starts, which is the
+// first moment the whole configuration is known.
+type Agent struct {
+	cfg *config
+}
+
+// New builds an agent from the tree's default layout and the options.
+//
+//	func main() { bonnie.New().Serve() }
+//
+// With no options that is a complete agent: instructions.md is the system
+// prompt, workspace/ is the agent's root for files, .bonnie is the journal,
+// the tools under tools/ are wired by codegen, and the HTTP channel is
+// served on :8080. Each [Option] replaces one of those.
+func New(opts ...Option) *Agent {
+	c := defaults()
+	for _, o := range opts {
+		o(c)
+	}
+	return &Agent{cfg: c}
+}
+
+// Serve runs the agent until the process is interrupted, then exits.
+//
+// It owns the process, which is what makes a one-line main possible: it
+// parses the operator flags a serving binary accepts, installs the signal
+// handler, drains in-flight turns on SIGINT or SIGTERM, and exits non-zero
+// after writing the error to stderr. A host that owns its own process calls
+// [Agent.Run] instead.
 //
 // The flags are -addr and -model, and each wins over the matching option, so
 // an operator can move a built binary to another port or model without
 // rebuilding it. `bonnie dev` starts a tree's binary with -addr, which is the
 // whole contract between the dev loop and the child.
-//
-// Main owns the process: it writes the error to stderr and exits non-zero
-// when serving fails. A host that owns its own process calls [Run] instead.
-func Main(opts ...Option) {
+func (a *Agent) Serve() {
 	addr := flag.String("addr", "", "address to listen on")
 	model := flag.String("model", "", "model to use, for example anthropic/claude-sonnet-4-5")
 	flag.Parse()
 
-	// The flags come last, so they win over the options the author wrote.
+	// The flags are applied after the author's options, so they win.
 	if *addr != "" {
-		opts = append(opts, WithAddr(*addr))
+		WithAddr(*addr)(a.cfg)
 	}
 	if *model != "" {
-		opts = append(opts, WithModel(*model))
+		WithModel(*model)(a.cfg)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	if err := Run(ctx, opts...); err != nil {
+	if err := a.Run(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
 // Run serves the agent until ctx ends, then drains in-flight turns and
-// returns.
+// returns. It is [Agent.Serve] without the process: no flags, no signal
+// handler, no exit — for a host that already owns those.
 //
-// It reads the tree's defaults — the instructions file, the workspace, the
-// journal directory — applies the options over them, and mounts the HTTP
-// channel plus any channel an option added. A run that parks holds no
-// compute and lives in the journal, so stopping here is never destructive.
-func Run(ctx context.Context, opts ...Option) error {
-	c := defaults()
-	for _, o := range opts {
-		o(c)
-	}
+// A run that parks holds no compute and lives in the journal, so stopping
+// here is never destructive.
+func (a *Agent) Run(ctx context.Context) error {
+	c := a.cfg
 
 	prompt, err := c.systemPrompt()
 	if err != nil {

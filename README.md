@@ -135,9 +135,9 @@ package main
 import "github.com/mark3labs/bonnie"
 
 func main() {
-	bonnie.Main(
+	bonnie.New(
 		bonnie.WithModel("anthropic/claude-sonnet-4-5"),
-	)
+	).Serve()
 }
 ```
 
@@ -423,11 +423,11 @@ Slack, Discord, and Telegram put the same durable runs into a conversation.
 Mount one in `main.go`, put its credentials in the environment, and run:
 
 ```go
-bonnie.Main(
+bonnie.New(
 	bonnie.WithSlack(slack.Config{}),
 	bonnie.WithDiscord(discord.Config{}),
 	bonnie.WithTelegram(telegram.Config{Username: "mybot"}),
-)
+).Serve()
 ```
 
 ```bash

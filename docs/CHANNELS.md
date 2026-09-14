@@ -82,7 +82,7 @@ to the workspace, then set:
 Mount it in `main.go`:
 
 ```go
-bonnie.Main(bonnie.WithSlack(slack.Config{}))
+bonnie.New(bonnie.WithSlack(slack.Config{})).Serve()
 ```
 
 ## Discord
@@ -118,7 +118,7 @@ set the webhook URL as the Interactions Endpoint URL, then set:
 Mount it in `main.go`:
 
 ```go
-bonnie.Main(bonnie.WithDiscord(discord.Config{}))
+bonnie.New(bonnie.WithDiscord(discord.Config{})).Serve()
 ```
 
 ## Telegram
@@ -148,7 +148,7 @@ you configure here (the URL must be HTTPS), then set:
 Mount it in `main.go`:
 
 ```go
-bonnie.Main(bonnie.WithTelegram(telegram.Config{Username: "mybot"}))
+bonnie.New(bonnie.WithTelegram(telegram.Config{Username: "mybot"})).Serve()
 ```
 
 ---

@@ -829,7 +829,7 @@ not.
 ## T-024 — Remove the manifest: configuration is code
 
 **RESOLVED.** `agent.yaml` is gone. A tree's data lives at fixed paths and
-everything else is a Go option on `bonnie.Main`. The scaffolded `main.go` is
+everything else is a Go option on `bonnie.New`. The scaffolded `main.go` is
 one call.
 
 **Priority** P1 · **Size** L · **Spec** [`docs/L2.md`](L2.md) §2, §4, §5
@@ -894,6 +894,12 @@ the wrong invention.
   generated file defined `discoveredTools()` and `embeddedInstructions()`,
   which the authored `main.go` had to know about and call. Registration
   inverts it, which is what lets the minimum `main.go` be one line.
+- **`New` returns an agent; `Serve` runs it.** A single `Main(opts...)` was
+  tried first and named the caller rather than the thing. The constructor and
+  the verb are separate because they do different jobs: `New` cannot fail, so
+  it returns no error, and `Serve` owns the process — flags, signals, exit —
+  while `Run(ctx)` is the same work for a host that owns its own. A `New` that
+  blocked, or a `Serve` that built, would lie about one of the two.
 - **`Registered` is a run-time read, and the doc says so.** Go initialises
   package-level variables before any `init`, so `var p = bonnie.Registered()`
   silently reads the empty tree. Found by the hermetic build test, which

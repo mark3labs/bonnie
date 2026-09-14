@@ -15,15 +15,9 @@ import (
 	kit "github.com/mark3labs/kit/pkg/kit"
 )
 
-// resolve applies options the way [Run] does, so a test can read the resolved
-// configuration without serving.
-func resolve(opts ...Option) *config {
-	c := defaults()
-	for _, o := range opts {
-		o(c)
-	}
-	return c
-}
+// resolve builds an agent and returns its configuration, so a test can read
+// what the options resolved to without serving.
+func resolve(opts ...Option) *config { return New(opts...).cfg }
 
 // TestDefaultsAreTheScaffoldedLayout is the claim that replaced the manifest:
 // an agent with no configuration at all reads its data from the paths `bonnie

@@ -42,10 +42,10 @@ bonnie serve --sandbox docker --sandbox-deny-network
 Or, in an agent tree's `main.go`:
 
 ```go
-bonnie.Main(
+bonnie.New(
 	bonnie.WithSandbox(sandbox.Docker()),
 	bonnie.WithNetwork(sandbox.NetworkPolicy{Mode: sandbox.NetworkDenyAll}),
-)
+).Serve()
 ```
 
 ```go

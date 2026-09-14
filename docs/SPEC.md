@@ -818,7 +818,7 @@ edge cases. Consult them for **design questions**, not for implementation.
 | `channel/chat` dispatch, steering, delivery | Chat SDK `send`, turn policies, default handlers | [Chat SDK](https://eve.dev/docs/channels/chat-sdk) |
 | `AppendExtensionData` | `defineState` | [State](https://eve.dev/docs/concepts/state) |
 | `bonnie init` / `dev` / `build` | `eve init`, `npm run dev`, deploy | [Getting Started](https://eve.dev/docs/getting-started) |
-| `main.go` options on `bonnie.Main` | `agent/agent.ts` (`defineAgent`) — configuration is code in both. BONNIE shipped a declarative `agent.yaml` in `v0.2` and removed it in `v0.3` (T-024): two places for one setting is worse than requiring Go on the desk | [Getting Started](https://eve.dev/docs/getting-started) |
+| `main.go` options on `bonnie.New` | `agent/agent.ts` (`defineAgent`) — configuration is code in both. BONNIE shipped a declarative `agent.yaml` in `v0.2` and removed it in `v0.3` (T-024): two places for one setting is worse than requiring Go on the desk | [Getting Started](https://eve.dev/docs/getting-started) |
 | Kit compaction (inherited) | `compaction.thresholdPercent` | [Default Harness](https://eve.dev/docs/concepts/default-harness) |
 | *deferred* | `defineEval`, `eve eval` | [Evals](https://eve.dev/docs/evals/overview) |
 | *deferred* | `instrumentation.ts` | [Observability](https://eve.dev/docs/guides/instrumentation) |

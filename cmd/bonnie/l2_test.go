@@ -47,7 +47,7 @@ func (s *syncBuffer) String() string {
 // file on disk.
 //
 // Everything else — the journal, the HTTP channel, the listen address, the
-// graceful stop — comes from bonnie.Main, which is the point: this is the real
+// graceful stop — comes from bonnie.Serve, which is the point: this is the real
 // serving path, with only the model replaced.
 const hermeticMain = `package main
 
@@ -102,12 +102,12 @@ func (a *parkingAgent) InjectSteer(string) {}
 func (a *parkingAgent) Close() error       { return nil }
 
 func main() {
-	bonnie.Main(
+	bonnie.New(
 		bonnie.WithAddr("127.0.0.1:0"),
 		bonnie.WithAgentFactory(func(_ context.Context, s *runtime.Session) (runtime.Agent, error) {
 			return &parkingAgent{session: s}, nil
 		}),
-	)
+	).Serve()
 }
 `
 

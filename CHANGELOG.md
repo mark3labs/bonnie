@@ -9,13 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Breaking: the manifest is gone. Configuration is code.** `agent.yaml` (and
 `agent.toml`, `agent.json`) no longer exist. A tree's data lives at fixed
-paths and everything else is a Go option on `bonnie.Main`, so a setting that
+paths and everything else is a Go option on `bonnie.New`, so a setting that
 does not exist is a compile error rather than a key nothing reads. See
 `docs/TASKS.md` T-024 and `docs/L2.md`.
 
 ### Added
 
-- **The root package `github.com/mark3labs/bonnie`.** `bonnie.Main()` is a
+- **The root package `github.com/mark3labs/bonnie`.** `bonnie.New().Serve()` is a
   complete agent: it reads `instructions.md`, roots the agent's files in
   `workspace/`, journals to `.bonnie`, serves the HTTP channel, and drains
   in-flight turns on a signal. The scaffolded `main.go` is now one call.
@@ -25,14 +25,16 @@ does not exist is a compile error rather than a key nothing reads. See
 
   import "github.com/mark3labs/bonnie"
 
-  func main() { bonnie.Main() }
+  func main() { bonnie.New().Serve() }
   ```
 
-- **Options for everything that is not a file**: `WithModel`, `WithSandbox`,
-  `WithNetwork`, `WithTools`, `WithKit`, `WithSlack`, `WithDiscord`,
-  `WithTelegram`, `WithChannel`, `WithWorkspace`, `WithInstructions`,
-  `WithJournal`, `WithAddr`, `WithShutdownTimeout`, and `WithAgentFactory`
-  for a host that brings its own agent.
+- **Options for everything that is not a file**, passed to `New`: `WithModel`,
+  `WithSandbox`, `WithNetwork`, `WithTools`, `WithKit`, `WithSlack`,
+  `WithDiscord`, `WithTelegram`, `WithChannel`, `WithWorkspace`,
+  `WithInstructions`, `WithJournal`, `WithAddr`, `WithShutdownTimeout`, and
+  `WithAgentFactory` for a host that brings its own agent.
+- **`Agent.Run(ctx) error`** is `Serve` without the process — no flags, no
+  signal handler, no exit — for a host that already owns those.
 - **The default layout as exported constants**: `DefaultInstructions`,
   `DefaultWorkspace`, `DefaultSkills`, `DefaultJournal`, `DefaultAddr`. The
   scaffold, codegen, the dev loop, and the runtime all read them, so the

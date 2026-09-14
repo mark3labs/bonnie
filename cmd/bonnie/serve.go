@@ -84,7 +84,7 @@ func runServe(o serveOpts) error {
 	if err != nil {
 		return err
 	}
-	return bonnie.Run(ctx, opts...)
+	return bonnie.New(opts...).Run(ctx)
 }
 
 // serveOptions turns the flags into the options [bonnie.Run] takes. It is

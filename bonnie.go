@@ -7,19 +7,19 @@
 //
 //	import "github.com/mark3labs/bonnie"
 //
-//	func main() { bonnie.Main() }
+//	func main() { bonnie.New().Serve() }
 //
 // That is the whole default agent. Every slot in the tree has a framework
 // default, and authoring the slot replaces it: instructions.md is the system
 // prompt, workspace/ is the directory the agent's files live in, tools/ holds
 // one directory per tool, and .bonnie holds the journal. Configuration that
-// is not a file is code — an [Option] on [Main]:
+// is not a file is code — an [Option] on [New]:
 //
 //	func main() {
-//		bonnie.Main(
+//		bonnie.New(
 //			bonnie.WithModel("anthropic/claude-sonnet-4-5"),
 //			bonnie.WithSandbox(sandbox.Docker()),
-//		)
+//		).Serve()
 //	}
 //
 // There is no manifest file. Data-shaped settings live at their default
@@ -39,7 +39,7 @@ import (
 )
 
 // The default layout of a scaffolded tree. These are the paths `bonnie init`
-// writes, the paths codegen embeds, and the paths [Run] reads when no option
+// writes, the paths codegen embeds, and the paths [Agent.Run] reads when no option
 // overrides them. They are constants rather than five copies of a string
 // literal, because the scaffold, the generator, the dev loop, and the runtime
 // must agree on the answer: a rule written more than once is a rule one
@@ -85,7 +85,7 @@ type Tree struct {
 	Skills embed.FS
 
 	// Workspace is the embedded copy of the tree's workspace seed files.
-	// [Run] materialises them beside a built binary that has no tree, and
+	// [Agent.Run] materialises them beside a built binary that has no tree, and
 	// never overwrites a file that is already there.
 	Workspace embed.FS
 }

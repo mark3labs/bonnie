@@ -50,8 +50,9 @@ func TestScaffoldIsTheDefaultLayout(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !strings.Contains(string(main), "bonnie.Main(") {
-				t.Fatalf("main.go does not call bonnie.Main: %s", main)
+			if !strings.Contains(string(main), "bonnie.New(") ||
+				!strings.Contains(string(main), ").Serve()") {
+				t.Fatalf("main.go does not build and serve an agent: %s", main)
 			}
 			wantModel := `bonnie.WithModel("` + model + `")`
 			if model == "" {
@@ -85,7 +86,7 @@ func TestScaffoldedMainIsOneCall(t *testing.T) {
 		}
 		code++
 	}
-	// package, import block (3), func main, bonnie.Main(, ), }
+	// package, import block (3), func main, bonnie.New(, ).Serve(), }
 	if code > 12 {
 		t.Fatalf("the scaffolded main.go carries %d lines of code; it is meant to be one call:\n%s", code, b)
 	}

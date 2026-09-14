@@ -208,7 +208,7 @@ import (
 )
 
 func main() {
-	bonnie.Main(
+	bonnie.New(
 %s
 
 		// Tool calls run as this process until a sandbox is set — fine at a
@@ -224,7 +224,7 @@ func main() {
 		//	bonnie.WithSlack(slack.Config{}),
 		//	bonnie.WithDiscord(discord.Config{}),
 		//	bonnie.WithTelegram(telegram.Config{Username: "mybot"}),
-	)
+	).Serve()
 }
 `, modelLine)
 }
