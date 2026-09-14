@@ -103,9 +103,9 @@ func TestLiveSuspendAndResume(t *testing.T) {
 	defer assertWorkspaceUntouched()
 
 	dir := t.TempDir()
-	journal, err := OpenFileJournal(dir)
+	journal, err := OpenSQLiteJournal(dir)
 	if err != nil {
-		t.Fatalf("OpenFileJournal: %v", err)
+		t.Fatalf("OpenSQLiteJournal: %v", err)
 	}
 	defer func() { _ = journal.Close() }()
 
@@ -152,7 +152,7 @@ func TestLiveSuspendAndResume(t *testing.T) {
 	if err := journal.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
-	reopened, err := OpenFileJournal(dir)
+	reopened, err := OpenSQLiteJournal(dir)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -215,9 +215,9 @@ func TestLiveToolCallsSurviveOneProcess(t *testing.T) {
 	assertWorkspaceUntouched := isolatedWorkspace(t)
 	defer assertWorkspaceUntouched()
 
-	journal, err := OpenFileJournal(t.TempDir())
+	journal, err := OpenSQLiteJournal(t.TempDir())
 	if err != nil {
-		t.Fatalf("OpenFileJournal: %v", err)
+		t.Fatalf("OpenSQLiteJournal: %v", err)
 	}
 	defer func() { _ = journal.Close() }()
 

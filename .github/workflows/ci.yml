@@ -37,6 +37,16 @@ jobs:
           GOWORK: off
         run: go test -race ./...
 
+      # The journal is SQLite, and `bonnie build` promises the user a single
+      # static binary. A driver that needs C would keep both claims compiling
+      # here and break them on the user's machine, so the build is proven
+      # with CGO off rather than asserted in prose.
+      - name: Build with CGO disabled
+        env:
+          GOWORK: off
+          CGO_ENABLED: "0"
+        run: go build ./...
+
   lint:
     runs-on: ubuntu-latest
     steps:

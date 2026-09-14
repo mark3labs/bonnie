@@ -39,8 +39,14 @@ coverage.*
 # .bonnie, and it holds full conversation content in plain text.
 .bonnie/
 
-# Journal files written outside the default root by an ad-hoc run.
+# Journal files written outside the default root by an ad-hoc run. The JSONL
+# form is pre-T-025 and only appears in a journal that has not been imported
+# yet; journal.db is the current one.
 *.jsonl
+*.jsonl.imported
+journal.db
+journal.db-wal
+journal.db-shm
 
 # Editor and OS noise
 .DS_Store

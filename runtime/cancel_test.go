@@ -144,9 +144,9 @@ func TestCancelledRunContinuesInASecondRunner(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
 
-	journalA, err := OpenFileJournal(dir)
+	journalA, err := OpenSQLiteJournal(dir)
 	if err != nil {
-		t.Fatalf("OpenFileJournal: %v", err)
+		t.Fatalf("OpenSQLiteJournal: %v", err)
 	}
 
 	// Process A: a turn that is cancelled while it works.
@@ -167,14 +167,14 @@ func TestCancelledRunContinuesInASecondRunner(t *testing.T) {
 	<-done
 	close(release)
 
-	// Process A dies. Closing the journal releases the run's flock, which is
-	// what a dead process looks like to the next owner.
+	// Process A dies. Closing its journal is what that looks like to the
+	// next owner; the records are already committed.
 	if err := journalA.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
 
 	// Process B: a new Runner over the same directory, nothing else shared.
-	journalB, err := OpenFileJournal(dir)
+	journalB, err := OpenSQLiteJournal(dir)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}

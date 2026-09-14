@@ -63,9 +63,9 @@ func requireLive(t *testing.T) (string, Provider) {
 func TestLiveAgentWorksInsideTheSandbox(t *testing.T) {
 	model, provider := requireLive(t)
 
-	journal, err := runtime.OpenFileJournal(t.TempDir())
+	journal, err := runtime.OpenSQLiteJournal(t.TempDir())
 	if err != nil {
-		t.Fatalf("OpenFileJournal: %v", err)
+		t.Fatalf("OpenSQLiteJournal: %v", err)
 	}
 	defer func() { _ = journal.Close() }()
 
@@ -126,9 +126,9 @@ func TestLiveAgentCannotReachTheHost(t *testing.T) {
 		t.Fatalf("write marker: %v", err)
 	}
 
-	journal, err := runtime.OpenFileJournal(t.TempDir())
+	journal, err := runtime.OpenSQLiteJournal(t.TempDir())
 	if err != nil {
-		t.Fatalf("OpenFileJournal: %v", err)
+		t.Fatalf("OpenSQLiteJournal: %v", err)
 	}
 	defer func() { _ = journal.Close() }()
 
@@ -168,9 +168,9 @@ func TestLiveSandboxSurvivesSuspendAndResume(t *testing.T) {
 	model, provider := requireLive(t)
 
 	dir := t.TempDir()
-	journal, err := runtime.OpenFileJournal(dir)
+	journal, err := runtime.OpenSQLiteJournal(dir)
 	if err != nil {
-		t.Fatalf("OpenFileJournal: %v", err)
+		t.Fatalf("OpenSQLiteJournal: %v", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
@@ -210,7 +210,7 @@ func TestLiveSandboxSurvivesSuspendAndResume(t *testing.T) {
 	if err := journal.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
-	reopened, err := runtime.OpenFileJournal(dir)
+	reopened, err := runtime.OpenSQLiteJournal(dir)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -246,9 +246,9 @@ func TestLiveSandboxSurvivesSuspendAndResume(t *testing.T) {
 func TestLiveParkedRunHoldsNoCompute(t *testing.T) {
 	model, provider := requireLive(t)
 
-	journal, err := runtime.OpenFileJournal(t.TempDir())
+	journal, err := runtime.OpenSQLiteJournal(t.TempDir())
 	if err != nil {
-		t.Fatalf("OpenFileJournal: %v", err)
+		t.Fatalf("OpenSQLiteJournal: %v", err)
 	}
 	defer func() { _ = journal.Close() }()
 

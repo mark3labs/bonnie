@@ -177,7 +177,7 @@ import (
 
 func main() {
 	// Every message is journalled here before it is kept.
-	journal, err := runtime.OpenFileJournal(".bonnie")
+	journal, err := runtime.OpenSQLiteJournal(".bonnie")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -504,16 +504,35 @@ which is exactly when you need it.
 The journal is the durability seam. Two ship in the box:
 
 ```go
-runtime.NewMemoryJournal()          // tests and ephemeral runs
-runtime.OpenFileJournal(".bonnie")  // JSONL, one file per run
+runtime.NewMemoryJournal()            // tests and ephemeral runs
+runtime.OpenSQLiteJournal(".bonnie")  // SQLite, one database for every run
 ```
 
-`FileJournal` writes `<root>/runs/<run-id>.jsonl`, one JSON object per line,
-fsynced by default. It is plain text, so `jq` works on it:
+`SQLiteJournal` writes `<root>/journal.db` through a **pure-Go** driver
+(`modernc.org/sqlite`), so BONNIE still builds and cross-compiles with
+`CGO_ENABLED=0` and `bonnie build` still produces one static binary. The
+database runs in WAL mode and fsyncs every commit by default.
+
+One record per row, so any SQLite client can read a run:
 
 ```bash
-jq -c 'select(.kind=="message") | {seq, role}' .bonnie/runs/run-1.jsonl
+sqlite3 .bonnie/journal.db \
+  "SELECT seq, role, text FROM records WHERE run_id = 'run-1' ORDER BY seq"
 ```
+
+What the database buys over the JSONL files it replaced:
+
+- **A step is atomic.** A tool-calling step is one transaction, so the
+  "torn single write" window a file append left is closed, not narrowed.
+- **Concurrent writers are safe, not refused.** SQLite serialises write
+  transactions across processes and the `(run_id, seq)` primary key makes a
+  reused sequence number a constraint violation. The per-run lock file, and
+  the `ErrRunOwnedElsewhere` it produced, are gone.
+
+**Upgrading.** A `.bonnie` that still holds `runs/*.jsonl` from an earlier
+BONNIE is imported on first open: records keep their sequence numbers, and
+each source file is renamed to `<run>.jsonl.imported` rather than deleted.
+The import is idempotent, so a crash halfway through costs a second read.
 
 Bring your own by implementing seven methods:
 
@@ -620,10 +639,13 @@ Stated plainly, because the failure modes are not obvious:
   different: each verifies its platform's signature, and a channel without
   its credentials refuses to serve. That verifies the platform, not the
   person — a user ID inside a verified Slack event is Slack's word.
-- **Run ownership is per host.** The file journal locks each run with
-  `flock`, so a second writer to the same run is refused rather than allowed
-  to corrupt it. That lock does not work on a network filesystem, and it does
-  not make two writers coordinate — one process still owns each run.
+- **Run ownership is per host, and the journal no longer refuses a second
+  writer.** SQLite serialises write transactions and rejects a reused
+  sequence number, so two processes writing one run cannot corrupt it. That
+  is journal integrity, not turn coordination: two servers that both execute
+  the same run still interleave the conversation. SQLite's locking also
+  needs working POSIX locks, so a journal on a network filesystem is still
+  unsafe.
 - **Events are journal-anchored.** The stream replays the journal past the
   in-memory backlog, so a reconnect — even after a restart — has no gap.
   Live-only deltas are the exception, marked as such.

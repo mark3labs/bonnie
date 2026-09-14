@@ -109,6 +109,21 @@ type Record struct {
 // ErrRunNotFound is returned when a run ID is unknown to the journal.
 var ErrRunNotFound = errors.New("bonnie: run not found")
 
+// ErrRunOwnedElsewhere is part of the [Journal] contract for an
+// implementation that admits only one writer per run: a write to a run some
+// other owner holds is refused with this error rather than allowed to
+// interleave records. A transport maps it to a conflict — `channel/http`
+// answers 409 — because no retry can fix it.
+//
+// The built-in [SQLiteJournal] never returns it. SQLite serialises write
+// transactions across processes, and the journal's (run_id, seq) primary key
+// makes a reused sequence number a constraint violation, so concurrent
+// writers are safe rather than forbidden. BONNIE's original JSONL journal
+// needed a lock file, and this error, to reach the same place. It stays
+// exported for a journal backed by a store that cannot make the same
+// promise.
+var ErrRunOwnedElsewhere = errors.New("bonnie: run is owned by another process")
+
 // ReservedRunPrefix marks run IDs that belong to BONNIE itself rather than to
 // a conversation. A transport that needs durable bookkeeping — an HTTP
 // channel's address-to-run map, for example — writes it to a reserved run, so
@@ -162,7 +177,7 @@ type Journal interface {
 // The event stream uses it as its anchor: every [Event] carries the journal
 // position the event belongs to, so a client that reconnects can be served
 // from the journal itself when the in-memory backlog has moved past its
-// cursor. [FileJournal] and [MemoryJournal] implement it. Without it the
+// cursor. [SQLiteJournal] and [MemoryJournal] implement it. Without it the
 // stream degrades to the live backlog only.
 type Positioner interface {
 	// Position returns the number of records a run has. It reports 0 with a
@@ -175,13 +190,13 @@ type Positioner interface {
 //
 // It exists for the same reason Kit's [kit.StepAppender] does: a tool-calling
 // step is two messages, and writing them one at a time leaves a crash window
-// between them. A journal that implements this interface writes every record
-// of the step with one lock, one buffer, and one fsync, so the step is either
-// fully durable or not present at all.
+// between them. A journal that implements this interface commits every record
+// of the step as one unit, so the step is either fully durable or not present
+// at all.
 //
 // The contract mirrors [kit.StepAppender]: a partial write must not be
 // reported as success, and cancellation must not stop a completed step from
-// being written — see [Session.AppendStep] for why. [FileJournal] and
+// being written — see [Session.AppendStep] for why. [SQLiteJournal] and
 // [MemoryJournal] both implement it. A journal that does not keeps working:
 // [Session] falls back to one [Journal.Append] per record, and the torn-write
 // repair in [Restore] still covers the crash window that leaves.

@@ -31,29 +31,29 @@ func journalFactories() []journalFactory {
 			reopen:    func(_ *testing.T, j Journal) Journal { return j },
 		},
 		{
-			name:      "file",
+			name:      "sqlite",
 			persisted: true,
 			open: func(t *testing.T) Journal {
 				t.Helper()
-				j, err := OpenFileJournal(t.TempDir())
+				j, err := OpenSQLiteJournal(t.TempDir())
 				if err != nil {
-					t.Fatalf("OpenFileJournal: %v", err)
+					t.Fatalf("OpenSQLiteJournal: %v", err)
 				}
 				t.Cleanup(func() { _ = j.Close() })
 				return j
 			},
 			reopen: func(t *testing.T, j Journal) Journal {
 				t.Helper()
-				fj, ok := j.(*FileJournal)
+				sj, ok := j.(*SQLiteJournal)
 				if !ok {
 					return j
 				}
-				if err := fj.Close(); err != nil {
+				if err := sj.Close(); err != nil {
 					t.Fatalf("Close: %v", err)
 				}
 				// A brand-new journal over the same directory is the closest
 				// a test gets to a process restart.
-				next, err := OpenFileJournal(fj.Root())
+				next, err := OpenSQLiteJournal(sj.Root())
 				if err != nil {
 					t.Fatalf("reopen: %v", err)
 				}

@@ -29,6 +29,19 @@ linters:
                 pins BONNIE to Kit's transitive dependency and breaks the
                 moment Kit changes it.
 
+        # `bonnie build` promises the user a single static binary, and
+        # goreleaser cross-compiles four targets from one machine. Both stop
+        # working the moment a C library enters the graph, so the journal's
+        # SQLite driver must stay the pure-Go one.
+        no-cgo:
+          list-mode: lax
+          deny:
+            - pkg: github.com/mattn/go-sqlite3
+              desc: >-
+                BONNIE must build with CGO_ENABLED=0. Use the pure-Go driver
+                modernc.org/sqlite, which runtime/sqlitejournal.go already
+                registers.
+
 formatters:
   enable:
     - gofmt

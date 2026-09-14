@@ -27,9 +27,9 @@ func seedJournal(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 
-	j, err := runtime.OpenFileJournal(dir)
+	j, err := runtime.OpenSQLiteJournal(dir)
 	if err != nil {
-		t.Fatalf("OpenFileJournal: %v", err)
+		t.Fatalf("OpenSQLiteJournal: %v", err)
 	}
 	ctx := context.Background()
 
@@ -230,8 +230,8 @@ func TestJournalDirIsCreated(t *testing.T) {
 	if !strings.Contains(out, "no runs") {
 		t.Fatalf("output:\n%s", out)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "runs")); err != nil {
-		t.Fatalf("journal directory was not created: %v", err)
+	if _, err := os.Stat(filepath.Join(dir, runtime.DefaultJournalFile)); err != nil {
+		t.Fatalf("journal database was not created: %v", err)
 	}
 }
 
@@ -243,9 +243,9 @@ func kitUser(text string) kit.LLMMessage { return kit.NewLLMUserMessage(text) }
 // workspace, so an operator can find the compute behind a run.
 func TestRunsShowDisplaysTheSandbox(t *testing.T) {
 	dir := t.TempDir()
-	j, err := runtime.OpenFileJournal(dir)
+	j, err := runtime.OpenSQLiteJournal(dir)
 	if err != nil {
-		t.Fatalf("OpenFileJournal: %v", err)
+		t.Fatalf("OpenSQLiteJournal: %v", err)
 	}
 	ctx := context.Background()
 	s := runtime.NewSession("run-sbx", j)
@@ -284,9 +284,9 @@ func TestSandboxPruneReclaimsTerminalRuns(t *testing.T) {
 	t.Chdir(t.TempDir())
 
 	ctx := context.Background()
-	j, err := runtime.OpenFileJournal(".bonnie")
+	j, err := runtime.OpenSQLiteJournal(".bonnie")
 	if err != nil {
-		t.Fatalf("OpenFileJournal: %v", err)
+		t.Fatalf("OpenSQLiteJournal: %v", err)
 	}
 
 	// A finished run with a workspace, and a parked run with one.
@@ -345,9 +345,9 @@ func TestSandboxPruneHidesReservedRuns(t *testing.T) {
 	t.Chdir(t.TempDir())
 
 	ctx := context.Background()
-	j, err := runtime.OpenFileJournal(".bonnie")
+	j, err := runtime.OpenSQLiteJournal(".bonnie")
 	if err != nil {
-		t.Fatalf("OpenFileJournal: %v", err)
+		t.Fatalf("OpenSQLiteJournal: %v", err)
 	}
 	if err := j.Checkpoint(ctx, "visible-run", runtime.RunCompleted); err != nil {
 		t.Fatalf("Checkpoint: %v", err)

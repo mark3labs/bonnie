@@ -164,9 +164,9 @@ func TestSessionAppendStepCrossesProcessBoundary(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	j1, err := OpenFileJournal(dir)
+	j1, err := OpenSQLiteJournal(dir)
 	if err != nil {
-		t.Fatalf("OpenFileJournal: %v", err)
+		t.Fatalf("OpenSQLiteJournal: %v", err)
 	}
 	s1 := NewSession("step-boundary", j1)
 	if _, err := s1.AppendStep(context.Background(), stepMessages()); err != nil {
@@ -177,7 +177,7 @@ func TestSessionAppendStepCrossesProcessBoundary(t *testing.T) {
 	}
 
 	// A second process: a new journal handle over the same directory.
-	j2, err := OpenFileJournal(dir)
+	j2, err := OpenSQLiteJournal(dir)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
@@ -218,16 +218,16 @@ func mustReplay(t *testing.T, j Journal, runID string) []Record {
 	return recs
 }
 
-// TestFileJournalAppendStepIsAllOrNothing pins the atomicity contract at the
-// journal level. A batch whose second record cannot be encoded fails whole:
-// nothing is written, and the sequence counter is restored so the next write
-// reuses no numbers and skips none.
-func TestFileJournalAppendStepIsAllOrNothing(t *testing.T) {
+// TestSQLiteJournalAppendStepIsAllOrNothing pins the atomicity contract at
+// the journal level. A batch whose second record cannot be stored fails
+// whole: nothing is written, and the next write takes sequence 1, so the
+// failed batch reused no numbers and skipped none.
+func TestSQLiteJournalAppendStepIsAllOrNothing(t *testing.T) {
 	t.Parallel()
 
-	j, err := OpenFileJournal(t.TempDir())
+	j, err := OpenSQLiteJournal(t.TempDir())
 	if err != nil {
-		t.Fatalf("OpenFileJournal: %v", err)
+		t.Fatalf("OpenSQLiteJournal: %v", err)
 	}
 	defer func() { _ = j.Close() }()
 	ctx := context.Background()
@@ -238,14 +238,15 @@ func TestFileJournalAppendStepIsAllOrNothing(t *testing.T) {
 			Payload: json.RawMessage("{not json")},
 	}
 	if _, err := j.AppendStep(ctx, step); err == nil {
-		t.Fatal("a record that cannot be encoded must fail the batch")
+		t.Fatal("a record whose payload no replay could decode must fail the batch")
 	}
-	if recs := mustReplay(t, j, "step-atomic"); len(recs) != 0 {
-		t.Fatalf("%d records survived a failed batch, want 0", len(recs))
+	if _, err := j.Replay(ctx, "step-atomic"); !errors.Is(err, ErrRunNotFound) {
+		t.Fatalf("Replay after a failed batch = %v, want ErrRunNotFound: "+
+			"the batch must leave no trace of the run at all", err)
 	}
 
-	// The sequence counter must not have moved: the next record takes
-	// sequence 1, not 3.
+	// The sequence must not have moved: the next record takes sequence 1,
+	// not 3.
 	seq, err := j.Append(ctx, Record{RunID: "step-atomic", Kind: RecordMessage})
 	if err != nil {
 		t.Fatalf("Append after failed batch: %v", err)
@@ -271,8 +272,8 @@ func TestFileJournalAppendStepIsAllOrNothing(t *testing.T) {
 }
 
 // TestAppendStepRejectsMixedRuns guards the unit: a batch that spans two
-// runs can be neither one file nor one transaction, so both journals refuse
-// it rather than split it.
+// runs can be neither one run's replay nor one transaction, so both journals
+// refuse it rather than split it.
 func TestAppendStepRejectsMixedRuns(t *testing.T) {
 	t.Parallel()
 
@@ -287,13 +288,13 @@ func TestAppendStepRejectsMixedRuns(t *testing.T) {
 		t.Fatal("memory journal accepted a batch that spans two runs")
 	}
 
-	fj, err := OpenFileJournal(t.TempDir())
+	sj, err := OpenSQLiteJournal(t.TempDir())
 	if err != nil {
-		t.Fatalf("OpenFileJournal: %v", err)
+		t.Fatalf("OpenSQLiteJournal: %v", err)
 	}
-	defer func() { _ = fj.Close() }()
-	if _, err := fj.AppendStep(ctx, mixed); err == nil {
-		t.Fatal("file journal accepted a batch that spans two runs")
+	defer func() { _ = sj.Close() }()
+	if _, err := sj.AppendStep(ctx, mixed); err == nil {
+		t.Fatal("sqlite journal accepted a batch that spans two runs")
 	}
 }
 

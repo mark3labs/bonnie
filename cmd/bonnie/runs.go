@@ -55,7 +55,7 @@ func newRunsListCmd() *cobra.Command {
 }
 
 func runsList(dir, state string, asJSON bool) error {
-	journal, err := runtime.OpenFileJournal(dir)
+	journal, err := runtime.OpenSQLiteJournal(dir)
 	if err != nil {
 		return err
 	}
@@ -136,7 +136,7 @@ func newRunsShowCmd() *cobra.Command {
 }
 
 func runsShow(dir string, asJSON bool, runID string) error {
-	journal, err := runtime.OpenFileJournal(dir)
+	journal, err := runtime.OpenSQLiteJournal(dir)
 	if err != nil {
 		return err
 	}

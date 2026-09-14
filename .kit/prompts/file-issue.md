@@ -27,7 +27,8 @@ File a GitHub issue. The user wants to create an issue about: $@
 1. **Determine the type** from the user input
 2. **Gather evidence before writing**:
    - For bugs: the exact command, the journal directory contents
-     (`ls .bonnie/runs/`, `bonnie runs show <id> --json`), the Go version,
+     (`sqlite3 .bonnie/journal.db "SELECT run_id, state FROM runs"`,
+     `bonnie runs show <id> --json`), the Go version,
      and whether `GOWORK=off` reproduces it — a go.work checkout hides
      version-pinning bugs
    - For durability bugs: run `bonnie runs show <id> --json` and attach the

@@ -90,13 +90,14 @@ func NewSession(runID string, j Journal) *Session {
 //
 // Restore also repairs a torn write. A journal can still hold an assistant
 // message whose tool call has no tool result: every journal written before
-// Kit v0.106.0, every journal whose implementation does not provide
-// [StepJournal], and the residual torn single Write that [FileJournal]
-// documents. An orphaned tool call is a conversation every provider rejects,
-// so Restore drops that incomplete trailing step and journals a
-// [RecordRepair]. A mismatch anywhere but the tail means the journal is
-// damaged, and Restore returns [ErrCorruptConversation] rather than rewrite
-// history.
+// Kit v0.106.0, every run imported from BONNIE's original JSONL journal, and
+// every journal whose implementation does not provide [StepJournal]. The
+// built-in [SQLiteJournal] cannot produce the shape itself — a step is one
+// transaction — but the shape is on disk in journals it inherited. An
+// orphaned tool call is a conversation every provider rejects, so Restore
+// drops that incomplete trailing step and journals a [RecordRepair]. A
+// mismatch anywhere but the tail means the journal is damaged, and Restore
+// returns [ErrCorruptConversation] rather than rewrite history.
 func Restore(ctx context.Context, runID string, j Journal) (*Session, error) {
 	recs, err := j.Replay(ctx, runID)
 	if err != nil {
@@ -528,18 +529,17 @@ func (s *Session) LastMessageSeq() int {
 
 // AppendStep implements [kit.StepAppender]. It receives every message of
 // one agent step in a single call and commits them as one unit: the records
-// are built first, then written through [StepJournal] with one lock and one
-// fsync when the journal supports it.
+// are built first, then written through [StepJournal] as one commit when the
+// journal supports it.
 //
 // Before Kit v0.106.0 there was no such call, so a step was two independent
 // writes and a crash between them left an orphaned tool call — the condition
 // [Restore]'s repair exists to drop. With this method implemented, Kit hands
-// the whole step over at once, and a [FileJournal] writes it as a single
-// buffered Write followed by one fsync. The torn-write window shrinks from
-// "any crash between two fsyncs" to "a torn single Write". The repair
-// stays: journals written by older BONNIE versions, journals whose
-// implementation does not provide [StepJournal], and the residual short-write
-// case all still produce the shape it fixes.
+// the whole step over at once, and a [SQLiteJournal] writes it in a single
+// transaction, which closes the window rather than narrowing it. The repair
+// stays for the journals that cannot make that promise: runs imported from
+// the old JSONL format, journals written by older BONNIE versions, and any
+// implementation that does not provide [StepJournal].
 //
 // # Cancellation
 //

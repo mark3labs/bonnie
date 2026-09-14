@@ -19,8 +19,8 @@ Pass `-model` to pick a model, for example
 `-model anthropic/claude-sonnet-4-5`. Without it, Kit uses its configured
 default.
 
-Every example writes its journal to `.bonnie/runs/<run-id>.jsonl`. That
-directory is in `.gitignore`. Delete it to start again.
+Every example writes its journal to `.bonnie/journal.db`. That directory is
+in `.gitignore`. Delete it to start again.
 
 ## minimal
 

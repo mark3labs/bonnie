@@ -7,11 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**Breaking: the journal is SQLite.** `runtime.FileJournal` and
+`runtime.OpenFileJournal` are replaced by `runtime.SQLiteJournal` and
+`runtime.OpenSQLiteJournal`. One `<root>/journal.db` holds every run instead
+of one JSONL file per run plus a lock file per run. The driver is pure Go
+(`modernc.org/sqlite`), so BONNIE still builds and cross-compiles with
+`CGO_ENABLED=0` and `bonnie build` still ships one static binary. See
+`docs/SPEC.md` §4.14 and `docs/TASKS.md` T-025.
+
+**Your existing runs are migrated, not lost.** A `.bonnie` that still holds
+`runs/*.jsonl` is imported the first time the new journal opens it: records
+keep their sequence numbers, and each source file is renamed to
+`<run>.jsonl.imported` rather than deleted. The import is idempotent.
+
 **Breaking: the manifest is gone. Configuration is code.** `agent.yaml` (and
 `agent.toml`, `agent.json`) no longer exist. A tree's data lives at fixed
 paths and everything else is a Go option on `bonnie.New`, so a setting that
 does not exist is a compile error rather than a key nothing reads. See
 `docs/TASKS.md` T-024 and `docs/L2.md`.
+
+### Changed — journal
+
+- **A tool-calling step is one transaction.** The "torn single write" window
+  the JSONL journal documented is closed, not narrowed: a step commits whole
+  or is absent. `Restore`'s torn-write repair stays, because imported runs
+  and third-party journals can still carry the shape.
+- **Concurrent writers are safe instead of refused.** SQLite serialises write
+  transactions across processes and the `(run_id, seq)` primary key makes a
+  reused sequence number a constraint violation. The per-run `flock`, the
+  `.lock` files, and the refusal they produced are gone.
+  `runtime.ErrRunOwnedElsewhere` stays exported for journals backed by a
+  store that admits one writer — `channel/http` still maps it to 409 — but
+  the built-in journal never returns it. **Journal integrity is not turn
+  coordination:** two servers executing the same run still interleave the
+  conversation, and `SECURITY.md` says so.
+- **A read of an unknown run costs nothing.** There is no per-run handle to
+  create, so the growth the previous release had to fix cannot recur.
+- **`FsyncInterval` is now `FsyncRelaxed`, and `WithFsyncInterval` is
+  removed.** SQLite's `synchronous=NORMAL` fsyncs at write-ahead-log
+  checkpoints, not on a clock, so the old name promised something the store
+  cannot deliver. `WithFsync(FsyncAlways)` is still the default and still
+  means every commit is on the platter.
+- **A record payload that is not valid JSON is refused at write time.** The
+  JSONL encoder caught this for free; a blob column does not.
+- **A store written by a newer BONNIE is refused** with
+  `runtime.ErrJournalSchema` rather than read with the wrong shape.
+- Inspecting a run is now `sqlite3 .bonnie/journal.db "SELECT ... FROM
+  records WHERE run_id = ..."` instead of `jq` over a JSONL file.
+- The binary grows about **3.8 MB** stripped (measured: 77.4 → 81.1 MB,
+  linux/amd64), and a **cold-cache** `go build ./...` grows about 12%
+  (98 → 110 s). The driver is transpiled C, so it adds roughly 1.6 million
+  generated lines to the dependency graph. Warm builds are unaffected.
 
 ### Added
 

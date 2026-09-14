@@ -86,9 +86,9 @@ func TestStreamEventsSurvivesRestart(t *testing.T) {
 
 	dir := t.TempDir()
 	fa, _ := fakeFactory(&kit.TurnResult{Response: "before the crash"})
-	j1, err := OpenFileJournal(dir)
+	j1, err := OpenSQLiteJournal(dir)
 	if err != nil {
-		t.Fatalf("OpenFileJournal: %v", err)
+		t.Fatalf("OpenSQLiteJournal: %v", err)
 	}
 	r1 := NewRunner(j1, fa)
 	if _, err := r1.Start(ctx, "restart-run", Input{Text: "go"}); err != nil {
@@ -99,7 +99,7 @@ func TestStreamEventsSurvivesRestart(t *testing.T) {
 	}
 
 	// The new process: same journal directory, a bus that knows nothing.
-	j2, err := OpenFileJournal(dir)
+	j2, err := OpenSQLiteJournal(dir)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}

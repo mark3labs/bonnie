@@ -129,7 +129,7 @@ func (a *Agent) Run(ctx context.Context) error {
 		return err
 	}
 
-	journal, err := runtime.OpenFileJournal(c.journal)
+	journal, err := runtime.OpenSQLiteJournal(c.journal)
 	if err != nil {
 		return err
 	}

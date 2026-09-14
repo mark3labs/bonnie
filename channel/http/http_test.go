@@ -278,9 +278,9 @@ func TestAddressMapSurvivesJournalReopen(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 
-	j, err := runtime.OpenFileJournal(dir)
+	j, err := runtime.OpenSQLiteJournal(dir)
 	if err != nil {
-		t.Fatalf("OpenFileJournal: %v", err)
+		t.Fatalf("OpenSQLiteJournal: %v", err)
 	}
 	first := newTestServerOn(t, j, &stubAgent{turns: []*kit.TurnResult{{Response: "one"}}})
 	_, run := first.post(t, "/runs", StartRequest{Address: "slack:C1/T1", Text: "hi"})
@@ -289,7 +289,7 @@ func TestAddressMapSurvivesJournalReopen(t *testing.T) {
 	}
 
 	// A second process: new journal, new runner, new channel, same directory.
-	next, err := runtime.OpenFileJournal(dir)
+	next, err := runtime.OpenSQLiteJournal(dir)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}

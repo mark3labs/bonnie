@@ -85,6 +85,26 @@ changing anything in `runtime/`. Full detail with citations in `docs/SPEC.md` §
   message from `Text` alone — that drops tool calls silently. Guard test:
   `runtime/replay_fidelity_test.go`.
 
+### The journal is SQLite, and it must stay CGO-free
+`SQLiteJournal` (`runtime/sqlitejournal.go`) is the durable journal: one
+`<root>/journal.db`, WAL, one transaction per step. The driver is
+`modernc.org/sqlite`, which is **pure Go**. Never swap in
+`github.com/mattn/go-sqlite3` or anything else that needs C: `bonnie build`
+promises a single static binary and `goreleaser` cross-compiles four targets
+from one machine. `depguard` denies the CGO driver and CI runs
+`CGO_ENABLED=0 go build ./...`, so a mistake fails loudly — do not silence
+either guard.
+
+Two more rules that are easy to break:
+
+- **Settings go in the DSN, not in a `PRAGMA` after `sql.Open`.** A pragma
+  statement applies to one pooled connection, not the pool.
+- **Do not delete the torn-write repair** (`runtime/repair.go`) on the
+  grounds that a step is now a transaction. Runs imported from the old JSONL
+  format, and third-party journals, still carry the shape it fixes.
+
+See `docs/SPEC.md` §4.14.
+
 ## Code Style
 - **Imports**: stdlib → third-party → local (blank lines between)
 - **Naming**: camelCase (unexported), PascalCase (exported)

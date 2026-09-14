@@ -35,7 +35,7 @@ L4  CLI, evals, traces                 CLI implemented, incl. the built-in TUI
 L3  channel/    inbound transports     channel/http implemented
 L2  discovery   agent/ tree + codegen  default layout + init + codegen;
                                        configuration is code (T-024)
-L1  runtime/    durable run executor   implemented, memory + file journals
+L1  runtime/    durable run executor   implemented, memory + SQLite journals
 L0  kit/pkg/kit                        upstream, unmodified
 
     sandbox/    isolated tool calls    implemented; local + docker verified,
@@ -163,9 +163,8 @@ it:
 - `kit.go:3205` — pre-generation messages
 
 BONNIE's `Session` implements `kit.StepAppender` (`runtime/session.go`), so a
-tool-calling step reaches the journal as **one call** and `FileJournal`
-commits it as one buffered write and one fsync. §4.2 records what this closes
-and what it cannot.
+tool-calling step reaches the journal as **one call** and `SQLiteJournal`
+commits it as one transaction. §4.2 records what this closes.
 
 `appendMessages` deliberately ignores errors, matching the historical
 behaviour of the call sites it replaced: a persistence failure must not abort
@@ -234,12 +233,14 @@ reissue a replayed entry ID.
 
 ### 4.2 RESOLVED — torn write orphans a tool call
 
-**Fixed twice.** First by T-003's repair (`runtime/repair.go`), which stays.
-Then by the upstream fix BONNIE asked for: Kit `v0.106.0` added
-`kit.StepAppender`, BONNIE's `Session` implements it, and a tool-calling step
-now reaches the journal as one call that `FileJournal` commits as one buffered
-write and one fsync. Regression tests: `runtime/repair_test.go`,
-`TestFileJournalCrashResumeIsProviderValid`, and the step tests in
+**Fixed three times, and the third closed it.** First by T-003's repair
+(`runtime/repair.go`), which stays. Then by the upstream fix BONNIE asked
+for: Kit `v0.106.0` added `kit.StepAppender` and BONNIE's `Session`
+implements it, so a tool-calling step arrives as one call. Then by T-025,
+which made the journal SQLite: that one call is now one **transaction**, and
+a transaction has no prefix. Regression tests: `runtime/repair_test.go`,
+`TestSQLiteJournalCrashResumeIsProviderValid`,
+`TestSQLiteJournalAppendStepIsAllOrNothing`, and the step tests in
 `runtime/step_append_test.go`. Keep them all passing.
 
 **The hazard, for the record.** A tool-calling step produces two journal
@@ -249,22 +250,25 @@ replay whose last assistant message has an unanswered `tool_use`. Providers
 reject that conversation. The run becomes permanently unresumable — the exact
 failure Kit's own docstring warns about, reintroduced at the journal layer.
 
-**What the atomic path closed.** The window went from "any crash between two
-fsyncs" to "a torn single `Write`", which is as small as an append-only file
-can make it. A cancelled context no longer drops a completed step either:
-Kit persists before it checks `ctx.Err()`, and `Session.AppendStep` writes
-under `context.WithoutCancel`, per the contract `v0.106.0` documents on
+**What each step closed.** The JSONL journal narrowed the window from "any
+crash between two fsyncs" to "a torn single `Write`", which is as small as an
+append-only file can make it — but a short write could still land a prefix of
+the step on disk. SQLite removes that residue: the step commits or it does
+not, and a crash before the commit leaves the write-ahead log unclaimed. A
+cancelled context never dropped a completed step either: Kit persists before
+it checks `ctx.Err()`, and `Session.AppendStep` writes under
+`context.WithoutCancel`, per the contract `v0.106.0` documents on
 `kit.StepAppender`.
 
-**Why the repair stays.** Three sources still produce the torn shape, and
-none of them is hypothetical:
+**Why the repair stays.** Two sources still produce the torn shape, and
+neither is hypothetical:
 
 1. Journals written before the upgrade — every run created by an older
-   BONNIE, on disk today.
+   BONNIE, on disk today, and carried into the database by
+   `importJSONLRuns` exactly as it was found. The import does not repair;
+   `Restore` still does, at the layer that understands conversations.
 2. Journals whose implementation does not provide BONNIE's `StepJournal` —
    `Session` falls back to per-record writes for them, with the old window.
-3. A short write of the single batch buffer, which can land a prefix of the
-   step on disk.
 
 `Restore` therefore still calls `repairTrailingOrphan`
 (`runtime/repair.go`). It walks the replayed messages; when a tool call has
@@ -278,9 +282,9 @@ A mismatch anywhere but the tail is not a torn write. It means the journal is
 damaged, and `Restore` returns `ErrCorruptConversation` rather than silently
 rewriting history.
 
-The journal is append-only, so the orphan records stay on disk and every later
-`Restore` finds them again. The repair is therefore deterministic, and it is
-journalled only once.
+The journal is append-only, so the orphan records stay in the store and every
+later `Restore` finds them again. The repair is therefore deterministic, and
+it is journalled only once.
 
 ### 4.3 RESOLVED — nothing has run against a live model
 
@@ -328,40 +332,50 @@ record behind it.
 
 ### 4.7 RESOLVED — one process must own a run
 
-**Resolved by T-014 with a lock file per run.** The first write a
-`FileJournal` makes to a run takes an exclusive `flock` on
-`<root>/runs/<run-id>.lock` and holds it until [FileJournal.Close] or process
-death. A second owner's write — `Append`, `AppendStep`, or `Checkpoint` — is
-refused with `ErrRunOwnedElsewhere` instead of interleaving records and
-colliding sequence numbers. Reads never take the lock, so `bonnie runs list`,
-`bonnie runs show`, and a second server's read paths keep working against a
-run they do not own.
+**Resolved twice. T-014 mitigated it with a lock file; T-025 removed it by
+making the journal a database — the option T-014 weighed and deferred.**
 
-Decisions worth knowing:
+The original problem: `FileJournal` serialised writes inside one process with
+a per-run mutex and took no cross-process lock, so two processes appending to
+one run interleaved records and gave the same sequence number to different
+ones. T-014's answer was an exclusive `flock` on
+`<root>/runs/<run-id>.lock`, held from a run's first write until close or
+process death, with a second owner's write refused as
+`ErrRunOwnedElsewhere`.
 
-- **flock, not a create-the-file lock.** The kernel releases a `flock` when
-  the process dies, so a crash is its own stale-lock recovery. There is no
-  lock table to reconcile and no timestamp heuristic to get wrong.
-- **Two journal instances in one process are refused too, and that is
-  correct.** `flock` is per file descriptor, and two `FileJournal` instances
-  keep independent sequence counters and buffered state — appending from both
-  corrupts a run exactly as two processes would. Closing the first instance
-  is what a dead process looks like, which is how the process-boundary tests
-  simulate death.
-- **The lock is per run, not per journal.** Two processes can work different
-  runs on the same store concurrently; only the same run conflicts.
-- **Refusing, not blocking.** A blocked write would turn a misconfigured
-  second server into a hung one. The error is immediate and names the run.
+`SQLiteJournal` does not need it. SQLite serialises write transactions across
+processes, and the journal's `(run_id, seq)` primary key makes a reused
+sequence number a **constraint violation** rather than silent corruption. The
+sequence number is read and taken inside the same `BEGIN IMMEDIATE`
+transaction that writes the record, so two writers cannot both see the same
+next value. Concurrent writers are now *safe*, not *forbidden*.
 
-Limits, stated plainly: the lock is **per host**. It does nothing on a network
-filesystem without working `flock` support, and it does not help two servers
-that want to write the same run — that deployment still needs one owner, or a
-journal backed by a database. `README.md` and `SECURITY.md` say so.
+What that changed, stated plainly:
 
-Test: `TestFileJournalOwnershipIsCrossProcess`, which covers every write path,
-per-run granularity, reader access, and release on close.
-`TestFileJournalLockFileIsNotARun` pins that the lock file never appears in
-`Runs`.
+- The lock file, `ownLocked`, and the `runFile` handle map are gone, together
+  with the whole class of defects they carried (see §4.12: a read used to
+  create a handle that was never released).
+- `ErrRunOwnedElsewhere` stays **exported and documented** on the `Journal`
+  seam, because it is still the right answer for a journal backed by a store
+  that admits one writer. `channel/http` still maps it to 409.
+  `SQLiteJournal` never returns it.
+- `TestFileJournalOwnershipIsCrossProcess` and
+  `TestFileJournalLockFileIsNotARun` were deleted with the mechanism they
+  guarded. `TestSQLiteJournalAdmitsConcurrentWriters` replaces them, and it
+  asserts the stronger property: two journals over one store, both writing
+  one run, produce a dense unbroken sequence and lose no record.
+
+Limits, stated plainly, because two of the old ones survive:
+
+- **SQLite's locking is per host.** It needs working POSIX advisory locks; on
+  a network filesystem without them the database can be corrupted, which is
+  worse than the old failure, not better. Keep the journal on local storage,
+  or write a `Journal` backed by a networked database.
+- **Journal integrity is not turn coordination.** Two `Runner` instances that
+  both execute a turn for one run now write a well-formed journal holding an
+  interleaved conversation. That used to be refused at the first write; it is
+  no longer. One owner per run is still a deployment decision, and
+  `README.md` and `SECURITY.md` say so.
 
 ### 4.8 RESOLVED — events survive a reconnect past the backlog
 
@@ -610,6 +624,29 @@ cases pass for the microsandbox backend, none skipped. `msb cp` carries binary
 content unaltered (`TestBinaryFileRoundTrip`), which settles the file I/O
 question this section raised.
 
+**Correction, 2026-09-14: that pass is not reliable under load.** Running the
+suite repeatedly on a loaded machine fails intermittently — measured at 2/6
+runs on `master` and 4/6 on a branch whose only change was unrelated build
+weight. The failure is always the same shape, on a different case each time:
+
+```
+create microsandbox from alpine:3.19: error: sandbox already exists:
+sandbox 'bonnie-exec-codes' already exists
+```
+
+Nothing leaks: `msb ps --all` is empty before and after. So this is not the
+reclaim defect fixed above — it is a **create/exists race inside one test**.
+`Open` asks `exists()`, `msb ps --all` does not yet report a sandbox that is
+mid-creation, `Open` creates, and `msb` refuses. The `--all` fix earlier in
+this section closed the *stopped-sandbox* half of the question and left the
+*being-created* half open. Load widens the window, which is why an unrelated
+change can move the rate without touching the adapter.
+
+This is invisible to CI, which has no `msb` and skips the backend — so a
+green CI run says nothing about it, exactly as T-011's "Watch for" warns.
+Recorded as **T-026**; not fixed here, because the fix belongs to the
+microsandbox adapter and not to the change that exposed it.
+
 Resolved, same day. The live sandbox suite ran against microsandbox and
 **all four tests passed**:
 
@@ -689,12 +726,14 @@ streams, live and mid-replay. Without the fix the live case leaks 40.
 created the in-memory handle for any ID it was asked about, and nothing ever
 deleted one. A server reachable from outside answers 404 to
 `GET /runs/<invented-id>` and paid a permanent map entry for each one, so an
-ID scan was unbounded memory growth with no run behind it. Reads now go
-through `readRun`, which throws its probe handle away when the run does not
-exist and adopts it when it does — an existing run still has exactly one
-handle, which is what the flock and the sequence counter require. Test:
-`TestReadsOfUnknownRunsDoNotGrowTheJournal`, plus
-`TestReadOfAKnownRunIsCached` for the half that must not regress.
+ID scan was unbounded memory growth with no run behind it. Reads went
+through `readRun`, which threw its probe handle away when the run did not
+exist and adopted it when it did. **T-025 deleted the whole mechanism**:
+`SQLiteJournal` keeps no per-run handle, so the defect class is gone by
+construction. `TestReadsOfUnknownRunsDoNotGrowTheJournal` and
+`TestReadOfAKnownRunIsCached` went with the handle map;
+`TestSQLiteJournalReadsOfUnknownRunsCostNothing` keeps the observable half —
+a read of an unknown run answers `ErrRunNotFound` and creates nothing.
 
 **Two settings were accepted and ignored** — the failure mode invariants 10
 and 13 exist to prevent, found in two new places:
@@ -783,6 +822,101 @@ name is not its scope.** When a feature is deleted, grep the docs for the
 test names in the files being removed before deleting them, and re-home any
 guard whose invariant outlives the feature.
 
+### 4.14 RESOLVED — the journal is SQLite
+
+**T-025.** `FileJournal` — one append-only JSONL file per run, a lock file
+beside it, a `runFile` handle in a map — is gone. `SQLiteJournal` replaces
+it: one `<root>/journal.db`, opened with the **pure-Go** driver
+`modernc.org/sqlite`.
+
+**Why the pure-Go driver and not the usual one.** `github.com/mattn/go-sqlite3`
+is CGO. `bonnie build` promises the user a single static binary and
+`goreleaser` cross-compiles four targets from one machine; both stop working
+the moment a C library enters the graph. The rule is enforced, not stated: a
+`depguard` rule denies the CGO driver, and CI runs `CGO_ENABLED=0 go build
+./...` as its own step.
+
+**What the move bought.** Each of these was a section of this document:
+
+| Was | Is |
+|---|---|
+| §4.2 — a torn single `Write` could land a prefix of a step | a step is one transaction; it commits or it does not |
+| §4.7 — a second writer refused with `ErrRunOwnedElsewhere` | SQLite serialises writers; `(run_id, seq)` rejects a reused number |
+| §4.12 — a read of an unknown run created a handle for ever | there is no per-run handle to create |
+
+Decisions worth knowing:
+
+- **The sequence number is taken inside the write transaction.** `SELECT
+  COALESCE(MAX(seq),0)+1` runs in the same `BEGIN IMMEDIATE` that inserts the
+  record, so no reader-then-writer race exists, and the primary key is the
+  backstop if one ever did.
+- **Pragmas are DSN parameters, not statements.** A `PRAGMA` executed after
+  `sql.Open` applies to one pooled connection, so WAL, `synchronous`, and
+  `busy_timeout` are set per connection through the DSN. Guard tests:
+  `TestSQLiteJournalUsesWAL`, `TestSQLiteJournalFsyncPolicy`, which read the
+  pragma back rather than trusting the struct field.
+- **A payload that is not valid JSON is refused at write time.** The JSONL
+  journal caught this for free, because encoding the record encoded the
+  payload with it. A blob column takes anything, so `insertRecord` checks
+  `json.Valid` — without it BONNIE could journal a record that is durable
+  and unreplayable at once, which is §4.1 with extra steps.
+- **`FsyncInterval` became `FsyncRelaxed`, and `WithFsyncInterval` is gone.**
+  The old option promised "flushes at most once per interval". SQLite's
+  `synchronous=NORMAL` fsyncs at WAL checkpoints, not on a clock, so keeping
+  the name and ignoring the duration would have been invariant 13 in the
+  public API.
+- **Every legacy run is imported, never deleted.** `importJSONLRuns` runs on
+  open when `<root>/runs/*.jsonl` exists: records keep their sequence
+  numbers, the source file is renamed to `.jsonl.imported`, the lock file is
+  removed, and a run already in the database is skipped — so a crash between
+  the insert and the rename costs a second read. A file that cannot be
+  parsed fails the open with the path named, because presenting an operator
+  with a journal that silently lost a run is the one outcome a durability
+  layer may not produce. Tests: `runtime/legacy_journal_test.go`.
+
+**Verified live, not only in tests.** Against `opencode/kimi-k2.5` on
+2026-09-14, through `bonnie dev`'s TUI in tmux — the surface a developer
+actually uses, and the one that reads the journal through the event cursor:
+
+- A turn with a real tool call renders and completes; the step lands in the
+  journal as the assistant + tool pair.
+- **A hot reload restarts the child mid-conversation and the run continues.**
+  One run, `seq` 1–18, dense and unbroken across **three** processes: the
+  first child, the child `dev` rebuilt after an `instructions.md` edit, and a
+  separate `bonnie chat` process attached to the same address. The model
+  recalled a tool result produced two process-generations earlier, which is
+  §4.1's lossless replay proven end to end.
+- `PRAGMA integrity_check` returns `ok`, and no run has a gap or a duplicate
+  sequence number.
+- The live suites pass: `TestLiveSuspendAndResume` and
+  `TestLiveToolCallsSurviveOneProcess`.
+
+One thing the tmux run clarified rather than found: a resumed run did not
+adopt an edited `instructions.md` rule in its next reply, while a **fresh**
+run did. That is in-context pressure from the replayed transcript, not a
+stale prompt — worth knowing before someone reports it as a hot-reload bug.
+
+**The cost, measured, not guessed.** Two dimensions, both paid once and
+neither hidden:
+
+- **Binary.** `modernc.org/sqlite` and `modernc.org/libc` add about
+  **3.8 MB** to a stripped `bonnie` binary (77.4 MB → 81.1 MB,
+  `CGO_ENABLED=0 -ldflags="-s -w"`, linux/amd64).
+- **Cold build.** The driver is transpiled C, so it brings about **1.6
+  million lines** of generated Go into the dependency graph. A cold-cache
+  `go build ./...` goes from **98 s to 110 s** (+12%), and a cold-cache
+  `go fix ./...` — which type-checks the whole graph — takes about **80 s**.
+  Warm, both are unchanged: `go fix ./...` is 2 s. This is worth knowing
+  because a 20-second tool timeout on a cold cache reports as a failure with
+  no defect behind it. CI caches the module and build cache, so it pays this
+  on a cache miss only.
+
+The driver lives in `runtime`, so every host that imports the package links
+it, even one that supplies its own `Journal`. That was accepted rather than
+hidden behind a sub-package: splitting it would have moved the shared
+conformance suite out of `runtime` and away from the helpers it tests
+against.
+
 ---
 
 ## 5. MVP scope
@@ -801,7 +935,7 @@ If the release cannot do those three things, it is not worth tagging.
 | Live-model verification of L1 | T-001 ✅ |
 | Lossless replay of tool calls | T-002 ✅ |
 | Crash-safe replay (torn-write repair) | T-003 ✅ |
-| `FileJournal` — JSONL persistence | T-004 ✅ |
+| `FileJournal` — JSONL persistence (replaced by `SQLiteJournal`, T-025) | T-004 ✅ |
 | `Runner.Cancel` | T-005 ✅ |
 | `channel/http` — start, send, respond, NDJSON stream | T-006 ✅ |
 | `bonnie serve` / `bonnie runs` | T-007 ✅ |
@@ -893,7 +1027,7 @@ Page index: `https://eve.dev/sitemap.md`.
   `dist/`. Build and copy. eve structurally cannot offer this.
 - **Branching sessions.** BONNIE inherits Kit's conversation tree — fork,
   collapse, navigate. eve has no branching at all.
-- **Pluggable durability.** `Journal` is six methods. eve is coupled to the
+- **Pluggable durability.** `Journal` is seven methods. eve is coupled to the
   Workflow SDK.
 - **Hooks can mutate.** Kit's hooks can block a tool call, rewrite a result, or
   replace the context window. eve's `defineHook` is observation-only.

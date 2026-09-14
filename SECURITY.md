@@ -119,36 +119,35 @@ Do not commit the journal to version control.
 
 ### Run ownership
 
-One process must own a run at a time.
+The journal can no longer be corrupted by two writers. It still does not
+coordinate them.
 
-The file journal enforces this on one host. The first write to a run takes an
-exclusive `flock` on `<root>/runs/<run-id>.lock`; another process — or another
-journal instance in the same process — that writes the same run is refused
-with `ErrRunOwnedElsewhere` instead of being allowed to interleave records and
-give the same sequence number to different ones. The kernel releases the lock
-when a process dies, so a crash needs no lock recovery.
+The SQLite journal serialises write transactions — inside this process and
+across processes — and its `(run_id, seq)` primary key makes a reused
+sequence number a constraint violation rather than silent corruption. Two
+processes appending to one run therefore produce a dense, correct record
+sequence. The `flock` per run that earlier versions took, and the
+`ErrRunOwnedElsewhere` refusal it produced, are gone: the problem they
+mitigated no longer exists.
 
-Reads are never locked: any process can list runs or replay a run it does not
-own, which is what keeps `bonnie runs show` working everywhere.
+Reads are never blocked. WAL mode lets any number of readers work while a
+writer commits, which is what keeps `bonnie runs show` usable against a busy
+server.
 
-Limits:
+Limits, stated plainly:
 
-- The lock is per host. On a network filesystem without working `flock`
-  support it enforces nothing.
-- Refusing a write is not coordination. Two load-balanced instances that both
-  need to write the same run still need one owner in front.
-
-Examples of what the lock now prevents, and what it does not:
-
-- Two load-balanced instances each resuming the same run — the second is
-  **refused loudly** with `ErrRunOwnedElsewhere`. Route the request to the
-  instance that owns the run, or share a journal that can coordinate.
-- A shared network filesystem — the lock says nothing there; use a journal
-  backed by a database or a coordinator (etcd, Redis) to elect one owner.
-- One process resuming while another is still in a turn — refused, as above.
+- **Journal integrity is not turn coordination.** Two servers that both
+  execute a turn for the same run write a well-formed journal holding an
+  interleaved conversation. Nothing in BONNIE stops them. Route a run to one
+  owner.
+- **SQLite locking is per host.** It relies on working POSIX advisory locks.
+  On a network filesystem that does not provide them, the database can be
+  corrupted. Put the journal on local storage, or write a `Journal` backed
+  by a networked database.
 
 Safer patterns:
 
-- Use a distributed lock (etcd, Redis, database) to elect a single owner.
-- Or, make sure only one process can reach the journal directory.
-- Or, use `MemoryJournal` for ephemeral test runs only.
+- Route every request for a run to the instance that owns it.
+- Or use a distributed lock (etcd, Redis, a database) to elect a single
+  owner.
+- Or use `MemoryJournal` for ephemeral test runs only.

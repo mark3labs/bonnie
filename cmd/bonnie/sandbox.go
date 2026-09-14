@@ -71,7 +71,7 @@ func runSandboxPrune(o pruneOpts) error {
 		return fmt.Errorf("the %s backend cannot delete a run's sandbox without opening it", provider.Name())
 	}
 
-	journal, err := runtime.OpenFileJournal(o.journal)
+	journal, err := runtime.OpenSQLiteJournal(o.journal)
 	if err != nil {
 		return err
 	}

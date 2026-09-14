@@ -49,7 +49,7 @@ func main() {
 }
 
 func run(phase, dir, runID, model, answer string) error {
-	journal, err := runtime.OpenFileJournal(dir)
+	journal, err := runtime.OpenSQLiteJournal(dir)
 	if err != nil {
 		return err
 	}
@@ -76,7 +76,7 @@ func run(phase, dir, runID, model, answer string) error {
 }
 
 // ask starts the run and exits the process while the run waits.
-func ask(ctx context.Context, runner *runtime.Runner, journal *runtime.FileJournal, runID string) error {
+func ask(ctx context.Context, runner *runtime.Runner, journal *runtime.SQLiteJournal, runID string) error {
 	result, err := runner.Start(ctx, runID, runtime.Input{
 		Text: "Deploy the app.",
 	})

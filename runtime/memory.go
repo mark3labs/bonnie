@@ -59,7 +59,7 @@ func (j *MemoryJournal) AppendStep(_ context.Context, recs []Record) ([]int, err
 	if len(recs) == 0 {
 		return nil, nil
 	}
-	// One step belongs to one run; see FileJournal.AppendStep.
+	// One step belongs to one run; see SQLiteJournal.AppendStep.
 	for i := range recs {
 		if recs[i].RunID != recs[0].RunID {
 			return nil, fmt.Errorf("bonnie: append step: record %d is for run %q, not %q",

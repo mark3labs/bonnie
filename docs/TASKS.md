@@ -19,6 +19,7 @@ the known risks, and the invariants every task must preserve.
 
 | ID | Title | Priority | Size | Blocks |
 |---|---|---|---|---|
+| T-026 | microsandbox `Open` races its own create under load | P2 | S | — |
 | T-022 | TUI transcript replay on reopen | P2 | M | — |
 | T-019 | Evals against a discovered agent | P2 | L | — |
 
@@ -32,6 +33,7 @@ the known risks, and the invariants every task must preserve.
 
 | ID | Delivered | Where |
 |---|---|---|
+| T-025 | The journal is SQLite, pure Go (no CGO): `SQLiteJournal` over one `<root>/journal.db`, WAL, one transaction per step, concurrent writers safe instead of refused, legacy `runs/*.jsonl` imported on open. `FileJournal`, the per-run lock file, and the handle map are gone | `runtime/sqlitejournal.go`, `runtime/legacy_journal.go`, `runtime/journal.go`, `docs/SPEC.md` §4.14 |
 | T-024 | The manifest is gone: configuration is code. The root `bonnie` package owns the serving path (`Main`, `Run`, options) and the default layout as constants; codegen registers the tree through `bonnie.Register` from `init`; `bonnie init` scaffolds a one-call `main.go`; `serve` is the flag-only generic host; `yaml` and `toml` return to indirect | `bonnie.go`, `run.go`, `options.go`, `agent/scaffold.go`, `agent/generate.go`, `cmd/bonnie/`, `internal/treetest/`, `docs/L2.md` |
 | T-023 | Audit fixes: the event stream releases a parked send on disconnect (goroutine leak), reads of unknown runs no longer grow the file journal, `--sandbox-image` reaches `auto` and is refused by `local`, reserved runs are off the wire and out of `sandbox prune`, `channel/http` caps a body and maps `ErrRunOwnedElsewhere` to 409; `chat.DeliveryText` and the workspace-default rule replace three copies each; `EventBus.Backlog` removed | `runtime/events.go`, `runtime/runner.go`, `runtime/filejournal.go`, `channel/chat/chat.go`, `channel/http/http.go`, `cmd/bonnie/sandbox.go`, `docs/SPEC.md` §4.12 |
 | T-021 | Built-in terminal TUI: `bonnie dev` opens a scrollback chat; `bonnie chat` connects to an HTTP channel; cursor reconnect and cancel; assistant messages render as markdown through herald-md (Kit's typography patterns) | `cmd/bonnie/tui/`, `cmd/bonnie/chat.go`, `cmd/bonnie/dev.go` |
@@ -1015,6 +1017,106 @@ This task is a placeholder until that spec exists.
 
 ---
 
+## T-025 — The journal is SQLite, without CGO
+
+**RESOLVED.** The design, the decisions, and the measured cost are in
+`docs/SPEC.md` §4.14. The text below is the record.
+
+**Priority** P1 · **Size** M · **Spec** §4.14, and the rewrites of §4.2,
+§4.7, §4.12 it forced
+
+### Why
+
+The journal was already on the local filesystem, and the JSONL layout paid
+for that choice three times over. Each of the following had its own section
+in `docs/SPEC.md`, its own mechanism, and its own tests:
+
+- a tool-calling step could be torn by a short write (§4.2),
+- two writers had to be refused with a per-run `flock`, because nothing
+  stopped them reusing a sequence number (§4.7),
+- a read of an unknown run created an in-memory handle that was never freed
+  (§4.12).
+
+All three are properties a local database has for free. T-014 weighed "a
+journal backed by a database" against the lock file and chose the lock file
+for cost; T-025 is that decision revisited now that a pure-Go SQLite driver
+makes the cost about 3.8 MB of binary and no build-system change at all.
+
+### What shipped
+
+1. **`runtime/sqlitejournal.go`** — `SQLiteJournal` and
+   `OpenSQLiteJournal(dir, opts...)` over `<root>/journal.db`. Tables `runs`,
+   `records`, `meta`, all `STRICT`; `records` keyed by `(run_id, seq)`. WAL,
+   `synchronous=FULL` by default, `busy_timeout`, `_txlock=immediate`, every
+   one a DSN parameter so it reaches each pooled connection.
+2. **`runtime/legacy_journal.go`** — `importJSONLRuns`, which carries every
+   `runs/*.jsonl` into the database on open, keeps sequence numbers, renames
+   the source rather than deleting it, and is idempotent.
+3. **Deleted** — `runtime/filejournal.go` and its two test files, the lock
+   file, `ownLocked`, the `runFile` handle map, `WithFsyncInterval`, and
+   `FsyncInterval` (now `FsyncRelaxed`).
+4. **Guards for the no-CGO claim** — a `depguard` rule denying
+   `github.com/mattn/go-sqlite3`, and a `CGO_ENABLED=0 go build ./...` step
+   in CI and in `task ci`.
+
+### Decisions, and why
+
+See `docs/SPEC.md` §4.14. The two that were easiest to get wrong:
+
+- **A blob column takes invalid JSON; the JSONL encoder did not.** Writing a
+  `Record.Payload` no decoder can read would journal a record that is durable
+  and unreplayable at once. `insertRecord` checks `json.Valid`.
+- **`FsyncInterval`'s promise could not be kept.** SQLite fsyncs at WAL
+  checkpoints, not on a clock. Renaming it to `FsyncRelaxed` and deleting
+  `WithFsyncInterval` was the only way to avoid invariant 13 in the public
+  API.
+
+### Acceptance criteria
+
+- [x] `SQLiteJournal` passes the shared conformance suite
+      (`runtime/journal_conformance_test.go`, factory `sqlite`)
+- [x] A step is all-or-nothing, and a failed batch leaves no trace of the run
+      (`TestSQLiteJournalAppendStepIsAllOrNothing`)
+- [x] Two journals over one store write one run concurrently without losing
+      a record or reusing a sequence number
+      (`TestSQLiteJournalAdmitsConcurrentWriters`)
+- [x] A crash mid-step still restores to a provider-valid conversation
+      (`TestSQLiteJournalCrashResumeIsProviderValid`)
+- [x] Pragmas are read back from a real connection, not trusted as fields
+      (`TestSQLiteJournalUsesWAL`, `TestSQLiteJournalFsyncPolicy`)
+- [x] A store from a newer BONNIE is refused by name
+      (`TestSQLiteJournalRefusesANewerSchema`)
+- [x] Legacy JSONL runs are imported losslessly, idempotently, and without
+      deleting anything; a corrupt file fails the open with its path named
+      (`runtime/legacy_journal_test.go`, five cases)
+- [x] `CGO_ENABLED=0 go build ./...` passes, and is enforced in CI
+- [x] `go test -race ./...` passes
+- [x] The live suites pass against a real model
+      (`TestLiveSuspendAndResume`, `TestLiveToolCallsSurviveOneProcess`,
+      `opencode/kimi-k2.5`)
+- [x] **Verified in tmux through `bonnie dev`'s TUI**: a tool-calling turn
+      completes, a hot reload restarts the child mid-conversation, and one
+      run stays dense across three processes — see `docs/SPEC.md` §4.14
+
+### Watch for
+
+- **A cold-cache toolchain run is slow, and it is not a defect.** The driver
+  is transpiled C — about 1.6 million lines of generated Go in the graph — so
+  a cold `go fix ./...` takes ~80 s and a cold `go build ./...` ~110 s
+  (was ~98 s). Warm, both are seconds. A tool with a short timeout will
+  report a failure with nothing behind it; check `gopls` and
+  `golangci-lint`, which are the ones that inspect code.
+- **Do not execute a `PRAGMA` after `sql.Open` and assume it stuck.** It
+  applies to one connection in the pool. Every setting belongs in the DSN.
+- **Do not put the journal on a network filesystem.** The old `flock` merely
+  failed to protect there; SQLite can be corrupted. `SECURITY.md` says so.
+- **The repair in `runtime/repair.go` still has work to do.** `SQLiteJournal`
+  cannot produce a torn step, but imported runs and third-party journals
+  can. Deleting the repair because "the journal is transactional now" would
+  strand exactly the runs the import exists to save.
+
+---
+
 ## Archive: shipped
 
 Each of these is complete and covered by tests. The detail that mattered is
@@ -1025,7 +1127,7 @@ now in the code and in `docs/SPEC.md`; this is a pointer, not a spec.
 | T-001 | Live-model integration test behind the `integration` tag; skips without a key | `runtime/integration_test.go` |
 | T-002 | Lossless replay — `Record.Payload` carries the typed `kit.LLMMessage` | `runtime/session.go`, `runtime/replay_fidelity_test.go` |
 | T-003 | Torn-write repair drops an incomplete trailing tool-calling step | `runtime/repair.go`, `runtime/repair_test.go` |
-| T-004 | `FileJournal` — JSONL, one file per run, fsync policy, `Persisted()` on the interface | `runtime/filejournal.go` |
+| T-004 | `FileJournal` — JSONL, one file per run, fsync policy, `Persisted()` on the interface — **replaced by `SQLiteJournal` in T-025** | (deleted; see `runtime/sqlitejournal.go`) |
 | T-005 | `Runner.Cancel`, `Runner.Steer`, `RunCancelled`, and the event bus | `runtime/runner.go`, `runtime/events.go` |
 | T-006 | `channel/http` — six routes, NDJSON stream with a reconnect cursor, journalled address map | `channel/http/` |
 | T-007 | `bonnie serve`, `runs list`, `runs show --json`, graceful SIGINT | `cmd/bonnie/` |
@@ -1042,6 +1144,64 @@ rationale now lives where it is enforced:
 - Every known risk, resolved or open → `docs/SPEC.md` §4
 - The invariants a change must preserve → `docs/SPEC.md` §8
 - Sandbox adapter contracts → `docs/SANDBOX.md`
+
+---
+
+## T-026 — microsandbox `Open` races its own create under load
+
+**Priority** P2 · **Size** S · **Spec** §4.11 · **Found by** running the
+conformance suite repeatedly while committing T-025
+
+### Why
+
+`sandbox/conformance_test.go` fails intermittently against the microsandbox
+backend — 2/6 runs on `master`, a different case each time:
+
+```
+create microsandbox from alpine:3.19: error: sandbox already exists:
+sandbox 'bonnie-exec-codes' already exists
+```
+
+Nothing leaks (`msb ps --all` is empty before and after), so this is not the
+reclaim defect §4.11 already fixed. `Open` asks `exists()`, `msb ps --all`
+does not yet report a sandbox that is mid-creation, `Open` creates anyway,
+and `msb` refuses. The earlier `--all` fix closed the stopped-sandbox half of
+the question; this is the being-created half.
+
+It matters beyond the test: `Open` is what a resumed run calls to reattach to
+its workspace. A host under load can therefore fail a tool call with
+"already exists" for a sandbox that is genuinely its own.
+
+**CI cannot see this.** A bare runner has no `msb`, so the backend skips —
+the trap T-011's "Watch for" already names.
+
+### Do
+
+1. Make `Open` tolerate the race rather than detect around it: treat "sandbox
+   already exists" from `msb create` as success and fall through to
+   attaching, which is what the caller asked for. A pre-flight `exists()`
+   check can never be atomic against another creator.
+2. Keep the policy check on the reattach path (`ErrPolicyMismatch`, §4.11) —
+   adopting a sandbox created by someone else must still refuse a policy
+   that does not match.
+3. Add a regression test that creates the same sandbox concurrently and
+   asserts both callers get a usable workspace.
+
+### Acceptance criteria
+
+- [ ] 20 consecutive `go test -count=1 ./sandbox` runs pass with `msb`
+      installed, on a loaded machine
+- [ ] Concurrent `Open` of one sandbox name is safe, with a test that fails
+      without the fix
+- [ ] A reattach under a different network policy still returns
+      `ErrPolicyMismatch`
+- [ ] §4.11's correction note is updated to record the fix
+
+### Watch for
+
+Do not "fix" this by serialising the conformance suite. The race is in the
+adapter, and hiding it behind a mutex in the test would leave the defect in
+the path a real host uses.
 
 ---
 

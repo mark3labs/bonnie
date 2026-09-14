@@ -36,7 +36,7 @@ func main() {
 func run(dir, runID, model, text string) error {
 	// A file journal is what makes the run durable. Swap in
 	// runtime.NewMemoryJournal() for a run that dies with the process.
-	journal, err := runtime.OpenFileJournal(dir)
+	journal, err := runtime.OpenSQLiteJournal(dir)
 	if err != nil {
 		return err
 	}
