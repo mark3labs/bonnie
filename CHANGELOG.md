@@ -18,6 +18,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **GitHub channel.** `channel/github` and `bonnie.WithGitHub`: a GitHub
+  App whose webhooks turn comments into turns. A `@<bot>` mention on an
+  issue, a PR, or a review thread starts or continues a run bound to that
+  thread (a review thread is its own conversation); a reply in an
+  already-bound thread continues it with no mention; the PR's title, base,
+  head, and changed-file patches reach the model as per-turn context, with
+  generated files dropped and the block capped. Delivery is a comment on
+  the thread, split at GitHub's limit, with an `eyes` reaction on the
+  triggering comment. Deliveries are verified (`X-Hub-Signature-256`) and
+  deduplicated (`X-GitHub-Delivery`); the installation token is minted per
+  event and never reaches a run. `OnIssue`, `OnPullRequest`, and
+  `OnCheckSuite` hooks dispatch the events a maintainer agent wants on its
+  own. (T-029)
 - **Idempotent start and stable error codes.** `POST /bonnie/v1/runs`
   accepts `operation_id`: the same ID from the same authenticated principal
   returns the run the first call created instead of dispatching again (it

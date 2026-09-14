@@ -2,6 +2,10 @@ package bonnie
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -13,6 +17,7 @@ import (
 	"time"
 
 	"github.com/mark3labs/bonnie/channel/discord"
+	"github.com/mark3labs/bonnie/channel/github"
 	"github.com/mark3labs/bonnie/channel/slack"
 	"github.com/mark3labs/bonnie/channel/telegram"
 	"github.com/mark3labs/bonnie/runtime"
@@ -363,6 +368,19 @@ func TestChatChannelOptionsMount(t *testing.T) {
 			opt:   WithTelegram(telegram.Config{Username: "mybot"}),
 			route: telegram.DefaultPath,
 		},
+		{
+			name: "github",
+			// The GitHub App's private key must parse at mount, so the
+			// fixture generates a real one. It is a test-only key; the fake
+			// API never verifies it.
+			env: map[string]string{
+				"GITHUB_APP_ID":          "1234",
+				"GITHUB_APP_PRIVATE_KEY": testRSAPrivateKey(t),
+				"GITHUB_WEBHOOK_SECRET":  "s3cret",
+			},
+			opt:   WithGitHub(github.Config{BotName: "my-agent"}),
+			route: github.DefaultPath,
+		},
 	}
 
 	runner := runtime.NewRunner(runtime.NewMemoryJournal(), stubFactory)
@@ -402,6 +420,16 @@ func TestChatChannelOptionsMount(t *testing.T) {
 			}
 		})
 	}
+}
+
+// testRSAPrivateKey generates a throwaway RSA key for the mount test.
+func testRSAPrivateKey(t *testing.T) string {
+	t.Helper()
+	k, err := rsa.GenerateKey(rand.Reader, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(k)}))
 }
 
 // The workspace seed never overwrites. A file already in the workspace is

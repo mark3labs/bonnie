@@ -1045,7 +1045,7 @@ edge cases. Consult them for **design questions**, not for implementation.
 | *T-031* — **shipped** | `operationId` create-once, `code` on errors | [eve channel](https://eve.dev/docs/channels/eve) |
 | *T-032* | `reset`, `clear`, `compact`; channel-name prefix on every token — **shipped** | [Custom Channels](https://eve.dev/docs/channels/custom) |
 | *T-033* | `to(channel, target).send`, `receive` (proactive) | [Custom Channels](https://eve.dev/docs/channels/custom) |
-| *T-029* | `githubChannel`, `<github_context>`, PR diff in context | [GitHub](https://eve.dev/docs/channels/github) |
+| `channel/github` (T-029, shipped) | `githubChannel`, `<github_context>`, PR diff in context | [GitHub](https://eve.dev/docs/channels/github) |
 | *deferred* | `instrumentation.ts` | [Observability](https://eve.dev/docs/guides/instrumentation) |
 | *deferred* | `defineDynamic` | [Dynamic Capabilities](https://eve.dev/docs/guides/dynamic-capabilities) |
 | *deferred* | `defineRemoteAgent` | [Remote Agents](https://eve.dev/docs/guides/remote-agents) |

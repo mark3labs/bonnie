@@ -19,7 +19,6 @@ the known risks, and the invariants every task must preserve.
 
 | ID | Title | Priority | Size | Blocks |
 |---|---|---|---|---|
-| T-029 | GitHub channel: issues, PRs, and review threads become conversations | P2 | L | — |
 | T-033 | Cross-channel hand-off and proactive sessions | P3 | M | — |
 | T-027 | goreleaser publishes a commit list, not the release notes | P2 | S | — |
 | T-026 | microsandbox `Open` races its own create under load | P2 | S | — |
@@ -36,6 +35,7 @@ the known risks, and the invariants every task must preserve.
 
 | ID | Delivered | Where |
 |---|---|---|
+| T-029 | The GitHub App channel: comment mentions and bound-thread replies become turns; issue, PR, and review-thread addresses; the PR diff as per-turn context; `eyes` reactions; signature verification and delivery dedup; per-event installation tokens that never reach the journal; `OnIssue`/`OnPullRequest`/`OnCheckSuite` hooks; `bonnie.WithGitHub` | `channel/github/`, `options.go`, `docs/CHANNELS.md` |
 | T-031 | Idempotent start (`operation_id`, namespaced per authenticated principal, refused anonymous) and a stable `code` on every error body, listed in `docs/CHANNELS.md` | `channel/http/http.go`, `channel/http/errors_test.go` |
 | T-032 | Session controls: `Reset`/`Clear`/`Compact` on `SessionRef` and the HTTP channel, `RunRetired` (the only non-revivable terminal state), `RecordClear` (an append-only forget), `/new` in every chat surface, the core owns the address prefix with the channel's name | `runtime/controls.go`, `runtime/session.go`, `channel/channel.go`, `channel/chat/chat.go`, `channeltest/` |
 | T-028 | Normalised turn: `runtime.Input{Context, Title, Origin}`, `RecordContext` journalled and shown to the model through `OnContextPrepare` for one turn only, `chat.Turn` with kinds, adapters set kind/title/context, HTTP accepts `context`/`kind`, `runs list` shows the title | `runtime/context.go`, `channel/chat/chat.go`, `channel/{slack,discord,telegram}`, `channeltest/`, `docs/SPEC.md` §3.7 |
@@ -1298,7 +1298,7 @@ the path a real host uses.
 
 ## T-028 — Normalised inbound turn with a per-turn context slot
 
-**Priority** P1 · **Size** M · **Blocks** T-029 · **Found by** comparing
+**Priority** P1 · **Size** M · **Blocks** T-029 (shipped) · **Found by** comparing
 `channel/chat` with eve's channel contract (2026-09-14)
 
 **SHIPPED.** Two notes against the plan: step 4 records the origin as
@@ -1388,6 +1388,13 @@ layer defines; `runtime/` must not import `channel/` (invariant 6).
 **Priority** P2 · **Size** L · **Blocked by** T-028 (shipped) · **Prior art** eve's
 [GitHub channel](https://eve.dev/docs/channels/github)
 
+**SHIPPED.** Three notes against the plan: a PR's timeline conversation is
+addressed `pulls/<n>` but answered through the issues API, where GitHub
+actually stores PR timeline comments; the review-thread thread ID is the
+root comment's ID, and the reply goes through the replies endpoint; and the
+hooks' turns get the obvious address when the hook leaves it empty, so an
+opt-in `issues.opened` needs no address bookkeeping.
+
 ### Why
 
 A GitHub App is the surface where a maintainer agent is most useful: answer a
@@ -1430,18 +1437,18 @@ is context, not history.
 
 ### Acceptance criteria
 
-- [ ] A mention in an issue comment starts a run bound to the issue address;
+- [x] A mention in an issue comment starts a run bound to the issue address;
       a second comment continues the same run
-- [ ] A review-thread comment and a PR-timeline comment on the same PR are
+- [x] A review-thread comment and a PR-timeline comment on the same PR are
       two runs
-- [ ] The PR diff arrives as `Context`, not as user text; the journal shows
+- [x] The PR diff arrives as `Context`, not as user text; the journal shows
       one user record with the comment only
-- [ ] A reply to a parked run resumes it
-- [ ] An unsigned or badly signed delivery is refused with 401; a replayed
+- [x] A reply to a parked run resumes it
+- [x] An unsigned or badly signed delivery is refused with 401; a replayed
       delivery ID is dropped
-- [ ] The installation token never appears in a journal record or a log line
+- [x] The installation token never appears in a journal record or a log line
       (a test greps the journal after a full turn)
-- [ ] `docs/CHANNELS.md` gains a GitHub section with setup and env vars
+- [x] `docs/CHANNELS.md` gains a GitHub section with setup and env vars
 
 ### Watch for
 

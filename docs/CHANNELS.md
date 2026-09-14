@@ -170,6 +170,62 @@ Mount it in `main.go`:
 bonnie.New(bonnie.WithTelegram(telegram.Config{Username: "mybot"})).Serve()
 ```
 
+## GitHub
+
+- **Webhook:** `POST /github/events` — GitHub App webhooks. Verify
+  `X-Hub-Signature-256` (HMAC-SHA256 over the raw body with the webhook
+  secret); a request without one is refused. Deliveries are deduplicated by
+  `X-GitHub-Delivery`, so a redelivered webhook does not run the turn
+  twice — which matters twice over, because a retried `/new` must not
+  retire the run that replaced the one it meant.
+- **For the agent:** a comment containing `@<bot>` — a text token, not a
+  GitHub mention: GitHub may not autocomplete or link it, so the match is
+  textual and case-insensitive. A comment in an already-bound thread
+  continues it with no mention, the same rule as Slack. A comment that is
+  neither is ignored: everything in a repository is not the agent's
+  business. Bot senders are always dropped.
+- **Addresses:** `octo/repo/issues/42` for an issue's timeline,
+  `octo/repo/pulls/42` for a PR's timeline (GitHub posts PR timeline
+  comments through the issues API, so the reply goes to
+  `/issues/42/comments`), and `octo/repo/pulls/42/reviews/<root>` for one
+  review thread — its own conversation, answered through
+  `/pulls/42/comments/<root>/replies`.
+- **Context:** the event, the sender, and whether the agent was mentioned
+  are one line; a PR adds its title, base, head, and changed-file patches,
+  with generated files (lock files, and anything in `ExcludedFiles`)
+  contributing their name but not their patch. The whole block is capped
+  (`MaxPatchBytes`, 32 KiB default). The diff is never conversation
+  history — T-028's `RecordContext` carries it.
+- **Delivery:** a comment on the surface the conversation lives on, split
+  at GitHub's limit with a cap of five parts. A triggering comment gets an
+  `eyes` reaction. A parked run posts its prompt as a comment; the next
+  comment on the address answers it.
+- **Opt-in events:** `OnIssue`, `OnPullRequest`, and `OnCheckSuite` hooks
+  on the config return a turn or nil. `check_suite` turns must anchor to a
+  pull request; a suite with none is dropped.
+- **Credentials:** a GitHub App. The channel mints an installation token
+  per event and uses it only to post and to fetch the PR context — the
+  token never enters a run, a journal record, or a log line, and a test
+  greps the journal to prove it.
+
+Setup: create the GitHub App, point its webhook URL at
+`<server>/github/events`, subscribe to `issue_comment`,
+`pull_request_review_comment`, and — for the hooks — `issues`,
+`pull_request`, and `check_suite`, then set:
+
+| Variable | What |
+|---|---|
+| `GITHUB_APP_ID` | the App ID |
+| `GITHUB_APP_PRIVATE_KEY` | the App's private key (PEM) |
+| `GITHUB_WEBHOOK_SECRET` | verifies the webhook signature |
+| `GITHUB_API_URL` | optional override; tests point it at a fake |
+
+Mount it in `main.go`:
+
+```go
+bonnie.New(bonnie.WithGitHub(github.Config{BotName: "my-agent"})).Serve()
+```
+
 ---
 
 ## Secrets never live in code
@@ -190,26 +246,24 @@ the message came from Slack; the user ID inside it is Slack's word. The
 ## Not implemented, on purpose
 
 - **Streaming edits.** eve's chat SDK posts an initial message and edits it
-  as tokens arrive. BONNIE's chat channels deliver one message per turn —
-  the NDJSON stream (the HTTP channel's `GET /bonnie/v1/runs/{id}/stream`) is the
-  integration surface for live output.
+  as tokens arrive. BONNIE's channels deliver one message per turn — the
+  NDJSON stream (`GET /bonnie/v1/runs/{id}/stream`) is the integration
+  surface for live output.
 - **Button-driven HITL** (Slack Block Kit actions, Discord message
   components). A parked run is answered in text. The resume path behind it
   is the same; only the gesture is missing.
-- **Proactive sessions** — a bot that starts the conversation. The run
-  creation path is the HTTP channel's job for now.
-- **Attachments and files.** Text in, text out.
+- **Proactive sessions** — a bot that starts the conversation. T-033.
+- **Message attachments.** Text in, text out. The GitHub channel fetches
+  the PR diff itself, which is what a file-bearing surface needs before an
+  attachment slot does.
 - **Gateway/Socket Mode transports.** Webhook only; both platforms' push
   transports need websocket dependencies BONNIE does not carry.
-- **GitHub, Linear, and other eve channels.** The adapters above prove the
-  address and dispatch pattern, and `chat.Turn` carries the per-turn
-  context a GitHub event needs (T-028). T-029 builds GitHub on it.
-- **Framework HTTP namespace.** Done in T-030: the HTTP channel serves
-  under `/bonnie/v1/`, `/bonnie/` is reserved, and `GET /bonnie/v1/health`
-  answers before any run exists.
-- **`reset`, `clear`, `compact`, idempotent start, stable error codes.**
-  All done in T-032 and T-031: `Reset`/`Clear`/`Compact` are on
-  `SessionRef` and the HTTP channel, `/new` works in every chat surface,
-  the core owns the address prefix, `operation_id` makes a start
-  idempotent, and every error body carries a stable `code`.
+- **Linear and other eve channels.** The GitHub adapter proves the pattern
+  works for a non-chat surface; the next one is mechanical on top of it.
+- **Framework HTTP namespace, session controls, idempotent start, stable
+  error codes.** Done in T-030, T-032, and T-031: the HTTP channel serves
+  under `/bonnie/v1/` and `/bonnie/` is reserved; `Reset`/`Clear`/`Compact`
+  are on `SessionRef` and the HTTP channel, and `/new` works in every chat
+  surface; `operation_id` makes a start idempotent, and every error body
+  carries a stable `code`.
 - **Cross-channel hand-off** (`to(channel).send`). T-033.

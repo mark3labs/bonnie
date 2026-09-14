@@ -8,6 +8,7 @@ import (
 
 	"github.com/mark3labs/bonnie/channel"
 	"github.com/mark3labs/bonnie/channel/discord"
+	"github.com/mark3labs/bonnie/channel/github"
 	"github.com/mark3labs/bonnie/channel/slack"
 	"github.com/mark3labs/bonnie/channel/telegram"
 	"github.com/mark3labs/bonnie/runtime"
@@ -250,6 +251,28 @@ func WithTelegram(cfg telegram.Config) Option {
 			return nil, err
 		}
 		return telegram.New(r, c), nil
+	})
+}
+
+// WithGitHub mounts the GitHub App channel. GITHUB_APP_ID,
+// GITHUB_APP_PRIVATE_KEY, and GITHUB_WEBHOOK_SECRET come from the
+// environment; see [WithSlack]. The bot name is configured, not
+// environmental: it is a setting, not a secret.
+func WithGitHub(cfg github.Config) Option {
+	return WithChannel(func(r *runtime.Runner) (Channel, error) {
+		c := cfg
+		fill(&c.AppID, "GITHUB_APP_ID")
+		fill(&c.PrivateKey, "GITHUB_APP_PRIVATE_KEY")
+		fill(&c.WebhookSecret, "GITHUB_WEBHOOK_SECRET")
+		fill(&c.APIURL, "GITHUB_API_URL")
+		if err := require("github",
+			named{"GITHUB_APP_ID", c.AppID},
+			named{"GITHUB_APP_PRIVATE_KEY", c.PrivateKey},
+			named{"GITHUB_WEBHOOK_SECRET", c.WebhookSecret},
+		); err != nil {
+			return nil, err
+		}
+		return github.New(r, c)
 	})
 }
 
