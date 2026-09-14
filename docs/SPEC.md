@@ -1038,12 +1038,12 @@ edge cases. Consult them for **design questions**, not for implementation.
 | `AppendExtensionData` | `defineState` | [State](https://eve.dev/docs/concepts/state) |
 | `bonnie init` / `dev` / `build` | `eve init`, `npm run dev`, deploy | [Getting Started](https://eve.dev/docs/getting-started) |
 | `main.go` options on `bonnie.New` | `agent/agent.ts` (`defineAgent`) — configuration is code in both. BONNIE shipped a declarative `agent.yaml` in `v0.2` and removed it in `v0.3` (T-024): two places for one setting is worse than requiring Go on the desk | [Getting Started](https://eve.dev/docs/getting-started) |
-| Kit compaction (inherited) | `compaction.thresholdPercent` | [Default Harness](https://eve.dev/docs/concepts/default-harness) |
+| Kit compaction (inherited) | `compaction.thresholdPercent` — and now on demand: `Runner.Compact` calls Kit's public `Compact` | [Default Harness](https://eve.dev/docs/concepts/default-harness) |
 | *deferred* | `defineEval`, `eve eval` | [Evals](https://eve.dev/docs/evals/overview) |
-| `channel/http` at `/runs` (root) — *T-030 moves it under `/bonnie/v1`* | `/eve/v1/*`, reserved for the framework | [eve channel](https://eve.dev/docs/channels/eve) |
-| `runtime.Input{Text, Files}` — *no context slot; T-028* | `message` + per-turn `context` / `clientContext` | [Custom Channels](https://eve.dev/docs/channels/custom) |
+| `channel/http` under `/bonnie/v1` (T-030, shipped) | `/eve/v1/*`, reserved for the framework | [eve channel](https://eve.dev/docs/channels/eve) |
+| `runtime.Input{Text, Context, Title, Origin}` + `chat.Turn` (T-028, shipped) | `message` + per-turn `context` / `clientContext` | [Custom Channels](https://eve.dev/docs/channels/custom) |
 | *T-031* | `operationId` create-once, `code` on errors | [eve channel](https://eve.dev/docs/channels/eve) |
-| *T-032* | `reset`, `clear`, `compact`; channel-name prefix on every token | [Custom Channels](https://eve.dev/docs/channels/custom) |
+| *T-032* | `reset`, `clear`, `compact`; channel-name prefix on every token — **shipped** | [Custom Channels](https://eve.dev/docs/channels/custom) |
 | *T-033* | `to(channel, target).send`, `receive` (proactive) | [Custom Channels](https://eve.dev/docs/channels/custom) |
 | *T-029* | `githubChannel`, `<github_context>`, PR diff in context | [GitHub](https://eve.dev/docs/channels/github) |
 | *deferred* | `instrumentation.ts` | [Observability](https://eve.dev/docs/guides/instrumentation) |

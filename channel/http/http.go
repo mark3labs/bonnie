@@ -20,6 +20,9 @@
 //	POST /bonnie/v1/runs/{id}            send a message to an existing run
 //	POST /bonnie/v1/runs/{id}/respond    answer a suspended run
 //	POST /bonnie/v1/runs/{id}/cancel     stop the turn a run is executing
+//	POST /bonnie/v1/runs/{id}/reset      retire the run for good
+//	POST /bonnie/v1/runs/{id}/clear      drop the conversation, keep the run
+//	POST /bonnie/v1/runs/{id}/compact    summarise the conversation now
 //	GET  /bonnie/v1/runs/{id}/stream     NDJSON event stream, resumable with ?cursor=
 //
 // The prefix is the framework's reserved namespace: the host refuses any
@@ -157,6 +160,9 @@ func (c *Channel) Routes() []channel.Route {
 		{Method: http.MethodPost, Path: p + "/runs/{id}", Handler: c.handleSend},
 		{Method: http.MethodPost, Path: p + "/runs/{id}/respond", Handler: c.handleRespond},
 		{Method: http.MethodPost, Path: p + "/runs/{id}/cancel", Handler: c.handleCancel},
+		{Method: http.MethodPost, Path: p + "/runs/{id}/reset", Handler: c.handleReset},
+		{Method: http.MethodPost, Path: p + "/runs/{id}/clear", Handler: c.handleClear},
+		{Method: http.MethodPost, Path: p + "/runs/{id}/compact", Handler: c.handleCompact},
 		{Method: http.MethodGet, Path: p + "/runs/{id}/stream", Handler: c.handleStream},
 	}
 }
@@ -195,7 +201,7 @@ func (c *Channel) Attach(runID string) channel.SessionRef {
 // touched: it keeps its history and can still be reached with
 // [Channel.Attach].
 func (c *Channel) Rebind(ctx context.Context, address, runID string) error {
-	return c.core.Addresses().Bind(ctx, address, runID)
+	return c.core.Bind(ctx, address, runID)
 }
 
 // ---------------------------------------------------------------------------
@@ -235,6 +241,11 @@ type SendRequest struct {
 // RespondRequest answers a suspended run.
 type RespondRequest struct {
 	Responses []runtime.InputResponse `json:"responses"`
+}
+
+// ResetRequest is the optional body of a reset: why the run is retired.
+type ResetRequest struct {
+	Reason string `json:"reason,omitempty"`
 }
 
 // RunResponse is the JSON form of a run at a turn boundary.
@@ -319,7 +330,7 @@ func (c *Channel) handleStart(w http.ResponseWriter, r *http.Request, in channel
 }
 
 func (c *Channel) handleAddress(w http.ResponseWriter, r *http.Request, _ channel.Inbound) {
-	runID, ok, err := c.core.Addresses().LookupContext(r.Context(), r.PathValue("address"))
+	runID, ok, err := c.core.Lookup(r.Context(), r.PathValue("address"))
 	if err != nil {
 		writeError(w, err)
 		return
@@ -382,6 +393,37 @@ func (c *Channel) handleRespond(w http.ResponseWriter, r *http.Request, in chann
 
 func (c *Channel) handleCancel(w http.ResponseWriter, r *http.Request, in channel.Inbound) {
 	if err := in.Attach(r.PathValue("id")).Cancel(r.Context()); err != nil {
+		writeError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleReset retires the run. The route is ID-addressed, so it retires
+// that run and no other; the address that pointed at it is freed by the
+// core, and a later start on that address creates a fresh run.
+func (c *Channel) handleReset(w http.ResponseWriter, r *http.Request, in channel.Inbound) {
+	var req ResetRequest
+	if r.ContentLength != 0 && !decode(w, r, &req) {
+		return
+	}
+	if err := in.Attach(r.PathValue("id")).Reset(r.Context(), req.Reason); err != nil {
+		writeError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (c *Channel) handleClear(w http.ResponseWriter, r *http.Request, in channel.Inbound) {
+	if err := in.Attach(r.PathValue("id")).Clear(r.Context()); err != nil {
+		writeError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (c *Channel) handleCompact(w http.ResponseWriter, r *http.Request, in channel.Inbound) {
+	if err := in.Attach(r.PathValue("id")).Compact(r.Context()); err != nil {
 		writeError(w, err)
 		return
 	}
@@ -494,11 +536,14 @@ func writeError(w http.ResponseWriter, err error) {
 	case errors.Is(err, runtime.ErrNotWaiting),
 		errors.Is(err, runtime.ErrRunActive),
 		errors.Is(err, runtime.ErrRunNotActive),
+		errors.Is(err, runtime.ErrRunRetired),
 		// Another process owns this run's journal. That is a conflict
 		// over who may write, not a fault in this server, and a client
 		// that reads 500 would retry a request no retry can fix.
 		errors.Is(err, runtime.ErrRunOwnedElsewhere):
 		writeJSON(w, http.StatusConflict, ErrorResponse{Error: err.Error()})
+	case errors.Is(err, runtime.ErrCompactionUnsupported):
+		writeJSON(w, http.StatusNotImplemented, ErrorResponse{Error: err.Error()})
 	case errors.Is(err, channel.ErrUnknownTurnPolicy):
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
 	case errors.Is(err, context.Canceled):

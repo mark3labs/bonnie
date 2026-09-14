@@ -108,6 +108,11 @@ type SendOptions struct {
 // Every method resolves the run first, so a reference stays correct after the
 // address is re-keyed. A reference from [Inbound.Attach] returns
 // [runtime.ErrRunNotFound] for an unknown run instead of creating one.
+//
+// Only Send creates. The controls — Cancel, Reset, Clear, Compact — never
+// do: on an address that owns no run they return nil and change nothing,
+// which is what a stray "/new" in a thread the agent never joined should
+// cost.
 type SessionRef interface {
 	// Send delivers a message and returns the run at its next boundary.
 	Send(ctx context.Context, text string, opts SendOptions) (*runtime.Run, error)
@@ -115,15 +120,30 @@ type SessionRef interface {
 	Respond(ctx context.Context, responses []runtime.InputResponse) (*runtime.Run, error)
 	// Cancel stops the active turn.
 	Cancel(ctx context.Context) error
+	// Reset retires the run for good and frees its address, so the next
+	// Send on the address starts a fresh run. A reference from Attach keeps
+	// pointing at the retired run.
+	Reset(ctx context.Context, reason string) error
+	// Clear drops the conversation from the model's context and keeps
+	// everything else: the run ID, the address, the workspace, the journal.
+	Clear(ctx context.Context) error
+	// Compact summarises the run's older messages now, without a user
+	// message.
+	Compact(ctx context.Context) error
 	// RunID returns the durable run this reference currently resolves to.
 	RunID(ctx context.Context) (string, error)
 }
 
 // Inbound is handed to a channel when traffic arrives.
+//
+// Addresses are channel-local: the framework prefixes every one with the
+// channel's name before it reaches the address map, so two channels cannot
+// bind the same key by accident and an adapter never spells its own prefix.
+// eve does the same with its continuation tokens.
 type Inbound interface {
 	// From resolves a channel-local address to whichever run owns it now,
-	// creating one when the address is new. It is dynamic: two calls may
-	// resolve to different runs if the address was re-keyed in between.
+	// creating one on Send when the address is new. It is dynamic: two calls
+	// may resolve to different runs if the address was re-keyed in between.
 	From(address string) SessionRef
 	// Attach targets one exact run ID. It never creates, follows, or
 	// replaces.

@@ -28,9 +28,7 @@ func TestConformance(t *testing.T) {
 		t.Helper()
 		j := runtime.NewMemoryJournal()
 		agent := channeltest.NewScriptAgent()
-		runner := runtime.NewRunner(j, runtime.AgentFactory(func(context.Context, *runtime.Session) (runtime.Agent, error) {
-			return agent, nil
-		}))
+		runner := runtime.NewRunner(j, agent.Factory())
 		return &channeltest.Fixture{
 			Inbound: mustNew(t, runner, Config{}),
 			Agent:   agent,
@@ -101,9 +99,7 @@ func adapter(t *testing.T, script []*kit.TurnResult) *harness {
 	for _, s := range script {
 		agent.Say(s)
 	}
-	runner := runtime.NewRunner(j, runtime.AgentFactory(func(context.Context, *runtime.Session) (runtime.Agent, error) {
-		return agent, nil
-	}))
+	runner := runtime.NewRunner(j, agent.Factory())
 	fake := newFakeAPI(t)
 	pub, priv, err := ed25519.GenerateKey(nil)
 	if err != nil {

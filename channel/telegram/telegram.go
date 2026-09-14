@@ -280,7 +280,7 @@ func stripCommand(text, command, username string) (string, bool) {
 // address is the channel-local address of a message: one conversation per
 // chat, or per forum topic when the chat has them.
 func (c *Channel) address(m *tgMessage) string {
-	a := fmt.Sprintf("telegram/%d", m.Chat.ID)
+	a := strconv.FormatInt(m.Chat.ID, 10)
 	if m.MessageThreadID != 0 {
 		a += fmt.Sprintf("/%d", m.MessageThreadID)
 	}
@@ -296,11 +296,12 @@ func (c *Channel) deliver(address string, run *runtime.Run, err error) {
 	if text == "" {
 		return
 	}
-	parts := strings.SplitN(address, "/", 3)
-	chatID, _ := strconv.ParseInt(parts[1], 10, 64)
+	// The address is channel-local: "<chat_id>" or "<chat_id>/<topic>".
+	chatPart, topicPart, _ := strings.Cut(address, "/")
+	chatID, _ := strconv.ParseInt(chatPart, 10, 64)
 	var thread int64
-	if len(parts) > 2 {
-		thread, _ = strconv.ParseInt(parts[2], 10, 64)
+	if topicPart != "" {
+		thread, _ = strconv.ParseInt(topicPart, 10, 64)
 	}
 	for _, p := range chat.SplitText(text, messageLimit, maxParts) {
 		c.sendMessage(context.Background(), chatID, thread, p)

@@ -18,6 +18,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Session controls.** `channel.SessionRef` gains `Reset`, `Clear`, and
+  `Compact`; the runner implements them once (`runtime/controls.go`) and
+  every transport shares them. `POST /bonnie/v1/runs/{id}/reset` retires a
+  run for good (`retired` is the only terminal state a run cannot leave;
+  the address is freed, the history stays readable), `/clear` drops the
+  conversation from the model's context and keeps the run, `/compact`
+  summarises on demand through Kit's public `Compact`. Chat surfaces get
+  the same thing by typing `/new` in the thread. The address map is
+  prefixed by the core with the channel's name — two channels cannot bind
+  the same key, and an adapter never spells its own prefix. (T-032)
 - **Per-turn context and a normalised turn.** `runtime.Input` gains
   `Context` (facts for the model on this turn only — journalled as a
   `RecordContext`, shown in front of the prompt through Kit's
@@ -35,7 +45,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Breaking for adapter authors:** `chat.NewCore` takes the channel's
-  name; `chat.Dispatch` and `chat.Route` take a `chat.Turn`. (T-028)
+  name; `chat.Dispatch` and `chat.Route` take a `chat.Turn`; the core
+  applies the address prefix itself, so adapters pass the bare platform
+  key; `channel.SessionRef` gains `Reset`, `Clear`, and `Compact`. (T-028,
+  T-032)
 
 ## [0.4.0] — 2026-09-14
 

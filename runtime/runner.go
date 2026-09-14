@@ -434,6 +434,9 @@ func (r *Runner) replayEvents(runID string, after int, out chan<- Event, done <-
 // are seen; its context is journalled and handed to the model for this turn
 // only.
 func (r *Runner) Start(ctx context.Context, runID string, in Input) (*Run, error) {
+	if err := r.refuseRetired(ctx, runID); err != nil {
+		return nil, err
+	}
 	turnCtx, act, err := r.acquire(ctx, runID)
 	if err != nil {
 		return nil, err
@@ -463,6 +466,9 @@ func (r *Runner) Resume(ctx context.Context, runID string, responses []InputResp
 	state, err := r.journal.State(ctx, runID)
 	if err != nil {
 		return nil, err
+	}
+	if state == RunRetired {
+		return nil, fmt.Errorf("%w: %s", ErrRunRetired, runID)
 	}
 	if state != RunWaiting {
 		return nil, fmt.Errorf("%w: %s is %s", ErrNotWaiting, runID, state)

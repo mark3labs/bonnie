@@ -59,22 +59,55 @@ func (s *Session) TurnContext() []string {
 }
 
 // Origin returns the run's recorded origin, or the zero value when no turn
-// has named one.
+// has named one. It is a fact about the run, not the branch: a clear does
+// not lose it.
 func (s *Session) Origin() Origin {
 	var o Origin
-	for _, e := range s.GetExtensionData(ExtOrigin) {
-		_ = json.Unmarshal([]byte(e.Data), &o)
+	if data, ok := s.runFact(ExtOrigin); ok {
+		_ = json.Unmarshal([]byte(data), &o)
 	}
 	return o
 }
 
 // Title returns the run's recorded title, or "".
 func (s *Session) Title() string {
-	title := ""
-	for _, e := range s.GetExtensionData(ExtTitle) {
-		title = e.Data
-	}
+	title, _ := s.runFact(ExtTitle)
 	return title
+}
+
+// runFact finds the one extension-data entry of a type anywhere in the
+// tree, not only on the current branch. The run-level facts are written
+// once, so there is at most one; if a damaged journal ever holds two, the
+// lowest entry ID — the first written — wins.
+func (s *Session) runFact(extType string) (string, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	best, found := "", false
+	bestSeq := 0
+	for id, e := range s.entries {
+		if e.extData == nil || e.extData.ExtType != extType {
+			continue
+		}
+		if n := entrySeq(id); !found || n < bestSeq {
+			best, bestSeq, found = e.extData.Data, n, true
+		}
+	}
+	return best, found
+}
+
+// Clear moves the branch tip to the root and journals a [RecordClear], so
+// the next message starts a fresh branch and a restore lands in the same
+// place. Nothing is deleted: the journal is append-only, and the cleared
+// messages stay readable to an operator.
+func (s *Session) Clear(ctx context.Context) error {
+	s.mu.Lock()
+	s.leaf = ""
+	s.mu.Unlock()
+	_, err := s.journal.Append(ctx, Record{
+		RunID: s.runID, Kind: RecordClear, Timestamp: now(),
+		Text: "conversation cleared",
+	})
+	return err
 }
 
 // recordOrigin writes the origin once. A later turn that names the same or

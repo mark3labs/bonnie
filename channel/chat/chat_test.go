@@ -1,11 +1,14 @@
 package chat_test
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
 
+	"github.com/mark3labs/bonnie/channel"
 	"github.com/mark3labs/bonnie/channel/chat"
+	"github.com/mark3labs/bonnie/channeltest"
 	"github.com/mark3labs/bonnie/runtime"
 )
 
@@ -90,5 +93,66 @@ func TestFirstLineCapsAnError(t *testing.T) {
 	long := strings.Repeat("x", 500)
 	if got := chat.FirstLine(long); len(got) != 200 {
 		t.Fatalf("FirstLine kept %d bytes, want 200", len(got))
+	}
+}
+
+// Two channels over one journal cannot resolve the same bare key to one
+// run: the core applies its own name as the prefix, so an adapter that
+// writes "C1/dm" on Slack and one that writes "C1/dm" on a custom channel
+// get two runs. The prefix is the core's, not the adapter's — an adapter
+// that spelled "slack/" itself would be prefixed again and still not
+// collide.
+func TestCorePrefixesAddressesWithItsName(t *testing.T) {
+	t.Parallel()
+	j := runtime.NewMemoryJournal()
+	agent := channeltest.NewScriptAgent()
+	r := runtime.NewRunner(j, agent.Factory())
+	ctx := context.Background()
+
+	slack := chat.NewCore(r, "slack", "")
+	other := chat.NewCore(r, "other", "")
+
+	a, err := slack.From("C1/dm").Send(ctx, "hi", channel.SendOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := other.From("C1/dm").Send(ctx, "hi", channel.SendOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.ID == b.ID {
+		t.Fatal("two channels resolved one bare key to the same run")
+	}
+	if got := slack.Address("C1/dm"); got != "slack/C1/dm" {
+		t.Fatalf("Address = %q, want slack/C1/dm", got)
+	}
+	// The raw map holds the prefixed keys, and each channel sees only its
+	// own binding through Lookup.
+	if id, ok, _ := slack.Lookup(ctx, "C1/dm"); !ok || id != a.ID {
+		t.Fatalf("slack Lookup = %q %v, want %q", id, ok, a.ID)
+	}
+	if _, ok, _ := slack.Lookup(ctx, "other/C1/dm"); ok {
+		t.Fatal("a channel can reach another channel's binding by spelling its prefix")
+	}
+	// An adapter that borrows another channel's prefix is prefixed again.
+	if _, ok, _ := other.Lookup(ctx, "slack/C1/dm"); ok {
+		t.Fatal("spelling another channel's prefix reached its binding")
+	}
+}
+
+// TitleFrom derives a listing title from the first message.
+func TestTitleFrom(t *testing.T) {
+	t.Parallel()
+	cases := map[string]string{
+		"deploy the app":              "deploy the app",
+		"  first line\nsecond line  ": "first line",
+		strings.Repeat("word ", 20):   strings.TrimSpace(strings.Repeat("word ", 12)) + "…",
+		strings.Repeat("x", 100):      strings.Repeat("x", 60) + "…",
+		"":                            "",
+	}
+	for in, want := range cases {
+		if got := chat.TitleFrom(in); got != want {
+			t.Errorf("TitleFrom(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

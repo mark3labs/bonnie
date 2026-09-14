@@ -127,6 +127,15 @@ func Restore(ctx context.Context, runID string, j Journal) (*Session, error) {
 			}
 			continue
 		}
+		// A clear moves the branch tip to the root: what follows hangs off
+		// nothing that came before. The old entries stay in the tree, so
+		// run-level facts recorded on them are still readable.
+		if rec.Kind == RecordClear {
+			s.mu.Lock()
+			s.leaf = ""
+			s.mu.Unlock()
+			continue
+		}
 		// A record with no entry ID is run metadata, not a tree entry.
 		// Treating one as an entry would give the tree a node keyed by the
 		// empty string, and every later message would hang off it.

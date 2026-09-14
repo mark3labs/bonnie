@@ -12,7 +12,6 @@
 package channel_test
 
 import (
-	"context"
 	"testing"
 
 	"github.com/mark3labs/bonnie/channel"
@@ -56,9 +55,7 @@ func httpFixture(t *testing.T) *channeltest.Fixture {
 
 	agent := channeltest.NewScriptAgent()
 	j := runtime.NewMemoryJournal()
-	r := runtime.NewRunner(j, func(context.Context, *runtime.Session) (runtime.Agent, error) {
-		return agent, nil
-	})
+	r := runtime.NewRunner(j, agent.Factory())
 	inbound := http.New(r, http.WithIDGenerator(seededIDs()))
 	return &channeltest.Fixture{Inbound: inbound, Agent: agent, Journal: j}
 }

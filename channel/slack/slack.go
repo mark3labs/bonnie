@@ -286,14 +286,14 @@ func (c *Channel) forUs(e *struct {
 			thread = e.TS
 		}
 		return chat.Turn{
-			Address: fmt.Sprintf("slack/%s/%s", e.Channel, thread),
+			Address: fmt.Sprintf("%s/%s", e.Channel, thread),
 			Text:    stripMention(e.Text),
 			Kind:    chat.KindThread,
 		}, true
 
 	case e.Type == "message" && e.ChannelType == "im":
 		return chat.Turn{
-			Address: fmt.Sprintf("slack/%s/dm", e.Channel),
+			Address: fmt.Sprintf("%s/dm", e.Channel),
 			Text:    strings.TrimSpace(e.Text),
 			Kind:    chat.KindDM,
 		}, true
@@ -301,8 +301,8 @@ func (c *Channel) forUs(e *struct {
 	case e.Type == "message" && e.ThreadTS != "":
 		// A reply in a thread: for the agent only when it bound that
 		// thread. Everything else in a busy channel is not its business.
-		address := fmt.Sprintf("slack/%s/%s", e.Channel, e.ThreadTS)
-		if _, bound := c.core.Addresses().Lookup(address); bound {
+		address := fmt.Sprintf("%s/%s", e.Channel, e.ThreadTS)
+		if _, bound, _ := c.core.Lookup(context.Background(), address); bound {
 			return chat.Turn{Address: address, Text: strings.TrimSpace(e.Text), Kind: chat.KindThread}, true
 		}
 		return chat.Turn{}, false
@@ -339,13 +339,14 @@ func (c *Channel) deliver(address string, run *runtime.Run, err error) {
 	if text == "" {
 		return
 	}
-	parts := strings.SplitN(address, "/", 3)
-	var thread string
-	if len(parts) > 2 && parts[2] != "dm" {
-		thread = parts[2]
+	// The address is channel-local: "<channel>/<thread_ts>" or
+	// "<channel>/dm". The framework's channel prefix never reaches here.
+	channelID, thread, _ := strings.Cut(address, "/")
+	if thread == "dm" {
+		thread = ""
 	}
 	for _, p := range chat.SplitText(text, messageLimit, maxParts) {
-		c.postMessage(context.Background(), parts[1], thread, p)
+		c.postMessage(context.Background(), channelID, thread, p)
 	}
 }
 

@@ -236,7 +236,7 @@ func (c *Channel) handleInteraction(w http.ResponseWriter, r *http.Request, _ ch
 		user = in.User
 	}
 	chat.Dispatch(r.Context(), c.core, chat.Turn{
-		Address: "discord/" + in.ChannelID,
+		Address: in.ChannelID,
 		Text:    commandText(in.Data),
 		// Discord's webhook does not say whether the channel is a thread;
 		// the interaction carries only its ID. One channel is one
@@ -288,9 +288,10 @@ func (c *Channel) deliver(address string, run *runtime.Run, err error) {
 	if text == "" {
 		return
 	}
-	channelID := strings.TrimPrefix(address, "discord/")
+	// The address is the channel ID itself; the framework's channel prefix
+	// never reaches here.
 	for _, p := range chat.SplitText(text, messageLimit, maxParts) {
-		c.postMessage(context.Background(), channelID, p)
+		c.postMessage(context.Background(), address, p)
 	}
 }
 

@@ -29,9 +29,7 @@ func TestConformance(t *testing.T) {
 		t.Helper()
 		j := runtime.NewMemoryJournal()
 		agent := channeltest.NewScriptAgent()
-		runner := runtime.NewRunner(j, runtime.AgentFactory(func(context.Context, *runtime.Session) (runtime.Agent, error) {
-			return agent, nil
-		}))
+		runner := runtime.NewRunner(j, agent.Factory())
 		return &channeltest.Fixture{
 			Inbound: New(runner, Config{}),
 			Agent:   agent,
@@ -99,9 +97,7 @@ func adapter(t *testing.T, script []*kit.TurnResult) *harness {
 	for _, s := range script {
 		agent.Say(s)
 	}
-	runner := runtime.NewRunner(j, runtime.AgentFactory(func(context.Context, *runtime.Session) (runtime.Agent, error) {
-		return agent, nil
-	}))
+	runner := runtime.NewRunner(j, agent.Factory())
 	fake := newFakeAPI(t)
 	const secret = "trustno1"
 	ch := New(runner, Config{
@@ -240,7 +236,7 @@ func TestMentionStartsAConversationAndThreadsTheReply(t *testing.T) {
 	// The event was normalised: the run is titled by what was asked, its
 	// origin names this channel and the thread kind, and the sender
 	// reached the model as context, not as part of the message.
-	runID, ok := h.ch.core.Addresses().Lookup("slack/C1/1719000000.000100")
+	runID, ok, _ := h.ch.core.Lookup(context.Background(), "C1/1719000000.000100")
 	if !ok {
 		t.Fatal("the thread is not bound")
 	}
@@ -327,9 +323,7 @@ func TestRedeliveredEventIsDropped(t *testing.T) {
 	j := runtime.NewMemoryJournal()
 	agent := channeltest.NewScriptAgent()
 	agent.Say(&kit.TurnResult{Response: "once"})
-	runner := runtime.NewRunner(j, runtime.AgentFactory(func(context.Context, *runtime.Session) (runtime.Agent, error) {
-		return agent, nil
-	}))
+	runner := runtime.NewRunner(j, agent.Factory())
 	fake := newFakeAPI(t)
 	ch := New(runner, Config{BotToken: "xoxb", APIURL: fake.server.URL}) // no secret: signature off
 	mux := http.NewServeMux()

@@ -29,13 +29,19 @@ const (
 	// with [Runner.Start] — unlike [RunFailed], which records a turn that
 	// the agent itself could not finish.
 	RunCancelled RunState = "cancelled"
+	// RunRetired means the run was reset: a person or a channel asked for
+	// a fresh conversation, and this one is closed for good. It keeps its
+	// history and stays readable, but [Runner.Start] and [Runner.Resume]
+	// refuse it with [ErrRunRetired]. It is the only terminal state a run
+	// cannot leave.
+	RunRetired RunState = "retired"
 )
 
 // IsTerminal reports whether the state admits no further transitions on its
-// own. A terminal run can still be revived by [Runner.Start], which appends a
-// new turn to the replayed conversation.
+// own. A terminal run other than [RunRetired] can still be revived by
+// [Runner.Start], which appends a new turn to the replayed conversation.
 func (s RunState) IsTerminal() bool {
-	return s == RunCompleted || s == RunFailed || s == RunCancelled
+	return s == RunCompleted || s == RunFailed || s == RunCancelled || s == RunRetired
 }
 
 // RecordKind classifies a [Record] in the journal.
@@ -79,6 +85,12 @@ const (
 	// honest — the record shows what the model saw — without turning it
 	// into a user message on resume. See docs/SPEC.md §3.7.
 	RecordContext RecordKind = "context"
+	// RecordClear records that the conversation was cleared: every message
+	// before it stays in the journal but leaves the model's context, and
+	// the next message starts a new branch from the root. It is run
+	// metadata with no entry ID. [Restore] moves the branch tip to the root
+	// when it meets one, which is how an append-only journal forgets.
+	RecordClear RecordKind = "clear"
 )
 
 // Record is one durable entry in a run's journal. Records are append-only and
@@ -118,6 +130,11 @@ type Record struct {
 
 // ErrRunNotFound is returned when a run ID is unknown to the journal.
 var ErrRunNotFound = errors.New("bonnie: run not found")
+
+// ErrRunRetired is returned when a turn is started on, or an answer is sent
+// to, a run that [Runner.Retire] closed. A retired run is readable and
+// nothing else; the address it served is free for a new run.
+var ErrRunRetired = errors.New("bonnie: run is retired")
 
 // ErrRunOwnedElsewhere is part of the [Journal] contract for an
 // implementation that admits only one writer per run: a write to a run some

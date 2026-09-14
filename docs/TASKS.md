@@ -21,7 +21,6 @@ the known risks, and the invariants every task must preserve.
 |---|---|---|---|---|
 | T-029 | GitHub channel: issues, PRs, and review threads become conversations | P2 | L | — |
 | T-031 | Idempotent start and stable error codes on the HTTP channel | P2 | S | — |
-| T-032 | Framework-owned address namespace and session controls (`reset`, `clear`, `compact`) | P2 | M | T-033 |
 | T-033 | Cross-channel hand-off and proactive sessions | P3 | M | — |
 | T-027 | goreleaser publishes a commit list, not the release notes | P2 | S | — |
 | T-026 | microsandbox `Open` races its own create under load | P2 | S | — |
@@ -38,6 +37,7 @@ the known risks, and the invariants every task must preserve.
 
 | ID | Delivered | Where |
 |---|---|---|
+| T-032 | Session controls: `Reset`/`Clear`/`Compact` on `SessionRef` and the HTTP channel, `RunRetired` (the only non-revivable terminal state), `RecordClear` (an append-only forget), `/new` in every chat surface, the core owns the address prefix with the channel's name | `runtime/controls.go`, `runtime/session.go`, `channel/channel.go`, `channel/chat/chat.go`, `channeltest/` |
 | T-028 | Normalised turn: `runtime.Input{Context, Title, Origin}`, `RecordContext` journalled and shown to the model through `OnContextPrepare` for one turn only, `chat.Turn` with kinds, adapters set kind/title/context, HTTP accepts `context`/`kind`, `runs list` shows the title | `runtime/context.go`, `channel/chat/chat.go`, `channel/{slack,discord,telegram}`, `channeltest/`, `docs/SPEC.md` §3.7 |
 | T-030 | The HTTP channel serves under `/bonnie/v1`; `/bonnie/` is reserved and a channel that mounts there is refused at startup by name; `GET /bonnie/v1/health` and `GET /bonnie/v1/info`; `bonnie.WithName` | `channel/channel.go`, `channel/http/http.go`, `run.go`, `namespace_test.go`, `cmd/bonnie/tui/client.go` |
 | T-011 | Applied again for `v0.4.0`, tagged at `9ccb959` and published 2026-09-14. Verified post-publish: the downloaded `linux_amd64` artifact prints `bonnie 0.4.0` (the injected version, not `dev`), its checksum matches, it is statically linked, and it serves. The auto-generated notes were again only a commit list, so the body was replaced with the `CHANGELOG.md` section — claims and limits both stated | `CHANGELOG.md`, [release v0.4.0](https://github.com/mark3labs/bonnie/releases/tag/v0.4.0) |
@@ -1564,6 +1564,12 @@ parsing prose. eve returns a stable `code` next to the message.
 
 **Priority** P2 · **Size** M · **Blocks** T-033
 
+**SHIPPED.** Two notes against the plan: retirement is a run state
+(`RunRetired`) rather than an extension-data note with a terminal flag,
+because every journal read already goes through the state; and the reset
+note is delivered by the adapter through `Dispatch`, not journalled — the
+retirement itself is the durable fact.
+
 ### Why
 
 eve prefixes every continuation token with the channel's name before it
@@ -1602,14 +1608,14 @@ own threshold (`docs/SPEC.md` §5, mapping row for `compaction.thresholdPercent`
 
 ### Acceptance criteria
 
-- [ ] Two channels mounted together cannot resolve the same bare key to one
+- [x] Two channels mounted together cannot resolve the same bare key to one
       run; a test proves the prefix is applied by `Core`, not by the adapter
-- [ ] After `Reset`, a `Send` on the same address creates a new run and the
+- [x] After `Reset`, a `Send` on the same address creates a new run and the
       old run's state is terminal in `bonnie runs list`
-- [ ] After `Clear`, `Restore` returns a provider-valid conversation with no
+- [x] After `Clear`, `Restore` returns a provider-valid conversation with no
       messages before the marker, and the run ID is unchanged
-- [ ] `/new` in a Slack thread starts a fresh run in the same thread
-- [ ] `channeltest` covers `Reset`, `Clear`, and `Compact`
+- [x] `/new` in a Slack thread starts a fresh run in the same thread
+- [x] `channeltest` covers `Reset`, `Clear`, and `Compact`
 
 ### Watch for
 

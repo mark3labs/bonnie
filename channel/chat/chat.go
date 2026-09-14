@@ -96,7 +96,12 @@ func (m *AddressMap) loadLocked(ctx context.Context) error {
 		if err := json.Unmarshal(rec.Payload, &b); err != nil {
 			continue
 		}
-		// Last binding wins, so re-keying an address is just another append.
+		// Last binding wins, so re-keying an address is just another append,
+		// and an unbinding is a binding to nothing.
+		if b.RunID == "" {
+			delete(m.byAddr, b.Address)
+			continue
+		}
 		m.byAddr[b.Address] = b.RunID
 	}
 	m.loaded = true
@@ -170,8 +175,28 @@ func (m *AddressMap) bindLocked(ctx context.Context, address, runID string) erro
 	}); err != nil {
 		return fmt.Errorf("bonnie: bind address: %w", err)
 	}
+	if runID == "" {
+		delete(m.byAddr, address)
+		return nil
+	}
 	m.byAddr[address] = runID
 	return nil
+}
+
+// Unbind frees an address, so the next Resolve creates a new run for it.
+// The run it pointed at is not touched. Unbinding an address that owns
+// nothing is a no-op and writes nothing.
+func (m *AddressMap) Unbind(ctx context.Context, address string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if err := m.loadLocked(ctx); err != nil {
+		return err
+	}
+	if _, ok := m.byAddr[address]; !ok {
+		return nil
+	}
+	return m.bindLocked(ctx, address, "")
 }
 
 // NotePrincipal records the identity that sent a message.
@@ -360,9 +385,34 @@ func NewCore(r *runtime.Runner, name string, policy channel.TurnPolicy, opts ...
 // Name is the channel's name.
 func (c *Core) Name() string { return c.name }
 
-// Addresses exposes the address map, for re-keying and for the platform
-// filters adapters need (a thread this channel never started is not for the
-// agent).
+// Address is the address-map key for a channel-local address: the
+// channel's name, a slash, the key the adapter chose. The prefix is applied
+// here and nowhere else, so an adapter cannot forget it, misspell it, or
+// borrow another channel's. A core with no name applies no prefix, for a
+// host that owns the whole map.
+func (c *Core) Address(local string) string {
+	if c.name == "" {
+		return local
+	}
+	return c.name + "/" + local
+}
+
+// Lookup returns the run bound to a channel-local address without creating
+// one. A chat adapter uses it to drop platform events for threads this
+// channel never started.
+func (c *Core) Lookup(ctx context.Context, local string) (string, bool, error) {
+	return c.addresses.LookupContext(ctx, c.Address(local))
+}
+
+// Bind points a channel-local address at a run, replacing any earlier
+// binding. The old run is not touched.
+func (c *Core) Bind(ctx context.Context, local, runID string) error {
+	return c.addresses.Bind(ctx, c.Address(local), runID)
+}
+
+// Addresses exposes the raw address map. Its keys carry the channel prefix
+// [Core.Address] applies; adapters use [Core.Lookup] and [Core.Bind], which
+// take the channel-local form.
 func (c *Core) Addresses() *AddressMap { return c.addresses }
 
 // Runner exposes the runner the adapter serves.
@@ -372,9 +422,9 @@ func (c *Core) Runner() *runtime.Runner { return c.runner }
 func (c *Core) NewID() string { return c.newID() }
 
 // From returns a [channel.SessionRef] that resolves a channel-local
-// address, creating and binding the run on first use.
+// address, creating and binding the run on first Send.
 func (c *Core) From(address string) *Ref {
-	return &Ref{core: c, address: address, create: true}
+	return &Ref{core: c, address: c.Address(address), create: true}
 }
 
 // Attach returns a [channel.SessionRef] that targets exactly one run ID and
@@ -467,11 +517,67 @@ func (s *Ref) Respond(ctx context.Context, responses []runtime.InputResponse) (*
 
 // Cancel implements [channel.SessionRef].
 func (s *Ref) Cancel(ctx context.Context) error {
-	runID, err := s.RunID(ctx)
-	if err != nil {
+	runID, ok, err := s.resolveExisting(ctx)
+	if err != nil || !ok {
 		return err
 	}
 	return s.core.runner.Cancel(runID)
+}
+
+// Reset implements [channel.SessionRef]. The run is retired first and the
+// address freed second, so a message that lands between the two finds a
+// run that refuses it rather than one that answers. A fixed reference
+// retires its run and touches no address.
+func (s *Ref) Reset(ctx context.Context, reason string) error {
+	runID, ok, err := s.resolveExisting(ctx)
+	if err != nil || !ok {
+		return err
+	}
+	// Stop the turn before waiting for its lock: the turn holds the lock
+	// until it returns, and it returns when it is cancelled.
+	_ = s.core.runner.Cancel(runID)
+	unlock := s.core.locks.Lock(runID)
+	defer unlock()
+	if err := s.core.runner.Retire(ctx, runID, reason); err != nil {
+		return err
+	}
+	if s.create {
+		return s.core.addresses.Unbind(ctx, s.address)
+	}
+	return nil
+}
+
+// Clear implements [channel.SessionRef].
+func (s *Ref) Clear(ctx context.Context) error {
+	runID, ok, err := s.resolveExisting(ctx)
+	if err != nil || !ok {
+		return err
+	}
+	unlock := s.core.locks.Lock(runID)
+	defer unlock()
+	return s.core.runner.Clear(ctx, runID)
+}
+
+// Compact implements [channel.SessionRef].
+func (s *Ref) Compact(ctx context.Context) error {
+	runID, ok, err := s.resolveExisting(ctx)
+	if err != nil || !ok {
+		return err
+	}
+	unlock := s.core.locks.Lock(runID)
+	defer unlock()
+	return s.core.runner.Compact(ctx, runID)
+}
+
+// resolveExisting is RunID for the controls: it never creates. An address
+// that owns nothing reports ok=false and no error; an Attach reference
+// reports its run or [runtime.ErrRunNotFound].
+func (s *Ref) resolveExisting(ctx context.Context) (string, bool, error) {
+	if !s.create {
+		runID, err := s.RunID(ctx)
+		return runID, err == nil, err
+	}
+	return s.core.addresses.LookupContext(ctx, s.address)
 }
 
 // Route delivers one inbound platform message to the right runner entry
@@ -500,6 +606,15 @@ func Route(ctx context.Context, ref *Ref, turn Turn) (*runtime.Run, error) {
 	return ref.Send(ctx, turn.Text, turn.Options())
 }
 
+// ResetCommand is the message that starts a fresh conversation in the same
+// place: the run serving the address is retired, the address is freed, and
+// the person is told. Every chat adapter honours it through [Dispatch], so
+// "/new" means the same thing in a Slack thread and a Telegram chat.
+const ResetCommand = "/new"
+
+// resetNote is what the person sees after a reset.
+const resetNote = "Started a new conversation. The previous one is closed."
+
 // Dispatch delivers one inbound platform message and reports the outcome.
 //
 // A chat platform's webhook wants an acknowledgement within seconds, but a
@@ -519,13 +634,27 @@ func Route(ctx context.Context, ref *Ref, turn Turn) (*runtime.Run, error) {
 // waiting on a reply that never comes.
 //
 // A turn with no title gets one from its text, so a run started from a chat
-// surface is listed by what was asked.
+// surface is listed by what was asked. A turn whose text is [ResetCommand]
+// resets the address instead of running: the run is retired, the address
+// freed, and a note delivered as the run's response. Adapters deduplicate
+// platform deliveries before calling Dispatch, so a retried webhook cannot
+// retire the run that replaced the one it meant.
 func Dispatch(ctx context.Context, core *Core, turn Turn, deliver func(address string, run *runtime.Run, err error)) {
 	if turn.Title == "" {
 		turn.Title = TitleFrom(turn.Text)
 	}
 	go func() {
 		bg := context.WithoutCancel(ctx)
+		if strings.TrimSpace(turn.Text) == ResetCommand {
+			ref := core.From(turn.Address)
+			runID, _, _ := ref.resolveExisting(bg)
+			if err := ref.Reset(bg, "reset by "+ResetCommand); err != nil {
+				deliver(turn.Address, nil, err)
+				return
+			}
+			deliver(turn.Address, &runtime.Run{ID: runID, State: runtime.RunRetired, Response: resetNote}, nil)
+			return
+		}
 		run, err := Route(bg, core.From(turn.Address), turn)
 		if err != nil {
 			deliver(turn.Address, nil, err)

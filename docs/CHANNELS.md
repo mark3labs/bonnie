@@ -208,5 +208,7 @@ the message came from Slack; the user ID inside it is Slack's word. The
   under `/bonnie/v1/`, `/bonnie/` is reserved, and `GET /bonnie/v1/health`
   answers before any run exists.
 - **`reset`, `clear`, `compact`, idempotent start, stable error codes.**
-  T-031 and T-032.
+  T-031. The controls are done in T-032: `Reset`/`Clear`/`Compact` are on
+  `SessionRef` and the HTTP channel, `/new` works in every chat surface,
+  and the core owns the address prefix.
 - **Cross-channel hand-off** (`to(channel).send`). T-033.

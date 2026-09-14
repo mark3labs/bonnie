@@ -59,6 +59,19 @@ func NewScriptAgent() *ScriptAgent {
 	return &ScriptAgent{}
 }
 
+// Factory returns a [runtime.AgentFactory] that hands out this agent bound
+// to each turn's session, so the agent's messages and compactions reach
+// the journal the way a real Kit's do. Fixtures should build their runner
+// with it.
+func (a *ScriptAgent) Factory() runtime.AgentFactory {
+	return func(_ context.Context, s *runtime.Session) (runtime.Agent, error) {
+		a.mu.Lock()
+		a.session = s
+		a.mu.Unlock()
+		return a, nil
+	}
+}
+
 // Say scripts the next turn response. A turn whose TurnResult carries a
 // FinalValue parks the run.
 func (a *ScriptAgent) Say(res *kit.TurnResult) {
@@ -145,6 +158,22 @@ func (a *ScriptAgent) InjectSteer(msg string) {
 
 // Close implements [runtime.Agent].
 func (a *ScriptAgent) Close() error { return nil }
+
+// Compact implements [runtime.Compactor] with a summary that keeps nothing,
+// which is what a summary of everything so far amounts to. It lets the
+// suite prove an adapter's Compact reaches the runner and the journal.
+func (a *ScriptAgent) Compact(context.Context, *kit.CompactionOptions, string) (*kit.CompactionResult, error) {
+	a.mu.Lock()
+	session := a.session
+	a.mu.Unlock()
+	if session == nil {
+		return &kit.CompactionResult{}, nil
+	}
+	_, err := session.AppendCompaction("scripted summary", "", 0, 0, 0, nil, nil)
+	return &kit.CompactionResult{}, err
+}
+
+var _ runtime.Compactor = (*ScriptAgent)(nil)
 
 // Fixture is what an adapter hands the conformance suite: the inbound side
 // under test, the script agent driving it, and the journal beneath both.
@@ -415,6 +444,95 @@ func RunConformance(t *testing.T, build func(t *testing.T) *Fixture) {
 			if u != "what changed?" && u != "and now?" {
 				t.Fatalf("user message %q: context leaked into the conversation", u)
 			}
+		}
+	})
+
+	t.Run("reset retires the run and frees the address", func(t *testing.T) {
+		f := build(t)
+		ctx := context.Background()
+
+		ref := f.Inbound.From("reset-addr")
+		first, err := ref.Send(ctx, "hello", channel.SendOptions{})
+		if err != nil {
+			t.Fatalf("Send: %v", err)
+		}
+		if err := ref.Reset(ctx, "start over"); err != nil {
+			t.Fatalf("Reset: %v", err)
+		}
+		if state, _ := f.Journal.State(ctx, first.ID); state != runtime.RunRetired {
+			t.Fatalf("old run state = %q, want retired", state)
+		}
+
+		// The address is free: the next Send creates a new run.
+		second, err := f.Inbound.From("reset-addr").Send(ctx, "again", channel.SendOptions{})
+		if err != nil {
+			t.Fatalf("Send after reset: %v", err)
+		}
+		if second.ID == first.ID {
+			t.Fatal("the address still resolves to the retired run")
+		}
+		// A fixed reference stays pinned to the retired run and is refused.
+		if _, err := f.Inbound.Attach(first.ID).Send(ctx, "more", channel.SendOptions{}); !errors.Is(err, runtime.ErrRunRetired) {
+			t.Fatalf("Send to the retired run = %v, want ErrRunRetired", err)
+		}
+		// Reset on an address that owns nothing is a no-op, not a create.
+		if err := f.Inbound.From("never-bound").Reset(ctx, ""); err != nil {
+			t.Fatalf("Reset on an unbound address: %v", err)
+		}
+		if _, err := f.Inbound.From("never-bound").RunID(ctx); err != nil {
+			t.Fatalf("RunID: %v", err)
+		}
+		if err := f.Inbound.Attach("no-such-run").Reset(ctx, ""); !errors.Is(err, runtime.ErrRunNotFound) {
+			t.Fatalf("Reset on an unknown run = %v, want ErrRunNotFound", err)
+		}
+	})
+
+	t.Run("clear forgets the conversation and keeps the run", func(t *testing.T) {
+		f := build(t)
+		ctx := context.Background()
+
+		ref := f.Inbound.From("clear-addr")
+		run, err := ref.Send(ctx, "remember this", channel.SendOptions{})
+		if err != nil {
+			t.Fatalf("Send: %v", err)
+		}
+		if err := ref.Clear(ctx); err != nil {
+			t.Fatalf("Clear: %v", err)
+		}
+		sess, err := runtime.Restore(ctx, run.ID, f.Journal)
+		if err != nil {
+			t.Fatalf("Restore: %v", err)
+		}
+		if n := len(sess.GetMessages()); n != 0 {
+			t.Fatalf("%d messages after clear, want 0", n)
+		}
+		again, err := ref.Send(ctx, "fresh start", channel.SendOptions{})
+		if err != nil {
+			t.Fatalf("Send after clear: %v", err)
+		}
+		if again.ID != run.ID {
+			t.Fatalf("clear changed the run: %s -> %s", run.ID, again.ID)
+		}
+	})
+
+	t.Run("compact summarises on demand", func(t *testing.T) {
+		f := build(t)
+		ctx := context.Background()
+
+		ref := f.Inbound.From("compact-addr")
+		run, err := ref.Send(ctx, "a long story", channel.SendOptions{})
+		if err != nil {
+			t.Fatalf("Send: %v", err)
+		}
+		if err := ref.Compact(ctx); err != nil {
+			t.Fatalf("Compact: %v", err)
+		}
+		sess, err := runtime.Restore(ctx, run.ID, f.Journal)
+		if err != nil {
+			t.Fatalf("Restore: %v", err)
+		}
+		if c := sess.GetLastCompaction(); c == nil || c.Summary != "scripted summary" {
+			t.Fatalf("last compaction = %+v, want the scripted summary", c)
 		}
 	})
 }
