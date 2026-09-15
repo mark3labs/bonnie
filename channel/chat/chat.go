@@ -110,6 +110,20 @@ func (m *AddressMap) loadLocked(ctx context.Context) error {
 
 // Resolve returns the run that serves an address, creating and binding one on
 // first sight.
+//
+// A run it creates is journalled as [runtime.RunPending] before the binding
+// is written, so the ID it hands back names a run that exists. Without that
+// checkpoint the binding pointed at an ID the journal had never heard of,
+// and every ID-addressed route answered 404 until the first turn happened to
+// write a record — so `POST /bonnie/v1/addresses/{address}`, whose whole
+// purpose is to hand a client its run ID before it speaks, returned an ID
+// the client could not then use to read the run or open its stream.
+//
+// The order matters. A crash between the two writes leaves a pending run no
+// address points at, which the next resolve simply steps over by minting a
+// fresh ID. The reverse order would leave a binding pointing at nothing, and
+// no later resolve would repair it: the address is bound, so the create path
+// never runs again.
 func (m *AddressMap) Resolve(ctx context.Context, address string, newID func() string) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -122,6 +136,9 @@ func (m *AddressMap) Resolve(ctx context.Context, address string, newID func() s
 	}
 
 	runID := newID()
+	if err := m.journal.Checkpoint(ctx, runID, runtime.RunPending); err != nil {
+		return "", fmt.Errorf("bonnie: channel: create run %s: %w", runID, err)
+	}
 	if err := m.bindLocked(ctx, address, runID); err != nil {
 		return "", err
 	}

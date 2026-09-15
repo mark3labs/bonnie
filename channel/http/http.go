@@ -596,6 +596,11 @@ func (c *Channel) handleAddress(w http.ResponseWriter, r *http.Request, _ channe
 // missed that turn's events, and no replay can recover them. POST here first,
 // open the stream, then send.
 //
+// The run it names exists from the moment this returns: it is journalled as
+// [runtime.RunPending], so the ID works on every ID-addressed route straight
+// away. The reported cursor is that birth record's position, so a stream
+// opened at it starts with what happens next.
+//
 // It is idempotent: an address that already owns a run returns that run and
 // binds nothing new.
 func (c *Channel) handleEnsureAddress(w http.ResponseWriter, r *http.Request, in channel.Inbound, _ channel.Outbound) {

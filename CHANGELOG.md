@@ -72,6 +72,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   survives the caller going away"*, holds the durability claim above for every
   transport; all five adapters pass it.
 
+### Fixed
+
+- **An address now resolves to a run that exists.** `POST
+  /bonnie/v1/addresses/{address}` journalled the binding but not the run, so
+  the ID it handed back answered 404 on every ID-addressed route until the
+  first turn happened to write a record — defeating the route's whole purpose,
+  which is to give a client a usable run ID *before* it speaks. A run created
+  through the address map is now journalled as `pending` first, so the ID
+  works straight away.
+
+  Two visible consequences: such a run carries one extra journal record, and a
+  stream read from cursor 0 now opens with a `pending` state event.
+
 ### Changed
 
 - **There is no unsandboxed mode.** `bonnie.WithSandbox` now *selects* a

@@ -486,9 +486,13 @@ func TestStreamEmitsNDJSON(t *testing.T) {
 }
 
 // TestStreamResumesFromCursor is the reconnect contract: no gap, no duplicate.
-// The seqs are journal anchors, so they are not dense — the origin record
-// comes first, and the response sits between the running and completed
-// state records.
+// The seqs are journal anchors, so they are not dense — a run opens with its
+// pending birth record, the origin follows, and the response sits between the
+// running and completed state records.
+//
+// The pending event at seq 1 is the run's creation: an address resolves to a
+// run that exists from that moment, so a client streaming from zero sees the
+// whole lifecycle rather than joining after the birth.
 func TestStreamResumesFromCursor(t *testing.T) {
 	t.Parallel()
 	s := newTestServer(t, &stubAgent{turns: []*kit.TurnResult{{Response: "hello"}}},
@@ -496,16 +500,19 @@ func TestStreamResumesFromCursor(t *testing.T) {
 
 	s.post(t, "/bonnie/v1/runs", StartRequest{Text: "hi"}) //nolint:errcheck // state asserted below
 
-	first := readStream(t, s, "/bonnie/v1/runs/cursor-me/stream?cursor=0", 2)
-	if first[0].Seq != 2 || first[1].Seq != 4 {
-		t.Fatalf("first read = %v, want [2 4] — the response anchors to the assistant message record", seqs(first))
+	first := readStream(t, s, "/bonnie/v1/runs/cursor-me/stream?cursor=0", 3)
+	if first[0].Seq != 1 || first[1].Seq != 3 || first[2].Seq != 5 {
+		t.Fatalf("first read = %v, want [1 3 5] — pending, running, then the response anchored to the assistant message", seqs(first))
+	}
+	if first[0].State != runtime.RunPending {
+		t.Fatalf("first event = %q, want the run's pending birth record", first[0].State)
 	}
 
-	// A client that dropped after event 4 comes back with its cursor: the
+	// A client that dropped after event 5 comes back with its cursor: the
 	// closing state of the turn is the next durable event.
-	second := readStream(t, s, "/bonnie/v1/runs/cursor-me/stream?cursor=4", 1)
-	if second[0].Seq != 5 || second[0].State != runtime.RunCompleted {
-		t.Fatalf("reconnect delivered %v, want the completed state at seq 5 — a gap or a duplicate", seqs(second))
+	second := readStream(t, s, "/bonnie/v1/runs/cursor-me/stream?cursor=5", 1)
+	if second[0].Seq != 6 || second[0].State != runtime.RunCompleted {
+		t.Fatalf("reconnect delivered %v, want the completed state at seq 6 — a gap or a duplicate", seqs(second))
 	}
 }
 
