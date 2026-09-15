@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/mark3labs/bonnie/sandbox"
@@ -15,10 +16,12 @@ func TestSandboxProviderSelection(t *testing.T) {
 		want    string
 		wantErr bool
 	}{
+		{kind: "landlock", want: "landlock"},
 		{kind: "docker", want: "docker"},
 		{kind: "microsandbox", want: "microsandbox"},
 		{kind: "msb", want: "microsandbox"},
 		{kind: "local", want: "local"},
+		{kind: "none", wantErr: true},
 		{kind: "frobnicate", wantErr: true},
 	}
 	for _, c := range cases {
@@ -135,5 +138,41 @@ func TestPrefixedAddsExactlyOnePrefix(t *testing.T) {
 		if got := prefixed(errors.New(c.in)); got != c.want {
 			t.Errorf("prefixed(%q) = %q, want %q", c.in, got, c.want)
 		}
+	}
+}
+
+// TestSandboxNoneNamesItsReplacement is a migration guard.
+//
+// `--sandbox none` was the default until issue #1, so it is in scripts, shell
+// history, and systemd units. Those must not start silently confined — nor
+// with a bare "unknown sandbox" that leaves the operator guessing which of
+// the four replacements matches what they had.
+func TestSandboxNoneNamesItsReplacement(t *testing.T) {
+	t.Parallel()
+	_, err := sandboxProvider(context.Background(), "none", "")
+	if err == nil {
+		t.Fatal("--sandbox none must be refused, not silently honoured")
+	}
+	for _, want := range []string{"landlock", "local", "NO isolation"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("the refusal does not mention %q, so an operator cannot act on it: %v", want, err)
+		}
+	}
+}
+
+// TestDefaultSandboxFlagIsNotNone pins the flag default itself. The framework
+// default lives in run.go; this is the CLI's copy of the same decision, and
+// the two drifting is how "none" would come back.
+func TestDefaultSandboxFlagIsNotNone(t *testing.T) {
+	t.Parallel()
+	f := newServeCmd().Flags().Lookup("sandbox")
+	if f == nil {
+		t.Fatal("serve has no --sandbox flag")
+	}
+	if f.DefValue == "none" {
+		t.Fatal("--sandbox defaults to none again: that is the defect issue #1 closed")
+	}
+	if f.DefValue != "landlock" {
+		t.Fatalf("--sandbox default = %q, want landlock", f.DefValue)
 	}
 }

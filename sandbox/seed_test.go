@@ -220,3 +220,46 @@ func TestSeededEmptyDirectoryIsANoOp(t *testing.T) {
 		t.Fatalf("an empty seed wrote files: %v", entries)
 	}
 }
+
+// TestSeededForwardsTheWorkingDirectory pins the gap that let a fixed defect
+// reach a live agent anyway.
+//
+// run.go wraps the DEFAULT provider in Seeded, so the wrapper sits between the
+// agent and the only provider that can report a host working directory. The
+// wrapper did not forward WorkingDir, the prompt fell back to /workspace —
+// a directory that does not exist under a host-mapped backend — and a live
+// model reported the disagreement: "my workspace is not actually /workspace".
+//
+// The unit guard passed throughout, because it tested the provider rather
+// than the provider as it is actually assembled.
+func TestSeededForwardsTheWorkingDirectory(t *testing.T) {
+	t.Parallel()
+
+	inner := Landlock(WithLandlockRoot(t.TempDir()))
+	wrapped := Seeded(inner, t.TempDir())
+
+	r, ok := wrapped.(WorkingDirReporter)
+	if !ok {
+		t.Fatal("Seeded drops WorkingDirReporter: the prompt would name a " +
+			"directory the tools do not use")
+	}
+	want := inner.WorkingDir("run-abc")
+	if got := r.WorkingDir("run-abc"); got != want {
+		t.Fatalf("Seeded reports %q, the backend runs at %q", got, want)
+	}
+
+	// And the assembled value must be what the prompt receives.
+	if got := promptWorkingDir(wrapped, "run-abc"); got != want {
+		t.Fatalf("the prompt would say %q, the tools use %q", got, want)
+	}
+}
+
+// TestSeededOverAGuestBackendStillReportsWorkspace: a wrapper that forwards
+// must not invent a path for a backend that really does run at Workspace.
+func TestSeededOverAGuestBackendStillReportsWorkspace(t *testing.T) {
+	t.Parallel()
+	wrapped := Seeded(&stubProvider{}, t.TempDir())
+	if got := promptWorkingDir(wrapped, "run-abc"); got != Workspace {
+		t.Fatalf("prompt working directory = %q, want %q", got, Workspace)
+	}
+}

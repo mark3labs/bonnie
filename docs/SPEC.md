@@ -566,8 +566,9 @@ deliver the message — a degraded transcript beats a dropped turn),
 
 ### 4.9 PARTLY RESOLVED — no sandbox, observed in practice
 
-**The `sandbox` package closes this. It is opt-in, so the risk returns for any
-host that does not switch it on.**
+**The `sandbox` package closes this, and since T-036 it is no longer opt-in:
+every run has a backend. What remains open is the floor's residue — the
+default confines the filesystem and not the network.**
 
 BONNIE runs the tool calls a model chooses. It is worth recording how fast that
 bites.
@@ -579,7 +580,7 @@ wrote a `Dockerfile`, a `terraform/` directory, `deploy.sh`, and three
 deployment documents into the checkout. Nothing failed. Nothing warned. The
 test passed.
 
-Two mitigations now exist.
+Three mitigations now exist.
 
 **For tests.** Any live test must give the model no tool that can touch the
 disk. `noCoreTools()` sets `Options.DisableCoreTools`, and
@@ -591,52 +592,168 @@ set that proxies into a container or a microVM. See `docs/SANDBOX.md`.
 `TestLiveAgentCannotReachTheHost` is the regression test: it puts a marker file
 on the host, asks a real model to read it, and fails if the model succeeds.
 
-The residual risk is that sandboxing is opt-in. A host that does not pass
-`--sandbox`, or does not call `sandbox.Agent`, runs tool calls as its own
-process. `README.md` and `SECURITY.md` both say so.
+**For the default.** T-036 removed the no-sandbox mode entirely. `WithSandbox`
+selects a backend rather than enabling one, and a host that configures nothing
+gets `sandbox.Landlock` — see §4.9.1.
 
-### 4.9.1 RESOLVED — the agent's root is the workspace, in both modes
+The residual risk is no longer that sandboxing is opt-in. It is that the
+**floor is containment, not isolation**: `Landlock` confines the filesystem
+and withholds host credentials, but leaves the network open and shares the
+host kernel. A host whose threat model includes hostile code must still choose
+Docker or microsandbox. `README.md` and `SECURITY.md` both say so in those
+words, and the backend refuses a network policy rather than appearing to
+enforce one.
 
-**The same incident had a second cause, fixed separately.** Even with the
-right intent, a tool call's *root* was wrong: Kit's file tools resolve a
+**The sharpest residue, found live and verified: a unix socket is not
+mediated.** Landlock ABI 1 hooks opening a file, not connecting to a socket,
+so a command that knows a socket's path reaches the daemon behind it even
+though the path is not in the granted set. Withholding `/var/run` was tried
+and does **not** close it — measured, not assumed — so no path configuration
+can. It matters because the daemon may hand out the host: a BONNIE process
+whose user is in the `docker` group can reach `/var/run/docker.sock`, and so
+can every tool call, making `docker run -v /:/host` a complete escape.
+
+How it was found is the argument for live testing. `opencode/kimi-k3`, asked
+to read a canary file outside its workspace, tried `cat`, `head`, `sed`,
+`awk`, `perl`, `dd`, a subshell, a pipeline, `cd`-first, `cp`, a hardlink, a
+symlink, and an fd redirect — every one refused by the kernel, zero bytes
+retrieved. It then reported the one avenue left, unprompted: *"abusing my
+`docker` group membership via the docker socket"*, and declined to use it.
+No unit test in this repository would have produced that sentence.
+
+The mitigation is operational, so it is stated where an operator will read
+it: run BONNIE as a user with no privileged group membership, or use
+microsandbox. `README.md`, `SECURITY.md`, `docs/SANDBOX.md` and `CHANGELOG.md`
+all carry it. The limitation is pinned by
+`TestLandlockDoesNotConfineUnixSockets`, which asserts nothing about the
+outcome — it fails only if the backend ever claims to control the network,
+the claim that would make the gap dishonest.
+
+**The decision is to document rather than close it, and that is deliberate.**
+Closing it needs a mount namespace to mask `/run`, which an unprivileged
+process can only create inside a user namespace — and unprivileged userns is
+switched off on Debian and Ubuntu (AppArmor's
+`apparmor_restrict_unprivileged_userns` since 24.04), on RHEL
+(`max_user_namespaces=0`), on hardened kernels, and inside many containers.
+Requiring it would make BONNIE refuse to start on exactly the hosts most
+likely to care about the sandbox, breaking T-036's acceptance criterion that
+`bonnie init && bonnie dev` works on a machine with nothing installed. A
+best-effort version was also rejected: it would make one command mean two
+different security levels depending on the host, which is the shape invariant
+10 exists to prevent.
+
+So this section stays **PARTLY RESOLVED** rather than resolved: a reproduced
+escape ships with a documented mitigation, because the alternative costs the
+property that makes the sandbox universal. The candidate for revisiting it is
+a startup refusal when a privileged socket is genuinely reachable — loud only
+on the hosts that have the hole. T-036 records all four options and why each
+was taken or left.
+
+### 4.9.1 RESOLVED — the agent's root is the workspace, and the sandbox is not optional
+
+**This section recorded a fix that was real but incomplete. T-036 finished
+it, and the correction is recorded here rather than overwritten, because the
+way the first fix failed is the useful part.**
+
+The same incident as §4.9 had a second cause. Kit's file tools resolve a
 relative path against `WorkDir`, falling back to `os.Getwd()`
 (`internal/core/read.go:122-134`), and BONNIE never set it. So a model's
 `write("notes.md")` landed in whatever directory the operator started the
 server from — for a tree that is the tree itself, on top of `main.go`,
-`instructions.md`, and `.bonnie/`, **the journal that makes a
-run durable**. A sandboxed run rooted everything at `/workspace`
-(`sandbox.Resolve`), so the two modes disagreed about what the agent's root
-meant, and a prompt could not name a stable location.
+`instructions.md`, and `.bonnie/`, **the journal that makes a run durable**.
 
-The workspace is now the agent's root in both modes:
+The first fix rooted both modes at the workspace: `hostWorkspaceOptions`
+rebuilt Kit's core tools with `kit.WithWorkDir(<root>/<workspace>)` for the
+no-sandbox mode, and `sandbox.Seeded(provider, workspace)` mirrored the same
+directory into `/workspace` for the sandboxed one.
 
-- **No sandbox** — `hostWorkspaceOptions` rebuilds Kit's core tool set with
-  `kit.WithWorkDir(<root>/<workspace>)` and installs it through
-  `kit.WithTools`. Kit's default core tools take no working directory:
-  `WithWorkDir` is a `kit.ToolOption` and `kit.Options` has no field that
-  forwards one, so rebuilding the set is the only public route.
-  `kit.AllTools` is that same default set, so no tool is lost.
-- **Sandbox** — the same directory is the seed: `sandbox.Seeded(provider,
-  workspace)`. That call is what makes the workspace real with a sandbox;
-  `Seeded` was written and tested but **never called** by non-test code, so
-  the setting was accepted and ignored — an invariant 13 violation that had
-  been recorded in `docs/TASKS.md` as working.
+**Two defects survived that fix, and a live agent found both.**
 
-**The two must never be mixed, and that is a security property.** Kit honours
-`Options.Tools` even when `DisableCoreTools` is set, and `sandbox.Agent`
-applies the caller's options *after* its own (`sandbox/agent.go`) — so using
-the host options on a sandboxed agent would hand the model real host tools
-inside the sandbox. `hostWorkspaceOptions` is therefore called on the
-no-sandbox branch only. Guard test: `TestSandboxedAgentGetsNoHostTools`.
+First, **a working directory is a base, not a jail**. It is consulted for a
+relative path and never for an absolute one. In a real Slack-driven tree the
+model ran
 
-Limits, stated plainly: `WithWorkDir` sets a base, **not a jail**. An absolute
-path, or one with enough `../`, still reaches the wider filesystem. Rooting
-the agent stops the accident — a model tidying up its own files does not
-overwrite the source or the journal — it does not contain a determined one.
-That is what the sandbox is for, and §4.9 still applies.
+    shell: find /home/<user>/Workspace/my-agent -type f | head -50
 
-Serving without a tree (`bonnie serve`) has nothing to anchor to, so the
-process's own directory stays the root, as before.
+and the result listed `main.go`, `instructions.md`, and `.bonnie/journal.db`.
+Nothing refused it. The old text of this section said as much — "`WithWorkDir`
+sets a base, **not a jail**" — and treated it as acceptable residue for §4.9
+to cover. That judgement was wrong: the residue was the whole attack.
+
+Second, **the prompt and the tools disagreed, and the model believes the
+prompt**. Kit appends an environment block to the system prompt —
+`environmentSection` (`pkg/kit/kit.go:957-964`), called from `kit.New`
+(`:1848`) and `composeSystemPrompt` (`:948`) — whose `cwd` is
+`opts.SessionDir`, falling back to `os.Getwd()`, the **process** directory
+(`:1723-1725`). BONNIE set the workspace on the tools only. One run, asked for
+both, answered:
+
+    Current working directory: /tmp/.../standup-bot            ← system prompt
+    /tmp/.../standup-bot/workspace                             ← actual pwd
+
+The model did not invent the host path it later listed; it was told it.
+
+**Correcting the verification claim.** This section previously said the
+rooting was "verified live … `pwd` reported the workspace". That check was
+true and incomplete: it tested the tool and never the prompt the tool
+contradicts. A guard over one half of a two-half invariant is how both defects
+survived a green suite.
+
+**What T-036 changed.**
+
+- **There is no unsandboxed mode.** `hostWorkspaceOptions` is deleted,
+  `WithSandbox` selects a backend rather than enabling one, and a host that
+  configures nothing gets `sandbox.Landlock`. `--sandbox none` is refused by
+  name with a message pointing at the replacement, because it was the
+  documented default and lives in scripts.
+- **The floor needs nothing installed.** Landlock confines each command in a
+  re-executed child before it becomes the command, so the restriction covers
+  the shell and every process it starts. Requiring Docker was rejected: a
+  floor that breaks `bonnie init && bonnie dev` on a bare machine is a floor
+  people switch off, which is how the no-sandbox default survived this long.
+- **The prompt now names the root the tools use.** `sandbox.Agent` sets
+  `Options.SessionDir` to the directory the backend really runs commands at —
+  `/workspace` for a guest backend, the host path for one that maps the
+  workspace onto a directory (`sandbox.WorkingDirReporter`). This is safe
+  because BONNIE owns persistence: Kit skips `InitTreeSession` entirely when
+  `Options.SessionManager` is set (`:2039`), so `SessionDir` no longer
+  chooses where sessions are stored. It still scopes context-file and
+  named-agent discovery, and pointing that at the sandbox root is right for
+  the same reason — a confined agent must not inherit an `AGENTS.md` from a
+  host directory it cannot read.
+
+**The guard is now over both halves at once.**
+`TestPromptWorkingDirectoryIsTheToolWorkingDirectory` derives the prompt's
+directory from the real option set and compares it against the sandbox's own
+`pwd`, for **every backend**. Its first version compared against the constant
+`sandbox.Workspace` instead, and passed while the defect was live — the
+landlock and local backends map the workspace onto a host directory, so
+`/workspace` did not exist there and a live model said so: *"my workspace is
+not actually /workspace"*. The value now comes from the backend
+(`sandbox.WorkingDirReporter`), and `Seeded` forwards it, which it did not:
+`run.go` wraps the default provider in `Seeded`, so the wrapper stood between
+the agent and the only provider that could answer. Two guards, one per cause:
+`TestPromptWorkingDirectoryIsTheToolWorkingDirectory` and
+`TestSeededForwardsTheWorkingDirectory`. **A guard that asserts against a
+constant tests the constant.**
+
+`TestDefaultSandboxCannotReadTheJournal` drives the default configuration
+against a journal laid out as a real tree and fails if any of five escape
+shapes — including the `find` from the incident — returns its contents.
+`TestNoHostToolsReachTheAgent` replaces `TestSandboxedAgentGetsNoHostTools`:
+it reads `run.go` with comments stripped and fails if `kit.AllTools`,
+`kit.WithWorkDir`, or `runtime.KitAgent` reappears there.
+
+**The two modes must still never be mixed.** Kit honours `Options.Tools` even
+when `DisableCoreTools` is set, and `sandbox.Agent` applies the caller's
+options *after* its own (`sandbox/agent.go`), so host tools reaching a
+sandboxed agent would hand the model a real host shell inside the sandbox.
+There are no host tools to mix in any more, which is why the guard checks for
+their reintroduction rather than their placement.
+
+Serving without a tree (`bonnie serve`) has nothing to seed from, so the
+sandbox starts empty; the process's own directory is no longer the root in
+either case.
 
 **The dev loop must not watch the workspace.** Rooting the agent there made a
 model's write an ordinary event in a watched directory, so `bonnie dev`
@@ -651,11 +768,11 @@ dev loop, and the runtime alike, so the four cannot disagree about which
 directory must not be watched. Both guards were briefly lost with the
 manifest and restored — see §4.13.
 
-Verified live against `opencode/kimi-k2.5`: a `write` and a shell redirect
-both landed in `workspace/` with the tree root untouched, `pwd` reported the
-workspace, and under `--sandbox docker` the seed file arrived at `/workspace`.
-Under `bonnie dev`, a model's write no longer restarts the child, while an
-edit to `instructions.md` or a tool still does.
+Verified live against `opencode/kimi-k2.5` before T-036: a `write` and a shell
+redirect both landed in `workspace/` with the tree root untouched, and under
+`--sandbox docker` the seed file arrived at `/workspace`. Under `bonnie dev`,
+a model's write no longer restarts the child, while an edit to
+`instructions.md` or a tool still does.
 Tests: `cmd/bonnie/workspace_test.go`, `cmd/bonnie/dev_workspace_test.go`.
 
 ### 4.10 RESOLVED — sandbox lifecycle is journalled
@@ -1205,7 +1322,17 @@ Page index: `https://eve.dev/sitemap.md`.
 ### Where BONNIE deliberately differs
 
 - **Single static binary.** No Node, no bundler, no Workflow service, no
-  `dist/`. Build and copy. eve structurally cannot offer this.
+  `dist/`. Build and copy. eve structurally cannot offer this. The Landlock
+  floor keeps the promise: `go-landlock` issues raw syscalls with no cgo, so
+  `CGO_ENABLED=0` still produces one static binary.
+- **Linux only, deliberately.** eve runs its floor backend, `just-bash`, as a
+  pure-JS interpreter over a virtual filesystem, so it is portable by
+  construction. BONNIE's floor is a kernel LSM instead — stronger, because it
+  confines a real shell and every process it starts, and narrower, because
+  Landlock exists only on Linux. Releases build linux/amd64 and linux/arm64.
+  macOS and Windows are not on the roadmap: restoring macOS means writing a
+  seatbelt backend that passes the same conformance suite, not adding a build
+  target (T-036).
 - **Branching sessions.** BONNIE inherits Kit's conversation tree — fork,
   collapse, navigate. eve has no branching at all.
 - **Pluggable durability.** `Journal` is seven methods. eve is coupled to the
@@ -1249,7 +1376,11 @@ Any change must preserve these. Each has, or must gain, a test.
 10. **A backend that cannot enforce a security control refuses it.** Returning
     success for a network policy nothing applies tells an operator they are
     protected when they are not. BONNIE broke this rule once, in
-    `sandbox/microsandbox.go`, and §4.11 records it.
+    `sandbox/microsandbox.go`, and §4.11 records it. The rule also decides
+    what the default backend may claim: `sandbox.Landlock` confines the
+    filesystem and not the network, so it does not implement `Networked` and
+    a policy given to it is refused, naming the backends that can enforce
+    one. Guard test: `TestLandlockRefusesNetworkPolicy`.
 
 L2 — [`docs/L2.md`](L2.md) — drafts four more (11–14: generated-code
 allowlist, disposable-generated versus sacred-authored files, refusal of
@@ -1259,13 +1390,14 @@ as of T-018 and T-024, and join the list here.
 13. **Discovery refuses what it cannot fully honor.** A tool directory
     without `Tool()`, or two tools declaring one runtime name, is an error
     naming the directories, not a partial generation. A setting the chosen
-    backend cannot apply is refused too: `sandbox.image` on the local
-    backend, which runs no image; a network policy with no sandbox to
-    enforce it; any agent option beside `WithAgentFactory`, which owns the
-    agent outright. Guard tests: `TestCodegenRejectsDuplicateToolName`,
+    backend cannot apply is refused too: `sandbox.image` on the local and
+    landlock backends, which run no image; a network policy the backend
+    cannot enforce; any agent option beside `WithAgentFactory`, which owns
+    the agent outright. Guard tests: `TestCodegenRejectsDuplicateToolName`,
     `TestCodegenRejectsToolWithoutToolFunc`,
     `TestSandboxImageReachesEveryBackendThatRunsOne`,
-    `TestLocalSandboxRefusesAnImage`, `TestDenyNetworkNeedsASandbox`,
+    `TestLocalSandboxRefusesAnImage`,
+    `TestDenyNetworkOnTheDefaultSandboxIsRejected`,
     `TestAgentFactoryRefusesConflictingOptions`.
 14. **There is one place to configure a setting.** A setting is a file at a
     fixed path or a Go option — never both, and never a third place that can
@@ -1276,6 +1408,18 @@ as of T-018 and T-024, and join the list here.
     of truth, and deleting the source beat policing it. Guard tests:
     `TestDefaultsAreTheScaffoldedLayout`, `TestScaffoldIsTheDefaultLayout`,
     `TestCodegenEmbedsTheDefaultLayout`.
+15. **Every tool call runs in a sandbox.** Since T-036 there is no
+    unsandboxed mode to fall back to: `WithSandbox` selects a backend rather
+    than enabling one, `--sandbox none` is refused by name, and a host that
+    configures nothing gets the Landlock floor. A working directory is not a
+    substitute for confinement — it is consulted for relative paths only,
+    which is how a live agent read its own journal by absolute path
+    (§4.9.1). The floor is containment, not isolation, and invariant 10
+    governs what it may claim. Guard tests:
+    `TestDefaultSandboxCannotReadTheJournal`, `TestNoHostToolsReachTheAgent`,
+    `TestEverySandboxedAgentIsSandboxed`, `TestSandboxIsTheDefault`,
+    `TestPromptWorkingDirectoryIsTheToolWorkingDirectory`,
+    `TestSandboxNoneNamesItsReplacement`.
 
 ---
 

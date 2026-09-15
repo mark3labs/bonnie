@@ -21,8 +21,14 @@ type backend struct {
 	// open returns a provider, or skips the test when the backend cannot
 	// run on this machine.
 	open func(t *testing.T) Provider
-	// isolated is false for a backend that shares the host filesystem.
-	isolated bool
+	// guestFS is true for a backend whose workspace really is [Workspace]
+	// inside a guest filesystem. A backend that maps the workspace onto a
+	// host directory — local, landlock — reports the host path as its cwd,
+	// so the cases that assert on the path itself skip for those.
+	//
+	// It says nothing about containment: the landlock backend confines the
+	// filesystem without a guest, and the local one confines nothing.
+	guestFS bool
 }
 
 // The isolated backends are shared across the whole suite, one provider per
@@ -56,8 +62,8 @@ var (
 func backends() []backend {
 	return []backend{
 		{
-			name:     "local",
-			isolated: false,
+			name:    "local",
+			guestFS: false,
 			// Local stays per-test: its root is a temp directory, it
 			// starts nothing, and a fresh root per case is the isolation
 			// the other backends get from the guest.
@@ -67,8 +73,22 @@ func backends() []backend {
 			},
 		},
 		{
-			name:     "docker",
-			isolated: true,
+			name:    "landlock",
+			guestFS: false,
+			// Landlock is per-test for the same reason as local: it starts
+			// no daemon, and each case gets its own root.
+			open: func(t *testing.T) Provider {
+				t.Helper()
+				p := Landlock(WithLandlockRoot(t.TempDir()), WithLandlockCleanup())
+				if err := p.Available(context.Background()); err != nil {
+					t.Skipf("landlock unavailable: %v", err)
+				}
+				return p
+			},
+		},
+		{
+			name:    "docker",
+			guestFS: true,
 			open: func(t *testing.T) Provider {
 				t.Helper()
 				p, err := sharedDocker()
@@ -79,8 +99,8 @@ func backends() []backend {
 			},
 		},
 		{
-			name:     "microsandbox",
-			isolated: true,
+			name:    "microsandbox",
+			guestFS: true,
 			open: func(t *testing.T) Provider {
 				t.Helper()
 				p, err := sharedMicrosandbox()
@@ -222,7 +242,14 @@ func TestEveryCallExecutes(t *testing.T) {
 
 		// Append to a file and read it back. A cached second call would
 		// report one line; a real one reports two.
-		const script = "echo tick >> /tmp/ledger && wc -l < /tmp/ledger"
+		//
+		// The ledger is workspace-relative on purpose. It used to be
+		// /tmp/ledger, which assumed every backend has a writable /tmp — true
+		// inside a guest, and true for the local backend only because it
+		// writes to the HOST's /tmp. A backend that confines the filesystem
+		// refuses that path, correctly, and the case would fail for doing its
+		// job. The workspace is the one location every backend promises.
+		const script = "echo tick >> ledger && wc -l < ledger"
 		first, err := sb.Exec(ctx, Shell(script))
 		if err != nil {
 			t.Fatalf("Exec: %v", err)
@@ -325,9 +352,10 @@ func TestWorkspaceIsTheWorkingDirectory(t *testing.T) {
 			t.Fatalf("a relative path did not resolve from the workspace: %+v", res)
 		}
 
-		// An isolated backend reports the workspace as its cwd. The local
-		// backend maps the workspace onto a host directory, so it does not.
-		if b.isolated {
+		// A backend with a guest filesystem reports the workspace as its
+		// cwd. The local and landlock backends map the workspace onto a host
+		// directory, so they do not.
+		if b.guestFS {
 			pwd, err := sb.Exec(ctx, Shell("pwd"))
 			if err != nil {
 				t.Fatalf("Exec: %v", err)

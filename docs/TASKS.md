@@ -19,7 +19,6 @@ the known risks, and the invariants every task must preserve.
 
 | ID | Title | Priority | Size | Blocks |
 |---|---|---|---|---|
-| T-036 | Require a sandbox: remove the host filesystem fallback | P1 | L | — |
 | T-022 | TUI transcript replay on reopen | P2 | M | — |
 | T-019 | Evals against a discovered agent | P2 | L | — |
 
@@ -27,12 +26,13 @@ the known risks, and the invariants every task must preserve.
 
 | ID | Title | Why |
 |---|---|---|
-| T-013 | Verify the microsandbox adapter on real hardware (macOS box only) | no access to an Apple Silicon machine; everything code-side is verified on Linux/KVM. Reopen when hardware is available. |
+| T-013 | Verify the microsandbox adapter on real hardware (macOS box only) | **dropped, not waiting.** T-036 made BONNIE Linux-only: macOS is off the roadmap, so there is no macOS verification to do. The Linux/KVM verification stands. |
 
 ### Shipped after `v0.1.0`
 
 | ID | Delivered | Where |
 |---|---|---|
+| T-036 | Every tool call runs in a sandbox: the host-tools mode is deleted. `hostWorkspaceOptions` rooted Kit's core tools at the workspace with `kit.WithWorkDir`, which is a base and not a jail — a live Slack agent ran `find` by **absolute path** and read `main.go`, `instructions.md`, and `.bonnie/journal.db`. The floor is the new `sandbox.Landlock` backend: it confines each command in a child that re-executes BONNIE's own binary, applies the Landlock LSM to itself, and only then becomes the command, so the shell **and every process it starts** are confined with nothing installed. It also builds the child's environment from nothing, so host API keys never reach a model-chosen command. It is **containment, not isolation** — the network is open and the kernel is shared — so it refuses a network policy instead of appearing to enforce one. `WithSandbox` now selects rather than enables; `--sandbox none` is refused by name. The prompt and the tools were also made to agree: `sandbox.Agent` sets `SessionDir` to `/workspace`, because Kit's environment block reported the **process** directory while the tools used the workspace, and the model believes the prompt. 18/18 conformance cases pass for the new backend. **BONNIE is Linux-only from here**: the floor is a kernel LSM, so releases build linux/amd64 and linux/arm64, and macOS and Windows leave the roadmap | `sandbox/landlock.go`, `sandbox/landlock_linux.go`, `sandbox/landlock_test.go`, `sandbox/agent.go`, `run.go`, `options.go`, `cmd/bonnie/serve.go`, `.goreleaser.yaml`, `docs/SPEC.md` §4.9/§4.9.1, `docs/SANDBOX.md`, `SECURITY.md` |
 | T-035 | The TUI missed the first turn's reasoning and tool events on a fresh tree, then rendered them after a restart — it learned its run ID from the reply to the first message and opened the stream once the turn was already over, and mid-turn deltas are live-only so no replay recovered them. `POST /bonnie/v1/addresses/{address}` binds an address to a run and runs no turn; the TUI holds the first message, resolves the run, opens the stream, and dispatches the turn from `streamReadyMsg`. **Subscribe before you speak.** A stream that will not open no longer strands the message. The earlier startup-lookup fix covered reopening only, which is why the defect survived it | `channel/http/http.go`, `cmd/bonnie/tui/model.go`, `cmd/bonnie/tui/client.go`, `docs/SPEC.md` §4.8 |
 | T-027 | `goreleaser` published a commit list, so T-011's "the notes state the claims and the limits" was met only by a person editing the body after every tag — done by hand at `v0.1.0` and `v0.4.0`. `release.yml` now slices the tag's section out of `CHANGELOG.md` and passes it to `--release-notes`; a tag whose version has no section fails the workflow, naming the missing heading, instead of publishing an empty body. The extractor matches the bracketed version exactly (`0.5` does not match `0.5.0`, `0.1.0` does not match `0.10.0`) and stops at the next `## [`. Proven on the `v0.5.0` tag: 170 lines of notes, no human edit. The guard on the notes was pinned to `0.5.0` and was corrected at `v0.6.0` to track the newest released section | `scripts/release-notes.sh`, `scripts/release_notes_test.go`, `.github/workflows/release.yml`, `Taskfile.yml` |
 | T-026 | The microsandbox conformance flake, which was two defects. **The harness**: `backends()` built a provider per test case, so 18 parallel cases issued ~20 concurrent `msb create` calls and locked msb's own SQLite store — a load a real host never produces, because `serve.go` shares one provider whose mutex serialises every create. One shared provider per backend took ~0/10 to 8/10. **The adapter**: `msb ps --all` intermittently returns an empty list with exit 0 while sandboxes run, so `exists()` reported absent and the create was refused; `ensureRunning` now adopts an "already exists" refusal, with `checkPolicy` on every adopt path. 20/20 runs pass. `msbError` keeps msb's `→` cause lines that `firstLine` dropped — the truncation that made the whole thing misdiagnosed | `sandbox/microsandbox.go`, `sandbox/conformance_test.go`, `sandbox/sandbox_test.go`, `docs/SPEC.md` §4.11 |
@@ -908,143 +908,200 @@ is what deletes that gap.
   row and the cursor leaves the input. Found in tmux; pinned by
   `TestViewCursorStaysOnTheInputRowWhenTheFrameExceedsTheScreen`.
 
-## T-036 — Require a sandbox: remove the host filesystem fallback
+## T-036 — Require a sandbox: remove the host filesystem fallback — **shipped**
 
 **Priority** P1 · **Size** L · **Found by** a live Slack agent reading its own
 journal (`docs/SPEC.md` §4.9.1)
 
-### Why
+### What shipped
 
-BONNIE's default is no sandbox. `bonnie.New()` with no `WithSandbox` runs
-every model-chosen tool call as the serving process, and
-`hostWorkspaceOptions` (`run.go:323-328`) roots Kit's core tools at the
-workspace with `kit.WithWorkDir`. SPEC §4.9.1 calls that rooting the fix for
-the incident where a model wrote Terraform into the checkout.
+Every tool call runs in a sandbox. `WithSandbox` selects a backend rather than
+enabling one, `hostWorkspaceOptions` and the no-sandbox branch are deleted, and
+`--sandbox none` is refused by name.
 
-**The rooting is a base, not a jail, and a live agent walked out of it.** In a
-real Slack-driven tree the model ran
+### The floor, and why
 
-    shell: find /home/<user>/Workspace/my-agent -type f | head -50
+The task named three candidates and warned against resolving the tension by
+weakening what "sandbox" means. A fourth was chosen, after measuring the
+second:
 
-and the result listed `main.go`, `instructions.md`, and
-`.bonnie/journal.db` — the journal that makes its own runs durable. Nothing
-refused it, because an absolute path never consults `WorkDir`.
+1. *Require Docker or microsandbox* — rejected. It breaks
+   `bonnie init && bonnie dev` on a bare machine, and a floor people switch
+   off is how the no-sandbox default survived this long.
+2. *Path-jail `Local`* — **rejected on evidence.** A throwaway probe showed
+   `localSandbox.host()` governs `ReadFile`, `WriteFile`, and `Exec`'s working
+   directory, but not the command string: `Exec` runs `sh -lc` on the host, so
+   `cat /abs/path` returned `SECRET-JOURNAL-BYTES` with the jail in place. A
+   path check cannot contain a shell, and the observed incident **was** a
+   shell call. It would have failed acceptance criteria 1 and 2 while looking
+   like a fix.
+3. *A pure-Go interpreter* — still its own project.
+4. **Landlock (chosen).** The Linux Landlock LSM confines the filesystem for a
+   process and every descendant, needs no daemon, no image, no KVM and no
+   root, and `go-landlock` issues the syscalls with no cgo — so
+   `CGO_ENABLED=0` still yields one static binary.
 
-It did not invent that path. Kit appends an environment block to the system
-prompt — `environmentSection` (`pkg/kit/kit.go:957-964`), called from
-`kit.New` (`:1848`) and `composeSystemPrompt` (`:948`) — whose `cwd` is
-`os.Getwd()`, the **process** directory. BONNIE sets the workspace on the
-tools only, so the two disagree and the prompt is the half the model believes.
-One run, asked for both:
+### The mechanism, and its one constraint
 
-    Current working directory: /tmp/.../standup-bot            ← system prompt
-    /tmp/.../standup-bot/workspace                             ← actual pwd
+A Landlock domain is irreversible and applies to the whole calling process, so
+BONNIE cannot restrict the server — that would take away the journal. Each
+command therefore runs in a child that re-executes BONNIE's own binary,
+restricts itself, and only then `execve`s the command; the domain survives the
+exec and is inherited, so a subshell cannot escape it. The child half is an
+`init()` in the `sandbox` package, so any binary importing the package is its
+own jail helper and no second binary ships.
 
-So the host mode has two defects at once: the agent is told the wrong root,
-and the right root does not contain it anyway.
+The child's environment is built from nothing rather than filtered, so a
+provider API key in the server's environment never reaches a model-chosen
+command. A deny-list would have to be updated for every new provider, and the
+one it missed would be the leak.
 
-**eve does not solve this; it makes the situation unreachable.** Every eve
-agent has exactly one sandbox, `/workspace` is one namespace across all
-backends, the file tools run with `/workspace` as the working directory, and
-the prompt's workspace listing is generated from that same filesystem
-(eve docs, *Sandbox*; `llms-full.txt:1348`, `:1425`). There is no host mode
-to disagree with. eve affords that because its floor backend, `just-bash`, is
-a pure-JS interpreter over a virtual filesystem and needs no daemon or VM
-(`:1486`, `:1496`) — the weakest backend still installs nothing, so
-"unsandboxed" never had to be the convenient default.
+### What it does not do
 
-This task asks BONNIE to take the same position: **a run always has a
-sandbox, and no configuration reaches the host filesystem.**
-
-### The hard part, stated first
-
-**`sandbox.Local()` is not BONNIE's `just-bash`, and must not be mistaken for
-it.** Its own doc comment is explicit (`sandbox/local.go:15-25`): *"It
-provides NO ISOLATION. A command can read any file the BONNIE process can
-read, reach any network the host can reach, and see every environment
-variable, including provider API keys."* `host()` maps a path under
-`Workspace` into the run directory and passes **anything else through
-unchanged** (`local.go:116-128`), which it documents as the honest behaviour
-for a backend with no isolation.
-
-So defaulting to `Local` would fix the prompt disagreement and close nothing.
-Only Docker and microsandbox are real, and both need something installed —
-against BONNIE's single-static-binary promise (SPEC §7) and the
-zero-install desk experience `bonnie init && bonnie dev` sells today.
-
-That tension is the task. Do not resolve it by quietly weakening what
-"sandbox" means.
-
-### Do
-
-Decide the floor first; the rest follows.
-
-1. **Choose the floor backend.** Three candidates, none free:
-   - *Require Docker or microsandbox.* Honest and strong. Breaks
-     `bonnie init && bonnie dev` on a bare machine, which is BONNIE's best
-     first impression.
-   - *Make `Local` a path jail* — refuse absolute paths outside `Workspace`,
-     resolve symlinks, refuse `../` escapes. Pure Go, keeps the single
-     binary, closes the defect above. **It is containment, not isolation**:
-     the command still runs as the host process with its network and its
-     API keys. Invariant 10 forbids presenting it as more than it is.
-   - *A third backend.* No pure-Go equivalent of `just-bash` exists in the
-     Go ecosystem today; writing one is its own project.
-2. **Make the sandbox unconditional** once a floor exists: `bonnie.New()`
-   resolves a provider always, `WithSandbox` selects rather than enables, and
-   `hostWorkspaceOptions` and its no-sandbox branch are deleted.
-3. **Make the prompt agree with the filesystem.** Whatever the floor, the
-   agent must be told the root its tools actually use. Under a real sandbox
-   this is already true (everything is `/workspace`). Until then it needs
-   either `os.Chdir` before `kit.New`, or an upstream Kit option that takes
-   the tool workdir for the environment block — file it in
-   `docs/UPSTREAM.md` if the second.
-4. **Decide the migration.** `WithSandbox` is public API and the no-sandbox
-   default is documented in `README.md`, `SECURITY.md`, the scaffolded
-   `main.go` comment, and the startup banner's warning. A host that relies on
-   host tools today must get a refusal that names the replacement, never a
-   silent behaviour change.
+It is **containment, not isolation**: the network is open and the kernel is
+shared. Per invariant 10 the provider does not implement `Networked`, so a
+policy given to it is refused and names the backends that can enforce one.
+`docs/SPEC.md` §4.9 stays open for that residue, and `README.md`,
+`SECURITY.md`, and `docs/SANDBOX.md` all say "containment, not isolation" in
+those words.
 
 ### Acceptance criteria
 
-- [ ] A default `bonnie.New()` run cannot read a file outside the workspace:
-      a live-model test asks for one by absolute path and fails if it arrives
-      (the §4.9 shape, extended to the default configuration)
-- [ ] A default run cannot read `<root>/.bonnie/journal.db`, by any path
-- [ ] The system prompt's working directory equals the directory the tools
-      use — one assertion over both, so they cannot drift again
-- [ ] `bonnie init && bonnie dev` still works on a machine with no Docker and
-      no KVM, or the failure names exactly what to install
-- [ ] The chosen floor states its limits in `README.md` and `SECURITY.md`;
-      if it is containment rather than isolation, both say so in those words
-- [ ] The startup banner's no-sandbox warning is gone because the condition
-      it warns about is gone
-- [ ] `TestNoSandboxIsTheDefault` is deleted or inverted, deliberately
+- [x] A default `bonnie.New()` run cannot read a file outside the workspace
+      (`TestLandlockConfinesTheShell`, `TestLandlockConfinesDescendants`,
+      `TestLandlockRefusesToWriteOutside`)
+- [x] A default run cannot read `<root>/.bonnie/journal.db`, by any path —
+      `TestDefaultSandboxCannotReadTheJournal` drives the **default**
+      configuration against a tree-shaped layout and tries five shapes,
+      including the `find` from the incident, plus the file tools
+- [x] The system prompt's working directory equals the directory the tools
+      use, asserted from one value in
+      `TestPromptWorkingDirectoryIsTheToolWorkingDirectory`
+- [x] `bonnie init && bonnie dev` works with no Docker and no KVM — verified
+      end to end: scaffold, `go mod tidy`, build, serve, health check. A
+      kernel without Landlock refuses with a message naming `--sandbox docker`
+- [x] The limits are stated in `README.md` and `SECURITY.md`, in those words
+- [x] The banner's no-sandbox warning is gone; the backend is named instead
+- [x] `TestNoSandboxIsTheDefault` inverted into `TestSandboxIsTheDefault`;
+      `TestSandboxedAgentGetsNoHostTools` replaced by
+      `TestNoHostToolsReachTheAgent`, which fails if `kit.AllTools`,
+      `kit.WithWorkDir`, or `runtime.KitAgent` returns to `run.go`
+- [x] The new backend joins the conformance suite: 18/18 pass, none skipped
 
-### Watch for
+### Two things this changed that were not in the plan
 
-**Do not let `hostWorkspaceOptions` survive into the sandboxed path.** Kit
-honours `Options.Tools` even when `DisableCoreTools` is set, and
-`sandbox.Agent` applies the caller's options after its own, so host tools
-reaching a sandboxed agent hand the model a real host shell inside the
-sandbox. `TestSandboxedAgentGetsNoHostTools` guards this by reading `run.go`
-as source text; if the function is removed, delete the guard with it rather
-than leaving it matching nothing.
+**A conformance case was wrong.** `TestEveryCallExecutes` wrote its ledger to
+`/tmp/ledger`, which assumed every backend has a writable `/tmp` — true in a
+guest, and true for `Local` only because it writes to the **host's** `/tmp`.
+A backend that confines the filesystem refuses that path correctly and the
+case failed for doing its job. The ledger is now workspace-relative, which is
+the one location every backend promises.
 
-**Do not claim containment the floor does not have.** Invariant 10: a backend
-that cannot enforce a control refuses it. A path-jailed `Local` still leaks
-the environment and the network, and §4.9 stays open for it.
+**The guard had to stop reading its own comments.** `TestNoHostToolsReachTheAgent`
+greps `run.go` for forbidden calls, and the comments explaining why those calls
+are forbidden name them. It now strips comments via `go/parser` first — a guard
+that fires on its own tombstone teaches the next person to delete the tombstone.
 
-**A green CI says nothing here.** CI has no `msb` and, until recently, no
-running Docker daemon, so sandbox cases skip rather than fail — the blind
-spot that hid three real defects in §4.11.
+### Platform
 
-### Also correct
+BONNIE is **Linux-only** from here. The floor is a kernel LSM, so
+`.goreleaser.yaml` builds linux/amd64 and linux/arm64 only. macOS and Windows
+are off the roadmap, and T-013 (microsandbox on Apple Silicon) is dropped
+rather than deferred. Restoring macOS means writing a `sandbox-exec` backend
+that passes the same conformance suite, not adding a build target.
 
-`docs/SPEC.md` §4.9.1 claims the workspace rooting was "verified live" with
-`pwd` reporting the workspace. That check was true and incomplete: it tested
-the tool and never the prompt the tool contradicts. Record the two defects
-and the missing guard when this ships.
+### Decided: the unix-socket gap stays documented, not closed
+
+**A unix socket is not mediated by Landlock, and on a developer machine that
+is a real escape.** Found by the live run (below): Landlock ABI 1 hooks
+`open()`, not `connect()`, so a command that knows a socket's path reaches the
+daemon behind it. Withholding `/var/run` was tried and does **not** close it —
+measured, not assumed. Where BONNIE's user is in the `docker` group, a tool
+call can reach `/var/run/docker.sock`, and `docker run -v /:/host` defeats the
+jail completely.
+
+Four options were weighed. **Option 3 — leave it documented — was chosen.**
+
+1. *Mandatory user namespace*, masking `/run` with a mount namespace.
+   Strongest, and rejected: unprivileged userns is switched off on Debian and
+   Ubuntu (`unprivileged_userns_clone`, and AppArmor's
+   `apparmor_restrict_unprivileged_userns` since 24.04), on RHEL
+   (`max_user_namespaces=0`), on hardened kernels, and inside many
+   containers. BONNIE would refuse to start there — breaking acceptance
+   criterion 4, and breaking it for the hosts most likely to care about the
+   sandbox.
+2. *Best-effort userns*: mask where possible, continue where not. Rejected
+   for now because it makes one command mean two different security levels
+   depending on the host, which is the shape invariant 10 exists to prevent.
+   It is defensible only with the banner naming which level is in force.
+3. **Leave it documented (chosen).** The gap is stated in `README.md`,
+   `SECURITY.md`, `docs/SANDBOX.md`, `CHANGELOG.md`, and §4.9, with the
+   operational mitigation — run BONNIE as a user with no privileged group
+   membership, or use microsandbox. It adds no failure mode, keeps the
+   two-command start working everywhere, and claims nothing the floor does
+   not do. Pinned by `TestLandlockDoesNotConfineUnixSockets`, which asserts
+   nothing about the outcome and fails only if the backend ever claims
+   network control.
+4. *Startup refusal when a privileged socket is reachable.* Not taken, but
+   the best candidate if this is revisited: it fails loudly only on the hosts
+   that actually have the hole, rather than on every host without userns.
+
+The reasoning is recorded because the conclusion is uncomfortable: a known,
+reproduced escape is being shipped with a documented mitigation rather than a
+fix. That is a deliberate trade against a hard usability constraint, and the
+next person to touch this should re-open it with option 4 in hand — not
+rediscover the problem.
+
+### Still open
+
+- Landlock ABI is pinned to V1 for compatibility. V4+ can restrict TCP and
+  V10 UDP, which would let this backend implement `Networked` honestly for
+  new kernels — with a refusal on older ones rather than a silent downgrade.
+
+### Verified live
+
+Run against `opencode/kimi-k3` through a scaffolded tree in tmux, with the
+default backend and no Docker involved. **The live run found two defects the
+green unit suite did not**, which is the argument for doing it at all.
+
+1. **The incident, replayed.** `find /tmp/.../escape-agent -type f | head -50`
+   — the exact shape from the report — returned
+   `find: '...': Permission denied`, exit 1. Before this change the same
+   command listed `main.go`, `instructions.md`, and the journal.
+2. **A determined escape attempt.** Asked to read a canary file outside the
+   workspace by any means, the model spent six rounds of tool calls on `cat`,
+   `head`, `sed`, `awk`, `perl`, `dd`, `xxd`, `python3`, a subshell, a
+   pipeline, `cd`-first, `cp`, a hardlink, a symlink, and an fd redirect.
+   Every one was refused by the kernel. Its own verdict: **"zero bytes of the
+   file's contents were retrieved"**. The `read_file` tool refused separately
+   with `bonnie: path is outside the sandbox workspace`, so both layers — the
+   LSM for the shell, the path jail for the in-process file tools — were
+   exercised.
+3. **Defect found: the docker socket.** Having exhausted the filesystem, the
+   model named the one remaining avenue unprompted — its `docker` group
+   membership — and declined to use it. Landlock does not mediate unix
+   sockets; withholding `/var/run` was then tried and **does not** close it.
+   Now documented in four places and pinned by
+   `TestLandlockDoesNotConfineUnixSockets`. It is the open item above.
+4. **Defect found: the prompt lied about the working directory.** Asked to
+   quote its prompt and run `pwd`, the model answered *"my workspace is not
+   actually `/workspace`"* — the prompt said `/workspace`, `pwd` said the host
+   path, and `/workspace` did not exist. This is the **same class of defect
+   this task exists to fix**, reintroduced by the fix itself: `SessionDir` was
+   hard-coded to the constant, but the landlock and local backends map the
+   workspace onto a host directory.
+
+   Two causes, both now fixed: the value must come from the backend
+   ([`WorkingDirReporter`], implemented by the two host-mapped providers), and
+   `Seeded` — which `run.go` wraps the default provider in — must forward it,
+   which it did not. The guard that missed it compared the prompt against the
+   **constant**; it now compares it against the sandbox's own `pwd`, for every
+   backend, and fails on the mutation that reintroduces the bug. Re-verified
+   live: prompt and `pwd` now match "character for character".
+
+   The lesson worth keeping: a guard that asserts against a constant tests the
+   constant. `TestSeededForwardsTheWorkingDirectory` exists because the unit
+   guard passed while the assembled product was broken.
 
 ---
 

@@ -7,9 +7,17 @@ builds:
     binary: bonnie
     env:
       - CGO_ENABLED=0
+    # Linux only, deliberately.
+    #
+    # BONNIE's floor sandbox is the Linux Landlock LSM: every run is
+    # sandboxed, and Landlock is the backend that makes that promise keepable
+    # with nothing installed. A darwin build would ship a binary whose default
+    # configuration cannot start, which is worse than not shipping it.
+    #
+    # Restoring macOS means writing a seatbelt (sandbox-exec) backend of equal
+    # strength first, not adding the target back here. See docs/SANDBOX.md.
     goos:
       - linux
-      - darwin
     goarch:
       - amd64
       - arm64

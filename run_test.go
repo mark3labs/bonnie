@@ -1,12 +1,16 @@
 package bonnie
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
+	"go/parser"
+	"go/printer"
+	"go/token"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -95,60 +99,6 @@ func TestWorkspaceIsTheAgentRoot(t *testing.T) {
 	})
 }
 
-// TestSandboxedAgentGetsNoHostTools is a security guard, not a style check.
-//
-// [hostWorkspaceOptions] rebuilds Kit's core tools with a working directory
-// and passes them through [kit.WithTools], which sets Options.Tools. Kit
-// honours Options.Tools even when DisableCoreTools is set — [sandbox.Agent]
-// applies the caller's options after its own — so using those options on a
-// sandboxed agent would hand the model host tools inside a sandbox: a real
-// shell on this machine, exactly what the sandbox exists to prevent.
-func TestSandboxedAgentGetsNoHostTools(t *testing.T) {
-	t.Parallel()
-
-	// With a workspace, the host options really do install host tools —
-	// applied to a kit.Options, they populate the field Kit reads.
-	var o kit.Options
-	for _, opt := range hostWorkspaceOptions(t.TempDir()) {
-		opt(&o)
-	}
-	if len(o.Tools) == 0 {
-		t.Fatal("hostWorkspaceOptions installed no tools: the workdir would not be applied")
-	}
-
-	// Without one, they install nothing.
-	var empty kit.Options
-	for _, opt := range hostWorkspaceOptions("") {
-		opt(&empty)
-	}
-	if len(empty.Tools) != 0 {
-		t.Fatalf("no workspace must add no tools, got %d", len(empty.Tools))
-	}
-
-	// And the sandboxed branch must never call them. Reading the source is
-	// the honest check here: the call has to be inside the no-sandbox branch,
-	// before the provider is used, and a future edit that moves it below
-	// would silently reintroduce host tools in a sandbox.
-	src, err := os.ReadFile("run.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	body := string(src)
-	call := strings.Index(body, "hostWorkspaceOptions(workspace)")
-	seeded := strings.Index(body, "sandbox.Seeded(provider, workspace)")
-	if call < 0 || seeded < 0 {
-		t.Fatal("run.go no longer has the shapes this guard reads")
-	}
-	if call > seeded {
-		t.Fatal("hostWorkspaceOptions is called past the sandbox branch: " +
-			"a sandboxed agent would receive host tools")
-	}
-	if strings.Count(body, "hostWorkspaceOptions(") != 2 { // the definition and the one call
-		t.Fatalf("hostWorkspaceOptions is used %d times; it belongs on the no-sandbox branch only",
-			strings.Count(body, "hostWorkspaceOptions(")-1)
-	}
-}
-
 // TestSandboxedWorkspaceBecomesASeed: with a sandbox, the workspace is not a
 // working directory but a seed mirrored into [sandbox.Workspace]. Accepting
 // the setting and ignoring it is what invariant 13 forbids.
@@ -164,11 +114,91 @@ func TestSandboxedWorkspaceBecomesASeed(t *testing.T) {
 	}
 }
 
-// TestNoSandboxIsTheDefault documents the default plainly. It is the right
-// choice for a local developer and the wrong one for an exposed server, which
-// is why the help text and the startup banner both say so.
-func TestNoSandboxIsTheDefault(t *testing.T) {
+// TestNoHostToolsReachTheAgent is a security guard, not a style check.
+//
+// It replaces TestSandboxedAgentGetsNoHostTools, which read run.go for the
+// placement of hostWorkspaceOptions. That function is gone: every run is
+// sandboxed now, so there are no host tools to misplace. The property it
+// protected is not gone, though, and is worth more than before — Kit honours
+// Options.Tools even when DisableCoreTools is set, and [sandbox.Agent]
+// applies a caller's options AFTER its own, so any route that reintroduces
+// kit.WithTools(kit.AllTools(...)) hands the model a real host shell inside a
+// sandbox.
+//
+// The check is the absence of that shape in the source. A guard that matches
+// nothing would be worse than none, so it also asserts the sandbox call it
+// depends on is still there.
+//
+// Comments are stripped before the check. The code that explains why these
+// shapes are forbidden has to be free to name them — a guard that fires on
+// its own tombstone comment teaches the next person to delete the comment.
+func TestNoHostToolsReachTheAgent(t *testing.T) {
 	t.Parallel()
+	body := sourceWithoutComments(t, "run.go")
+
+	if strings.Contains(body, "kit.AllTools(") {
+		t.Fatal("run.go builds Kit's host core tools again: " +
+			"with sandbox.Agent applying caller options last, those tools would " +
+			"give the model a host shell inside the sandbox")
+	}
+	if strings.Contains(body, "kit.WithWorkDir(") {
+		t.Fatal("run.go roots host file tools at a working directory again: " +
+			"WithWorkDir is a base and not a jail, which is the defect issue #1 fixed")
+	}
+	if strings.Contains(body, "runtime.KitAgent(") {
+		t.Fatal("run.go builds a bare Kit agent again: that is the unsandboxed " +
+			"path this change removed")
+	}
+	if !strings.Contains(body, "sandbox.Agent(provider") {
+		t.Fatal("run.go no longer wraps the agent in a sandbox: this guard reads " +
+			"a shape that is gone, so it is no longer guarding anything")
+	}
+}
+
+// sourceWithoutComments returns a Go file's code with every comment removed,
+// so a guard that greps for a forbidden call cannot be tripped by prose that
+// mentions it.
+func sourceWithoutComments(t *testing.T, path string) string {
+	t.Helper()
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, path, nil, 0) // 0: drop comments
+	if err != nil {
+		t.Fatalf("parse %s: %v", path, err)
+	}
+	var buf bytes.Buffer
+	if err := printer.Fprint(&buf, fset, file); err != nil {
+		t.Fatalf("print %s: %v", path, err)
+	}
+	return buf.String()
+}
+
+// TestEverySandboxedAgentIsSandboxed is the positive half: whatever the
+// configuration, agentFactory must not produce an agent whose tools are this
+// process. The factory is opaque, so the assertion is that a configuration
+// with no sandbox still resolves a real provider.
+func TestEverySandboxedAgentIsSandboxed(t *testing.T) {
+	t.Parallel()
+	p := resolve().defaultSandbox()
+	if p == nil {
+		t.Fatal("a run with no WithSandbox resolved no provider: tool calls would run on the host")
+	}
+	if p.Name() == "local" {
+		t.Fatal("the default backend is local, which provides no isolation: " +
+			"that is the no-sandbox default under another name")
+	}
+	if p.Name() != "landlock" {
+		t.Fatalf("default backend = %q, want landlock", p.Name())
+	}
+}
+
+// TestSandboxIsTheDefault is the inversion of TestNoSandboxIsTheDefault,
+// which documented the old behaviour and is deliberately gone. A default
+// bonnie.New() must build a working, confined agent factory.
+func TestSandboxIsTheDefault(t *testing.T) {
+	t.Parallel()
+	if err := sandbox.Landlock().Available(context.Background()); err != nil {
+		t.Skipf("landlock unavailable: %v", err)
+	}
 	f, err := resolve().agentFactory(context.Background(), "", nil)
 	if err != nil {
 		t.Fatalf("agentFactory: %v", err)
@@ -178,17 +208,25 @@ func TestNoSandboxIsTheDefault(t *testing.T) {
 	}
 }
 
-// TestDenyNetworkNeedsASandbox stops a false sense of safety: asking for no
-// egress without a sandbox must fail, not quietly run with full network.
-func TestDenyNetworkNeedsASandbox(t *testing.T) {
+// TestDenyNetworkOnTheDefaultSandboxIsRejected stops a false sense of safety.
+//
+// It used to assert that a network policy with NO sandbox fails. There is no
+// such configuration now, so the honest version of the same rule is one level
+// down: the default backend confines the filesystem and not the network, so a
+// policy it cannot enforce must be refused and must name a backend that can
+// (docs/SPEC.md §8, invariant 10).
+func TestDenyNetworkOnTheDefaultSandboxIsRejected(t *testing.T) {
 	t.Parallel()
 	c := resolve(WithNetwork(sandbox.NetworkPolicy{Mode: sandbox.NetworkDenyAll}))
 	_, err := c.agentFactory(context.Background(), "", nil)
 	if err == nil {
-		t.Fatal("want an error for a network policy without a sandbox")
+		t.Fatal("want an error for a network policy the default backend cannot enforce")
 	}
-	if !strings.Contains(err.Error(), "WithSandbox") {
-		t.Fatalf("error does not say how to fix it: %v", err)
+	if !strings.Contains(err.Error(), "cannot control the network") {
+		t.Fatalf("error does not say what is wrong: %v", err)
+	}
+	if !strings.Contains(err.Error(), "docker") {
+		t.Fatalf("error does not name a backend that can enforce it: %v", err)
 	}
 }
 
@@ -494,5 +532,76 @@ func TestCloseStreamsDoesNotCancelTurn(t *testing.T) {
 	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodPost, "/bonnie/v1/runs/run-1", nil))
 	if err := <-observed; err != nil {
 		t.Fatalf("turn context was cancelled: %v", err)
+	}
+}
+
+// TestDefaultSandboxCannotReadTheJournal is the regression test for the
+// incident that opened issue #1.
+//
+// A live Slack agent ran `find /home/<user>/Workspace/my-agent -type f` and
+// the result listed main.go, instructions.md, and .bonnie/journal.db — the
+// journal that makes its own runs durable. Nothing refused it, because an
+// absolute path never consults a working directory.
+//
+// This drives the DEFAULT configuration, not a hand-built provider: the whole
+// point of the change is that a host which configures nothing is confined.
+// The journal sits where a real tree puts it, and the workspaces root is the
+// one bonnie.New() derives from it.
+func TestDefaultSandboxCannotReadTheJournal(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	journalDir := filepath.Join(root, DefaultJournal)
+	if err := os.MkdirAll(journalDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	journal := filepath.Join(journalDir, "journal.db")
+	if err := os.WriteFile(journal, []byte("SQLite format 3\x00SECRET-JOURNAL-BYTES"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// The tree's own source, beside the journal, is the rest of what the
+	// live agent listed.
+	if err := os.WriteFile(filepath.Join(root, "instructions.md"), []byte("SECRET-PROMPT"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	provider := resolve(WithJournal(journalDir)).defaultSandbox()
+	if err := provider.Available(context.Background()); err != nil {
+		t.Skipf("the default backend is unavailable here: %v", err)
+	}
+
+	ctx := context.Background()
+	sb, err := provider.Open(ctx, "journal-guard")
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() {
+		if d, ok := sb.(interface{ Delete(context.Context) error }); ok {
+			_ = d.Delete(ctx)
+		}
+	})
+
+	// By absolute path, by the shell, and by the traversal a model would try
+	// next. "any path" is what the acceptance criterion says.
+	for _, line := range []string{
+		"cat " + journal,
+		"cat " + filepath.Join(root, "instructions.md"),
+		"find " + root + " -type f",
+		"cat ../../" + DefaultJournal + "/journal.db",
+		"sh -c 'cat " + journal + "'",
+	} {
+		res, err := sb.Exec(ctx, sandbox.Shell(line))
+		if err != nil {
+			t.Fatalf("Exec(%q): %v", line, err)
+		}
+		if strings.Contains(res.Stdout, "SECRET") {
+			t.Fatalf("a default run read outside its workspace with %q: %q", line, res.Stdout)
+		}
+	}
+
+	// And the file tools, which run in this process and are not covered by
+	// the kernel restriction.
+	if _, err := sb.ReadFile(ctx, journal); err == nil {
+		t.Fatal("the read_file tool reached the journal by absolute path")
 	}
 }

@@ -273,3 +273,58 @@ func messageTextOf(msg kit.LLMMessage) string {
 	}
 	return strings.Join(b, "\n")
 }
+
+// TestPromptWorkingDirectoryIsTheToolWorkingDirectory is one assertion over
+// both halves of the defect in issue #1, run against every backend.
+//
+// Kit's system prompt carries an environment block whose working directory is
+// Options.SessionDir. The tools run somewhere real. When those disagree the
+// model is told the wrong root — and the prompt is the half it believes.
+//
+// The earlier version of this test compared the prompt against the CONSTANT
+// sandbox.Workspace and passed while the defect was live: the landlock and
+// local backends map the workspace onto a host directory, so commands run
+// there and /workspace does not exist. A live model reported exactly that:
+// "my workspace is not actually /workspace". The test now asks the sandbox
+// where it really is, with `pwd`, which is the only source that cannot be
+// wrong.
+func TestPromptWorkingDirectoryIsTheToolWorkingDirectory(t *testing.T) {
+	t.Parallel()
+	eachBackend(t, func(t *testing.T, _ backend, p Provider) {
+		const runID = "prompt-cwd"
+		sb := openSandbox(t, p, runID)
+		ctx := testCtx(t)
+
+		// What the prompt will say, from the real option set.
+		var o kit.Options
+		for _, opt := range sandboxedKitOptions(
+			func(context.Context) (Sandbox, error) { return sb, nil },
+			promptWorkingDir(p, runID),
+		) {
+			opt(&o)
+		}
+
+		// What the tools actually do.
+		res, err := sb.Exec(ctx, Shell("pwd"))
+		if err != nil {
+			t.Fatalf("Exec(pwd): %v", err)
+		}
+		actual := strings.TrimSpace(res.Stdout)
+
+		if o.SessionDir != actual {
+			t.Fatalf("the prompt says the working directory is %q, the tools "+
+				"report %q: the model believes the prompt (docs/SPEC.md §4.9.1)",
+				o.SessionDir, actual)
+		}
+
+		// And a relative path must resolve there, so the directory the prompt
+		// names is the one a tool call writes into.
+		if err := sb.WriteFile(ctx, "cwd-proof.txt", []byte("x")); err != nil {
+			t.Fatalf("WriteFile: %v", err)
+		}
+		seen, err := sb.Exec(ctx, Shell("cat cwd-proof.txt"))
+		if err != nil || !seen.OK() {
+			t.Fatalf("a relative write did not land in the reported directory: %+v err=%v", seen, err)
+		}
+	})
+}

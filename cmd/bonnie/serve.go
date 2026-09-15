@@ -54,9 +54,11 @@ flags, with no agent tree. To serve a tree, run the tree — ` + "`bonnie dev`" 
 you work on it, ` + "`bonnie build`" + ` for the binary it graduates into. A tree's
 configuration is Go in its own main.go, so serve cannot read it.
 
-Without a sandbox, tool calls run as this process, with its files, network,
-and credentials. Use --sandbox docker for a server that is reachable from
-outside. See docs/SANDBOX.md.`,
+Every tool call runs in a sandbox. The default is landlock, which confines
+tool calls to the run's own workspace using the Linux Landlock LSM and needs
+nothing installed. It confines the filesystem and the environment, not the
+network: use --sandbox docker or microsandbox for a server reachable from
+outside, and --sandbox-deny-network to cut egress. See docs/SANDBOX.md.`,
 		RunE: func(_ *cobra.Command, _ []string) error { return runServe(o) },
 	}
 	f := cmd.Flags()
@@ -64,7 +66,7 @@ outside. See docs/SANDBOX.md.`,
 	addJournalFlag(f, &o.journal)
 	f.StringVar(&o.model, "model", "", "model to use, for example anthropic/claude-sonnet-4-5")
 	f.StringVar(&o.prompt, "system-prompt", "", "system prompt override")
-	f.StringVar(&o.sandboxKind, "sandbox", "none", "tool sandbox: none, docker, microsandbox, local, or auto")
+	f.StringVar(&o.sandboxKind, "sandbox", "landlock", "tool sandbox: landlock, docker, microsandbox, local, or auto")
 	f.StringVar(&o.sandboxImg, "sandbox-image", "", "sandbox image, for example python:3.12-slim")
 	f.BoolVar(&o.denyNetwork, "sandbox-deny-network", false, "block all network egress from the sandbox")
 	f.DurationVar(&o.shutdown, "shutdown-timeout", 30*time.Second, "how long to wait for in-flight turns on shutdown")
@@ -106,7 +108,11 @@ func serveOptions(ctx context.Context, o serveOpts) ([]bonnie.Option, error) {
 		bonnie.WithShutdownTimeout(o.shutdown),
 	}
 
-	if o.sandboxKind != "" && o.sandboxKind != "none" {
+	// An empty value means the operator did not pass the flag, so the
+	// framework default applies. Anything else is an explicit choice and is
+	// resolved here — including "none", which is refused rather than
+	// silently honoured.
+	if o.sandboxKind != "" {
 		p, err := sandboxProvider(ctx, o.sandboxKind, o.sandboxImg)
 		if err != nil {
 			return nil, err
@@ -136,6 +142,24 @@ func serveOptions(ctx context.Context, o serveOpts) ([]bonnie.Option, error) {
 // makes when it swallows a network policy (docs/SPEC.md §8, invariant 13).
 func sandboxProvider(ctx context.Context, kind, image string) (sandbox.Provider, error) {
 	switch kind {
+	case "landlock":
+		if image != "" {
+			return nil, fmt.Errorf("the landlock sandbox runs no image: drop --sandbox-image, or pick --sandbox docker")
+		}
+		return sandbox.Landlock(), nil
+
+	case "none":
+		// This used to be the default, and it is why issue #1 existed: a
+		// live agent read its own journal by absolute path. Refuse it by
+		// name rather than mapping it onto something weaker, so an operator
+		// whose script still passes it learns what replaced it instead of
+		// getting a silent change of behaviour.
+		return nil, fmt.Errorf("--sandbox none is gone: every tool call runs in a sandbox now; " +
+			"the default, --sandbox landlock, needs nothing installed and confines tool " +
+			"calls to the run's workspace; if you really want tool calls to run as this " +
+			"process with its files, network, and credentials, that is --sandbox local, " +
+			"which provides NO isolation")
+
 	case "docker":
 		var o []sandbox.DockerOption
 		if image != "" {
@@ -175,12 +199,18 @@ func sandboxProvider(ctx context.Context, kind, image string) (sandbox.Provider,
 		if image != "" {
 			msb = append(msb, sandbox.WithMicrosandboxImage(image))
 			dkr = append(dkr, sandbox.WithDockerImage(image))
+			// Landlock runs no image, so it cannot be a candidate when one
+			// was asked for: selecting it would honour the request by
+			// ignoring it, which is what invariant 13 forbids. With no
+			// image there is nothing to drop, so the floor joins the list
+			// and auto always resolves to a real confinement on Linux.
+			return sandbox.Select(selectCtx, sandbox.Microsandbox(msb...), sandbox.Docker(dkr...))
 		}
-		// Never auto-select local: falling back from isolation to none must
-		// be a decision someone wrote down.
-		return sandbox.Select(selectCtx, sandbox.Microsandbox(msb...), sandbox.Docker(dkr...))
+		// Never auto-select local: falling back from containment to none
+		// must be a decision someone wrote down.
+		return sandbox.Select(selectCtx, sandbox.Microsandbox(msb...), sandbox.Docker(dkr...), sandbox.Landlock())
 
 	default:
-		return nil, fmt.Errorf("unknown sandbox %q: want none, docker, microsandbox, local, or auto", kind)
+		return nil, fmt.Errorf("unknown sandbox %q: want landlock, docker, microsandbox, local, or auto", kind)
 	}
 }

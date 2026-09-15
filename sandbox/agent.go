@@ -36,15 +36,70 @@ func Agent(p Provider, opts ...kit.Option) runtime.AgentFactory {
 		}
 
 		open := LazyOpener(p, s)
+		return runtime.KitAgent(append(sandboxedKitOptions(open, promptWorkingDir(p, s.RunID())), opts...)...)(ctx, s)
+	}
+}
 
-		sandboxed := []kit.Option{
-			// Kit's core tools run in the BONNIE process. Leaving them on
-			// beside the sandboxed set would give the model two shells,
-			// one of them the host's, and it would pick either.
-			func(o *kit.Options) { o.DisableCoreTools = true },
-			kit.WithExtraTools(Tools(open)...),
+// promptWorkingDir is the directory the system prompt must name for this
+// backend and run: the real path commands run at.
+//
+// A backend with a guest filesystem runs at [Workspace] and reports nothing.
+// A backend that maps the workspace onto a host directory implements
+// [WorkingDirReporter] and names that path, because that is what `pwd`
+// returns — and a prompt that disagrees with `pwd` is the defect in
+// docs/SPEC.md §4.9.1, which a live model hit again when this value was
+// hard-coded to [Workspace].
+func promptWorkingDir(p Provider, runID string) string {
+	if r, ok := p.(WorkingDirReporter); ok {
+		if dir := r.WorkingDir(runID); dir != "" {
+			return dir
 		}
-		return runtime.KitAgent(append(sandboxed, opts...)...)(ctx, s)
+	}
+	return Workspace
+}
+
+// sandboxedKitOptions is the option set that makes a Kit agent sandboxed,
+// with workdir the directory the prompt should report. It is a named function
+// rather than a literal inside [Agent] so a test can read what the model will
+// actually be given.
+func sandboxedKitOptions(open Opener, workdir string) []kit.Option {
+	return []kit.Option{
+		// Kit's core tools run in the BONNIE process. Leaving them on
+		// beside the sandboxed set would give the model two shells,
+		// one of them the host's, and it would pick either.
+		func(o *kit.Options) { o.DisableCoreTools = true },
+		kit.WithExtraTools(Tools(open)...),
+
+		// Tell the model the root its tools actually use.
+		//
+		// Kit appends an environment block to the system prompt whose
+		// working directory is Options.SessionDir, falling back to the
+		// PROCESS's directory. The sandboxed tools resolve every relative
+		// path from the sandbox root, so without this the prompt names one
+		// directory and the tools use another. A live run was asked for
+		// both and answered
+		//
+		//	Current working directory: /tmp/.../standup-bot
+		//	/tmp/.../standup-bot/workspace
+		//
+		// and the model believes the prompt. docs/SPEC.md §4.9.1.
+		//
+		// The value is per backend, not the constant [Workspace]: a
+		// host-mapped backend runs commands at a host path, and naming
+		// /workspace there reproduced the very same defect — a live model
+		// reported "my workspace is not actually /workspace" and found the
+		// directory did not exist.
+		//
+		// Setting it is safe precisely because BONNIE owns persistence:
+		// Kit skips InitTreeSession entirely when Options.SessionManager is
+		// set, so SessionDir no longer chooses where sessions are stored.
+		// What it still does is scope context-file and named-agent
+		// discovery, and pointing that at the sandbox root is right for the
+		// same reason: a confined agent must not silently inherit an
+		// AGENTS.md from a host directory it cannot read.
+		//
+		// Guard test: TestPromptWorkingDirectoryIsTheToolWorkingDirectory.
+		func(o *kit.Options) { o.SessionDir = workdir },
 	}
 }
 
