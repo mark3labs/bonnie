@@ -32,22 +32,23 @@ type ChannelFunc func(*runtime.Runner) (Channel, error)
 // config is the resolved configuration of one [Agent]. Every field has a
 // default from the scaffolded layout; an [Option] replaces one.
 type config struct {
-	addr      string
-	name      string
-	journal   string
-	model     string
-	prompt    string
-	instrPath string
-	workspace string
-	sandbox   sandbox.Provider
-	network   *sandbox.NetworkPolicy
-	tools     []kit.Tool
-	kitOpts   []kit.Option
-	channels  []ChannelFunc
-	factory   runtime.AgentFactory
-	shutdown  time.Duration
-	listener  net.Listener
-	quiet     bool
+	addr       string
+	name       string
+	journal    string
+	model      string
+	prompt     string
+	instrPath  string
+	skillsPath string
+	workspace  string
+	sandbox    sandbox.Provider
+	network    *sandbox.NetworkPolicy
+	tools      []kit.Tool
+	kitOpts    []kit.Option
+	channels   []ChannelFunc
+	factory    runtime.AgentFactory
+	shutdown   time.Duration
+	listener   net.Listener
+	quiet      bool
 }
 
 // Option configures [New]. This is where a setting that is not a
@@ -58,11 +59,12 @@ type Option func(*config)
 // defaults returns the configuration of a scaffolded tree with no options.
 func defaults() *config {
 	return &config{
-		addr:      DefaultAddr,
-		journal:   DefaultJournal,
-		instrPath: DefaultInstructions,
-		workspace: DefaultWorkspace,
-		shutdown:  30 * time.Second,
+		addr:       DefaultAddr,
+		journal:    DefaultJournal,
+		instrPath:  DefaultInstructions,
+		skillsPath: DefaultSkills,
+		workspace:  DefaultWorkspace,
+		shutdown:   30 * time.Second,
 	}
 }
 
@@ -107,6 +109,26 @@ func WithSystemPrompt(prompt string) Option {
 // file, which is how a host with no tree runs.
 func WithInstructions(path string) Option {
 	return func(c *config) { c.instrPath = path }
+}
+
+// WithSkills reads the tree's skills from dir instead of [DefaultSkills]. An
+// empty dir means the agent loads no skills at all, which is how a host with
+// no tree runs.
+//
+// A skill is a markdown file with YAML frontmatter: dir holds one *.md or
+// *.txt per skill, or one subdirectory per skill with a SKILL.md in it. Kit
+// scans the directory as given and adds nothing to the path, so BONNIE's
+// skills/ is the whole skill set — the agent never inherits a skill from a
+// .agents/skills it happens to be running beside.
+//
+// Each skill's name and description reach the system prompt; the body arrives
+// only when the model calls activate_skill. A bundled scripts/, references/,
+// or assets/ file is NAMED in that activation text but lives on the host,
+// outside the sandbox the tools run in, so the model cannot open it. Put what
+// the model must read in the skill body, and put a file it must open in
+// workspace/.
+func WithSkills(dir string) Option {
+	return func(c *config) { c.skillsPath = dir }
 }
 
 // WithWorkspace roots the agent's files at dir instead of

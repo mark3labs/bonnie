@@ -78,10 +78,9 @@ type Tree struct {
 	Instructions string
 
 	// Skills is the embedded copy of the tree's skills directory.
-	//
-	// Reserved: it is embedded so a later skill loader has it, and nothing
-	// reads it today. It is stated here rather than implied, because a field
-	// that quietly does nothing is the failure this package exists to avoid.
+	// [Agent.Run] materialises it beside the journal when the tree's skills
+	// directory is not on disk, which is what a built binary on a bare host
+	// has, and hands the directory to Kit as Options.SkillsDir.
 	Skills embed.FS
 
 	// Workspace is the embedded copy of the tree's workspace seed files.

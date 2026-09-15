@@ -43,6 +43,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The tree's `skills/` directory is loaded.** It was embedded by codegen
+  from the first release and read by nothing, which `bonnie.Tree.Skills`
+  admitted in its own doc comment. `Agent.Run` now resolves it and hands it to
+  Kit as `Options.SkillsDir`: each skill's name and description reach the
+  system prompt, and the body arrives when the model calls `activate_skill`.
+
+  The path is resolved the way the instructions file is — the tree on disk
+  first, the copy codegen embedded second. Kit takes a path, so a built binary
+  on a bare host unpacks the embedded skills beside its journal, into
+  `<journal>/skills`. That copy is replaced on each start rather than kept: a
+  skill is authored data the model never writes, so a skill withdrawn from the
+  tree must not survive in the prompt.
+
+- **`bonnie.WithSkills(dir)`**, the option that replaces the tree's skills
+  directory, beside `WithInstructions` and `WithWorkspace`. `WithSkills("")`
+  is a host with no tree, and is what `bonnie serve` passes.
+
+  A tree with no skills now says so to Kit (`Options.NoSkills`) instead of
+  leaving auto-discovery on. Kit would otherwise load `~/.agents/skills` — the
+  operator's own editor skills — and the `.agents/skills` under
+  `Options.SessionDir`, which `sandbox.Agent` points at the sandbox root. A
+  served agent must not take instructions from a directory it merely sits
+  beside. Skills a host configured itself through `WithKit` are untouched.
+
 - **`sandbox.Landlock()`** — the floor backend, and the default. It confines
   tool calls to the run's own workspace with the Linux Landlock LSM and needs
   nothing installed: no daemon, no image, no KVM, no root.
@@ -68,6 +92,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Known limits
 
+- **A skill's bundled files stay on the host.** Kit names a skill's
+  `scripts/`, `references/`, and `assets/` files in the text it injects when
+  the skill is activated, with a host path. The tools run in a sandbox that
+  does not have that path, so the model is told about a file it cannot open.
+  Put what the model must read in the skill body, and put a file it must open
+  in `workspace/`, which is copied into the sandbox.
 - **The default backend is containment, not isolation.** `Landlock` confines
   the filesystem and withholds host credentials. It does **not** confine the
   network and it shares the host kernel, so a local privilege-escalation bug

@@ -101,6 +101,10 @@ func (a *Agent) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	skills, err := c.skillsDir()
+	if err != nil {
+		return err
+	}
 
 	// A built binary has no tree beside it, so the workspace seed files come
 	// from the copies codegen embedded. Seeding never overwrites: a file the
@@ -114,18 +118,7 @@ func (a *Agent) Run(ctx context.Context) error {
 		}
 	}
 
-	kitOpts := append([]kit.Option{}, c.kitOpts...)
-	if c.model != "" {
-		kitOpts = append(kitOpts, kit.WithModel(c.model))
-	}
-	if prompt != "" {
-		kitOpts = append(kitOpts, kit.WithSystemPrompt(prompt))
-	}
-	if extra := append(append([]kit.Tool{}, Registered().Tools...), c.tools...); len(extra) > 0 {
-		kitOpts = append(kitOpts, kit.WithExtraTools(extra...))
-	}
-
-	factory, err := c.agentFactory(ctx, workspace, kitOpts)
+	factory, err := c.agentFactory(ctx, workspace, c.kitOptions(prompt, skills))
 	if err != nil {
 		return err
 	}
@@ -185,8 +178,61 @@ func (a *Agent) Run(ctx context.Context) error {
 		}
 	}
 
-	c.banner(ln.Addr().String(), workspace)
+	c.banner(ln.Addr().String(), workspace, skills)
 	return c.serve(ctx, mux, ln)
+}
+
+// kitOptions is the Kit configuration one run resolved to, with prompt and
+// skills already resolved from the tree by [config.systemPrompt] and
+// [config.skillsDir].
+//
+// A host's own options come first, so a setting BONNIE resolved from the tree
+// wins over the same setting passed through [WithKit]. It is a method rather
+// than a block inside [Agent.Run] so a test can read the options the agent
+// will really be built with, which is the only place the tree's data becomes
+// Kit configuration.
+func (c *config) kitOptions(prompt, skills string) []kit.Option {
+	opts := append([]kit.Option{}, c.kitOpts...)
+	if c.model != "" {
+		opts = append(opts, kit.WithModel(c.model))
+	}
+	if prompt != "" {
+		opts = append(opts, kit.WithSystemPrompt(prompt))
+	}
+
+	// The tree's skills are the agent's whole skill set.
+	//
+	// Naming the directory also turns Kit's auto-discovery off, which is half
+	// the point: left to itself Kit loads ~/.agents/skills and the
+	// .agents/skills under Options.SessionDir, so a served agent would inherit
+	// whatever skills the operator keeps for their own editor, and a sandboxed
+	// run — sandbox.Agent points SessionDir at the sandbox root — would take
+	// instructions from a directory it merely sits beside. A tree with no
+	// skills therefore says so, rather than leaving the question open.
+	//
+	// Kit reads the directory during construction, which is why the path has
+	// to be resolved before the agent is built: the activate_skill tool is
+	// registered only when at least one skill loaded, so a skill added to a
+	// running Kit would reach the catalog with no tool to open it.
+	opts = append(opts, func(o *kit.Options) {
+		if skills == "" {
+			// A host that configured skills itself through WithKit keeps
+			// them: an absent directory in the tree is BONNIE having
+			// nothing to say, not an instruction to drop what was asked for.
+			if o.SkillsDir == "" && len(o.Skills) == 0 {
+				o.NoSkills = true
+			}
+			return
+		}
+		// Options.Skills is an explicit list Kit consults BEFORE SkillsDir,
+		// and NoSkills silences both. Clearing them is what keeps the tree's
+		// own directory from being accepted and then quietly shadowed.
+		o.SkillsDir, o.Skills, o.NoSkills = skills, nil, false
+	})
+	if extra := append(append([]kit.Tool{}, Registered().Tools...), c.tools...); len(extra) > 0 {
+		opts = append(opts, kit.WithExtraTools(extra...))
+	}
+	return opts
 }
 
 // systemPrompt resolves the agent's system prompt: the option when one was
@@ -223,6 +269,88 @@ func (c *config) workspaceDir() (string, error) {
 	abs, err := filepath.Abs(c.workspace)
 	if err != nil {
 		return "", fmt.Errorf("bonnie: workspace path: %w", err)
+	}
+	return abs, nil
+}
+
+// skillsDir is the directory Kit scans for the tree's skills, absolute, or
+// "" when the tree has none. Empty is not an error: instructions.md is a
+// tree's one required file, and a tree with no skill is the normal case.
+//
+// The precedence is the one the instructions file follows — the tree on disk
+// first, the copy codegen embedded second — but the fallback has to land on
+// disk, because Kit takes a path. A built binary on a bare host therefore
+// writes the embedded skills beside its journal and points Kit at that.
+func (c *config) skillsDir() (string, error) {
+	if c.skillsPath == "" {
+		return "", nil
+	}
+	abs, err := filepath.Abs(c.skillsPath)
+	if err != nil {
+		return "", fmt.Errorf("bonnie: skills path: %w", err)
+	}
+	if hasSkillFiles(abs) {
+		return abs, nil
+	}
+	return unpackSkills(Registered().Skills, filepath.Join(c.journal, DefaultSkills))
+}
+
+// hasSkillFiles reports whether dir holds a file that is not the scaffold's
+// .gitkeep marker. A directory holding only the marker is the fresh scaffold's
+// empty slot, not a skill set, and must not win over an embedded copy.
+func hasSkillFiles(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if e.Name() == ".gitkeep" {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+// unpackSkills writes the skills codegen embedded into dest and returns dest
+// absolute, or "" when the binary embedded none. dest is BONNIE's own
+// directory beside the journal, never the tree's skills/ — a built binary is
+// the only caller, and it has no tree.
+//
+// Unlike the workspace seed this replaces what is there. A skill is authored
+// data that only the tree can change: the model never writes one, so a copy
+// left by an older binary is stale rather than precious, and keeping it would
+// leave a deleted skill in the prompt for as long as the directory survives.
+func unpackSkills(files fs.FS, dest string) (string, error) {
+	if embedIsEmpty(files) {
+		return "", nil // nothing embedded: a tree with no skills
+	}
+	abs, err := filepath.Abs(dest)
+	if err != nil {
+		return "", fmt.Errorf("bonnie: skills path: %w", err)
+	}
+	if err := os.RemoveAll(abs); err != nil {
+		return "", fmt.Errorf("bonnie: unpack skills: %w", err)
+	}
+	err = fs.WalkDir(files, ".", func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || path == "." || entry.IsDir() {
+			return err
+		}
+		target := filepath.Join(abs, filepath.FromSlash(embedRel(path)))
+		b, err := fs.ReadFile(files, path)
+		if err != nil {
+			return fmt.Errorf("bonnie: read embedded skill %s: %w", path, err)
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return fmt.Errorf("bonnie: unpack skills: %w", err)
+		}
+		if err := os.WriteFile(target, b, 0o644); err != nil {
+			return fmt.Errorf("bonnie: unpack skills: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return "", err
 	}
 	return abs, nil
 }
@@ -339,23 +467,15 @@ func (c *config) defaultSandbox() sandbox.Provider {
 // It never overwrites: a file that is already there is either the author's
 // seed from a previous start or the model's own work, and both outrank a
 // copy compiled in months ago.
-//
-// A generated embed binds one directory, so every path it yields begins with
-// that directory's name. Only that first element is stripped — not every
-// leading directory — so a seed file in a subdirectory keeps its place.
 func seedFromEmbed(files fs.FS, dest string) error {
-	if _, err := fs.ReadDir(files, "."); err != nil {
+	if embedIsEmpty(files) {
 		return nil // nothing embedded: a tree run from its own source
 	}
 	return fs.WalkDir(files, ".", func(path string, entry fs.DirEntry, err error) error {
 		if err != nil || path == "." || entry.IsDir() {
 			return err
 		}
-		_, rel, ok := strings.Cut(path, "/")
-		if !ok {
-			rel = path
-		}
-		target := filepath.Join(dest, filepath.FromSlash(rel))
+		target := filepath.Join(dest, filepath.FromSlash(embedRel(path)))
 		if _, err := os.Stat(target); err == nil {
 			return nil
 		}
@@ -373,6 +493,33 @@ func seedFromEmbed(files fs.FS, dest string) error {
 	})
 }
 
+// embedIsEmpty reports whether a codegen embed carries nothing.
+//
+// The zero [embed.FS] — the slot a generated file declares when the plan found
+// no directory to embed — reads as an existing but EMPTY root, not as an
+// error. Testing the error alone would therefore call it non-empty, and a
+// caller that acts on that materialises an empty directory and hands it on as
+// if it were a real one.
+func embedIsEmpty(files fs.FS) bool {
+	entries, err := fs.ReadDir(files, ".")
+	return err != nil || len(entries) == 0
+}
+
+// embedRel is one embedded path with the embed's own root directory stripped.
+//
+// A generated embed binds one directory (//go:embed workspace, //go:embed
+// skills), so every path it yields begins with that directory's name. Only
+// that first element is stripped — not every leading directory — so a file in
+// a subdirectory keeps its place, which is what a skill bundled as
+// skills/<name>/SKILL.md depends on.
+func embedRel(path string) string {
+	_, rel, ok := strings.Cut(path, "/")
+	if !ok {
+		return path
+	}
+	return rel
+}
+
 // banner prints the effective configuration at startup, with addr the address
 // the listener really bound. An operator must never have to guess what is
 // running.
@@ -381,7 +528,7 @@ func seedFromEmbed(files fs.FS, dest string) error {
 // run to warn about. The backend is always named instead: the warning existed
 // to make a dangerous default visible, and naming the confinement in force is
 // what replaces it.
-func (c *config) banner(addr, workspace string) {
+func (c *config) banner(addr, workspace, skills string) {
 	if c.quiet {
 		return
 	}
@@ -406,6 +553,9 @@ func (c *config) banner(addr, workspace string) {
 	line("network", networkLabel(c.network))
 	if workspace != "" {
 		line("workspace", workspace)
+	}
+	if skills != "" {
+		line("skills", skills)
 	}
 }
 

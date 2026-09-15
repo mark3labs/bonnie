@@ -94,9 +94,9 @@ func runServe(o serveOpts) error {
 // serveOptions turns the flags into the options [bonnie.Run] takes. It is
 // separate from runServe so tests can read the resolution without serving.
 //
-// serve has no tree, so it takes neither an instructions file nor a
-// workspace: the process's own directory stays the root, which is the
-// historical behaviour of `bonnie serve`.
+// serve has no tree, so it takes neither an instructions file, nor a skills
+// directory, nor a workspace: the process's own directory stays the root,
+// which is the historical behaviour of `bonnie serve`.
 func serveOptions(ctx context.Context, o serveOpts) ([]bonnie.Option, error) {
 	opts := []bonnie.Option{
 		bonnie.WithAddr(o.addr),
@@ -104,6 +104,7 @@ func serveOptions(ctx context.Context, o serveOpts) ([]bonnie.Option, error) {
 		bonnie.WithModel(o.model),
 		bonnie.WithSystemPrompt(o.prompt),
 		bonnie.WithInstructions(""),
+		bonnie.WithSkills(""),
 		bonnie.WithWorkspace(""),
 		bonnie.WithShutdownTimeout(o.shutdown),
 	}

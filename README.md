@@ -153,6 +153,14 @@ bonnie chat --addr 127.0.0.1:8080
 Files under `workspace/` are copied into each run's sandbox. A file that the
 model already wrote is never replaced.
 
+Files under `skills/` are the agent's skills: one `*.md` per skill, or one
+subdirectory per skill with a `SKILL.md` in it, each with YAML frontmatter
+that gives a `name` and a `description`. Those two fields go in the system
+prompt; the body arrives only when the model calls `activate_skill`, so a
+large skill set costs few tokens until it is used. The tree's `skills/` is the
+whole set — an agent never inherits a skill from a `.agents/skills` directory
+it happens to run beside.
+
 There is no configuration file. A setting is a file at a known path
 (`instructions.md`, `workspace/`, `skills/`, `tools/`) or an option in
 `main.go`. Thus a setting that does not exist is a compile error, and not a key
