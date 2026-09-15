@@ -51,6 +51,9 @@ type fakeAPI struct {
 	mu     sync.Mutex
 	server *httptest.Server
 	sent   []string
+	// raw keeps each post's whole body, so a test can read what the
+	// content field alone does not carry — the controls under a message.
+	raw []string
 }
 
 func newFakeAPI(t *testing.T) *fakeAPI {
@@ -61,14 +64,19 @@ func newFakeAPI(t *testing.T) *fakeAPI {
 			http.NotFound(w, r)
 			return
 		}
-		var body struct {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("fake API: unreadable body: %v", err)
+		}
+		var decoded struct {
 			Content string `json:"content"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		if err := json.Unmarshal(body, &decoded); err != nil {
 			t.Errorf("fake API: undecodable body: %v", err)
 		}
 		f.mu.Lock()
-		f.sent = append(f.sent, body.Content)
+		f.sent = append(f.sent, decoded.Content)
+		f.raw = append(f.raw, string(body))
 		f.mu.Unlock()
 		_, _ = w.Write([]byte(`{"id":"m"}`))
 	}))
@@ -80,6 +88,13 @@ func (f *fakeAPI) messages() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string(nil), f.sent...)
+}
+
+// bodies returns each post's whole payload, in order.
+func (f *fakeAPI) bodies() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.raw...)
 }
 
 // harness is the adapter under test with its webhook mounted, its platform

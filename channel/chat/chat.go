@@ -889,6 +889,44 @@ func Dispatch(ctx context.Context, core *Core, turn Turn, deliver func(address s
 	}()
 }
 
+// DispatchAnswer delivers a structured answer to a parked run: the
+// inbound counterpart of [Choices], for a person who pressed a control
+// instead of typing.
+//
+// It is [Dispatch] for an answer that is already resolved. Dispatch reads a
+// message, decides whether it is a control or a turn, and lets [Route]
+// choose between Send and Respond from the run's state. None of that applies
+// here: a press is unambiguously an answer to the question the control was
+// drawn for, and [Answer] has already checked it belongs to this suspension.
+//
+// Like Dispatch it runs in a goroutine under [context.WithoutCancel], so a
+// platform's interaction webhook can acknowledge inside its deadline while
+// the turn the answer releases runs for as long as it needs.
+//
+// A run that is no longer waiting delivers [runtime.ErrNotWaiting] through
+// deliver. That is the double-press: two people answer the same question, or
+// one person presses twice before the first press lands. The second answer
+// is refused rather than queued, because the question was asked once.
+func DispatchAnswer(ctx context.Context, core *Core, address string, responses []runtime.InputResponse, deliver func(address string, run *runtime.Run, err error)) {
+	go func() {
+		bg := context.WithoutCancel(ctx)
+		ref := core.From(address)
+		runID, err := ref.RunID(bg)
+		if err != nil {
+			deliver(address, nil, err)
+			return
+		}
+		stop := watchActivity(core, address, runID)
+		run, err := ref.Respond(bg, responses)
+		stop()
+		if err != nil {
+			deliver(address, nil, err)
+			return
+		}
+		deliver(address, run, nil)
+	}()
+}
+
 // Proactive starts a conversation on an address without an inbound
 // message: the same dispatch a webhook drives, driven by another channel
 // or a schedule instead. The binding is written before the turn runs, so a

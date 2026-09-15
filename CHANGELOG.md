@@ -96,6 +96,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   use /new?" is still a question for the model and "/New" from a phone
   keyboard is still a reset.
 
+- **A parked run can be answered by pressing, not only by typing.**
+  `chat.Choices` says what controls a suspension offers and `chat.Answer`
+  resolves a press back into the responses that resume the run — one
+  vocabulary, so a press means the same thing on every surface.
+  `chat.DispatchAnswer` is the inbound counterpart of `chat.Dispatch` for an
+  answer that is already resolved.
+
+  **Discord renders them.** An approval arrives with Approve and Reject
+  buttons, a question with options gets one button per option, and a press
+  lands on the adapter's existing interactions route — no new endpoint and no
+  change in the Developer Portal. An approval answers with a *verdict*, never
+  with the word on the button, so the agent that asked "may I?" is not left
+  interpreting prose.
+
+  A token carries the halting tool call, so a button in an old message cannot
+  answer the question the run is parked on today. Pressing replaces the
+  message without its buttons, which is the double-press guard. Slack and
+  Telegram still answer in text; the shared layer is what they will use.
+
 - **`channeltest` gains capabilities and a durability case.** An adapter
   declares what it cannot do in `Fixture.Unsupported`, and the suite skips
   exactly those cases with a message naming the capability — so the set of
