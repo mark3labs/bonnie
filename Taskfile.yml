@@ -154,6 +154,13 @@ tasks:
     cmds:
       - goreleaser release --snapshot --clean
 
+  release-notes:
+    desc: Print the CHANGELOG.md section the release body will carry (TAG=v0.5.0)
+    cmds:
+      - scripts/release-notes.sh {{.TAG}}
+    requires:
+      vars: [TAG]
+
   # -----------------------------------------------------------------------
   # Cleanup
   # -----------------------------------------------------------------------

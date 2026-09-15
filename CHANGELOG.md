@@ -5,41 +5,51 @@ All notable changes to BONNIE are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.5.0] — 2026-09-15
 
-### Fixed
+The channels increment. A run now reaches a person wherever they already are:
+a GitHub App joins Slack, Discord, and Telegram, and an agent can **open** a
+conversation instead of only answering one. Two breaking changes land with
+it — the HTTP channel moves under `/bonnie/v1`, and the adapter-facing `chat`
+API takes a normalised turn.
 
-- **The microsandbox conformance suite is reliable again** (20/20 runs, was
-  ~0/10). Two defects. The suite built a sandbox provider per test case, so
-  parallel cases issued ~20 concurrent `msb create` calls and locked msb's
-  own SQLite store — a load BONNIE never produces, because a host shares one
-  provider whose mutex serialises every create. And `msb ps --all`
-  intermittently reports an empty list while sandboxes are running, so the
-  adapter thought a live sandbox was absent and tried to recreate it; `Open`
-  now adopts a sandbox that already exists, still refusing one whose network
-  policy does not match. An `msb` failure also keeps its own cause now
-  instead of only the headline. (T-026)
+### The claims
 
-### Changed
+Unchanged by this release, and still what BONNIE is for:
 
-- **The public-API boundary is a Kit extension, not a CI job.**
-  `.kit/extensions/kit-boundary.go` blocks a `write` or `edit` that would add
-  `github.com/mark3labs/kit/internal/...` or `charm.land/fantasy` to a `.go`
-  file in this repository, and names the import, the file, and the way out in
-  the refusal, so the agent corrects itself in the same turn instead of
-  learning about it minutes later in CI. It is scoped to this repository: a
-  sibling checkout has its own rules, and Kit's own code must import Kit's
-  internals. The `boundary` CI job is removed: `depguard` in the `lint` job
-  already denies both paths by prefix, whatever the module layout, so the
-  rule loses no coverage. `depguard` remains the authority; the extension
-  only runs when a person drives Kit in this checkout. (T-034)
+- **A run survives process death.** The conversation is journalled as it
+  happens, so another process — after a crash, on another machine — resumes
+  the run with the whole history, including which tools it already called, so
+  a side effect is not repeated. A tool-calling step commits as one SQLite
+  transaction: whole, or absent.
+- **A run parks indefinitely.** A run waiting on a person holds no process and
+  no compute — the sandbox opens lazily, so a parked run costs a row in a
+  database. Exit the process and answer tomorrow. A parked run now also parks
+  in a GitHub thread, and the reply that wakes it needs no mention.
+- **A run is reachable over HTTP.** `channel/http` mounts its routes and an
+  NDJSON event stream that survives a reconnect and a restart, now under
+  `/bonnie/v1` with health, info, idempotent start, and stable error codes;
+  the Slack, Discord, Telegram, and GitHub adapters carry the same durable
+  run into a thread.
 
-- **Breaking: the HTTP channel lives under `/bonnie/v1`.** `POST /runs`
-  is now `POST /bonnie/v1/runs`, and every other route moved the same way.
-  `/bonnie/` is the framework's reserved namespace: a channel that mounts a
-  route under it is refused at startup with an error naming the channel and
-  the path, instead of a mux panic or a silent shadow. `bonnie chat` and the
-  TUI follow the new paths. (T-030)
+The limits are under **Known limits** below, stated as plainly. A framework
+that hides its limits gets deployed into situations it cannot handle.
+
+### Breaking changes
+
+1. **The HTTP channel lives under `/bonnie/v1`.** `POST /runs` is now
+   `POST /bonnie/v1/runs`, and every other route moved the same way.
+   `/bonnie/` is the framework's reserved namespace: a channel that mounts a
+   route under it is refused at startup with an error naming the channel and
+   the path, instead of a mux panic or a silent shadow. `bonnie chat` and the
+   TUI follow the new paths. **Update any client that calls the old paths;
+   they no longer exist.** (T-030)
+2. **Breaking for adapter authors:** `chat.NewCore` takes the channel's name;
+   `chat.Dispatch` and `chat.Route` take a `chat.Turn`; the core applies the
+   address prefix itself, so adapters pass the bare platform key;
+   `channel.SessionRef` gains `Reset`, `Clear`, and `Compact`; route handlers
+   take a `channel.Outbound` beside their `Inbound`. An out-of-tree adapter
+   must be updated to compile. (T-028, T-032, T-033)
 
 ### Added
 
@@ -95,17 +105,78 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `runs list` shows the title. (T-028)
 - `GET /bonnie/v1/health` answers `{"ok":true,"status":"ready"}` before any
   run exists and without touching the journal. `GET /bonnie/v1/info` reports
-  the agent name (`bonnie.WithName`), the BONNIE version, and the mounted
-  channels. (T-030)
+  the agent name, the BONNIE version, and the mounted channels. (T-030)
+- **Two options**: `bonnie.WithName` sets the agent name that
+  `GET /bonnie/v1/info` reports, and `bonnie.WithGitHub` mounts the GitHub
+  channel. (T-029, T-030)
 
 ### Changed
 
-- **Breaking for adapter authors:** `chat.NewCore` takes the channel's
-  name; `chat.Dispatch` and `chat.Route` take a `chat.Turn`; the core
-  applies the address prefix itself, so adapters pass the bare platform
-  key; `channel.SessionRef` gains `Reset`, `Clear`, and `Compact`; route
-  handlers take a `channel.Outbound` beside their `Inbound`. (T-028,
-  T-032, T-033)
+- **A tag publishes the release notes, not a commit list.** `release.yml`
+  slices the tag's section out of `CHANGELOG.md` (`scripts/release-notes.sh`)
+  and passes it to `goreleaser --release-notes`, so the published body states
+  the three claims and the limits with no human edit. That edit was done by
+  hand at `v0.1.0` and again at `v0.4.0`; a manual step after every tag is
+  eventually skipped, and the failure is silent — the release simply stops
+  saying what BONNIE cannot do. A tag whose version has no matching section
+  now **fails the release workflow**, naming the missing heading, rather than
+  publishing an empty body. (T-027)
+
+- **The public-API boundary is a Kit extension, not a CI job.**
+  `.kit/extensions/kit-boundary.go` blocks a `write` or `edit` that would add
+  `github.com/mark3labs/kit/internal/...` or `charm.land/fantasy` to a `.go`
+  file in this repository, and names the import, the file, and the way out in
+  the refusal, so the agent corrects itself in the same turn instead of
+  learning about it minutes later in CI. It is scoped to this repository: a
+  sibling checkout has its own rules, and Kit's own code must import Kit's
+  internals. The `boundary` CI job is removed: `depguard` in the `lint` job
+  already denies both paths by prefix, whatever the module layout, so the
+  rule loses no coverage. `depguard` remains the authority; the extension
+  only runs when a person drives Kit in this checkout. (T-034)
+
+### Fixed
+
+- **The microsandbox conformance suite is reliable again** (20/20 runs, was
+  ~0/10). Two defects. The suite built a sandbox provider per test case, so
+  parallel cases issued ~20 concurrent `msb create` calls and locked msb's
+  own SQLite store — a load BONNIE never produces, because a host shares one
+  provider whose mutex serialises every create. And `msb ps --all`
+  intermittently reports an empty list while sandboxes are running, so the
+  adapter thought a live sandbox was absent and tried to recreate it; `Open`
+  now adopts a sandbox that already exists, still refusing one whose network
+  policy does not match. An `msb` failure also keeps its own cause now
+  instead of only the headline. (T-026)
+
+### Known limits
+
+Stated as plainly as the claims. Full detail in [`README.md`](README.md#limits).
+
+- Sandboxing is opt-in. Without it, tool calls run as the host process.
+- Docker isolates with namespaces, not a guest kernel. Use microsandbox when
+  the threat model includes hostile code.
+- microsandbox is verified on Linux with KVM only, not on macOS with Apple
+  Silicon, and its network policy is fixed at create time; reattaching under
+  a different policy fails with `ErrPolicyMismatch`.
+- Sandbox egress is open unless a policy is set.
+- **The HTTP channel carries a `Principal` but does not verify it.**
+  Authenticate in front of it. The chat channels are different: each verifies
+  its platform's signature — Slack, Discord, Telegram, and GitHub's
+  `X-Hub-Signature-256` — and a channel without its credentials refuses to
+  serve. That verifies the platform, not the person: a user ID inside a
+  verified event is the platform's word.
+- **Run ownership is per host, and the journal does not refuse a second
+  writer.** SQLite serialises write transactions and rejects a reused
+  sequence number, so two processes writing one run cannot corrupt it. That
+  is journal integrity, not turn coordination: two servers that both execute
+  the same run still interleave the conversation. SQLite's locking needs
+  working POSIX locks, so a journal on a network filesystem is unsafe.
+- Events are journal-anchored: a reconnect past the in-memory backlog is
+  served from the journal, and Kit's mid-turn deltas stay live-only.
+- Reclaiming the sandboxes of finished runs is a command
+  (`bonnie sandbox prune`), not a background sweep.
+- The mark3labs modules are publicly fetchable; authoring an agent needs Go
+  on your machine, while the binary `bonnie build` produces needs nothing on
+  the host.
 
 ## [0.4.0] — 2026-09-14
 
@@ -608,6 +679,7 @@ gets deployed into situations it cannot handle.
 
 ---
 
+[0.5.0]: https://github.com/mark3labs/bonnie/releases/tag/v0.5.0
 [0.4.0]: https://github.com/mark3labs/bonnie/releases/tag/v0.4.0
 [0.3.0]: https://github.com/mark3labs/bonnie/releases/tag/v0.3.0
 [0.2.0]: https://github.com/mark3labs/bonnie/releases/tag/v0.2.0

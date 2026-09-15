@@ -159,6 +159,7 @@ subsequent tag follows, not as open work. Applications:
 | `v0.2.0` | `b1fff6d` | 2026-09-13 |
 | `v0.3.0` | `38a511d` | 2026-09-13 |
 | `v0.4.0` | `9ccb959` | 2026-09-14 |
+| `v0.5.0` | _pending_ | 2026-09-15 |
 
 ### `v0.4.0`, 2026-09-14 — every box confirmed
 
@@ -184,10 +185,18 @@ mid-release must be re-checked against the code at tag time**; a later commit
 in the same release can invalidate an earlier entry, and nothing in CI
 notices.
 
-**`goreleaser` does not read `CHANGELOG.md`.** `.goreleaser.yaml` builds the
-body from commit subjects, so the published notes are a commit list until
-someone replaces them. This cost an edit at `v0.1.0` and again at `v0.4.0`.
-Setting `release.notes` would fix it once — filed as T-027.
+**`goreleaser` does not read `CHANGELOG.md` — fixed in `v0.5.0`.**
+`.goreleaser.yaml` builds the body from commit subjects, so the published
+notes were a commit list until someone replaced them. This cost an edit at
+`v0.1.0` and again at `v0.4.0`. T-027 closed it: `release.yml` now slices the
+tag's section out of `CHANGELOG.md` with `scripts/release-notes.sh` and passes
+it to `goreleaser --release-notes`, and a tag with no matching section fails
+the workflow instead of publishing an empty body. **Step 3 below is no longer
+manual** — but the section must exist before the tag is pushed.
+
+**The `boundary` CI job no longer exists.** T-034 deleted it; `depguard` in
+the `lint` job is the authority and denies both forbidden paths by prefix.
+"All CI jobs green" now means `test` and `lint`.
 
 **Priority** P2 · **Size** S
 
@@ -1229,11 +1238,18 @@ say what BONNIE cannot do. The limits are the part a reader most needs.
 
 ### Acceptance criteria
 
-- [ ] A tag publishes a body containing the three claims and the limits with
-      no human edit
-- [ ] A tag whose version has no `CHANGELOG.md` section fails the release
+- [x] A tag publishes a body containing the three claims and the limits with
+      no human edit — `release.yml` runs `scripts/release-notes.sh` and passes
+      the section to `goreleaser --release-notes`
+- [x] A tag whose version has no `CHANGELOG.md` section fails the release
       workflow with a message naming the missing heading
-- [ ] Verified on a real tag, not only in `--snapshot`
+- [ ] Verified on a real tag, not only in `--snapshot` — **pending `v0.5.0`**
+
+The extractor is pinned by `scripts/release_notes_test.go`, which `go test
+./...` reaches: it covers the stop-at-next-release boundary, the optional
+leading `v`, exact-not-prefix matching (`0.5` must not match `0.5.0`, `0.1.0`
+must not match `0.10.0`), the named failure, and a check that the repository's
+own notes for the version being cut state the claims and the limits.
 
 ### Watch for
 
