@@ -1,67 +1,151 @@
-# BONNIE Agent Guidelines
+# AGENTS.md
 
-Always talk in ASD-STE100 Simplified Technical English.
+Guidance for coding agents that work in this repository. Human contributors
+read [`README.md`](README.md) and [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
-## Start here
+Write and speak in ASD-STE100 Simplified Technical English.
 
-**The code is the spec.** There is no specification document and no task
-file. The godoc on every exported symbol, and the comments on the tests,
-carry the reasoning — many of them record a real defect and why the shape is
-what it is. Read them before you change the shape.
+## Project overview
+
+BONNIE makes an agent run durable. It wraps the
+[Kit](https://github.com/mark3labs/kit) agent SDK. A run continues after a
+crash, waits days for a human answer, and replies over HTTP.
+
+- Module: `github.com/mark3labs/bonnie`
+- Language: Go 1.27
+- Entry point for an agent tree: `bonnie.New().Serve()`
+
+**The code is the spec.** There is no specification document and no task file.
+The godoc on each exported symbol, and the comments on the tests, carry the
+reasoning — many of them record a real defect and why the shape is what it is.
+Read them before you change the shape.
+
+When you learn that a comment is wrong, **correct the comment in the same
+commit**. A stale comment is worse than none.
 
 Open work is ad hoc or a
 [GitHub issue](https://github.com/mark3labs/bonnie/issues).
 
-When you learn something that a comment gets wrong, **correct the comment in
-the same commit**. A stale comment is worse than none.
+Layout:
 
-## Build/Test Commands
-- **Shortcut**: `task` — `task check` (fmt, lint, test), `task ci` (CI parity), `task dev -- serve` (Taskfile.yml mirrors everything below)
-- **Build**: `go build ./...`
-- **Test all**: `go test -race ./...`
-- **Test single**: `go test -race ./runtime -run TestResumeAcrossProcessBoundary`
-- **Lint**: `golangci-lint run`
-- **Vet**: `go vet ./...`
-- **Format**: `go fmt ./...`
+| Path | Function |
+|---|---|
+| `bonnie.go`, `options.go`, `run.go` | root package: serve, options, run API |
+| `runtime/` | durable run executor and SQLite journal |
+| `channel/` | inbound transports: `http`, `chat`, `slack`, `discord`, `telegram`, `github` |
+| `agent/` | agent-tree scaffold and code generation |
+| `sandbox/` | tool sandboxes: local, exec, docker, landlock, microsandbox |
+| `cmd/bonnie/` | CLI (`init`, `dev`, `chat`, `serve`, `build`, `runs`, `sandbox`) |
+| `examples/` | `minimal`, `hitl-restart` |
 
 ## The one rule that matters
 
-**BONNIE uses the public Kit SDK only: `github.com/mark3labs/kit/pkg/kit`.**
+**BONNIE imports the public Kit SDK only: `github.com/mark3labs/kit/pkg/kit`.**
 
-Never import `github.com/mark3labs/kit/internal/...`. The Go compiler already
-rejects it, because BONNIE's module path is not a prefix of Kit's. Do not try
-to work around this by vendoring Kit, copying internal code, or merging the
-repositories.
+- Never import `github.com/mark3labs/kit/internal/...`.
+- Never import `charm.land/fantasy`. Kit re-exports each model type as an
+  alias (`kit.LLMMessage`, `kit.LLMToolCallPart`,
+  `kit.LLMToolResultOutputContentText`). `fantasy` must stay `// indirect` in
+  `go.mod`.
+- Do not vendor Kit, copy internal code, or merge the two repositories.
 
-Never import `charm.land/fantasy` either. Kit re-exports every model type
-BONNIE needs as an alias (`kit.LLMMessage`, `kit.LLMToolCallPart`,
-`kit.LLMToolResultOutputContentText`, ...). Naming fantasy directly pins BONNIE
-to Kit's own transitive dependency. It must stay `// indirect` in `go.mod`.
-When Kit aliases a type but not a helper that operates on it, write the small
-helper in BONNIE — see `toolResultText` in `runtime/util.go`.
+If Kit exports a type but not a helper for it, write the small helper in
+BONNIE. See `toolResultText` in `runtime/util.go`.
 
-If you need something Kit does not export:
-1. Check whether the public API can already do it. It usually can.
-2. If not, open an issue on Kit to export it from `pkg/kit`.
-3. Only then consider a local workaround, and mark it `// TODO(kit):`.
+If the public API cannot do the task:
 
-The rule is enforced three ways, and the order they fire in is not the order
-of authority:
+1. Examine the public API again. Usually it can.
+2. Open an issue on `mark3labs/kit` to export what you need.
+3. Only then write a local workaround, and mark it `// TODO(kit):`.
+
+Three layers enforce the rule. The order they fire in is not the order of
+authority:
 
 | Layer | Where | Fires |
 |---|---|---|
-| Kit extension | `.kit/extensions/kit-boundary.go` | before the `write`/`edit` lands, in this checkout only |
-| Go compiler | module path is not a prefix of Kit's | at build time |
+| Kit extension | `.kit/extensions/kit-boundary.go` | before a `write`/`edit` lands, in this checkout only |
+| Go compiler | BONNIE's module path is not a prefix of Kit's | at build time |
 | `depguard` | `.golangci.yml` | in `task lint` and the CI `lint` job |
 
-**`depguard` is the authority.** The extension is a guard-rail: it only runs
-when a person drives Kit here, so it cannot see an edit made in an editor, by
-another tool, or by a dependency bump. Never delete the `depguard` rule
-because the extension exists. There is no `boundary` CI job any more:
-`depguard` denies both paths by prefix whatever the module layout, so the job
-added nothing.
+**`depguard` is the authority.** The extension is only a guard-rail: it does
+not see an edit from an editor, a different tool, or a dependency bump. Do not
+delete the `depguard` rule because the extension exists. There is no
+`boundary` CI job any more: `depguard` denies both paths by prefix whatever
+the module layout, so the job added nothing.
 
-## Architecture
+## Setup commands
+
+Use `task` (see [`Taskfile.yml`](Taskfile.yml)). Nix users get the full tool
+set with `direnv allow` or `nix develop`.
+
+- Build the binary: `task build`
+- Install the CLI: `task install`
+- Run the CLI: `task dev -- serve --journal .bonnie`
+- Tidy modules: `task tidy`
+
+Work against the pinned Kit by default. `go.mod` names the version, and each
+test uses it. To work against Kit HEAD, add an **uncommitted** replace:
+
+```bash
+go mod edit -replace github.com/mark3labs/kit=../kit
+# ... work ...
+go mod edit -dropreplace github.com/mark3labs/kit
+```
+
+Never commit a `replace` directive. CI builds against the pinned version, so a
+release is always proven against the version a user gets.
+
+## Build and test commands
+
+- Full quality loop: `task check` (format check, lint, test)
+- CI parity, run it before you push: `task ci`
+- Build: `go build ./...`
+- Test all: `go test -race ./...`
+- Test one test: `go test -race ./runtime -run TestResumeAcrossProcessBoundary`
+- Lint: `golangci-lint run ./...`
+- Vet: `go vet ./...`
+- Format: `go fmt ./...`
+- Coverage report: `task test-cover`
+
+Correct each test failure, lint message, and type error before you finish a
+task.
+
+The CGO-free build is proven, not assumed:
+
+```bash
+CGO_ENABLED=0 go build ./...
+```
+
+## Testing instructions
+
+- CI is in [`.github/workflows/ci.yml`](.github/workflows/ci.yml). The `test`
+  job builds, vets, tests with `-race`, and builds again with `CGO_ENABLED=0`.
+  The `lint` job runs `golangci-lint`.
+- Use `t.Parallel()` by default.
+- Use `fakeAgent` from `runtime/runner_test.go`. Do not call a live model in a
+  standard test.
+- Each durability claim needs a test that crosses a process boundary in
+  spirit: make a second `Runner` that shares the journal only. See
+  `TestResumeAcrossProcessBoundary`.
+- Live-model tests use the `integration` build tag and a provider key
+  (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GEMINI_API_KEY`). They must skip
+  cleanly without a key, never fail. Run them with `task test-live`.
+- Add or update tests for the code you change, also when nobody asks.
+
+## Code style
+
+- **Imports**: stdlib → third-party → local, with a blank line between groups.
+- **Naming**: camelCase for unexported, PascalCase for exported.
+- **Errors**: always examine them. Wrap with
+  `fmt.Errorf("bonnie: context: %w", err)`.
+- **Sentinel errors**: declare at package level, test with `errors.Is`.
+- **Types**: prefer `any` to `interface{}`.
+- **JSON**: snake_case tags, with `omitempty` where it applies.
+- **Context**: the first parameter of each blocking operation.
+- **Godoc**: each exported symbol gets a doc comment. BONNIE is a public
+  framework; the doc comment is part of the API.
+
+## Architecture notes
 
 ```
 L4  CLI, evals, traces                 CLI implemented; evals planned
@@ -72,95 +156,76 @@ L1  runtime/    durable run executor   implemented
 L0  kit/pkg/kit                        upstream, unmodified
 ```
 
-The root package `github.com/mark3labs/bonnie` is the entry point an agent
-tree calls: `bonnie.New().Serve()` is a complete agent. It owns the serving
-the default layout constants, and the CLI calls the same code, so the two
-cannot drift. **There is no manifest file** — a setting is a file at a fixed
-path or a Go option, never both. Do not add a config file back.
+The root package is the entry point an agent tree calls. It owns the serving
+and the default layout constants, and the CLI calls the same code, so the two
+cannot drift.
 
-### L1 durability seams (runtime/)
-BONNIE gets durability from four public Kit extension points. Know these before
-changing anything in `runtime/`.
+### Durability seams (`runtime/`)
+
+BONNIE gets durability from four public Kit extension points. Learn them
+before you change `runtime/`.
 
 | Need | Kit public API | BONNIE file |
 |---|---|---|
-| Journal every message | `Options.SessionManager` | `session.go` |
+| Journal each message | `Options.SessionManager` | `session.go` |
 | Checkpoint each step | `Kit.OnStepFinish` | `runner.go` |
 | Inject replayed context | `Kit.OnContextPrepare` | `runner.go` |
 | Suspend for human input | `ToolOutput{Halt, FinalValue}` | `suspend.go` |
 
 - `Session` implements all 20 methods of `kit.SessionManager` (the count was
-  recorded as 21 until `v0.106.0` was verified; it was wrong). The
-  `var _ kit.SessionManager = (*Session)(nil)` assertion in `session.go` is a
-  deliberate tripwire: if Kit breaks the v0.x freeze and widens the interface,
-  the build breaks here first. `Session` also implements `kit.StepAppender`
+  recorded as 21 until `v0.106.0` was verified; it was wrong). The assertion
+  `var _ kit.SessionManager = (*Session)(nil)` in `session.go` is a deliberate
+  tripwire: if Kit breaks the v0.x freeze and widens the interface, the build
+  breaks here first. `Session` also implements `kit.StepAppender`
   (`AppendStep`), so a tool-calling step reaches the journal as one atomic
   write.
-- `Agent` is an interface, not `*kit.Kit`. This keeps the executor testable
-  without credentials and documents how small the Kit surface actually is.
-  Do not replace it with a concrete type.
+- `Agent` (`runtime/runner.go`) is an interface, not `*kit.Kit`. This keeps
+  the executor testable without credentials, and documents how small the Kit
+  surface actually is. Do not replace it with a concrete type.
 - Records are append-only. `Replay` must be deterministic.
-- **Replay must stay lossless.** `Record.Payload` carries the JSON-encoded
-  `kit.LLMMessage`; `Record.Text` is a display-only projection. Never rebuild a
-  message from `Text` alone — that drops tool calls silently. Guard test:
-  `runtime/replay_fidelity_test.go`.
+- **Replay must stay lossless.** `Record.Payload` holds the JSON-encoded
+  `kit.LLMMessage`. `Record.Text` is a display-only projection. Never rebuild
+  a message from `Text` alone, because that drops tool calls silently. Guard
+  test: `runtime/replay_fidelity_test.go`.
 
-### The journal is SQLite, and it must stay CGO-free
-`SQLiteJournal` (`runtime/sqlitejournal.go`) is the durable journal: one
-`<root>/journal.db`, WAL, one transaction per step. The driver is
-`modernc.org/sqlite`, which is **pure Go**. Never swap in
-`github.com/mattn/go-sqlite3` or anything else that needs C: `bonnie build`
-promises a single static binary and `goreleaser` cross-compiles four targets
-from one machine. `depguard` denies the CGO driver and CI runs
-`CGO_ENABLED=0 go build ./...`, so a mistake fails loudly — do not silence
-either guard.
+### The journal is SQLite and must stay CGO-free
 
-Two more rules that are easy to break:
+`runtime/sqlitejournal.go` keeps one `<root>/journal.db` with WAL and one
+transaction per step. The driver is `modernc.org/sqlite`, which is pure Go.
 
-- **Settings go in the DSN, not in a `PRAGMA` after `sql.Open`.** A pragma
-  statement applies to one pooled connection, not the pool.
-- **Do not delete the torn-write repair** (`runtime/repair.go`) on the
-  grounds that a step is now a transaction. Runs imported from the old JSONL
-  format, and third-party journals, still carry the shape it fixes.
+- Never use `github.com/mattn/go-sqlite3` or another driver that needs C.
+  `bonnie build` promises one static binary, and `goreleaser` cross-compiles
+  four targets from one machine.
+- Put settings in the DSN, not in a `PRAGMA` after `sql.Open`. A pragma
+  applies to one pooled connection, not to the pool.
+- Do not delete the torn-write repair (`runtime/repair.go`). Runs imported
+  from the older JSONL format, and third-party journals, still have the shape
+  it corrects.
 
-## Code Style
-- **Imports**: stdlib → third-party → local (blank lines between)
-- **Naming**: camelCase (unexported), PascalCase (exported)
-- **Errors**: always check, wrap with `fmt.Errorf("bonnie: context: %w", err)`
-- **Sentinel errors**: define at package level, test with `errors.Is`
-- **Types**: prefer `any` over `interface{}`
-- **JSON**: snake_case tags with `omitempty` where appropriate
-- **Context**: first parameter for blocking operations
-- **Godoc**: every exported symbol. BONNIE is a public framework; treat the
-  doc comment as part of the API.
+### Configuration is code
 
-## Testing
-- Every durability claim needs a test that crosses a process boundary in
-  spirit: build a second `Runner` sharing only the journal.
-- Use `fakeAgent` in `runner_test.go` rather than a live model.
-- `t.Parallel()` by default.
+There is no manifest file. A setting is a file at a fixed path or a Go option,
+never both. Do not add a configuration file.
 
-## Terminal rendering
+### Terminal rendering
+
 Kit renders the agent's terminal UI. BONNIE's framework packages ship no TUI
-today; the CLI owns one interactive surface, `bonnie dev` / `bonnie chat`
+today. The CLI owns one interactive surface, `bonnie dev` / `bonnie chat`
 (`cmd/bonnie/tui`, charm's bubbletea/bubbles/lipgloss v2, with herald-md for
-assistant markdown — the same libraries upstream Kit's TUI uses), and styles its
-own help and errors with fang. The layered framework packages stay
-terminal-free; a host that wants an off-screen conversation uses the HTTP
+assistant markdown — the same libraries upstream Kit's TUI uses), and styles
+its own help and errors with fang. The layered framework packages stay
+terminal-free. A host that wants an off-screen conversation uses the HTTP
 channel. The hard boundary is the public-Kit-SDK rule above, and it extends
 here: the TUI talks to the wire the channel exposes, never to Kit internals.
 
-## Local development
-BONNIE and Kit are separate repos. Nothing is needed to work against the
-pinned Kit: `go.mod` names the version, and every test — including the ones
-that compile a scaffolded tree in a temp directory — uses it.
+## Commit and PR instructions
 
-To work against Kit HEAD, add an **uncommitted** replace:
-
-```
-go mod edit -replace github.com/mark3labs/kit=../kit
-```
-
-Never put a `replace` directive in the published `go.mod`. CI builds against
-the Kit version pinned there, so a release is always proven against the
-version a user gets.
+- Use conventional commits: `feat:`, `fix:`, `docs:`, `test:`, `chore:`,
+  `refactor:`. Add `!` for a breaking change.
+- Write what changed and why, not the process you followed.
+- Branch from `master`.
+- Run `task check` before each commit.
+- Make sure no new import of `kit/internal/*` or `charm.land/fantasy` exists.
+- Complete each box in the PR template.
+- Release steps are in [`docs/RELEASE.md`](docs/RELEASE.md). Keep
+  `CHANGELOG.md` current.
