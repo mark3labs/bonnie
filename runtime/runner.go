@@ -46,8 +46,26 @@ var _ Agent = (*kit.Kit)(nil)
 // fresh agent wired to the replayed conversation.
 type AgentFactory func(ctx context.Context, s *Session) (Agent, error)
 
-// KitAgent is the default [AgentFactory]. It constructs a real Kit instance
-// with the BONNIE session installed and the HITL tools registered.
+// KitAgent is the [AgentFactory] that builds a bare Kit instance with the
+// BONNIE session installed and the HITL tools registered.
+//
+// # It is not sandboxed
+//
+// The agent it builds runs Kit's core tools — shell, read, write, edit — **in
+// this process**, with its files, its network, and its credentials. It is the
+// low-level seam, not the default: `bonnie.New()` wraps it in
+// [sandbox.Agent], which replaces those tools with a set that proxies into a
+// sandbox, and there is no configuration of BONNIE's own serving path that
+// reaches this function directly.
+//
+// Call it only when the host owns the isolation itself — for example a
+// process that is already inside a container it controls. Rooting the tools
+// at a directory with kit.WithWorkDir is NOT isolation: a working directory
+// is consulted for relative paths only, and an absolute path walks straight
+// out of it. A live agent did exactly that and read its own journal
+// (docs/SPEC.md §4.9.1). Prefer [sandbox.Agent].
+//
+// # Why it applies options this way
 //
 // It deliberately applies the options to a [kit.Options] value and calls
 // [kit.New], rather than calling [kit.NewAgent] and then SetSessionManager.

@@ -26,14 +26,51 @@ Only the latest tag receives security fixes. If you run an older version, upgrad
 
 ⚠️ **Important: read before deployment.**
 
-### No sandbox in v0.1.0
+### Every run is sandboxed — but the floor is containment, not isolation
 
-BONNIE executes tool calls that the language model chooses.
+BONNIE executes tool calls that the language model chooses. **Every tool call
+runs in a sandbox.** There is no unsandboxed mode: `bonnie.WithSandbox`
+selects a backend, it does not enable one, and `--sandbox none` is refused.
 
-**Sandboxing exists but is opt-in.** Without it, tool calls run as the BONNIE
-process, with its files, its network, and its credentials.
+The default backend is `Landlock`. Read what it does and does not do, because
+the difference decides whether it is enough for your deployment:
 
-Turn it on:
+| | Landlock (default) | Docker | Microsandbox |
+|---|---|---|---|
+| Filesystem | **confined** to the run's workspace | container | microVM |
+| Host credentials | **not passed** to commands | not passed | not passed |
+| Network | **open** | open unless a policy is set | policy, incl. allow-list |
+| Kernel | **shared with the host** | shared | own guest kernel |
+| Needs installing | nothing | Docker | `msb` + KVM |
+
+**The default is containment, not isolation.** Landlock confines the
+filesystem and withholds the environment. It does **not** confine the network,
+and it does not give the command its own kernel, so a local
+privilege-escalation bug is not contained. It is the floor because it needs
+nothing installed — a floor that breaks `bonnie init` on a bare machine is a
+floor people switch off.
+
+⚠️ **Do not run BONNIE as a user in the `docker` group, or any group that
+grants access to a privileged unix socket.** Landlock mediates opening a file,
+not connecting to a socket, so a tool call can reach `/var/run/docker.sock`
+whenever the BONNIE process can — and `docker run -v /:/host` then reads the
+whole filesystem, defeating the jail entirely. No path configuration closes
+this; it is a property of the LSM. Use a dedicated unprivileged user, or
+microsandbox.
+
+Check the account you serve from:
+
+```sh
+id -nG          # look for: docker, podman, lxd, libvirt, kvm
+```
+
+If any appear, either serve from an account without them or use
+`--sandbox microsandbox`. This is a known, reproduced gap, not a theoretical
+one — a live model found it and reported the route itself. See `docs/SPEC.md`
+§4.9 for why it is documented rather than closed.
+
+**For untrusted or hostile code, that floor is not enough.** Use a real
+backend and cut egress:
 
 ```sh
 bonnie serve --sandbox docker --sandbox-deny-network
@@ -52,27 +89,38 @@ bonnie.New(
 runner := runtime.NewRunner(journal, sandbox.Agent(sandbox.Docker(), opts...))
 ```
 
-See `docs/SANDBOX.md`. Three backends ship: `Local` (no isolation, for
-development only), `Docker` (container namespaces), and `Microsandbox`
-(microVM with a guest kernel).
+See `docs/SANDBOX.md`. Four backends ship: `Landlock` (the default:
+filesystem containment, no isolation of the network or the kernel), `Local`
+(**no containment at all**, development only), `Docker` (container
+namespaces), and `Microsandbox` (microVM with a guest kernel).
 
-Even with a sandbox, the host is responsible for the rest:
+Whatever the backend, the host is responsible for the rest:
 
-- Docker isolates with namespaces and cgroups, not a guest kernel. Use
-  microsandbox when the threat model includes hostile code.
+- **Run BONNIE as an unprivileged user.** With the Landlock floor this is not
+  advice but a requirement: group membership that reaches a daemon socket
+  (`docker` above all) is inherited by every tool call and is a complete
+  escape.
+- Landlock and Docker share the host kernel. Use microsandbox when the threat
+  model includes hostile code.
 - Sandbox egress is open unless you set a policy. Use
   `--sandbox-deny-network`, or an allow-list on microsandbox, or
   `bonnie.WithNetwork` in a tree. They are the same control with the same
   refusals: a mode a backend cannot enforce is an error, never a silent
-  default, and a policy with no sandbox to enforce it is refused at startup.
+  default. The Landlock backend cannot control egress, so it refuses a policy
+  outright and names the backends that can.
 - Run BONNIE itself in a container or VM that limits system calls, file
   access, and network.
 - Do not give BONNIE credentials that your application does not also hold.
 
-This is a real risk, not a hypothetical one. BONNIE's own live-model test once
-ran without a sandbox and the model wrote a `Dockerfile`, a `terraform/`
-directory, and deployment scripts into the repository working directory.
-Nothing failed and nothing warned. See `docs/SPEC.md` §4.9.
+This is a real risk, not a hypothetical one, and it has bitten twice. BONNIE's
+own live-model test once ran with host tools and the model wrote a
+`Dockerfile`, a `terraform/` directory, and deployment scripts into the
+repository working directory. Later, with tool calls rooted at the workspace,
+a live Slack agent ran `find` over its own tree by **absolute path** and read
+`main.go`, `instructions.md`, and `.bonnie/journal.db` — the journal that made
+its own runs durable. Nothing failed and nothing warned either time. A working
+directory is a base, not a jail; that is why the sandbox is no longer
+optional. See `docs/SPEC.md` §4.9 and §4.9.1.
 
 ### HTTP channel: no authentication verification in v0.1.0
 

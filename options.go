@@ -119,17 +119,28 @@ func WithWorkspace(dir string) Option {
 	return func(c *config) { c.workspace = dir }
 }
 
-// WithSandbox runs every tool call in p instead of in this process.
+// WithSandbox selects the backend every tool call runs in.
 //
-// Without it, a model-chosen tool call has this process's files, network, and
-// credentials, and [Agent.Run] says so at startup. See docs/SANDBOX.md.
+// It SELECTS a sandbox, it does not enable one. Leaving it out does not give
+// the model this process's filesystem: a run with no explicit backend gets
+// [sandbox.Landlock], which confines tool calls to the run's own workspace
+// using the Linux Landlock LSM and needs nothing installed.
+//
+// Pass this to choose something stronger — [sandbox.Docker] for namespaces,
+// [sandbox.Microsandbox] for a microVM with its own kernel — or to widen the
+// confinement deliberately with [sandbox.Local], which provides no isolation
+// at all and is for development only.
+//
+// See docs/SANDBOX.md for what each backend does and does not contain.
 func WithSandbox(p sandbox.Provider) Option {
 	return func(c *config) { c.sandbox = p }
 }
 
-// WithNetwork constrains what the sandbox may reach. It needs a sandbox: a
-// policy with nothing to enforce it is refused at startup, never stored and
-// ignored.
+// WithNetwork constrains what the sandbox may reach. It needs a backend that
+// can enforce it: a policy is refused at startup by a backend that cannot,
+// never stored and ignored. The default Landlock backend confines the
+// filesystem and not the network, so a policy with it is refused and names
+// the backends that can.
 func WithNetwork(p sandbox.NetworkPolicy) Option {
 	return func(c *config) { c.network = &p }
 }
@@ -189,8 +200,11 @@ func WithListener(ln net.Listener) Option {
 	return func(c *config) { c.listener = ln }
 }
 
-// Quiet suppresses the startup banner. The no-sandbox warning is printed
-// anyway: what runs unisolated must never be quieter than what does not.
+// Quiet suppresses the startup banner.
+//
+// It no longer has to make an exception for a no-sandbox warning, because no
+// run is unsandboxed: the banner names the backend in force instead, and a
+// host that silences it has still chosen a confined run.
 func Quiet() Option {
 	return func(c *config) { c.quiet = true }
 }

@@ -94,6 +94,25 @@ func (s *seeded) DeleteRun(ctx context.Context, runID string) (bool, error) {
 	return rd.DeleteRun(ctx, runID)
 }
 
+// WorkingDir forwards to the wrapped provider, so the system prompt still
+// names the directory the tools really use when a seed is in play.
+//
+// Forgetting this was a live defect: seeding is applied to the DEFAULT
+// backend in run.go, so the wrapper stood between the agent and the only
+// provider that could report a host path. The prompt fell back to
+// /workspace, a directory that does not exist under a host-mapped backend,
+// and a live model said so — "my workspace is not actually /workspace".
+//
+// A provider that runs at [Workspace] reports nothing and the caller's
+// fallback applies, which is why this returns "" rather than guessing.
+func (s *seeded) WorkingDir(runID string) string {
+	r, ok := s.p.(WorkingDirReporter)
+	if !ok {
+		return ""
+	}
+	return r.WorkingDir(runID)
+}
+
 // seedInto mirrors dir into the sandbox, relative to [Workspace], skipping
 // files that are already there and skipping [gitkeep].
 func seedInto(ctx context.Context, sb Sandbox, dir string) error {

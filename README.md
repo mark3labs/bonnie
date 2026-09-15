@@ -86,7 +86,10 @@ Set a provider key. BONNIE uses whatever Kit is configured for:
 export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY, or GEMINI_API_KEY
 ```
 
-Requires Go 1.27+. Sandboxing is optional and needs Docker or `msb`.
+Requires Go 1.27+ and **Linux** (kernel 5.13+ with Landlock enabled, which is
+the default on every current distribution). Sandboxing is not optional and
+needs nothing installed; Docker or `msb` buy stronger isolation. macOS and
+Windows are not supported — see [Limits](#limits).
 
 ### Development shell
 
@@ -317,11 +320,20 @@ the tool's name. `bonnie dev` and `bonnie build` regenerate the wiring, so
 
 ## Sandboxing
 
-By default, tool calls run **as your process** — your files, your network, your
-credentials. For anything untrusted, put them in a sandbox.
+Every tool call runs in a sandbox. There is no unsandboxed mode: `WithSandbox`
+**selects** a backend, it does not enable one, and leaving it out gets you
+`sandbox.Landlock()` — not your process.
 
-In an agent tree, that is one option — `bonnie init` scaffolds both lines
-commented out, so the choice is visible rather than silent:
+The default confines tool calls to the run's own workspace with the Linux
+Landlock LSM, and needs nothing installed. That is why it is the floor: a
+default that requires Docker is a default people turn off.
+
+```go
+bonnie.New().Serve() // already sandboxed
+```
+
+Choose something stronger when the work is untrusted — `bonnie init` scaffolds
+both lines commented out, so the choice is visible rather than silent:
 
 ```go
 bonnie.New(
@@ -340,25 +352,32 @@ runner := runtime.NewRunner(journal, sandbox.Agent(provider,
 ))
 ```
 
-The model now gets `bash`, `read_file`, `write_file`, and `list_files` that
-run inside a container rooted at `/workspace`.
+The model gets `bash`, `read_file`, `write_file`, and `list_files` that run
+inside the sandbox, rooted at `/workspace`.
 
 | Backend | Isolation | You install | Extra Go deps |
 |---|---|---|---|
+| `sandbox.Landlock()` — **default** | filesystem **containment**, shared kernel, open network | — | 1 |
 | `sandbox.Local()` | **none** — dev only | — | 0 |
 | `sandbox.Docker()` | container namespaces | Docker | 0 |
 | `sandbox.Microsandbox()` | microVM, guest kernel | [`msb`](https://github.com/superradcompany/microsandbox) | 0 |
 
-All three drive a CLI, so BONNIE stays a single static binary.
+The CLI backends drive a CLI and Landlock is pure Go, so BONNIE stays a single
+static binary.
+
+> **The default is containment, not isolation.** Landlock confines the
+> filesystem and withholds the host environment from commands, so a model
+> cannot read your journal or your API keys. It does **not** confine the
+> network and does **not** give the command its own kernel. For hostile code,
+> use Docker or microsandbox and cut egress.
 
 > The microsandbox adapter is **verified on Linux with KVM** (`msb` 0.6.18,
-> all 18 conformance cases, network policies enforced with real egress). It
-> has not been run on macOS with Apple Silicon, and its network policy is
-> fixed at create time: reattaching under a different policy fails with
-> `ErrPolicyMismatch` rather than silently using the old rules.
+> all 18 conformance cases, network policies enforced with real egress). Its
+> network policy is fixed at create time: reattaching under a different policy
+> fails with `ErrPolicyMismatch` rather than silently using the old rules.
 
-Lock down the network. A policy the backend cannot enforce is refused, and so
-is a policy with no sandbox to enforce it — never a silent allow-all:
+Lock down the network. A policy the backend cannot enforce is refused — never
+a silent allow-all:
 
 ```go
 provider := sandbox.Docker()
@@ -369,7 +388,7 @@ Pick the best backend available, without silently falling back to no
 isolation:
 
 ```go
-provider, err := sandbox.Select(ctx, sandbox.Microsandbox(), sandbox.Docker())
+provider, err := sandbox.Select(ctx, sandbox.Microsandbox(), sandbox.Docker(), sandbox.Landlock())
 ```
 
 The sandbox opens on the **first tool call that needs it**, so a parked run
@@ -629,13 +648,27 @@ Full detail, with the Kit citations, in [`docs/SPEC.md`](docs/SPEC.md).
 
 Stated plainly, because the failure modes are not obvious:
 
-- **Sandboxing is opt-in.** Without it, tool calls run as your process.
+- **Linux only.** BONNIE's floor is the Landlock LSM, so releases build for
+  linux/amd64 and linux/arm64 and nothing else. macOS and Windows are not
+  supported and are not on the roadmap: restoring macOS means writing a
+  seatbelt (`sandbox-exec`) backend of equal strength first, not adding a
+  build target. A kernel older than 5.13, or one booted with Landlock
+  disabled, has no default sandbox and BONNIE refuses to start rather than
+  run unconfined — use `--sandbox docker` there.
+- **The default sandbox is containment, not isolation.** Landlock confines
+  the filesystem and withholds host credentials from commands. It does not
+  confine the network and shares the host kernel.
+- **Do not run BONNIE as a user in the `docker` group.** Landlock mediates
+  opening a file, not connecting to a socket, so a tool call reaches
+  `/var/run/docker.sock` whenever the process can — and that is a full host
+  escape. No path setting closes it. Use an unprivileged user, or
+  microsandbox.
 - **Docker is namespaces, not a kernel.** Use microsandbox for hostile code.
-- **microsandbox is verified on Linux/KVM only** — not on macOS with Apple
-  Silicon. Every network policy mode is enforced, but the policy is fixed at
-  create time; reattaching under a different policy fails with
-  `ErrPolicyMismatch`.
-- **Sandbox egress is open** unless you set a policy.
+- **microsandbox is verified on Linux/KVM.** Every network policy mode is
+  enforced, but the policy is fixed at create time; reattaching under a
+  different policy fails with `ErrPolicyMismatch`.
+- **Sandbox egress is open** unless you set a policy, and the default backend
+  cannot set one — it refuses the policy instead of ignoring it.
 - **No auth verification on the HTTP channel.** It carries a `Principal`; it
   does not check one. Authenticate in front of it. The chat channels are
   different: each verifies its platform's signature, and a channel without

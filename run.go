@@ -227,25 +227,23 @@ func (c *config) workspaceDir() (string, error) {
 	return abs, nil
 }
 
-// agentFactory builds the factory the runner executes turns with, with or
-// without a tool sandbox.
+// agentFactory builds the factory the runner executes turns with.
 //
 // A host that supplied its own factory owns the agent outright, so every
 // option that would have configured the one BONNIE builds is refused rather
 // than ignored — the same rule a backend follows for a network policy it
 // cannot enforce (docs/SPEC.md §8, invariant 13).
 //
-// The default is no sandbox, which runs Kit's core tools in this process.
-// That is the right default at a desk and the wrong one for a server, so the
-// banner says which mode is active rather than leaving an operator to guess.
+// **Every other run is sandboxed.** There is no host-tools mode: [WithSandbox]
+// selects a backend, it does not enable one, and leaving it out selects
+// [sandbox.Landlock] rather than the host. BONNIE used to default to running
+// Kit's core tools in this process, rooted at the workspace with
+// kit.WithWorkDir; a live agent walked out of that root with an absolute path
+// and read its own journal, because a working directory is a base and not a
+// jail. docs/SPEC.md §4.9.1 records the incident.
 //
-// workspace, when set, is applied differently by each mode and the two must
-// never be mixed: without a sandbox the host's file tools are rebuilt with it
-// as their working directory; with one it is the seed mirrored into
-// [sandbox.Workspace]. Handing the host tools to a sandboxed agent would give
-// the model a shell on this machine, so [hostWorkspaceOptions] is called only
-// on the branch that has no sandbox. Guard test:
-// TestSandboxedAgentGetsNoHostTools.
+// workspace, when set, is the seed mirrored into [sandbox.Workspace] — never
+// a working directory for host tools, which no longer exist.
 func (c *config) agentFactory(ctx context.Context, workspace string, opts []kit.Option) (runtime.AgentFactory, error) {
 	if c.factory != nil {
 		if conflict := c.agentConflicts(); conflict != "" {
@@ -254,18 +252,16 @@ func (c *config) agentFactory(ctx context.Context, workspace string, opts []kit.
 		return c.factory, nil
 	}
 
-	if c.sandbox == nil {
-		if c.network != nil {
-			return nil, errors.New("bonnie: a network policy needs a sandbox: pass bonnie.WithSandbox, or --sandbox docker")
-		}
-		return runtime.KitAgent(append(opts, hostWorkspaceOptions(workspace)...)...), nil
-	}
-
 	provider := c.sandbox
+	if provider == nil {
+		provider = c.defaultSandbox()
+	}
 	if c.network != nil {
 		net, ok := provider.(sandbox.Networked)
 		if !ok {
-			return nil, fmt.Errorf("bonnie: the %s sandbox cannot control the network", provider.Name())
+			return nil, fmt.Errorf("bonnie: the %s sandbox cannot control the network: "+
+				"pass bonnie.WithSandbox(sandbox.Docker()) or --sandbox docker, "+
+				"which can", provider.Name())
 		}
 		if err := net.SetNetworkPolicy(*c.network); err != nil {
 			return nil, err
@@ -307,24 +303,36 @@ func (c *config) agentConflicts() string {
 	return ""
 }
 
-// hostWorkspaceOptions returns the options that root the host's file tools in
-// the workspace, or nothing when there is no workspace.
+// hostWorkspaceOptions is gone, and its absence is the point.
 //
-// Kit's default core tools take no working directory: the option is a
-// [kit.ToolOption] and [kit.Options] has no field that forwards one. So the
-// core set is rebuilt with the workdir applied and supplied through
-// [kit.WithTools]. [kit.AllTools] is that same default set, so no tool is
-// lost.
+// It rebuilt Kit's core tools with kit.WithWorkDir(workspace) so a run with no
+// sandbox wrote into the workspace instead of the process's directory. That
+// made the accident rarer without making the escape harder: WithWorkDir sets
+// the base for a RELATIVE path, and the shell tool never resolves one — a
+// model that writes an absolute path reaches the whole filesystem. A live
+// agent did exactly that and listed its own journal (docs/SPEC.md §4.9.1).
 //
-// Its placement is a security property, not a style choice: Kit honours
-// Options.Tools even when DisableCoreTools is set, and [sandbox.Agent]
-// applies a caller's options after its own — so using these options on a
-// sandboxed agent would hand the model host tools inside the sandbox.
-func hostWorkspaceOptions(workspace string) []kit.Option {
-	if workspace == "" {
-		return nil
-	}
-	return []kit.Option{kit.WithTools(kit.AllTools(kit.WithWorkDir(workspace))...)}
+// Every run is sandboxed now, so there are no host tools to root. Do not
+// reintroduce this: Kit honours Options.Tools even when DisableCoreTools is
+// set, and [sandbox.Agent] applies a caller's options after its own, so host
+// tools reaching a sandboxed agent would hand the model a real host shell
+// inside the sandbox. Guard test: TestNoHostToolsReachTheAgent.
+
+// defaultSandbox is the backend a run gets when the host chose none.
+//
+// Landlock is the floor because it needs nothing installed: no daemon, no
+// image, no KVM, no root. That matters more than it sounds. The alternative
+// was to require Docker, and a floor that breaks `bonnie init && bonnie dev`
+// on a bare machine is a floor people switch off — which is how the old
+// no-sandbox default survived as long as it did.
+//
+// It confines the filesystem and the environment, NOT the network. See
+// [sandbox.LandlockProvider] for the full statement of what it does not do.
+//
+// Workspaces live beside the journal, so one directory holds everything a run
+// owns and `bonnie sandbox prune` has one place to look.
+func (c *config) defaultSandbox() sandbox.Provider {
+	return sandbox.Landlock(sandbox.WithLandlockRoot(filepath.Join(c.journal, "workspaces")))
 }
 
 // seedFromEmbed materialises the workspace files codegen embedded into dest.
@@ -367,34 +375,37 @@ func seedFromEmbed(files fs.FS, dest string) error {
 
 // banner prints the effective configuration at startup, with addr the address
 // the listener really bound. An operator must never have to guess what is
-// running, and the no-isolation warning is printed even when the banner is
-// quiet.
+// running.
+//
+// There is no no-sandbox warning any more, because there is no unsandboxed
+// run to warn about. The backend is always named instead: the warning existed
+// to make a dangerous default visible, and naming the confinement in force is
+// what replaces it.
 func (c *config) banner(addr, workspace string) {
-	if !c.quiet {
-		line := func(label, value string) {
-			fmt.Fprintf(os.Stderr, "bonnie: %s %s\n", label, value)
-		}
-		line("serving on", addr)
-		line("journal", c.journal)
-		if c.model != "" {
-			line("model", c.model)
-		}
-		switch {
-		case c.factory != nil:
-			line("agent", "supplied by the host")
-		case c.sandbox == nil:
-			line("sandbox", "none")
-		default:
-			line("sandbox", c.sandbox.Name())
-		}
-		line("network", networkLabel(c.network))
-		if workspace != "" {
-			line("workspace", workspace)
-		}
+	if c.quiet {
+		return
 	}
-	if c.sandbox == nil && c.factory == nil {
-		fmt.Fprintln(os.Stderr,
-			"bonnie: WARNING no sandbox: tool calls run as this process, with its files, network, and credentials")
+	line := func(label, value string) {
+		fmt.Fprintf(os.Stderr, "bonnie: %s %s\n", label, value)
+	}
+	line("serving on", addr)
+	line("journal", c.journal)
+	if c.model != "" {
+		line("model", c.model)
+	}
+	switch {
+	case c.factory != nil:
+		// A host-supplied factory owns the agent, so BONNIE cannot claim
+		// anything about what its tools reach.
+		line("agent", "supplied by the host")
+	case c.sandbox != nil:
+		line("sandbox", c.sandbox.Name())
+	default:
+		line("sandbox", c.defaultSandbox().Name()+" (default)")
+	}
+	line("network", networkLabel(c.network))
+	if workspace != "" {
+		line("workspace", workspace)
 	}
 }
 

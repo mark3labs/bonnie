@@ -5,6 +5,89 @@ All notable changes to BONNIE are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+**Breaking: every tool call now runs in a sandbox, and BONNIE is Linux-only.**
+
+### Changed
+
+- **There is no unsandboxed mode.** `bonnie.WithSandbox` now *selects* a
+  backend rather than enabling one. A host that configures nothing gets the
+  new `sandbox.Landlock` backend instead of this process's filesystem.
+  `hostWorkspaceOptions`, which rooted Kit's core tools at the workspace with
+  `kit.WithWorkDir`, is deleted.
+
+  The rooting was not enough, and the reason is the whole point: a working
+  directory is consulted for **relative** paths only. A live Slack agent ran
+  `find /home/<user>/Workspace/my-agent -type f` and read `main.go`,
+  `instructions.md`, and `.bonnie/journal.db` — the journal that made its own
+  runs durable. Nothing refused it. See `docs/SPEC.md` §4.9.1.
+
+- **`--sandbox none` is refused by name**, with a message naming the
+  replacement. It was the default, so it lives in scripts and unit files; a
+  silent change of behaviour would be worse than a failure. The default for
+  `--sandbox` is now `landlock`.
+
+- **The startup banner's no-sandbox warning is gone**, because the condition
+  it warned about is gone. The banner names the backend in force instead.
+
+- **The system prompt now names the directory the tools actually use.**
+  `sandbox.Agent` sets Kit's `Options.SessionDir` to the directory the chosen
+  backend really runs commands at: `/workspace` under Docker or microsandbox,
+  the run's host directory under Landlock or Local. Kit's environment block
+  otherwise reports the **process** directory, and the model believes the
+  prompt over its own `pwd`.
+
+- **Linux only.** Releases build `linux/amd64` and `linux/arm64`. macOS and
+  Windows are no longer supported and are off the roadmap.
+
+### Added
+
+- **`sandbox.Landlock()`** — the floor backend, and the default. It confines
+  tool calls to the run's own workspace with the Linux Landlock LSM and needs
+  nothing installed: no daemon, no image, no KVM, no root.
+
+  Because a Landlock domain is irreversible and process-wide, BONNIE cannot
+  restrict its own server — that would take away the journal. Each command
+  runs in a child that re-executes BONNIE's binary, restricts itself, and only
+  then becomes the command. The restriction survives `execve` and is inherited,
+  so **a subshell cannot escape it**. It also builds the child's environment
+  from nothing, so a provider API key in the server's environment never reaches
+  a model-chosen command.
+
+  It passes all 18 conformance cases. One new dependency,
+  `github.com/landlock-lsm/go-landlock`, which issues the syscalls with no cgo
+  — `CGO_ENABLED=0` still produces a single static binary.
+
+- `sandbox.ErrOutsideWorkspace`, returned by the file tools when a path would
+  leave the workspace, including through a symlink the agent created.
+
+- `sandbox.WorkingDirReporter`, implemented by a backend whose commands do not
+  run at `/workspace`. It is how the system prompt learns the real working
+  directory; `sandbox.Seeded` forwards it.
+
+### Known limits
+
+- **The default backend is containment, not isolation.** `Landlock` confines
+  the filesystem and withholds host credentials. It does **not** confine the
+  network and it shares the host kernel, so a local privilege-escalation bug
+  is not contained. It therefore does not implement `sandbox.Networked`: a
+  network policy given to it is **refused**, naming the backends that can
+  enforce one. For untrusted or hostile code use `sandbox.Docker()` or
+  `sandbox.Microsandbox()`.
+- **Do not run BONNIE as a user in the `docker` group.** Landlock mediates
+  opening a file, not connecting to a socket, so a tool call can reach
+  `/var/run/docker.sock` whenever the BONNIE process can — and
+  `docker run -v /:/host` then defeats the jail completely. No path setting
+  closes this; withholding `/var/run` was tried and does not. Use a dedicated
+  unprivileged user, or microsandbox. Found by a live model, which named the
+  vector itself after every filesystem technique was refused.
+- A kernel older than 5.13, or one booted with Landlock disabled, has no
+  floor. BONNIE refuses to start rather than run unconfined, naming
+  `--sandbox docker`.
+- `sandbox.Local()` still exists and still provides **no** containment. It is
+  no longer reachable by accident: it has to be named.
+
 ## [0.6.0] — 2026-09-15
 
 A fix for the first thing a new user sees. `bonnie dev` rendered the first

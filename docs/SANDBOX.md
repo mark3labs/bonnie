@@ -1,18 +1,41 @@
 # Sandboxing
 
-BONNIE runs the tool calls a model chooses. Without a sandbox those calls run
-as the host process, with its files, its network, and its credentials.
+BONNIE runs the tool calls a model chooses. **Every one of them runs in a
+sandbox**: `WithSandbox` selects a backend, it does not enable one, and
+`--sandbox none` is refused by name.
 
-This is not a theoretical risk. BONNIE's own live-model test once ran with
-Kit's core tools in the repository working directory and the prompt "deploy the
-app". The model answered the question, then wrote a `Dockerfile`, a
-`terraform/` directory, `deploy.sh`, and three deployment documents into the
-checkout. Nothing failed. Nothing warned. The test passed. See `docs/SPEC.md`
-§4.9.
+That was not always true, and the history is the argument. BONNIE's own
+live-model test once ran with Kit's core tools in the repository working
+directory and the prompt "deploy the app". The model answered the question,
+then wrote a `Dockerfile`, a `terraform/` directory, `deploy.sh`, and three
+deployment documents into the checkout. Nothing failed. Nothing warned. The
+test passed (`docs/SPEC.md` §4.9).
 
-The `sandbox` package is the fix.
+The first fix rooted the host tools at the workspace with `kit.WithWorkDir`.
+It was not enough, and the second incident says why: a live Slack agent ran
+
+    shell: find /home/<user>/Workspace/my-agent -type f | head -50
+
+and read `main.go`, `instructions.md`, and `.bonnie/journal.db` — the journal
+that made its own runs durable. **A working directory is a base, not a jail.**
+It applies to relative paths, and an absolute path never consults it
+(`docs/SPEC.md` §4.9.1).
+
+So the host-tools mode is gone. The `sandbox` package is not the fix you
+switch on; it is the only way a tool call runs.
 
 ## Quick start
+
+Nothing:
+
+```go
+bonnie.New().Serve() // sandboxed with Landlock
+```
+
+The default backend is `Landlock()`, which confines tool calls to the run's
+own workspace using the Linux Landlock LSM and needs nothing installed.
+
+For stronger isolation, name a backend:
 
 ```go
 provider := sandbox.Docker(sandbox.WithDockerImage("python:3.12-slim"))
@@ -24,7 +47,10 @@ runner := runtime.NewRunner(journal, sandbox.Agent(provider,
 
 `sandbox.Agent` replaces Kit's core tools with a sandboxed `bash`,
 `read_file`, `write_file`, and `list_files`. BONNIE's human-in-the-loop tools
-stay, because they run in the BONNIE process and never touch the sandbox.
+stay, because they run in the BONNIE process and never touch the sandbox. It
+also sets Kit's `SessionDir` to `/workspace`, so the working directory the
+system prompt reports is the one the tools actually use — the two disagreeing
+is half of the second incident above.
 
 From an agent tree's `main.go`, where the wiring above is already done:
 
@@ -36,8 +62,9 @@ bonnie.New(
 ```
 
 The scaffold writes both lines commented out, so `bonnie init` leaves the
-choice visible rather than silent. Without one, tool calls run as the agent's
-own process and the startup banner says so.
+choice visible rather than silent. Leaving them out is not a choice to run
+unconfined — it selects Landlock — and the startup banner names the backend
+in force.
 
 From the CLI, for an agent with no tree:
 
@@ -49,15 +76,70 @@ bonnie serve --sandbox docker --sandbox-image python:3.12-slim
 
 | Backend | Isolation | User installs | New Go deps | Network policy |
 |---|---|---|---|---|
+| `Landlock()` — **default** | filesystem only, shared kernel | — | 1 | **none — refused** |
 | `Local()` | **none** | — | 0 | none |
 | `Docker()` | container namespaces | Docker | 0 | allow-all, deny-all |
 | `Microsandbox()` | microVM, guest kernel | `msb` | 0 | allow-all, deny-all, allow-list |
 
-All three are in the main module and add no dependency: they drive a CLI
-through `os/exec`.
+The CLI backends drive `os/exec` and add no dependency. `Landlock()` adds one
+pure-Go dependency, `github.com/landlock-lsm/go-landlock`, which issues the
+`landlock(2)` syscalls directly — no cgo, so the single static binary and the
+cross-compiled release both survive.
 
-`Local()` provides **no isolation**. It exists so a developer can work without
-Docker and so the seam is testable with no daemon. Do not use it in production.
+### `Landlock()` — containment, not isolation
+
+This distinction is the whole reason the backend is documented at length.
+Landlock is the **floor**: it is what makes "every run is sandboxed" keepable
+on a machine with nothing installed. It is not the strongest backend and must
+not be described as if it were.
+
+What it does:
+
+- **Confines the filesystem.** A command — and every process it starts — can
+  read and write only the run's workspace, plus the read-only system paths a
+  shell needs. An absolute path out of the workspace is refused by the kernel.
+- **Withholds host credentials.** The command gets a minimal environment built
+  from nothing, not a filtered copy of the server's, so a provider API key in
+  BONNIE's environment never reaches a model-chosen command.
+
+What it does **not** do:
+
+- **The network is open.** A command can reach anything the host can reach.
+  The provider therefore does not implement `Networked`, so a network policy
+  is **refused** rather than silently ignored — invariant 10.
+- **A unix socket is not confined — the sharpest edge.** Landlock ABI 1
+  mediates *opening a file*, not *connecting to a socket*. A command that
+  knows a socket's path can talk to the daemon behind it even though the path
+  is not in the granted set; withholding `/var/run` does not change this, and
+  that was verified rather than assumed. It matters because the daemon may
+  hand out the host: **if BONNIE's user is in the `docker` group, a tool call
+  can reach `/var/run/docker.sock`, and `docker run -v /:/host` reads
+  everything.** Run BONNIE as a user with no such group membership, or use
+  microsandbox. A live model found this vector itself — after every
+  filesystem technique was refused it named the docker socket and stopped
+  there. Pinned by `TestLandlockDoesNotConfineUnixSockets`.
+- **The kernel is shared.** No namespaces, no guest. A local
+  privilege-escalation bug is not contained.
+- **Linux only.** Landlock is a Linux LSM. There is no macOS equivalent in
+  BONNIE; see Limits.
+
+Use `Docker()` or `Microsandbox()` for untrusted or hostile code.
+
+**How it works, because the mechanism has one surprising constraint.** A
+Landlock domain is irreversible and applies to the whole calling process, so
+BONNIE cannot apply it to the server — that would take away the journal.
+Instead each command runs in a child that re-executes BONNIE's own binary,
+restricts itself, and only then `execve`s the command. The restriction
+survives that exec and is inherited by every descendant, which is why a
+subshell cannot escape it. The child half is an `init()` in the `sandbox`
+package, so any binary that imports the package can be its own jail helper and
+no second binary ships.
+
+`Local()` provides **no isolation** and no containment: a command reads any
+file the BONNIE process can read. It exists so a developer can reproduce
+unconfined behaviour deliberately and so the seam is testable with no daemon.
+Do not use it in production. It is no longer reachable by accident — it has to
+be named.
 
 > **microsandbox network policy is fixed at create time.** Every mode is
 > enforced — `--no-net` for deny-all, `--no-net --net-rule allow@<host>` for
@@ -262,14 +344,26 @@ The live tests cover the claims that matter:
 
 ## Limits
 
+- **The default backend is containment, not isolation.** `Landlock` confines
+  the filesystem and withholds host credentials. It does not confine the
+  network, and it shares the host kernel. `docs/SPEC.md` §4.9 stays open for
+  exactly this residue.
 - **`Local` is not a sandbox.** It is named honestly and documented loudly.
+  It is no longer reachable by default — it must be named.
+- **Linux only.** Landlock is a Linux LSM, so the floor exists only there and
+  releases build for linux/amd64 and linux/arm64. macOS and Windows are not
+  supported and are **not on the roadmap**. Restoring macOS is not a build
+  target but a backend: a `sandbox-exec` (seatbelt) provider that passes the
+  same conformance suite, plus a decision about seatbelt's deprecated status.
+  A kernel older than 5.13, or one booted with Landlock disabled, has no
+  floor — `Available` refuses with a message naming `--sandbox docker`
+  rather than running unconfined.
 - **Docker is namespaces, not a kernel.** Use microsandbox when the threat
   model includes hostile code.
-- **microsandbox is verified on Linux/KVM only.** All 18 conformance cases
-  pass with `msb` 0.6.18 (2026-09-12), every network policy mode is enforced
-  with real egress, and the live suite — a real model working, suspending,
-  and resuming inside the microVM — passes. It has not been run on macOS with
-  Apple Silicon; that verification (T-013) is deferred for lack of hardware.
+- **microsandbox is verified on Linux/KVM.** All 18 conformance cases pass
+  with `msb` 0.6.18 (2026-09-12), every network policy mode is enforced with
+  real egress, and the live suite — a real model working, suspending, and
+  resuming inside the microVM — passes.
 - **microsandbox network policy is fixed at create time.** `msb modify`
   cannot change network rules, so a reattached sandbox keeps its create-time
   policy; `Open` reports a mismatch with `ErrPolicyMismatch` rather than

@@ -228,3 +228,16 @@ func (s *localSandbox) Delete(context.Context) error {
 	}
 	return nil
 }
+
+// WorkingDir implements [WorkingDirReporter]. A local sandbox is a host
+// directory, so that path — not [Workspace] — is what `pwd` reports and what
+// the system prompt must name.
+func (p *LocalProvider) WorkingDir(runID string) string {
+	dir, err := filepath.Abs(filepath.Join(p.root, safeName("", runID)))
+	if err != nil {
+		return filepath.Join(p.root, safeName("", runID))
+	}
+	return dir
+}
+
+var _ WorkingDirReporter = (*LocalProvider)(nil)

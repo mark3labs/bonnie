@@ -51,6 +51,12 @@ var (
 	// ErrNotFound means the path does not exist inside the sandbox.
 	ErrNotFound = errors.New("bonnie: path not found in sandbox")
 
+	// ErrOutsideWorkspace means a path would leave the sandbox workspace.
+	// Backends that map the workspace onto a host directory refuse such a
+	// path rather than following it, because a file tool runs in the BONNIE
+	// process and is not covered by a kernel restriction.
+	ErrOutsideWorkspace = errors.New("bonnie: path is outside the sandbox workspace")
+
 	// ErrClosed means the sandbox handle is closed.
 	ErrClosed = errors.New("bonnie: sandbox is closed")
 
@@ -225,6 +231,35 @@ type Networked interface {
 type Imaged interface {
 	// Image returns the image reference sandboxes are opened from.
 	Image() string
+}
+
+// WorkingDirReporter is implemented by a [Provider] whose commands do not run
+// at [Workspace].
+//
+// Most backends give the agent a guest filesystem, so [Workspace] is both the
+// namespace and the real path. A backend that maps the workspace onto a host
+// directory instead — [LocalProvider], [LandlockProvider] — runs commands at
+// that host path, and `pwd` reports it.
+//
+// This exists so the system prompt can name the directory the tools actually
+// use. Kit renders a working directory into the prompt, and a model believes
+// the prompt over its own observation: telling it /workspace when `pwd` says
+// otherwise is the disagreement docs/SPEC.md §4.9.1 records, and a live model
+// hit it again — "my workspace is not actually /workspace" — when the value
+// was hard-coded.
+//
+// It takes a run ID because the directory is per run, and it must not open
+// the sandbox: the prompt is built before the first tool call, and opening
+// would start compute a parked run should not hold.
+//
+// An implementation returns the empty string when the backend does run at
+// [Workspace] after all. That matters for a wrapper such as [Seeded], which
+// must forward this method to stay transparent and cannot know in advance
+// whether the provider beneath it maps to a host path.
+type WorkingDirReporter interface {
+	// WorkingDir returns the path commands for runID really run at, or ""
+	// when that path is [Workspace].
+	WorkingDir(runID string) string
 }
 
 // Resolve anchors a path to [Workspace]. An absolute path passes through
