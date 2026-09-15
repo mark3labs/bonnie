@@ -19,6 +19,7 @@ the known risks, and the invariants every task must preserve.
 
 | ID | Title | Priority | Size | Blocks |
 |---|---|---|---|---|
+| T-036 | Require a sandbox: remove the host filesystem fallback | P1 | L | — |
 | T-022 | TUI transcript replay on reopen | P2 | M | — |
 | T-019 | Evals against a discovered agent | P2 | L | — |
 
@@ -906,6 +907,146 @@ is what deletes that gap.
   the screen scrolled past) — or the terminal clamps the move to its bottom
   row and the cursor leaves the input. Found in tmux; pinned by
   `TestViewCursorStaysOnTheInputRowWhenTheFrameExceedsTheScreen`.
+
+## T-036 — Require a sandbox: remove the host filesystem fallback
+
+**Priority** P1 · **Size** L · **Found by** a live Slack agent reading its own
+journal (`docs/SPEC.md` §4.9.1)
+
+### Why
+
+BONNIE's default is no sandbox. `bonnie.New()` with no `WithSandbox` runs
+every model-chosen tool call as the serving process, and
+`hostWorkspaceOptions` (`run.go:323-328`) roots Kit's core tools at the
+workspace with `kit.WithWorkDir`. SPEC §4.9.1 calls that rooting the fix for
+the incident where a model wrote Terraform into the checkout.
+
+**The rooting is a base, not a jail, and a live agent walked out of it.** In a
+real Slack-driven tree the model ran
+
+    shell: find /home/<user>/Workspace/my-agent -type f | head -50
+
+and the result listed `main.go`, `instructions.md`, and
+`.bonnie/journal.db` — the journal that makes its own runs durable. Nothing
+refused it, because an absolute path never consults `WorkDir`.
+
+It did not invent that path. Kit appends an environment block to the system
+prompt — `environmentSection` (`pkg/kit/kit.go:957-964`), called from
+`kit.New` (`:1848`) and `composeSystemPrompt` (`:948`) — whose `cwd` is
+`os.Getwd()`, the **process** directory. BONNIE sets the workspace on the
+tools only, so the two disagree and the prompt is the half the model believes.
+One run, asked for both:
+
+    Current working directory: /tmp/.../standup-bot            ← system prompt
+    /tmp/.../standup-bot/workspace                             ← actual pwd
+
+So the host mode has two defects at once: the agent is told the wrong root,
+and the right root does not contain it anyway.
+
+**eve does not solve this; it makes the situation unreachable.** Every eve
+agent has exactly one sandbox, `/workspace` is one namespace across all
+backends, the file tools run with `/workspace` as the working directory, and
+the prompt's workspace listing is generated from that same filesystem
+(eve docs, *Sandbox*; `llms-full.txt:1348`, `:1425`). There is no host mode
+to disagree with. eve affords that because its floor backend, `just-bash`, is
+a pure-JS interpreter over a virtual filesystem and needs no daemon or VM
+(`:1486`, `:1496`) — the weakest backend still installs nothing, so
+"unsandboxed" never had to be the convenient default.
+
+This task asks BONNIE to take the same position: **a run always has a
+sandbox, and no configuration reaches the host filesystem.**
+
+### The hard part, stated first
+
+**`sandbox.Local()` is not BONNIE's `just-bash`, and must not be mistaken for
+it.** Its own doc comment is explicit (`sandbox/local.go:15-25`): *"It
+provides NO ISOLATION. A command can read any file the BONNIE process can
+read, reach any network the host can reach, and see every environment
+variable, including provider API keys."* `host()` maps a path under
+`Workspace` into the run directory and passes **anything else through
+unchanged** (`local.go:116-128`), which it documents as the honest behaviour
+for a backend with no isolation.
+
+So defaulting to `Local` would fix the prompt disagreement and close nothing.
+Only Docker and microsandbox are real, and both need something installed —
+against BONNIE's single-static-binary promise (SPEC §7) and the
+zero-install desk experience `bonnie init && bonnie dev` sells today.
+
+That tension is the task. Do not resolve it by quietly weakening what
+"sandbox" means.
+
+### Do
+
+Decide the floor first; the rest follows.
+
+1. **Choose the floor backend.** Three candidates, none free:
+   - *Require Docker or microsandbox.* Honest and strong. Breaks
+     `bonnie init && bonnie dev` on a bare machine, which is BONNIE's best
+     first impression.
+   - *Make `Local` a path jail* — refuse absolute paths outside `Workspace`,
+     resolve symlinks, refuse `../` escapes. Pure Go, keeps the single
+     binary, closes the defect above. **It is containment, not isolation**:
+     the command still runs as the host process with its network and its
+     API keys. Invariant 10 forbids presenting it as more than it is.
+   - *A third backend.* No pure-Go equivalent of `just-bash` exists in the
+     Go ecosystem today; writing one is its own project.
+2. **Make the sandbox unconditional** once a floor exists: `bonnie.New()`
+   resolves a provider always, `WithSandbox` selects rather than enables, and
+   `hostWorkspaceOptions` and its no-sandbox branch are deleted.
+3. **Make the prompt agree with the filesystem.** Whatever the floor, the
+   agent must be told the root its tools actually use. Under a real sandbox
+   this is already true (everything is `/workspace`). Until then it needs
+   either `os.Chdir` before `kit.New`, or an upstream Kit option that takes
+   the tool workdir for the environment block — file it in
+   `docs/UPSTREAM.md` if the second.
+4. **Decide the migration.** `WithSandbox` is public API and the no-sandbox
+   default is documented in `README.md`, `SECURITY.md`, the scaffolded
+   `main.go` comment, and the startup banner's warning. A host that relies on
+   host tools today must get a refusal that names the replacement, never a
+   silent behaviour change.
+
+### Acceptance criteria
+
+- [ ] A default `bonnie.New()` run cannot read a file outside the workspace:
+      a live-model test asks for one by absolute path and fails if it arrives
+      (the §4.9 shape, extended to the default configuration)
+- [ ] A default run cannot read `<root>/.bonnie/journal.db`, by any path
+- [ ] The system prompt's working directory equals the directory the tools
+      use — one assertion over both, so they cannot drift again
+- [ ] `bonnie init && bonnie dev` still works on a machine with no Docker and
+      no KVM, or the failure names exactly what to install
+- [ ] The chosen floor states its limits in `README.md` and `SECURITY.md`;
+      if it is containment rather than isolation, both say so in those words
+- [ ] The startup banner's no-sandbox warning is gone because the condition
+      it warns about is gone
+- [ ] `TestNoSandboxIsTheDefault` is deleted or inverted, deliberately
+
+### Watch for
+
+**Do not let `hostWorkspaceOptions` survive into the sandboxed path.** Kit
+honours `Options.Tools` even when `DisableCoreTools` is set, and
+`sandbox.Agent` applies the caller's options after its own, so host tools
+reaching a sandboxed agent hand the model a real host shell inside the
+sandbox. `TestSandboxedAgentGetsNoHostTools` guards this by reading `run.go`
+as source text; if the function is removed, delete the guard with it rather
+than leaving it matching nothing.
+
+**Do not claim containment the floor does not have.** Invariant 10: a backend
+that cannot enforce a control refuses it. A path-jailed `Local` still leaks
+the environment and the network, and §4.9 stays open for it.
+
+**A green CI says nothing here.** CI has no `msb` and, until recently, no
+running Docker daemon, so sandbox cases skip rather than fail — the blind
+spot that hid three real defects in §4.11.
+
+### Also correct
+
+`docs/SPEC.md` §4.9.1 claims the workspace rooting was "verified live" with
+`pwd` reporting the workspace. That check was true and incomplete: it tested
+the tool and never the prompt the tool contradicts. Record the two defects
+and the missing guard when this ships.
+
+---
 
 ## T-022 — TUI transcript replay on reopen
 
