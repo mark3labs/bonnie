@@ -349,6 +349,14 @@ type Core struct {
 	locks     *Locks
 	newID     func() string
 	policy    channel.TurnPolicy
+	// activity renders the live status of a turn in flight. Nil is a
+	// channel that shows nothing until the turn ends, which is what every
+	// adapter did before [WithActivity].
+	activity ActivityFunc
+	// watching is the set of addresses that already carry an indicator, so
+	// one conversation never shows two.
+	activityMu sync.Mutex
+	watching   map[string]bool
 }
 
 // CoreOption configures a [Core].
@@ -639,6 +647,11 @@ const resetNote = "Started a new conversation. The previous one is closed."
 // freed, and a note delivered as the run's response. Adapters deduplicate
 // platform deliveries before calling Dispatch, so a retried webhook cannot
 // retire the run that replaced the one it meant.
+//
+// While the turn runs, a channel configured with [WithActivity] is told what
+// the agent is doing — thinking, working, which tool it called. The
+// indicator is cleared before deliver is called, so the status never
+// outlives the turn it describes.
 func Dispatch(ctx context.Context, core *Core, turn Turn, deliver func(address string, run *runtime.Run, err error)) {
 	if turn.Title == "" {
 		turn.Title = TitleFrom(turn.Text)
@@ -655,16 +668,32 @@ func Dispatch(ctx context.Context, core *Core, turn Turn, deliver func(address s
 			deliver(turn.Address, &runtime.Run{ID: runID, State: runtime.RunRetired, Response: resetNote}, nil)
 			return
 		}
-		run, err := Route(bg, core.From(turn.Address), turn)
+		ref := core.From(turn.Address)
+		// The address is resolved before the turn starts so the activity
+		// watcher can subscribe to the run it is about to describe. Resolve
+		// creates and binds on first sight, which is what Route does next
+		// with the same reference.
+		runID, err := ref.RunID(bg)
 		if err != nil {
+			deliver(turn.Address, nil, err)
+			return
+		}
+		stop := watchActivity(core, turn.Address, runID)
+
+		run, err := Route(bg, ref, turn)
+		if err != nil {
+			stop()
 			deliver(turn.Address, nil, err)
 			return
 		}
 		if run.State == runtime.RunRunning || run.State == runtime.RunPending {
 			// Steered into a turn that is still running: the message that
-			// owns the turn delivers its result.
+			// owns the turn delivers its result, and owns the indicator
+			// that describes it.
+			stop()
 			return
 		}
+		stop()
 		deliver(turn.Address, run, nil)
 	}()
 }

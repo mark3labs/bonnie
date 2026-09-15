@@ -34,6 +34,19 @@
 // dispatch rule in `channel/chat` routes it to the run's resume, not to a
 // new turn.
 //
+// # What a person sees while the agent works
+//
+// A turn can run for minutes. The channel says what is happening while it
+// does: `Thinking…` when the message is accepted, `Working…` when the turn
+// starts, the line of reasoning the model is following, and the tool it is
+// calling with its most telling argument — `read_file runner.go`,
+// `bash go test ./...`, `+2 more` when it asked for several at once. The
+// indicator is cleared when the reply posts.
+//
+// The statuses come from Kit's own lifecycle events; see
+// [chat.WithActivity]. [Config.Activity] chooses the surface, and
+// [ActivityOff] turns the whole thing off.
+//
 // # Limits, stated plainly
 //
 //   - Webhook only — Socket Mode (no public URL) is not implemented.
@@ -99,6 +112,12 @@ type Config struct {
 
 	// Path overrides the webhook route. The default is [DefaultPath].
 	Path string
+
+	// Activity chooses how the channel shows that the agent is working.
+	// The empty value is [ActivityMessage]: one placeholder message in the
+	// thread, edited in place, deleted when the reply is ready. It needs no
+	// scope the channel does not already have. [ActivityOff] shows nothing.
+	Activity ActivityMode
 }
 
 // Channel is the Slack transport. It implements [channel.Channel] and
@@ -110,6 +129,11 @@ type Channel struct {
 	http   *http.Client
 	seenMu sync.Mutex
 	seen   map[string]bool
+
+	// active holds the activity placeholder for each address that carries a
+	// turn in flight. The core guarantees one writer per address.
+	activeMu sync.Mutex
+	active   map[string]*activity
 }
 
 var (
@@ -123,13 +147,21 @@ func New(r *runtime.Runner, cfg Config, opts ...chat.CoreOption) *Channel {
 	if api == "" {
 		api = "https://slack.com/api"
 	}
-	return &Channel{
-		core: chat.NewCore(r, "slack", channel.PolicySteer, opts...),
-		cfg:  cfg,
-		api:  api,
-		http: &http.Client{Timeout: 15 * time.Second},
-		seen: make(map[string]bool),
+	c := &Channel{
+		cfg:    cfg,
+		api:    api,
+		http:   &http.Client{Timeout: 15 * time.Second},
+		seen:   make(map[string]bool),
+		active: make(map[string]*activity),
 	}
+	// The channel's own option comes first, so a host that passes
+	// [chat.WithActivity] itself replaces the indicator rather than fighting
+	// it.
+	if opt := c.activityOption(); opt != nil {
+		opts = append([]chat.CoreOption{opt}, opts...)
+	}
+	c.core = chat.NewCore(r, "slack", channel.PolicySteer, opts...)
+	return c
 }
 
 // Name implements [channel.Channel].

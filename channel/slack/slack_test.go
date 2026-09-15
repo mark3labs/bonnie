@@ -42,39 +42,68 @@ func TestConformance(t *testing.T) {
 // thread ID a hand-off binds its address to.
 const fakeRootTS = "1700000000.000900"
 
-// fakeAPI is a stand-in for the Slack API. It records every postMessage.
+// fakeActivityTS is the timestamp the fake answers an activity placeholder
+// with: the message the indicator edits and then deletes.
+const fakeActivityTS = "1700000000.000800"
+
+// fakeAPI is a stand-in for the Slack API. It records every postMessage,
+// and keeps the activity indicator's own writes apart from the replies: a
+// placeholder that says the agent is working is machinery, and a test that
+// waits for an answer must not mistake one for the other.
 type fakeAPI struct {
 	mu     sync.Mutex
 	server *httptest.Server
 	sent   []string
+	acts   []string
 }
 
 func newFakeAPI(t *testing.T) *fakeAPI {
 	t.Helper()
 	f := &fakeAPI{}
 	f.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/chat.postMessage" {
-			http.NotFound(w, r)
-			return
-		}
 		var body struct {
 			Channel  string `json:"channel"`
 			Text     string `json:"text"`
 			ThreadTS string `json:"thread_ts"`
+			TS       string `json:"ts"`
+			Status   string `json:"status"`
+		}
+		switch r.URL.Path {
+		case "/chat.postMessage", "/chat.update", "/chat.delete", "/assistant.threads.setStatus":
+		default:
+			http.NotFound(w, r)
+			return
 		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Errorf("fake API: undecodable body: %v", err)
 		}
+
 		f.mu.Lock()
-		f.sent = append(f.sent, body.ThreadTS+"|"+body.Text)
-		f.mu.Unlock()
-		// Slack answers a post with its timestamp. A root message's is the
-		// thread ID every reply needs; a reply's is of no use to anyone here.
-		ts := fakeRootTS
-		if body.ThreadTS != "" {
-			ts = "1700000000.001000"
+		defer f.mu.Unlock()
+		switch {
+		case r.URL.Path == "/assistant.threads.setStatus":
+			f.acts = append(f.acts, "status|"+body.Status)
+		case r.URL.Path == "/chat.delete":
+			f.acts = append(f.acts, "delete")
+		case r.URL.Path == "/chat.update":
+			f.acts = append(f.acts, "update|"+body.Text)
+		case strings.HasPrefix(body.Text, activityPrefix):
+			f.acts = append(f.acts, "post|"+body.Text)
+			_, _ = w.Write([]byte(`{"ok":true,"ts":"` + fakeActivityTS + `"}`))
+			return
+		default:
+			f.sent = append(f.sent, body.ThreadTS+"|"+body.Text)
+			// Slack answers a post with its timestamp. A root message's is
+			// the thread ID every reply needs; a reply's is of no use to
+			// anyone here.
+			ts := fakeRootTS
+			if body.ThreadTS != "" {
+				ts = "1700000000.001000"
+			}
+			_, _ = w.Write([]byte(`{"ok":true,"ts":"` + ts + `"}`))
+			return
 		}
-		_, _ = w.Write([]byte(`{"ok":true,"ts":"` + ts + `"}`))
+		_, _ = w.Write([]byte(`{"ok":true}`))
 	}))
 	t.Cleanup(f.server.Close)
 	return f
@@ -84,6 +113,13 @@ func (f *fakeAPI) messages() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string(nil), f.sent...)
+}
+
+// activity returns the indicator's writes, in order.
+func (f *fakeAPI) activity() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.acts...)
 }
 
 // harness is the adapter under test with its webhook mounted and its
