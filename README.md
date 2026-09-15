@@ -6,7 +6,7 @@
 
 <p align="center">
   <b>Durable agent runs for Go.</b><br>
-  Survive a crash. Wait days for a human. Answer over HTTP.
+  Survive a crash. Wait days for a human. Answer over HTTP, Slack, Discord, Telegram, or GitHub.
 </p>
 
 <p align="center">
@@ -17,30 +17,30 @@
 
 > [!WARNING]
 > **Early and experimental. Use at your own risk.** BONNIE is pre-1.0
-> software under active development. The API can change without notice,
-> the durability and sandboxing claims are tested but not yet proven in
-> production, and no release is suitable for workloads whose loss would
-> hurt. Read [Limits](#limits) before you deploy anything with it.
+> software under active development. The API can change without notice. The
+> durability and the sandbox claims have tests, but no release is proven in
+> production. Do not use a release for work whose loss would hurt. Read
+> [Limits](#limits) before you deploy.
 
 ---
 
-An agent turn normally lives and dies with your process. Kill it mid-tool-call
-and the work is gone. Ask the user a question and you have to hold the process
-open until they answer.
+An agent turn usually lives and dies with the process. Stop the process during
+a tool call and the work is gone. Ask the user a question and you must hold the
+process open until the user answers.
 
-BONNIE fixes that. It wraps the [Kit](https://github.com/mark3labs/kit) agent
-SDK so a run becomes **durable**:
+BONNIE corrects that. It wraps the [Kit](https://github.com/mark3labs/kit)
+agent SDK, and a run becomes **durable**:
 
 ```go
 run, _ := runner.Start(ctx, "deploy-42", runtime.Input{Text: "Deploy the app."})
 
 if run.State == runtime.RunWaiting {
     fmt.Println(run.Suspend.Prompt) // "Which region?"
-    os.Exit(0)                      // ← the process can end here
+    os.Exit(0)                      // ← the process can stop here
 }
 ```
 
-Come back tomorrow, in a different process, and finish it:
+Come back tomorrow, in a different process, and complete the run:
 
 ```go
 run, _ := runner.Resume(ctx, "deploy-42",
@@ -49,15 +49,15 @@ run, _ := runner.Resume(ctx, "deploy-42",
 fmt.Println(run.Response) // "Deployed to eu-west-1."
 ```
 
-The agent remembers the whole conversation, including which tools it already
-called — so it does not repeat a side effect it has already performed.
+The agent keeps the full conversation, and the tools it already called. Thus it
+does not do a side effect a second time.
 
 ## Contents
 
-- [Install](#install) · [Quickstart: scaffold an agent](#quickstart-scaffold-an-agent) · [Quickstart](#quickstart) · [Park and resume](#park-and-resume)
-- [Your own tools](#your-own-tools) · [Sandboxing](#sandboxing) · [Serve over HTTP](#serve-over-http) · [Chat channels](#chat-channels)
-- [CLI](#cli) · [Storage](#storage) · [Streaming](#streaming) · [Steer and cancel](#steer-and-cancel)
-- [How it works](#how-it-works) · [Limits](#limits) · [Docs](#documentation)
+- [Install](#install) · [Scaffold an agent](#scaffold-an-agent) · [Use the library](#use-the-library) · [Park and resume](#park-and-resume)
+- [Your own tools](#your-own-tools) · [Sandboxes](#sandboxes) · [HTTP API](#http-api) · [Chat channels](#chat-channels)
+- [CLI](#cli) · [Journal](#journal) · [Events](#events) · [Session controls](#session-controls)
+- [Run states](#run-states) · [How it works](#how-it-works) · [Limits](#limits) · [Docs](#documentation)
 
 ## Install
 
@@ -73,23 +73,23 @@ As a CLI:
 go install github.com/mark3labs/bonnie/cmd/bonnie@latest
 ```
 
-With Nix. This gives you the CLI with the microsandbox CLI (`msb`) already on
-its PATH:
+With Nix. This gives you the CLI, and the microsandbox CLI (`msb`) on its PATH:
 
 ```bash
 nix profile install github:mark3labs/bonnie   # or: nix run github:mark3labs/bonnie
 ```
 
-Set a provider key. BONNIE uses whatever Kit is configured for:
+Set a provider key. BONNIE uses the provider that Kit is configured for:
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY, or GEMINI_API_KEY
 ```
 
-Requires Go 1.27+ and **Linux** (kernel 5.13+ with Landlock enabled, which is
-the default on every current distribution). Sandboxing is not optional and
-needs nothing installed; Docker or `msb` buy stronger isolation. macOS and
-Windows are not supported — see [Limits](#limits).
+BONNIE needs Go 1.27+ and **Linux**. The kernel must be 5.13 or newer with
+Landlock enabled, which is the default on each current distribution. A sandbox
+is not optional, and the default sandbox needs no installation. Docker or `msb`
+give stronger isolation. macOS and Windows are not supported — see
+[Limits](#limits).
 
 ### Development shell
 
@@ -101,21 +101,19 @@ nix develop
 go test -race ./...
 ```
 
-The repository ships an `.envrc`, so `direnv allow` enters the same shell on
-`cd`.
+The repository has an `.envrc`, thus `direnv allow` opens the same shell when
+you `cd` into it.
 
-Other flake outputs:
-
-| Output | What it is |
+| Flake output | What it is |
 |---|---|
 | `packages.default`, `packages.bonnie` | the BONNIE CLI |
-| `packages.microsandbox` | the `msb` CLI plus its `libkrunfw` |
+| `packages.microsandbox` | the `msb` CLI and its `libkrunfw` |
 | `apps.msb` | `nix run github:mark3labs/bonnie#msb` |
 | `overlays.default` | both packages, for your own nixpkgs |
 
-## Quickstart: scaffold an agent
+## Scaffold an agent
 
-Scaffold an agent, edit one file, run it.
+Scaffold an agent, edit one file, then run it.
 
 ```bash
 bonnie init my-agent --model anthropic/claude-sonnet-4-5
@@ -125,14 +123,14 @@ go mod tidy
 bonnie dev
 ```
 
-The tree is four things: `main.go` (one call — this is where the model, the
-sandbox, and the channels are configured, in code), `instructions.md` (the
-system prompt, read fresh at every start), and `skills/` and `workspace/`
-(seed directories — files under `workspace/` are mirrored into every run's
-sandbox, and a file the model already wrote is never overwritten).
+`bonnie init` writes `instructions.md` (the system prompt), `main.go` (the one
+call you own), `bonnie_gen.go` (the generated wiring), `go.mod`, and the seed
+directories `skills/` and `workspace/`. With `--tools` it also writes a sample
+tool at `tools/echo/tool.go`. It never replaces a file: if one file exists, it
+refuses, names each file it found, and changes nothing.
 
 ```go
-// main.go — the whole default agent
+// main.go — the full default agent
 package main
 
 import "github.com/mark3labs/bonnie"
@@ -145,26 +143,30 @@ func main() {
 ```
 
 ```bash
-# talk to it over HTTP
+# speak to it over HTTP
 curl -s localhost:8080/bonnie/v1/runs -d '{"text":"What are you?"}'
 
-# or talk to it in the terminal — one durable conversation, live streamed
-bonnie chat --addr :8080
+# or speak to it in the terminal — one durable conversation, streamed live
+bonnie chat --addr 127.0.0.1:8080
 ```
 
-There is no config file. A setting is either a file at a known path
-(`instructions.md`, `workspace/`, `tools/`) or an option in `main.go`, so a
-setting that does not exist is a compile error rather than a key nothing
-reads. `-addr` and `-model` are operator flags on the built binary and win
-over the options, so one binary can move port or model without a rebuild.
+Files under `workspace/` are copied into each run's sandbox. A file that the
+model already wrote is never replaced.
 
-When you are ready to ship it, `bonnie build` compiles the tree — tools,
-instructions, and seed files embedded — into one static binary that serves
-on a host with no Go and no BONNIE install.
+There is no configuration file. A setting is a file at a known path
+(`instructions.md`, `workspace/`, `skills/`, `tools/`) or an option in
+`main.go`. Thus a setting that does not exist is a compile error, and not a key
+that nothing reads. The built binary accepts two operator flags, `-addr` and
+`-model`. Each flag wins over the related option, thus one binary can change
+port or model without a new build.
 
-## Quickstart
+When the agent is ready, `bonnie build` compiles the tree into one static
+binary. The binary contains the tools, the instructions, the skills, and the
+seed files. It serves on a host that has no Go and no BONNIE installation.
 
-A durable run in 20 lines. The journal on disk is what makes it durable.
+## Use the library
+
+A durable run in 25 lines. The journal on disk is what makes the run durable.
 
 ```go
 package main
@@ -175,18 +177,22 @@ import (
 	"log"
 
 	"github.com/mark3labs/bonnie/runtime"
+	"github.com/mark3labs/bonnie/sandbox"
 	kit "github.com/mark3labs/kit/pkg/kit"
 )
 
 func main() {
-	// Every message is journalled here before it is kept.
+	// Each message is journalled here before it is kept.
 	journal, err := runtime.OpenSQLiteJournal(".bonnie")
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer journal.Close()
 
-	runner := runtime.NewRunner(journal, runtime.KitAgent(
+	// sandbox.Agent gives the model a shell and a filesystem that are not
+	// the host's. It also registers the human-in-the-loop tools.
+	runner := runtime.NewRunner(journal, sandbox.Agent(
+		sandbox.Landlock(),
 		kit.WithModel("anthropic/claude-sonnet-4-5"),
 	))
 
@@ -199,15 +205,32 @@ func main() {
 }
 ```
 
-Run it again with a different message and the **same run ID**. BONNIE replays
-the conversation first, so the agent remembers:
+> **`runtime.KitAgent` is the unsandboxed seam.** It builds a Kit agent whose
+> core tools — shell, read, write, edit — run **in your process**, with your
+> files and your credentials. `bonnie.New()` never uses it directly: it wraps
+> it in `sandbox.Agent`. Call `runtime.KitAgent` only when your process is
+> already inside isolation that you control. A working directory is not
+> isolation: an absolute path leaves it.
+
+Start the program again with a different message and the **same run ID**.
+BONNIE replays the conversation first, thus the agent remembers:
 
 ```go
 run, _ := runner.Start(ctx, "run-1", runtime.Input{Text: "What did I just ask?"})
 // `You asked me "In one sentence, what is a durable agent run?"`
 ```
 
-Inspect what happened, without a server:
+`runtime.Input` carries more than text:
+
+| Field | Function |
+|---|---|
+| `Text` | the user's message — the one part that becomes conversation history |
+| `Files` | file parts for the turn (`kit.LLMFilePart`) |
+| `Context` | what the model must know for this turn only; shown before `Text`, never history |
+| `Title` | names the run in operator listings; recorded on the first turn |
+| `Origin` | where the conversation lives (`Channel`, `Kind`); recorded on the first turn |
+
+Examine what occurred, with no server:
 
 ```bash
 bonnie runs list --journal .bonnie
@@ -215,26 +238,28 @@ bonnie runs show --journal .bonnie run-1
 ```
 
 ```
-RUN    STATE      STEPS  LAST
-run-1  completed  2      You asked me "In one sentence, what is a durable agent run?"
+RUN    TITLE              STATE      STEPS  LAST
+run-1  What is a durab…   completed  2      You asked me "In one sentence, …"
 ```
 
 ## Park and resume
 
-This is the headline feature. An agent asks a question, **your process exits**,
-and a completely new process finishes the job.
+This is the primary function. An agent asks a question, **your process stops**,
+and a new process completes the work.
 
-BONNIE ships two tools for this. Register them and the model can call them:
+BONNIE has two tools for this. The model can call them:
 
 | Tool | Parks the run to... |
 |---|---|
 | `ask_human` | ask the operator a question |
-| `request_approval` | get approval before a risky action |
+| `request_approval` | get approval before a dangerous action |
 
-`runtime.KitAgent` registers both automatically.
+`runtime.KitAgent` registers both, thus `sandbox.Agent` and `bonnie.New()`
+register them too.
 
 ```go
-runner := runtime.NewRunner(journal, runtime.KitAgent(
+runner := runtime.NewRunner(journal, sandbox.Agent(
+	sandbox.Landlock(),
 	kit.WithModel("anthropic/claude-sonnet-4-5"),
 	kit.WithSystemPrompt("Before you deploy anything, use ask_human to ask "+
 		"which region to deploy to."),
@@ -247,32 +272,32 @@ if err != nil {
 
 if run.State == runtime.RunWaiting {
 	fmt.Println("agent asks:", run.Suspend.Prompt)
-	return // nothing is holding compute — the process may exit
+	return // no compute is held — the process can stop
 }
 ```
 
-Later, anywhere, as long as it can read the same journal:
+Later, in any process that can read the same journal:
 
 ```go
 run, err := runner.Resume(ctx, "deploy-42",
 	[]runtime.InputResponse{{Text: "eu-west-1"}})
 ```
 
-A parked run holds **no compute**. It costs nothing to wait a week.
+A parked run holds **no compute**. To wait one week costs nothing.
 
-See [`examples/hitl-restart`](examples/hitl-restart) for a runnable version
-that genuinely calls `os.Exit` between the two phases:
+[`examples/hitl-restart`](examples/hitl-restart) does this with a real
+`os.Exit` between the two phases:
 
 ```bash
 go run ./examples/hitl-restart -phase ask
-# ...process exits, run is parked on disk...
+# ...the process stops, the run is parked on disk...
 go run ./examples/hitl-restart -phase answer -answer "eu-west-1"
 ```
 
 ## Your own tools
 
-A BONNIE tool is a Kit tool. Pass it through and it joins the sandboxed and
-human-in-the-loop sets:
+A BONNIE tool is a Kit tool. Give it to the agent and it joins the sandboxed
+set and the human-in-the-loop set:
 
 ```go
 type chargeInput struct {
@@ -282,21 +307,26 @@ type chargeInput struct {
 
 chargeCard := kit.NewTool("charge_card", "Charge a customer's card.",
 	func(ctx context.Context, in chargeInput) (kit.ToolOutput, error) {
-		// Runs in YOUR process, with your secrets. The model sees only
-		// the result you return.
+		// This runs in YOUR process, with your secrets. The model sees
+		// only the result you return.
 		if err := stripe.Charge(in.UserID, in.Amount); err != nil {
 			return kit.ErrorResult(err.Error()), nil
 		}
 		return kit.TextResult("Charged."), nil
 	})
 
-runner := runtime.NewRunner(journal, runtime.KitAgent(
+// In an agent tree:
+bonnie.New(bonnie.WithTools(chargeCard)).Serve()
+
+// Or one layer down:
+runner := runtime.NewRunner(journal, sandbox.Agent(
+	sandbox.Landlock(),
 	kit.WithModel("anthropic/claude-sonnet-4-5"),
 	kit.WithExtraTools(chargeCard),
 ))
 ```
 
-You can also write a tool that **parks the run** — that is all `ask_human` is:
+You can also write a tool that **parks the run**. `ask_human` is exactly this:
 
 ```go
 return kit.ToolOutput{
@@ -310,30 +340,29 @@ return kit.ToolOutput{
 ```
 
 The run stops, `Start` returns with `State == RunWaiting`, and
-`run.Suspend.Prompt` carries your question.
+`run.Suspend.Prompt` holds your question.
 
-Prefer scaffolding over hand-wiring? `bonnie init --tools` creates a tree
-with one sample tool and a `main.go` you own; tools there live in
-`tools/<name>/tool.go` as `func Tool() kit.Tool`, and the directory name is
-the tool's name. `bonnie dev` and `bonnie build` regenerate the wiring, so
-`main.go` never has to name a tool.
+In an agent tree, `bonnie init --tools` writes one sample tool. A tool there is
+`tools/<name>/tool.go` with `func Tool() kit.Tool`, and the directory name is
+the tool's name. `bonnie dev` and `bonnie build` generate the wiring again,
+thus `main.go` never names a tool.
 
-## Sandboxing
+## Sandboxes
 
-Every tool call runs in a sandbox. There is no unsandboxed mode: `WithSandbox`
-**selects** a backend, it does not enable one, and leaving it out gets you
-`sandbox.Landlock()` — not your process.
+Each tool call runs in a sandbox. There is no unsandboxed mode. `WithSandbox`
+**selects** a backend, it does not enable one. If you do not call it, you get
+`sandbox.Landlock()`, and not your process.
 
 The default confines tool calls to the run's own workspace with the Linux
-Landlock LSM, and needs nothing installed. That is why it is the floor: a
-default that requires Docker is a default people turn off.
+Landlock LSM, and needs no installation. That is why it is the floor: a default
+that needs Docker is a default that people switch off.
 
 ```go
 bonnie.New().Serve() // already sandboxed
 ```
 
-Choose something stronger when the work is untrusted — `bonnie init` scaffolds
-both lines commented out, so the choice is visible rather than silent:
+Select a stronger backend when the work is not trusted. `bonnie init` writes
+both lines as comments, thus the choice is visible:
 
 ```go
 bonnie.New(
@@ -342,7 +371,7 @@ bonnie.New(
 ).Serve()
 ```
 
-Wiring the runner yourself, it is the same provider one layer down:
+If you wire the runner yourself, it is the same provider one layer down:
 
 ```go
 provider := sandbox.Docker(sandbox.WithDockerImage("python:3.12-slim"))
@@ -352,87 +381,114 @@ runner := runtime.NewRunner(journal, sandbox.Agent(provider,
 ))
 ```
 
-The model gets `bash`, `read_file`, `write_file`, and `list_files` that run
-inside the sandbox, rooted at `/workspace`.
+The model gets four tools that run in the sandbox: `bash`, `read_file`,
+`write_file`, and `list_files`. Their root is `sandbox.Workspace`,
+`/workspace`. A path that leaves the workspace, also through a symlink the
+model made, gets `sandbox.ErrOutsideWorkspace`.
 
-| Backend | Isolation | You install | Extra Go deps |
+| Backend | Isolation | You install | Network policy |
 |---|---|---|---|
-| `sandbox.Landlock()` — **default** | filesystem **containment**, shared kernel, open network | — | 1 |
-| `sandbox.Local()` | **none** — dev only | — | 0 |
-| `sandbox.Docker()` | container namespaces | Docker | 0 |
-| `sandbox.Microsandbox()` | microVM, guest kernel | [`msb`](https://github.com/superradcompany/microsandbox) | 0 |
+| `sandbox.Landlock()` — **default** | filesystem **containment**, shared kernel | — | none: a policy is refused |
+| `sandbox.Local()` | **none** — development only | — | none: a policy is refused |
+| `sandbox.Docker()` | container namespaces | Docker | `allow-all`, `deny-all` |
+| `sandbox.Microsandbox()` | microVM, guest kernel | [`msb`](https://github.com/superradcompany/microsandbox) | `allow-all`, `deny-all`, `allow-list` |
 
-The CLI backends drive a CLI and Landlock is pure Go, so BONNIE stays a single
-static binary.
+The Docker and microsandbox backends drive a CLI, and Landlock is pure Go.
+Thus BONNIE stays one static binary.
 
 > **The default is containment, not isolation.** Landlock confines the
-> filesystem and withholds the host environment from commands, so a model
+> filesystem and keeps the host environment away from a command. Thus a model
 > cannot read your journal or your API keys. It does **not** confine the
-> network and does **not** give the command its own kernel. For hostile code,
-> use Docker or microsandbox and cut egress.
+> network, and it does **not** give the command its own kernel. For hostile
+> code, use Docker or microsandbox, and stop egress.
 
-> The microsandbox adapter is **verified on Linux with KVM** (`msb` 0.6.18,
-> all 18 conformance cases, network policies enforced with real egress). Its
-> network policy is fixed at create time: reattaching under a different policy
-> fails with `ErrPolicyMismatch` rather than silently using the old rules.
+> Each Landlock command runs in a child process that re-executes BONNIE's
+> binary, restricts itself, and then becomes the command. The restriction stays
+> after `execve` and is inherited, thus a subshell cannot escape it.
 
-Lock down the network. A policy the backend cannot enforce is refused — never
-a silent allow-all:
+> The microsandbox adapter is **verified on Linux with KVM** (`msb` 0.6.18, all
+> 18 conformance cases, network policies enforced with real egress). Its
+> network policy is fixed when the sandbox is made. To attach again with a
+> different policy fails with `ErrPolicyMismatch`, and does not use the old
+> rules in silence.
+
+Constrain the network. A backend that cannot enforce a policy refuses it with
+`ErrPolicyUnsupported`. It never permits everything in silence:
 
 ```go
 provider := sandbox.Docker()
 provider.SetNetworkPolicy(sandbox.NetworkPolicy{Mode: sandbox.NetworkDenyAll})
 ```
 
-Pick the best backend available, without silently falling back to no
+Select the best backend that is available, with no silent fall-back to no
 isolation:
 
 ```go
 provider, err := sandbox.Select(ctx, sandbox.Microsandbox(), sandbox.Docker(), sandbox.Landlock())
 ```
 
-The sandbox opens on the **first tool call that needs it**, so a parked run
-holds no container. Read the godoc on each provider in
-[package `sandbox`](https://pkg.go.dev/github.com/mark3labs/bonnie/sandbox)
-before deploying: each one states what it does and does not contain.
+`sandbox.Seeded(provider, dir)` copies a local directory into each sandbox, and
+never replaces a file that the run already has. An agent tree wraps its
+`workspace/` directory this way.
 
-## Serve over HTTP
+The sandbox opens at the **first tool call that needs it**, thus a parked run
+holds no container. Read the godoc of each provider in
+[package `sandbox`](https://pkg.go.dev/github.com/mark3labs/bonnie/sandbox)
+before you deploy. Each provider states what it contains and what it does not.
+
+## HTTP API
 
 ```bash
 bonnie serve --journal .bonnie --model anthropic/claude-sonnet-4-5 --sandbox docker
 ```
 
-Or run an agent tree — its configuration is Go in its own `main.go`, so the
-tree is served by running it. See [Quickstart: scaffold an
-agent](#quickstart-scaffold-an-agent):
+Or run an agent tree. Its configuration is Go in its own `main.go`, thus you
+serve the tree when you run it:
 
 ```bash
-bonnie dev my-agent          # hot reload while you work on it
+bonnie dev my-agent          # hot reload while you work
 bonnie build my-agent        # one static binary, then run it anywhere
 ```
 
-Or mount it in your own server:
+Or mount the channel in your own server. A channel gives you its routes, and
+it is also the inbound surface that a handler resolves an address through:
 
 ```go
-runner := runtime.NewRunner(journal, runtime.KitAgent(opts...))
-http.ListenAndServe(":8080", bonniehttp.New(runner).Handler())
+runner := runtime.NewRunner(journal, sandbox.Agent(provider, opts...))
+ch := bonniehttp.New(runner)
+
+mux := http.NewServeMux()
+for _, rt := range ch.Routes() {
+	handler := rt.Handler
+	mux.HandleFunc(rt.Method+" "+rt.Path, func(w http.ResponseWriter, r *http.Request) {
+		handler(w, r, ch, nil) // nil: no other channel to hand off to
+	})
+}
+http.ListenAndServe(":8080", mux)
 ```
 
-| Route | Does |
+Each route is under `/bonnie/v1`. The version segment is the wire contract.
+
+| Route | Function |
 |---|---|
-| `GET /bonnie/v1/health` | liveness: `{"ok":true,"status":"ready"}`, no run needed |
+| `GET /bonnie/v1/health` | liveness: `{"ok":true,"status":"ready"}`, no journal read |
 | `GET /bonnie/v1/info` | agent name, BONNIE version, mounted channels |
-| `POST /bonnie/v1/runs` | start a run, or route to the one serving an address |
+| `POST /bonnie/v1/runs` | start a run, or route to the run that serves an address |
+| `GET /bonnie/v1/addresses/{address}` | report the run that an address resolves to |
+| `POST /bonnie/v1/addresses/{address}` | send to the run that an address resolves to |
 | `GET /bonnie/v1/runs/{id}` | report a run's durable state |
-| `POST /bonnie/v1/runs/{id}` | send a message to an existing run |
+| `POST /bonnie/v1/runs/{id}` | send a message to one exact run |
 | `POST /bonnie/v1/runs/{id}/respond` | answer a parked run |
-| `POST /bonnie/v1/runs/{id}/cancel` | stop the turn in flight |
-| `GET /bonnie/v1/runs/{id}/stream` | NDJSON event stream, resumable via `?cursor=` |
+| `POST /bonnie/v1/runs/{id}/cancel` | stop the turn in progress |
+| `POST /bonnie/v1/runs/{id}/reset` | retire the run and free its address |
+| `POST /bonnie/v1/runs/{id}/clear` | drop the conversation, keep the run |
+| `POST /bonnie/v1/runs/{id}/compact` | summarise the older messages now |
+| `GET /bonnie/v1/runs/{id}/stream` | NDJSON event stream, resumable with `?cursor=` |
 
 ```bash
 # Start a run. It parks on a question.
 curl -s localhost:8080/bonnie/v1/runs -d '{"text":"Deploy the app. Ask me the region first."}'
-# {"run_id":"run-e8b3fa...","state":"waiting",
+# {"run_id":"run-e8b3fa...","cursor":4,"state":"waiting",
 #  "suspend":{"kind":"question","prompt":"Which region?"}}
 
 # Answer it.
@@ -441,28 +497,42 @@ curl -s localhost:8080/bonnie/v1/runs/run-e8b3fa.../respond \
 # {"run_id":"run-e8b3fa...","state":"completed","response":"Deployed to eu-west-1."}
 ```
 
+Each error reply has a message and a stable code:
+`{"error":"...","code":"run_not_found"}`. The codes include `run_not_found`,
+`invalid_run_id`, `run_not_waiting`, `run_active`, `run_retired`,
+`unknown_turn_policy`, `bad_request`, `too_large`, and `internal`. A client can
+branch on the code, and not on the text.
+
+`POST /bonnie/v1/runs` accepts `operation_id` as an idempotency key, and
+`turn_policy` to select what occurs when a turn is already running: `steer`
+(the default) injects the message into the turn, `queue` lets the turn finish
+first.
+
 ### Addresses
 
-Chat platforms have threads, not run IDs. Pass an `address` and BONNIE keeps
-the mapping **in the journal**, so a restart does not orphan a conversation:
+Chat platforms have threads, not run IDs. Send an `address`, and BONNIE keeps
+the mapping **in the journal**. Thus a restart does not orphan a conversation:
 
 ```bash
-curl -s localhost:8080/bonnie/v1/runs -d '{"address":"slack:C123/T456","text":"hi"}'
+curl -s localhost:8080/bonnie/v1/runs -d '{"address":"session-42","text":"hi"}'
 ```
 
-The same address always resolves to the same run. `POST /bonnie/v1/runs/{id}` is the
-opposite: it targets one exact run and returns `404` rather than creating one.
+The same address always resolves to the same run.
+`POST /bonnie/v1/runs/{id}` is the opposite: it targets one exact run, and
+returns `404` instead of making a run.
 
 ## Chat channels
 
-Slack, Discord, and Telegram put the same durable runs into a conversation.
-Mount one in `main.go`, put its credentials in the environment, and run:
+Slack, Discord, Telegram, and GitHub put the same durable runs into a
+conversation. Mount a channel in `main.go`, put its credentials in the
+environment, and run:
 
 ```go
 bonnie.New(
 	bonnie.WithSlack(slack.Config{}),
 	bonnie.WithDiscord(discord.Config{}),
 	bonnie.WithTelegram(telegram.Config{Username: "mybot"}),
+	bonnie.WithGitHub(github.Config{BotName: "my-agent"}),
 ).Serve()
 ```
 
@@ -470,95 +540,151 @@ bonnie.New(
 export SLACK_BOT_TOKEN=xoxb-... SLACK_SIGNING_SECRET=...
 export DISCORD_BOT_TOKEN=... DISCORD_PUBLIC_KEY=...
 export TELEGRAM_BOT_TOKEN=... TELEGRAM_WEBHOOK_SECRET=...
+export GITHUB_APP_ID=... GITHUB_APP_PRIVATE_KEY=... GITHUB_WEBHOOK_SECRET=...
 bonnie dev
 ```
 
-Credentials are read from the environment and never from code; a missing one
-is a startup error that names the variable.
+Credentials come from the environment and never from code. A missing
+credential is a startup error that names the variable. The GitHub bot name is
+a setting and not a secret, thus it stays in the config.
 
-Each channel mounts one webhook (`/slack/events`, `/discord/interactions`,
-`/telegram`), verifies its platform's signature — Slack's v0 HMAC, Discord's
-Ed25519, Telegram's shared secret — and answers within the platform's ACK
-deadline while the turn runs on. The reply posts back to the thread; a
-parked run posts its question, and the next message on the thread is the
-answer.
+| Channel | Webhook route | Verification | Address |
+|---|---|---|---|
+| `slack` | `POST /slack/events` | v0 HMAC signature | `<channel>/<thread_ts>`, or `<channel>` for a DM |
+| `discord` | `POST /discord/interactions` | Ed25519 signature | the channel or thread ID |
+| `telegram` | `POST /telegram` | shared secret header | `<chat_id>`, or `<chat_id>/<topic>` |
+| `github` | `POST /github/events` | HMAC signature | `<owner>/<repo>/issues/<n>`, or `<owner>/<repo>/pulls/<n>/reviews/<id>` |
 
-The per-platform setup, the dispatch and steering rules, and what is
-deliberately not implemented (streaming edits, button HITL, attachments,
-gateway transports) are in the godoc of
+An address is channel-local. The framework puts the channel's name in front of
+it, thus the durable form is `slack/C123/1700000000.000900`.
+
+Each channel answers in the platform's ACK period while the turn continues. The
+reply goes back to the thread. A parked run posts its question, and the next
+message on the thread is the answer. `/new` in a thread retires the run and
+starts a new conversation in the same place.
+
+The GitHub channel is a GitHub App. A comment that names `@<BotName>` on an
+issue, a pull request, or a review thread starts or continues a run. The
+channel mints an installation token for each event, uses it only to post back
+and to read the pull request's changed files, and never lets the token enter
+the run. A review thread is its own conversation, separate from the pull
+request's timeline. The hooks `OnIssue`, `OnPullRequest`, and `OnCheckSuite`
+let the host start a turn from an event with no comment.
+
+While a turn runs, the Slack channel shows what the agent is doing. The mode is
+`slack.Config.Activity`: `ActivityMessage` (the default) edits one placeholder
+message, `ActivityStatus` uses Slack's assistant status and needs the
+`assistant:write` scope, and `ActivityOff` shows nothing until the reply.
+
+A mounted channel can also start a conversation on another channel. A route
+handler gets `channel.Outbound` beside `channel.Inbound`:
+
+```go
+to, ok := out.To("slack")
+if ok {
+	err := to.Receive(ctx, "C0123456789", "the nightly digest, please",
+		channel.SendOptions{Auth: principal})
+}
+```
+
+This is an agent hand-off and not a notification: the text becomes turn input,
+and the model runs on the destination channel. The destination binds the
+address before the turn runs, thus a platform event that arrives during the
+turn continues this run.
+
+The per-platform setup, the dispatch rules, and what is deliberately not
+implemented are in the godoc of
 [package `channel`](https://pkg.go.dev/github.com/mark3labs/bonnie/channel)
-and each adapter under it.
+and each adapter below it.
 
 ## CLI
 
 ```
-bonnie init     Scaffold an agent tree (main.go, instructions, seeds)
+bonnie init     Scaffold an agent tree
 bonnie dev      Run an agent tree with hot reload and the built-in TUI
 bonnie build    Compile an agent tree into one static binary
 bonnie serve    Mount the HTTP channel and serve durable runs, with no tree
-bonnie chat     Talk to a running agent in a terminal
+bonnie chat     Interact with an agent over the HTTP channel in a terminal
 bonnie runs     List and inspect durable runs
-bonnie sandbox  Reclaim the sandboxes of terminal runs (prune)
-bonnie version  Print the version
+bonnie sandbox  Reclaim the sandboxes of finished runs
+bonnie version  Print the BONNIE version
 ```
 
 ```bash
 bonnie init my-agent --model anthropic/claude-sonnet-4-5
-bonnie init .                      adopt this directory; never overwrites
+bonnie init .                      adopt this directory; never replaces a file
 bonnie init my-agent --tools       add a sample Go tool
 
-bonnie dev my-agent                hot reload + the terminal interface
+bonnie dev my-agent                hot reload and the terminal interface
+bonnie dev my-agent --tui=false    the serve loop alone, for CI
+bonnie dev my-agent --dry-run      print the discovery plan, build nothing
+
 bonnie build my-agent              one static binary at ./my-agent
-bonnie chat --addr :8080           talk to any running channel in a terminal
+bonnie build my-agent --output bin/agent
+
+bonnie chat --addr 127.0.0.1:8080 --run tui-default
 
 bonnie serve --addr :8080 --journal .bonnie \
              --model anthropic/claude-sonnet-4-5 \
-             --sandbox docker --sandbox-deny-network
+             --sandbox docker --sandbox-deny-network \
+             --slack --discord --telegram
 
 bonnie runs list --journal .bonnie --state waiting
 bonnie runs show --journal .bonnie run-1
 bonnie runs show --journal .bonnie run-1 --json | jq '.[] | select(.kind=="message")'
+
+bonnie sandbox prune --journal .bonnie --sandbox docker --dry-run
 ```
 
-`runs` reads the journal directly, so it works while the server is stopped —
-which is exactly when you need it.
+`--sandbox` accepts `landlock` (the default), `docker`, `microsandbox`,
+`local`, or `auto`. `none` is refused by name, because it was the old default
+and still lives in scripts.
 
-## Storage
+`bonnie serve` has no `--github` flag: the GitHub channel needs a bot name,
+which is a setting in code and not an environment variable. Mount it from an
+agent tree with `bonnie.WithGitHub`.
 
-The journal is the durability seam. Two ship in the box:
+`runs` reads the journal directly, thus it works while the server is stopped —
+which is when you need it.
+
+## Journal
+
+The journal is the durability seam. Two implementations are in the box:
 
 ```go
 runtime.NewMemoryJournal()            // tests and ephemeral runs
-runtime.OpenSQLiteJournal(".bonnie")  // SQLite, one database for every run
+runtime.OpenSQLiteJournal(".bonnie")  // SQLite, one database for each run
 ```
 
 `SQLiteJournal` writes `<root>/journal.db` through a **pure-Go** driver
-(`modernc.org/sqlite`), so BONNIE still builds and cross-compiles with
-`CGO_ENABLED=0` and `bonnie build` still produces one static binary. The
-database runs in WAL mode and fsyncs every commit by default.
+(`modernc.org/sqlite`). Thus BONNIE still builds and cross-compiles with
+`CGO_ENABLED=0`, and `bonnie build` still makes one static binary. The database
+uses WAL mode and fsyncs each commit. `runtime.WithFsync(runtime.FsyncRelaxed)`
+trades a bounded loss window for throughput.
 
-One record per row, so any SQLite client can read a run:
+One record for each row, thus any SQLite client can read a run:
 
 ```bash
 sqlite3 .bonnie/journal.db \
   "SELECT seq, role, text FROM records WHERE run_id = 'run-1' ORDER BY seq"
 ```
 
-What the database buys over the JSONL files it replaced:
+What the database gives, against the JSONL files that it replaced:
 
-- **A step is atomic.** A tool-calling step is one transaction, so the
-  "torn single write" window a file append left is closed, not narrowed.
-- **Concurrent writers are safe, not refused.** SQLite serialises write
-  transactions across processes and the `(run_id, seq)` primary key makes a
-  reused sequence number a constraint violation. The per-run lock file, and
-  the `ErrRunOwnedElsewhere` it produced, are gone.
+- **A step is atomic.** A tool-calling step is one transaction. Thus the torn
+  single write that a file append permitted is closed, and not only smaller.
+- **Concurrent writers are safe, and not refused.** SQLite serialises write
+  transactions across processes, and the `(run_id, seq)` primary key makes a
+  reused sequence number a constraint violation. The per-run lock file, and the
+  `ErrRunOwnedElsewhere` that it caused, are gone.
 
-**Upgrading.** A `.bonnie` that still holds `runs/*.jsonl` from an earlier
-BONNIE is imported on first open: records keep their sequence numbers, and
-each source file is renamed to `<run>.jsonl.imported` rather than deleted.
-The import is idempotent, so a crash halfway through costs a second read.
+**Upgrade.** A `.bonnie` directory that still has `runs/*.jsonl` from an
+earlier BONNIE is imported at the first open. Records keep their sequence
+numbers, and each source file is renamed to `<run>.jsonl.imported` and not
+deleted. The import is idempotent, thus a crash in the middle costs one more
+read.
 
-Bring your own by implementing seven methods:
+Supply your own journal with seven methods:
 
 ```go
 type Journal interface {
@@ -572,12 +698,12 @@ type Journal interface {
 }
 ```
 
-A table-driven conformance suite in `runtime/journal_conformance_test.go` runs
-against every implementation. Add yours to it and it inherits the whole suite.
+The table-driven conformance suite in `runtime/journal_conformance_test.go`
+runs against each implementation. Add yours, and it gets the full suite.
 
-## Streaming
+## Events
 
-Subscribe to a run's events in-process:
+Subscribe to a run's events in the process:
 
 ```go
 events, unsubscribe := runner.Events().Subscribe("run-1", 0)
@@ -588,134 +714,150 @@ for ev := range events {
 }
 ```
 
-Or over HTTP, one JSON object per line:
+The types are `run_state`, `run_suspend`, `run_resume`, and `run_response`, and
+the live deltas that Kit forwards during a turn.
+
+Or over HTTP, one JSON object for each line:
 
 ```bash
 curl -sN localhost:8080/bonnie/v1/runs/run-1/stream
 ```
 
-Every event carries a monotonic `seq`. If a client drops, reconnect with the
-last one it saw and lose nothing:
+Each event has a monotonic `seq`. If a client disconnects, connect again with
+the last `seq` it saw, and lose nothing:
 
 ```bash
 curl -sN "localhost:8080/bonnie/v1/runs/run-1/stream?cursor=12"
 ```
 
-## Steer and cancel
+Durable events are anchored to the journal record that caused them. Thus a
+cursor keeps its meaning after a restart. Live-only deltas are never replayed.
+
+## Session controls
 
 ```go
-runner.Steer("run-1", "actually, use eu-west-1")  // joins the running turn
-runner.Cancel("run-1")                            // stops it
+runner.Steer("run-1", "actually, use eu-west-1")   // joins the turn in progress
+runner.Cancel("run-1")                             // stops the turn
+runner.Clear(ctx, "run-1")                         // forgets the conversation
+runner.Compact(ctx, "run-1")                       // summarises the older messages
+runner.Retire(ctx, "run-1", "user asked for a new conversation")
 ```
 
-Cancelling keeps every completed step, so the run restores to a valid
-conversation and can be continued with `Start`.
+To cancel keeps each completed step, thus the run restores to a valid
+conversation and continues with `Start`. To retire is permanent: `Start` and
+`Resume` then refuse the run with `ErrRunRetired`, and the run stays readable.
+
+`runner.Snapshot(ctx, runID)` reports a run without a turn.
+`runner.IsActive(runID)` reports whether a turn runs now.
 
 ## Run states
 
 ```
 pending → running → completed
-                  → waiting    (parked for a human; resume with Resume)
+                  → waiting    (parked for a human; continue with Resume)
                   → cancelled  (stopped by an operator; continue with Start)
-                  → failed
+                  → failed     (the agent could not finish the turn)
+                  → retired    (closed for good; Start and Resume refuse it)
 ```
 
 ## How it works
 
-BONNIE is built on four public Kit extension points. No fork, no patched SDK:
+BONNIE uses four public Kit extension points. There is no fork and no patched
+SDK:
 
 | Need | Kit API |
 |---|---|
-| Journal every message | `Options.SessionManager` |
+| Journal each message | `Options.SessionManager` |
 | Checkpoint each step | `Kit.OnStepFinish` |
 | Inject replayed context | `Kit.OnContextPrepare` |
 | Park for a human | `kit.ToolOutput{Halt, FinalValue}` |
 
-Three properties are worth knowing, because they are the difference between a
-demo and something you can deploy:
+Three properties are the difference between a demonstration and something you
+can deploy:
 
-- **Replay is lossless.** Journalled messages keep their typed parts, so a
-  resumed run knows which tools it called and what came back. It will not
-  repeat a side effect it already performed.
+- **Replay is lossless.** A journalled message keeps its typed parts, thus a
+  resumed run knows which tools it called and what they returned. It does not
+  do a side effect a second time.
 - **A step commits atomically.** A tool call and its result reach the journal
-  as one write and one fsync (`kit.StepAppender`, adopted from Kit `v0.106.0`),
-  so a crash cannot leave an unanswered tool call. If a torn step still
-  reaches disk — from an older journal, a non-batching journal, or a short
-  write — restore drops that incomplete step and records the repair.
-- **Cancelling keeps finished work.** Steps are persisted before the context is
-  checked, so a cancelled turn loses only the step in flight.
+  as one write and one fsync (`kit.StepAppender`, from Kit `v0.106.0`). Thus a
+  crash cannot leave a tool call with no answer. If a torn step is on disk —
+  from an older journal, a journal that does not batch, or a short write —
+  restore removes that incomplete step and records the repair.
+- **To cancel keeps finished work.** A step is written before the context is
+  examined, thus a cancelled turn loses only the step in progress.
 
-Full detail, with the Kit citations, is in the godoc of `runtime/` — the
+The full detail, with the Kit citations, is in the godoc of `runtime/`. The
 code is the specification.
 
 ## Limits
 
 Stated plainly, because the failure modes are not obvious:
 
-- **Linux only.** BONNIE's floor is the Landlock LSM, so releases build for
+- **Linux only.** BONNIE's floor is the Landlock LSM, thus a release builds for
   linux/amd64 and linux/arm64 and nothing else. macOS and Windows are not
-  supported and are not on the roadmap: restoring macOS means writing a
-  seatbelt (`sandbox-exec`) backend of equal strength first, not adding a
-  build target. A kernel older than 5.13, or one booted with Landlock
-  disabled, has no default sandbox and BONNIE refuses to start rather than
-  run unconfined — use `--sandbox docker` there.
-- **The default sandbox is containment, not isolation.** Landlock confines
-  the filesystem and withholds host credentials from commands. It does not
-  confine the network and shares the host kernel.
-- **Do not run BONNIE as a user in the `docker` group.** Landlock mediates
-  opening a file, not connecting to a socket, so a tool call reaches
-  `/var/run/docker.sock` whenever the process can — and that is a full host
-  escape. No path setting closes it. Use an unprivileged user, or
-  microsandbox.
+  supported and are not on the roadmap: to restore macOS needs a seatbelt
+  (`sandbox-exec`) backend of equal strength first, and not one more build
+  target. A kernel older than 5.13, or a kernel booted with Landlock disabled,
+  has no default sandbox. BONNIE refuses to start instead of a run with no
+  confinement — use `--sandbox docker` there.
+- **The default sandbox is containment, not isolation.** Landlock confines the
+  filesystem and keeps host credentials away from a command. It does not
+  confine the network, and it shares the host kernel.
+- **Do not run BONNIE as a user in the `docker` group.** Landlock mediates the
+  open of a file, and not the connection to a socket. Thus a tool call reaches
+  `/var/run/docker.sock` when the process can, and that is a full host escape.
+  No path setting closes it. Use an unprivileged user, or microsandbox.
 - **Docker is namespaces, not a kernel.** Use microsandbox for hostile code.
-- **microsandbox is verified on Linux/KVM.** Every network policy mode is
-  enforced, but the policy is fixed at create time; reattaching under a
-  different policy fails with `ErrPolicyMismatch`.
-- **Sandbox egress is open** unless you set a policy, and the default backend
+- **microsandbox is verified on Linux with KVM.** Each network policy mode is
+  enforced, but the policy is fixed when the sandbox is made. To attach again
+  with a different policy fails with `ErrPolicyMismatch`.
+- **Sandbox egress is open** until you set a policy, and the default backend
   cannot set one — it refuses the policy instead of ignoring it.
-- **No auth verification on the HTTP channel.** It carries a `Principal`; it
-  does not check one. Authenticate in front of it. The chat channels are
-  different: each verifies its platform's signature, and a channel without
-  its credentials refuses to serve. That verifies the platform, not the
-  person — a user ID inside a verified Slack event is Slack's word.
-- **Run ownership is per host, and the journal no longer refuses a second
-  writer.** SQLite serialises write transactions and rejects a reused
-  sequence number, so two processes writing one run cannot corrupt it. That
-  is journal integrity, not turn coordination: two servers that both execute
-  the same run still interleave the conversation. SQLite's locking also
-  needs working POSIX locks, so a journal on a network filesystem is still
+- **The HTTP channel does not verify auth.** It carries a `Principal`, it does
+  not examine one. Authenticate in front of it. The chat channels are
+  different: each one verifies its platform's signature, and a channel with no
+  credentials refuses to serve. That verifies the platform and not the person:
+  a user ID in a verified Slack event is Slack's word.
+- **Run ownership is per host, and the journal does not refuse a second
+  writer.** SQLite serialises write transactions and rejects a reused sequence
+  number, thus two processes that write one run cannot corrupt it. That is
+  journal integrity and not turn coordination: two servers that both execute
+  the same run still interleave the conversation. SQLite locking also needs
+  POSIX locks that work, thus a journal on a network filesystem is still
   unsafe.
-- **Events are journal-anchored.** The stream replays the journal past the
-  in-memory backlog, so a reconnect — even after a restart — has no gap.
-  Live-only deltas are the exception, marked as such.
-- **Sandbox lifecycle is journalled, and reclaiming is manual.**
-  `bonnie sandbox prune` deletes the sandboxes of terminal runs; `serve`
-  does not sweep them on its own yet.
+- **Events are journal-anchored.** The stream replays the journal after the
+  in-memory backlog, thus a reconnect — also after a restart — has no gap.
+  Live-only deltas are the exception, and they are marked.
+- **Sandbox lifecycle is journalled, and reclamation is manual.**
+  `bonnie sandbox prune` deletes the sandboxes of finished runs. `serve` does
+  not sweep them yet.
 - **The mark3labs modules are publicly fetchable.** A scaffolded module runs
-  `go mod tidy` and resolves `bonnie` and `kit` from the proxy; no
-  `GOPRIVATE`. Authoring an agent needs Go on your machine; the binary
-  `bonnie build` produces needs nothing on the host.
+  `go mod tidy` and resolves `bonnie` and `kit` from the proxy; no `GOPRIVATE`.
+  To author an agent needs Go on your machine. The binary that `bonnie build`
+  makes needs nothing on the host.
 
 ## Examples
 
 | Example | Shows |
 |---|---|
 | [`examples/minimal`](examples/minimal) | one durable run, start to finish |
-| [`examples/hitl-restart`](examples/hitl-restart) | park, **exit the process**, resume |
+| [`examples/hitl-restart`](examples/hitl-restart) | park, **stop the process**, resume |
 
 ```bash
 go run ./examples/minimal -text "What is a durable agent run?"
 ```
 
-See [`examples/README.md`](examples/README.md) for copy-pasteable commands.
+See [`examples/README.md`](examples/README.md) for commands you can copy.
 
 ## Documentation
 
 | Document | Purpose |
 |---|---|
-| [godoc](https://pkg.go.dev/github.com/mark3labs/bonnie) | The specification. Every exported symbol carries its contract and, often, the defect that shaped it |
+| [godoc](https://pkg.go.dev/github.com/mark3labs/bonnie) | The specification. Each exported symbol has its contract and, often, the defect that shaped it |
+| [`CHANGELOG.md`](CHANGELOG.md) | What each release changed, and the limits it recorded |
 | [`docs/RELEASE.md`](docs/RELEASE.md) | The release checklist, and what each tag confirmed |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Boundary rule, workspace setup, commands |
+| [`AGENTS.md`](AGENTS.md) | The same rules, for a coding agent |
 | [`SECURITY.md`](SECURITY.md) | Disclosure, and what BONNIE does not protect you from |
 
 ## Contributing
@@ -728,14 +870,14 @@ golangci-lint run
 
 Or run the same loop with `task check`, and CI parity with `task ci`.
 
-The live-model tests are behind a build tag and need a provider key:
+The live-model tests need a build tag and a provider key:
 
 ```bash
 go test -race -tags integration ./runtime ./sandbox
 ```
 
-They skip, never fail, when no key is present. One rule matters above the
-rest: **BONNIE uses the public Kit SDK only**. See
+They skip, and never fail, when no key is present. One rule is above the rest:
+**BONNIE uses the public Kit SDK only**. See
 [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## License
