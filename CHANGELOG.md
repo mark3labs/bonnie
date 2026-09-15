@@ -55,6 +55,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refuses a caller with 401; any other error from a verifier is a 500,
   because a verifier that broke has not proved the caller is an impostor.
 
+- **`bonnie.WithHTTPAuthenticator`** passes that verifier from an agent tree.
+  Without it the option was unreachable for the way most hosts run BONNIE:
+  `Serve` built the framework's HTTP channel with a fixed option list.
+
+- **`channel.RouteHandler`** names the type a `channel.Route` carries, so an
+  adapter can wrap one — an authentication check, a rate limit, a trace span
+  — without spelling the signature out inline.
+
 - **`channeltest` gains capabilities and a durability case.** An adapter
   declares what it cannot do in `Fixture.Unsupported`, and the suite skips
   exactly those cases with a message naming the capability — so the set of

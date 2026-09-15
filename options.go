@@ -10,6 +10,7 @@ import (
 	"github.com/mark3labs/bonnie/channel"
 	"github.com/mark3labs/bonnie/channel/discord"
 	"github.com/mark3labs/bonnie/channel/github"
+	bonniehttp "github.com/mark3labs/bonnie/channel/http"
 	"github.com/mark3labs/bonnie/channel/slack"
 	"github.com/mark3labs/bonnie/channel/telegram"
 	"github.com/mark3labs/bonnie/runtime"
@@ -49,6 +50,7 @@ type config struct {
 	shutdown   time.Duration
 	listener   net.Listener
 	quiet      bool
+	auth       bonniehttp.Authenticator
 }
 
 // Option configures [New]. This is where a setting that is not a
@@ -230,6 +232,28 @@ func WithListener(ln net.Listener) Option {
 // host that silences it has still chosen a confined run.
 func Quiet() Option {
 	return func(c *config) { c.quiet = true }
+}
+
+// WithHTTPAuthenticator verifies who is calling the framework's own HTTP
+// API, and makes the principal it returns the run's identity.
+//
+// Every chat adapter already does this from a platform signature — Slack's
+// HMAC, Discord's Ed25519, GitHub's HMAC. The HTTP channel carries no such
+// signature, so what counts as proof is the host's to decide: a bearer
+// token, an OIDC assertion, a client certificate, a session cookie.
+//
+// Without this option the HTTP API authenticates nobody. That is the right
+// default for a loopback `bonnie dev`, and the wrong one for anything
+// reachable by someone else — the routes start runs, read transcripts, and
+// retire conversations. A deployment either passes an authenticator here or
+// puts the process behind something that has already established who is
+// calling.
+//
+// See [github.com/mark3labs/bonnie/channel/http.Authenticator] for what a
+// verifier returns, and [github.com/mark3labs/bonnie/channel/http.ErrUnauthenticated]
+// for how it refuses one.
+func WithHTTPAuthenticator(fn bonniehttp.Authenticator) Option {
+	return func(c *config) { c.auth = fn }
 }
 
 // WithSlack mounts the Slack channel. Credentials come from the environment

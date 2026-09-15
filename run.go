@@ -161,7 +161,11 @@ func (a *Agent) Run(ctx context.Context) error {
 	}
 
 	mux := http.NewServeMux()
-	mount(mux, bonniehttp.New(runner, bonniehttp.WithInfo(info)), out)
+	httpOpts := []bonniehttp.Option{bonniehttp.WithInfo(info)}
+	if c.auth != nil {
+		httpOpts = append(httpOpts, bonniehttp.WithAuthenticator(c.auth))
+	}
+	mount(mux, bonniehttp.New(runner, httpOpts...), out)
 	for _, ch := range channels {
 		mount(mux, ch, out)
 	}

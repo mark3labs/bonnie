@@ -211,9 +211,22 @@ func (c *Channel) Name() string { return "http" }
 
 // Routes implements [channel.Channel]. Every path is under
 // [channel.APIPrefix].
+//
+// A configured [Authenticator] is applied HERE, to each returned handler,
+// rather than by whatever mounts them. Routes is the channel's single
+// definition of its own surface, and it has more than one consumer:
+// [Channel.HandlerWithOutbound] builds a mux from it, and a host mounts the
+// same routes on a mux of its own. An authentication check that lived in
+// one of those wrappers would protect that path and silently leave the
+// other open — which is exactly what happened, and why a host's own mount
+// is now covered by construction.
+//
+// `GET /bonnie/v1/health` is the one public route: a deployment probe must
+// not need a credential, and the route reports that the process is up and
+// nothing about any run.
 func (c *Channel) Routes() []channel.Route {
 	p := channel.APIPrefix
-	return []channel.Route{
+	routes := []channel.Route{
 		{Method: http.MethodGet, Path: p + "/health", Handler: c.handleHealth},
 		{Method: http.MethodGet, Path: p + "/info", Handler: c.handleInfo},
 		{Method: http.MethodPost, Path: p + "/runs", Handler: c.handleStart},
@@ -227,6 +240,26 @@ func (c *Channel) Routes() []channel.Route {
 		{Method: http.MethodPost, Path: p + "/runs/{id}/clear", Handler: c.handleClear},
 		{Method: http.MethodPost, Path: p + "/runs/{id}/compact", Handler: c.handleCompact},
 		{Method: http.MethodGet, Path: p + "/runs/{id}/stream", Handler: c.handleStream},
+	}
+	if c.auth == nil {
+		return routes
+	}
+	for i, route := range routes {
+		if route.Path == p+"/health" {
+			continue
+		}
+		routes[i].Handler = c.guard(route.Handler)
+	}
+	return routes
+}
+
+// guard wraps one route handler in the configured [Authenticator].
+func (c *Channel) guard(next channel.RouteHandler) channel.RouteHandler {
+	return func(w http.ResponseWriter, r *http.Request, in channel.Inbound, out channel.Outbound) {
+		if !c.authenticate(w, r) {
+			return
+		}
+		next(w, r, in, out)
 	}
 }
 
@@ -248,6 +281,9 @@ func (noOutbound) To(string) (channel.Receiver, bool) { return nil, false }
 // HandlerWithOutbound is [Channel.Handler] with a registry of the other
 // mounted channels, for a host that serves hand-offs. A nil registry is
 // the empty one.
+//
+// The routes arrive already guarded by [Channel.Routes], so this function
+// does no authentication of its own.
 func (c *Channel) HandlerWithOutbound(out channel.Outbound) http.Handler {
 	if out == nil {
 		out = noOutbound{}
@@ -255,11 +291,7 @@ func (c *Channel) HandlerWithOutbound(out channel.Outbound) http.Handler {
 	mux := http.NewServeMux()
 	for _, route := range c.Routes() {
 		handler := route.Handler
-		public := route.Path == channel.APIPrefix+"/health"
 		mux.HandleFunc(route.Method+" "+route.Path, func(w http.ResponseWriter, r *http.Request) {
-			if !public && !c.authenticate(w, r) {
-				return
-			}
 			handler(w, r, c, out)
 		})
 	}

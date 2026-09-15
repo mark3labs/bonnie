@@ -150,11 +150,19 @@ type Inbound interface {
 	Attach(runID string) SessionRef
 }
 
+// RouteHandler serves one channel route. It is handed the inbound side the
+// route belongs to and the registry of channels mounted beside it.
+//
+// It is a named type because adapters wrap it: an authentication check, a
+// rate limit, and a trace span are each a function of one handler to
+// another, and they are unreadable spelled out inline.
+type RouteHandler func(w http.ResponseWriter, r *http.Request, in Inbound, out Outbound)
+
 // Route binds an HTTP method and path to a handler.
 type Route struct {
 	Method  string
 	Path    string
-	Handler func(w http.ResponseWriter, r *http.Request, in Inbound, out Outbound)
+	Handler RouteHandler
 }
 
 // Outbound is handed to a channel's route handlers next to [Inbound]: it
