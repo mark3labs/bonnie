@@ -52,8 +52,8 @@ compute and lives in the journal; a restarted child resumes it, and the TUI reco
 to the stream (the journal is the durable record).
 
 The TUI connects to the same HTTP channel the child serves, so the transcript you see
-is what any client sees. --no-tui runs the serve loop alone for CI and non-interactive
-hosts.
+is what any client sees. --tui=false runs the serve loop alone for CI and
+non-interactive hosts.
 
 --dry-run prints the discovery plan without watching or building.`,
 		Args: cobra.MaximumNArgs(1),
