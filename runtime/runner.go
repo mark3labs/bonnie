@@ -682,6 +682,19 @@ func (r *Runner) session(ctx context.Context, runID string) (*Session, error) {
 
 // acquire claims the run for one turn and returns a context that
 // [Runner.Cancel] can stop.
+//
+// The turn's context is deliberately detached from the caller's with
+// [context.WithoutCancel]: a durable run must not die because whoever
+// started it went away. An HTTP client that hangs up mid-turn, a webhook
+// handler that returns, a CLI that is interrupted — none of them is a
+// decision to stop the agent, and a turn killed halfway leaves the journal
+// at the last checkpoint instead of at an answer.
+//
+// Stopping a turn is an explicit act: [Runner.Cancel] cancels the context
+// this function derives, which is why the cancel is kept on the activeTurn
+// rather than left to the caller's context tree. Deadlines the caller set
+// are dropped with the cancellation, so a caller that wants a bounded turn
+// bounds it with Cancel.
 func (r *Runner) acquire(ctx context.Context, runID string) (context.Context, *activeTurn, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -689,7 +702,7 @@ func (r *Runner) acquire(ctx context.Context, runID string) (context.Context, *a
 	if _, busy := r.active[runID]; busy {
 		return nil, nil, fmt.Errorf("%w: %s", ErrRunActive, runID)
 	}
-	turnCtx, cancel := context.WithCancel(ctx)
+	turnCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	act := &activeTurn{cancel: cancel}
 	r.active[runID] = act
 	return turnCtx, act, nil

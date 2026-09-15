@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -115,23 +115,23 @@ func TestCrossChannelHandOff(t *testing.T) {
 
 	// The instruction was posted as a thread root, and the reply landed
 	// inside that thread.
+	//
+	// Wait for the reply itself, not for a message count. Slack's default
+	// activity mode posts a placeholder into the thread as soon as the turn
+	// becomes active, so "two messages" is reached while the turn is still
+	// running — and the journal assertions below would then read a run whose
+	// origin the turn has not written yet.
+	const reply = "1700000000.000900|here is the digest"
 	deadline := time.Now().Add(5 * time.Second)
-	for {
-		msgs := fake.messages()
-		if len(msgs) >= 2 {
-			break
-		}
+	for !slices.Contains(fake.messages(), reply) {
 		if time.Now().After(deadline) {
-			t.Fatalf("the Slack adapter posted %v, want a root and a reply", msgs)
+			t.Fatalf("the Slack adapter posted %v, want a root and the reply %q", fake.messages(), reply)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
 	msgs := fake.messages()
 	if msgs[0] != "|the digest request" {
 		t.Fatalf("the root message = %q, want the instruction", msgs[0])
-	}
-	if !strings.HasPrefix(msgs[1], "1700000000.000900|") {
-		t.Fatalf("the reply = %q, want it threaded under the root", msgs[1])
 	}
 
 	// The run exists on the journal and names Slack as its origin.

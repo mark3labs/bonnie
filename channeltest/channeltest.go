@@ -14,9 +14,22 @@
 // scripted agent standing in for the model. It never opens a port and never
 // needs credentials.
 //
-// A case an adapter cannot satisfy on some platform should skip inside the
-// build function, not fail: the contract is what a transport must do, and a
-// platform that cannot do a thing must say so loudly and specifically.
+// # Mandatory cases and capabilities
+//
+// Most cases are mandatory: they state what any transport must do, and an
+// adapter that fails one is broken rather than limited.
+//
+// A case that states an OPTIONAL behaviour is gated on a [Capability]. An
+// adapter names the capabilities it does not have in
+// [Fixture.Unsupported], and the suite skips exactly those cases with a
+// message that names the capability. This is the same rule the suite always
+// had — "a case an adapter cannot satisfy should skip, not fail" — moved out
+// of each adapter's build function and into one declaration, so the set of
+// skips across the adapters reads as a parity matrix instead of scattered
+// t.Skip calls.
+//
+// Declare a capability only when a real transport can genuinely lack it. A
+// capability every adapter claims is a mandatory case wearing a disguise.
 package channeltest
 
 import (
@@ -181,6 +194,40 @@ type Fixture struct {
 	Inbound channel.Inbound
 	Agent   *ScriptAgent
 	Journal runtime.Journal
+
+	// Unsupported names the optional capabilities this adapter does not
+	// have. The suite skips their cases and runs everything else. An empty
+	// slice — the usual case — claims every capability.
+	//
+	// Name a capability here only when the transport or its runner truly
+	// cannot do the thing. Silencing a case that fails for another reason
+	// hides a defect behind a skip, which is worse than a red test.
+	Unsupported []Capability
+}
+
+// Capability names an optional behaviour a channel adapter may or may not
+// have. Cases for a capability are skipped for an adapter that lists it in
+// [Fixture.Unsupported].
+type Capability string
+
+// CapCompaction is on-demand compaction: [channel.SessionRef.Compact]
+// summarises a run's conversation without a user message.
+//
+// It is optional because it is not the transport's to give. Compaction needs
+// an agent that implements [runtime.Compactor]; a runner built over one that
+// does not answers [runtime.ErrCompactionUnsupported], and the HTTP channel
+// maps that to 501 rather than pretending the work happened.
+const CapCompaction Capability = "compaction"
+
+// supports reports whether the fixture claims a capability, and skips the
+// case with a message naming it when it does not.
+func supports(t *testing.T, f *Fixture, cap Capability) {
+	t.Helper()
+	for _, missing := range f.Unsupported {
+		if missing == cap {
+			t.Skipf("adapter declares it does not support %q", cap)
+		}
+	}
 }
 
 // RunConformance runs every conformance case against the adapter that build
@@ -394,6 +441,67 @@ func RunConformance(t *testing.T, build func(t *testing.T) *Fixture) {
 			t.Fatal("the turn never returned after cancel")
 		}
 	})
+	t.Run("a turn survives the caller going away", func(t *testing.T) {
+		f := build(t)
+		// The context that STARTS the turn is cancelled mid-turn, the way an
+		// HTTP client that hangs up cancels a request context and a webhook
+		// handler's context ends when it answers the platform. Neither is a
+		// decision to stop the agent: the run is durable, and stopping it is
+		// Cancel and nothing else.
+		//
+		// Before the runner detached the turn context, every transport lost
+		// runs this way and the journal kept them at the last checkpoint
+		// instead of at an answer.
+		callerCtx, hangUp := context.WithCancel(context.Background())
+		defer hangUp()
+
+		release, active := f.Agent.HoldOpen()
+		done := make(chan *runtime.Run, 1)
+		go func() {
+			run, err := f.Inbound.From("detach-addr").Send(callerCtx, "long work", channel.SendOptions{})
+			if err != nil {
+				run = &runtime.Run{Err: err}
+			}
+			done <- run
+		}()
+
+		select {
+		case <-active:
+		case <-time.After(10 * time.Second):
+			t.Fatal("the turn never became active")
+		}
+		hangUp()
+
+		// The turn is still working: the caller's exit unwound nothing.
+		select {
+		case run := <-done:
+			t.Fatalf("the turn ended when its caller left: %+v", run)
+		case <-time.After(200 * time.Millisecond):
+		}
+		release()
+
+		select {
+		case run := <-done:
+			if run.Err != nil {
+				t.Fatalf("Send: %v", run.Err)
+			}
+			if run.State != runtime.RunCompleted {
+				t.Fatalf("state = %q, want %q", run.State, runtime.RunCompleted)
+			}
+			// The durable record is the claim: a later process must find
+			// the finished run, not one stuck mid-turn.
+			state, err := f.Journal.State(context.Background(), run.ID)
+			if err != nil {
+				t.Fatalf("State: %v", err)
+			}
+			if state != runtime.RunCompleted {
+				t.Fatalf("journalled state = %q, want %q", state, runtime.RunCompleted)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("the turn never finished after the agent was released")
+		}
+	})
+
 	t.Run("send records title, origin, and context", func(t *testing.T) {
 		f := build(t)
 		ctx := context.Background()
@@ -517,6 +625,7 @@ func RunConformance(t *testing.T, build func(t *testing.T) *Fixture) {
 
 	t.Run("compact summarises on demand", func(t *testing.T) {
 		f := build(t)
+		supports(t, f, CapCompaction)
 		ctx := context.Background()
 
 		ref := f.Inbound.From("compact-addr")
