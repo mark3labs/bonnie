@@ -170,15 +170,47 @@ func TestVersionMatchIsExactNotAPrefix(t *testing.T) {
 	}
 }
 
-// The real changelog must always carry a section for the version being cut,
-// and that section must state the claims and the limits. This is the check
-// that would have caught the v0.1.0 and v0.4.0 manual edits.
+// latestReleased returns the newest version heading in CHANGELOG.md that is
+// an actual release, skipping [Unreleased]. At release time the section being
+// cut is the newest one, so this is the version about to ship.
+func latestReleased(t *testing.T, path string) string {
+	t.Helper()
+
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read changelog: %v", err)
+	}
+	for line := range strings.SplitSeq(string(b), "\n") {
+		if !strings.HasPrefix(line, "## [") {
+			continue
+		}
+		version := line[len("## ["):]
+		if i := strings.Index(version, "]"); i >= 0 {
+			version = version[:i]
+		}
+		if strings.EqualFold(version, "Unreleased") {
+			continue
+		}
+		return version
+	}
+	t.Fatal("CHANGELOG.md has no released version heading")
+	return ""
+}
+
+// The newest released section must state the claims and the limits. T-011
+// requires it of every release, and the manual edit that used to enforce it
+// is gone, so this is what is left to catch a release that forgets.
+//
+// It deliberately tracks the newest version rather than a fixed one: pinned
+// to a single version it would pass forever while checking a section that
+// shipped long ago, which is the whole failure it exists to prevent.
 func TestRepositoryChangelogStatesClaimsAndLimits(t *testing.T) {
 	t.Parallel()
 
-	out, _, code := run(t, "../CHANGELOG.md", "v0.5.0")
+	version := latestReleased(t, "../CHANGELOG.md")
+	out, _, code := run(t, "../CHANGELOG.md", version)
 	if code != 0 {
-		t.Fatalf("exit = %d for the repository changelog, want 0", code)
+		t.Fatalf("exit = %d for version %s, want 0", code, version)
 	}
 
 	for _, want := range []string{
@@ -188,7 +220,7 @@ func TestRepositoryChangelogStatesClaimsAndLimits(t *testing.T) {
 		"Known limits",
 	} {
 		if !strings.Contains(out, want) {
-			t.Errorf("the 0.5.0 notes never say %q", want)
+			t.Errorf("the %s notes never say %q", version, want)
 		}
 	}
 }

@@ -5,30 +5,112 @@ All notable changes to BONNIE are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.6.0] — 2026-09-15
+
+A fix for the first thing a new user sees. `bonnie dev` rendered the first
+turn of a fresh agent as a bare answer — no thinking, no tool calls — and
+rendered every later turn in full, so the same agent looked broken until you
+quit and reopened it. The cause was an ordering mistake, and the cure is a new
+endpoint that lets a client subscribe before it speaks.
+
+### The claims
+
+Unchanged by this release, and still what BONNIE is for:
+
+- **A run survives process death.** The conversation is journalled as it
+  happens, so another process — after a crash, on another machine — resumes
+  the run with the whole history, including which tools it already called, so
+  a side effect is not repeated. A tool-calling step commits as one SQLite
+  transaction: whole, or absent.
+- **A run parks indefinitely.** A run waiting on a person holds no process and
+  no compute — the sandbox opens lazily, so a parked run costs a row in a
+  database. Exit the process and answer tomorrow.
+- **A run is reachable over HTTP.** `channel/http` mounts its routes under
+  `/bonnie/v1` — health, info, idempotent start, stable error codes, session
+  controls — and an NDJSON event stream that survives a reconnect and a
+  restart; the Slack, Discord, Telegram, and GitHub adapters carry the same
+  durable run into a thread.
+
+The limits are under **Known limits** below, stated as plainly. A framework
+that hides its limits gets deployed into situations it cannot handle.
+
+### Added
+
+- **`POST /bonnie/v1/addresses/{address}`** resolves an address to its run,
+  creating and binding one when the address is new, and **runs no turn**. It
+  is idempotent: an address that already owns a run returns that run.
+
+  It exists because a turn's reasoning deltas and tool events are live-only —
+  the journal keeps the conversation, not the mid-turn deltas — so a client
+  that learns its run ID from the *reply* to its first message has already
+  missed that turn, and no replay recovers it. Any client that wants a turn's
+  live events needs its run ID before it sends the turn. This is how it gets
+  one. The read-only `GET` on the same path is unchanged and still creates
+  nothing.
 
 ### Fixed
 
 - **`bonnie dev` showed no reasoning and no tool calls on the first run of a
   new tree**, then showed both after a quit and restart. The TUI learned its
   run ID from the reply to the first message, so it opened the event stream
-  after that turn had already finished. Reasoning deltas and tool events are
-  live-only — the journal keeps the conversation, not the mid-turn deltas —
-  so replay could not bring them back. A restart found the address already
-  bound, resolved the run at startup, and streamed normally, which is why the
-  same agent appeared to work the second time.
+  after that turn had already finished. A restart found the address already
+  bound, resolved the run at startup, and streamed normally — which is why
+  the same agent appeared to work the second time, and why the defect
+  survived the earlier fix that only covered reopening.
 
-  `POST /bonnie/v1/addresses/{address}` now resolves an address to its run,
-  creating and binding one when it is new, and runs no turn. The TUI holds the
-  first message, resolves the run, opens the stream, and only then dispatches
-  the turn: it subscribes before it speaks. A stream that fails to open no
-  longer strands the message — it is sent anyway and the stream reconnects.
+  The TUI now holds the first message, resolves the run, opens the stream,
+  and only then dispatches the turn: **it subscribes before it speaks.** A
+  turn is no longer dispatched from a fresh session's send path; it is
+  dispatched once the stream is live, so a turn cannot outrun the
+  subscription meant to observe it. A stream that fails to open no longer
+  strands the message — it is sent anyway and the stream reconnects, because
+  a degraded transcript beats a dropped turn.
 
-### Added
+- **The release-notes guard checked a fixed version.** The check that every
+  release states the claims and the limits (added in `0.5.0`) named `0.5.0`
+  literally, so it would have passed forever while inspecting a section that
+  had already shipped — the exact failure it was written to prevent. It now
+  tracks the newest released section in `CHANGELOG.md`.
 
-- `POST /bonnie/v1/addresses/{address}` binds an address to a run without
-  running a turn, and is idempotent. Any client that wants a turn's live
-  events needs its run ID before it sends the turn; this is how it gets one.
+### Changed
+
+- `cmd/bonnie/tui.Client` gains an `Ensure` method. The package is the CLI's
+  own chat surface rather than a framework API, but the interface is
+  exported, so an out-of-tree implementation of it needs the new method.
+
+### Known limits
+
+Stated as plainly as the claims. Full detail in [`README.md`](README.md#limits).
+
+- Sandboxing is opt-in. Without it, tool calls run as the host process.
+- Docker isolates with namespaces, not a guest kernel. Use microsandbox when
+  the threat model includes hostile code.
+- microsandbox is verified on Linux with KVM only, not on macOS with Apple
+  Silicon, and its network policy is fixed at create time; reattaching under
+  a different policy fails with `ErrPolicyMismatch`.
+- Sandbox egress is open unless a policy is set.
+- **The HTTP channel carries a `Principal` but does not verify it.**
+  Authenticate in front of it. The chat channels are different: each verifies
+  its platform's signature — Slack, Discord, Telegram, and GitHub's
+  `X-Hub-Signature-256` — and a channel without its credentials refuses to
+  serve. That verifies the platform, not the person: a user ID inside a
+  verified event is the platform's word.
+- **Run ownership is per host, and the journal does not refuse a second
+  writer.** SQLite serialises write transactions and rejects a reused
+  sequence number, so two processes writing one run cannot corrupt it. That
+  is journal integrity, not turn coordination: two servers that both execute
+  the same run still interleave the conversation. SQLite's locking needs
+  working POSIX locks, so a journal on a network filesystem is unsafe.
+- **Events are journal-anchored, and mid-turn deltas are not.** A reconnect
+  past the in-memory backlog is served from the journal, so the stream has no
+  gap. Kit's reasoning and tool deltas stay live-only: a client that is not
+  subscribed when a turn runs cannot recover that turn's deltas afterwards.
+  Bind the address, open the stream, then send.
+- Reclaiming the sandboxes of finished runs is a command
+  (`bonnie sandbox prune`), not a background sweep.
+- The mark3labs modules are publicly fetchable; authoring an agent needs Go
+  on your machine, while the binary `bonnie build` produces needs nothing on
+  the host.
 
 ## [0.5.0] — 2026-09-15
 
@@ -704,6 +786,7 @@ gets deployed into situations it cannot handle.
 
 ---
 
+[0.6.0]: https://github.com/mark3labs/bonnie/releases/tag/v0.6.0
 [0.5.0]: https://github.com/mark3labs/bonnie/releases/tag/v0.5.0
 [0.4.0]: https://github.com/mark3labs/bonnie/releases/tag/v0.4.0
 [0.3.0]: https://github.com/mark3labs/bonnie/releases/tag/v0.3.0

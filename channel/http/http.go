@@ -16,6 +16,7 @@
 //	GET  /bonnie/v1/info                 agent name, BONNIE version, channels
 //	POST /bonnie/v1/runs                 start a run, or resolve an address to one
 //	GET  /bonnie/v1/addresses/{address}  look up an address without creating a run
+//	POST /bonnie/v1/addresses/{address}  bind an address to a run, running no turn
 //	GET  /bonnie/v1/runs/{id}            report a run's durable state
 //	POST /bonnie/v1/runs/{id}            send a message to an existing run
 //	POST /bonnie/v1/runs/{id}/respond    answer a suspended run
