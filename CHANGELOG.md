@@ -9,6 +9,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Breaking: every tool call now runs in a sandbox, and BONNIE is Linux-only.**
 
+### Security
+
+- **A turn is no longer killed by the caller that started it.**
+  `runtime.Runner` now derives a turn's context with `context.WithoutCancel`,
+  so an HTTP client that hangs up, a webhook handler that returns, or a CLI a
+  person interrupts no longer stops a durable run. The journal kept such a run
+  at its last checkpoint instead of at an answer. Stopping a turn is
+  `Runner.Cancel` and nothing else; a caller's deadline no longer bounds how
+  long the agent may think.
+
+- **`operation_id` now requires a principal an authenticator proved.** The
+  idempotency key is namespaced by the caller's identity, but the HTTP channel
+  derived that identity from the request body, which the caller writes. Any
+  caller could name another principal, guess an operation ID, and be handed
+  that principal's run. A start that carries `operation_id` without
+  `http.WithAuthenticator` configured is now refused with 400 and a message
+  naming what is missing.
+
+- **Unmapped errors no longer reach the client verbatim.** `writeError`
+  returned `err.Error()` for anything it did not recognise, which sent journal
+  paths, driver messages, and SQL to whoever could reach the API. A 500 now
+  carries the stable `"internal"` code and nothing else; the detail goes to
+  stderr. The mapped sentinels keep their exact wording, which is contract.
+
+### Added
+
+- **`client` — a public Go client for the wire API.** It speaks the whole
+  `/bonnie/v1` contract: health, info, address lookup and bind, start, send,
+  respond, get, cancel, reset, clear, compact, and the NDJSON event stream
+  with cursor resume. It is terminal-free and holds no conversation state.
+
+  BONNIE's own TUI is now one of its callers rather than a privileged path
+  into the server, which is what keeps the client honest: a capability the
+  wire cannot express is one the TUI cannot show. `cmd/bonnie/tui.HTTP` and
+  `tui.NewHTTP` remain as deprecated aliases.
+
+- **`http.WithAuthenticator`** verifies every request except
+  `GET /bonnie/v1/health` and makes the principal it returns the run's
+  identity. It is the HTTP channel's equivalent of the signature check every
+  webhook adapter already runs — Slack's HMAC, Discord's Ed25519, GitHub's
+  HMAC — for a transport that carries no platform signature. With one
+  configured the body's `auth` field is **ignored rather than merged**, so a
+  caller cannot add claims to a verified identity. `ErrUnauthenticated`
+  refuses a caller with 401; any other error from a verifier is a 500,
+  because a verifier that broke has not proved the caller is an impostor.
+
+- **`channeltest` gains capabilities and a durability case.** An adapter
+  declares what it cannot do in `Fixture.Unsupported`, and the suite skips
+  exactly those cases with a message naming the capability — so the set of
+  skips across the adapters reads as a parity matrix instead of scattered
+  `t.Skip` calls. `CapCompaction` is the first, because compaction needs an
+  agent that implements `runtime.Compactor`. The new mandatory case, *"a turn
+  survives the caller going away"*, holds the durability claim above for every
+  transport; all five adapters pass it.
+
 ### Changed
 
 - **There is no unsandboxed mode.** `bonnie.WithSandbox` now *selects* a

@@ -19,7 +19,7 @@ import (
 
 	"github.com/mark3labs/bonnie"
 	"github.com/mark3labs/bonnie/agent"
-	"github.com/mark3labs/bonnie/cmd/bonnie/tui"
+	"github.com/mark3labs/bonnie/client"
 )
 
 // devOpts carries the parsed flags of `bonnie dev`.
@@ -447,11 +447,11 @@ func runDev(root string, o devOpts) error {
 		if err := waitForListen(ctx, d.servedURL()); err != nil {
 			return err
 		}
-		client := tui.NewHTTP(url, nil)
+		c := client.New(url)
 		d.mu.Lock()
-		d.beforeStop = client.CloseStreams
+		d.beforeStop = c.CloseStreams
 		d.mu.Unlock()
-		if err := runTUIClient(ctx, client, tuiAddress(d.root)); err != nil {
+		if err := runTUIClient(ctx, c, tuiAddress(d.root)); err != nil {
 			return err
 		}
 		// The TUI ended; stop the serve loop.

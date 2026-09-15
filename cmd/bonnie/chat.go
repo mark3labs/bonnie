@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/spf13/cobra"
 
+	"github.com/mark3labs/bonnie/client"
 	"github.com/mark3labs/bonnie/cmd/bonnie/tui"
 )
 
@@ -67,11 +68,11 @@ func runChat(o chatOpts) error {
 // is shared by `bonnie chat` and `bonnie dev`. address is the conversation
 // key the channel resolves to one run.
 func runTUI(ctx context.Context, url, address string) error {
-	return runTUIClient(ctx, tui.NewHTTP(url, nil), address)
+	return runTUIClient(ctx, client.New(url), address)
 }
 
-func runTUIClient(ctx context.Context, client tui.Client, address string) error {
-	model := tui.New(client, ctx, address)
+func runTUIClient(ctx context.Context, c tui.Client, address string) error {
+	model := tui.New(c, ctx, address)
 	p := tea.NewProgram(model)
 	if _, err := p.Run(); err != nil {
 		return fmt.Errorf("bonnie: chat: %w", err)

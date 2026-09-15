@@ -1,4 +1,4 @@
-package tui
+package client
 
 import (
 	"context"
@@ -67,7 +67,7 @@ func TestHTTPClientWire(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	c := NewHTTP(srv.URL, nil)
+	c := New(srv.URL)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -141,7 +141,7 @@ func TestHTTPClientCloseStreams(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	c := NewHTTP(srv.URL, nil)
+	c := New(srv.URL)
 	ch, _, err := c.Stream(context.Background(), "run-1", 0)
 	if err != nil {
 		t.Fatalf("Stream: %v", err)
@@ -174,7 +174,7 @@ func TestHTTPClientNotFound(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	c := NewHTTP(srv.URL, nil)
+	c := New(srv.URL)
 	_, err := c.Send(context.Background(), "nope", "hello")
 	if err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Fatalf("err = %v, want the not-found marker", err)
