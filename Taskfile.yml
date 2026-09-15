@@ -110,7 +110,7 @@ tasks:
     desc: Check formatting (fails if files need formatting)
     cmds:
       # git ls-files, never `gofmt -l .` — the latter walks .direnv/ and
-      # reports vendored files. See docs/HANDOVER.md §9.
+      # reports vendored files.
       - test -z "$(gofmt -l $(git ls-files '*.go'))" || (echo "Files need formatting:" && gofmt -l $(git ls-files '*.go') && exit 1)
 
   tidy:

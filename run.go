@@ -232,7 +232,7 @@ func (c *config) workspaceDir() (string, error) {
 // A host that supplied its own factory owns the agent outright, so every
 // option that would have configured the one BONNIE builds is refused rather
 // than ignored — the same rule a backend follows for a network policy it
-// cannot enforce (docs/SPEC.md §8, invariant 13).
+// cannot enforce.
 //
 // **Every other run is sandboxed.** There is no host-tools mode: [WithSandbox]
 // selects a backend, it does not enable one, and leaving it out selects
@@ -240,7 +240,7 @@ func (c *config) workspaceDir() (string, error) {
 // Kit's core tools in this process, rooted at the workspace with
 // kit.WithWorkDir; a live agent walked out of that root with an absolute path
 // and read its own journal, because a working directory is a base and not a
-// jail. docs/SPEC.md §4.9.1 records the incident.
+// jail.
 //
 // workspace, when set, is the seed mirrored into [sandbox.Workspace] — never
 // a working directory for host tools, which no longer exist.
@@ -310,7 +310,7 @@ func (c *config) agentConflicts() string {
 // made the accident rarer without making the escape harder: WithWorkDir sets
 // the base for a RELATIVE path, and the shell tool never resolves one — a
 // model that writes an absolute path reaches the whole filesystem. A live
-// agent did exactly that and listed its own journal (docs/SPEC.md §4.9.1).
+// agent did exactly that and listed its own journal.
 //
 // Every run is sandboxed now, so there are no host tools to root. Do not
 // reintroduce this: Kit honours Options.Tools even when DisableCoreTools is

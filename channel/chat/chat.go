@@ -441,9 +441,9 @@ var _ channel.SessionRef = (*Ref)(nil)
 // bookkeeping — the address map — in a run under
 // [runtime.ReservedRunPrefix], and that run has a state, so Attach used to
 // accept it and a caller who knew the prefix could run a model turn inside
-// the store every address binding lives in. Reserved runs stay BONNIE's
-// (docs/SPEC.md §8, invariant 8), so the answer is the same one an unknown
-// ID gets.
+// the store every address binding lives in. Reserved runs are BONNIE's own
+// bookkeeping and are never addressable by a caller, so the answer is the
+// same one an unknown ID gets.
 func (s *Ref) RunID(ctx context.Context) (string, error) {
 	if !s.create {
 		if runtime.IsReservedRun(s.runID) {

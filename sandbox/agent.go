@@ -46,9 +46,8 @@ func Agent(p Provider, opts ...kit.Option) runtime.AgentFactory {
 // A backend with a guest filesystem runs at [Workspace] and reports nothing.
 // A backend that maps the workspace onto a host directory implements
 // [WorkingDirReporter] and names that path, because that is what `pwd`
-// returns — and a prompt that disagrees with `pwd` is the defect in
-// docs/SPEC.md §4.9.1, which a live model hit again when this value was
-// hard-coded to [Workspace].
+// returns — and a prompt that disagrees with `pwd` is a defect a live model
+// hit again when this value was hard-coded to [Workspace].
 func promptWorkingDir(p Provider, runID string) string {
 	if r, ok := p.(WorkingDirReporter); ok {
 		if dir := r.WorkingDir(runID); dir != "" {
@@ -82,7 +81,7 @@ func sandboxedKitOptions(open Opener, workdir string) []kit.Option {
 		//	Current working directory: /tmp/.../standup-bot
 		//	/tmp/.../standup-bot/workspace
 		//
-		// and the model believes the prompt. docs/SPEC.md §4.9.1.
+		// and the model believes the prompt.
 		//
 		// The value is per backend, not the constant [Workspace]: a
 		// host-mapped backend runs commands at a host path, and naming
@@ -109,11 +108,10 @@ func sandboxedKitOptions(open Opener, workdir string) []kit.Option {
 // pruned while it was parked resumed in silence with an empty workspace, and
 // the model watched files vanish between turns with no way to know why.
 //
-// The decision about what a vanished workspace means is recorded in
-// docs/SPEC.md §4.10: not a failure — a run whose container was pruned by an
-// operator can still do useful work — but never silence. The note lands in
-// the conversation before the first step of the resumed turn, so the model
-// can account for it in what it says next.
+// A vanished workspace is not a failure — a run whose container was pruned
+// by an operator can still do useful work — but it is never silence. The note
+// lands in the conversation before the first step of the resumed turn, so the
+// model can account for it in what it says next.
 //
 // A failed check is not fatal: the sandbox may be starting, the backend may
 // be busy, and the first tool call would surface a real problem. Silence is

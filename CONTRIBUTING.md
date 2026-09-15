@@ -36,8 +36,8 @@ authority:
    change whatever wrote that change. Do not remove this rule because the
    extension exists.
 
-There is no separate `boundary` CI job; `docs/SPEC.md` §2 records why it was
-removed and the two traps to avoid if you ever rebuild it.
+There is no separate `boundary` CI job. `depguard` already denies both paths
+by prefix whatever the module layout, so the job added nothing.
 
 If Kit exports a type but not a helper that operates on it, write the small
 helper in BONNIE. See `toolResultText` in `runtime/util.go` for an example.
@@ -45,8 +45,8 @@ helper in BONNIE. See `toolResultText` in `runtime/util.go` for an example.
 If Kit cannot do a thing at all, do these steps in order:
 
 1. Check the public API again. It usually can.
-2. Open an issue on `mark3labs/kit` to export what you need. Write it up in
-   `docs/UPSTREAM.md` first.
+2. Open an issue on `mark3labs/kit` to export what you need. Cite the public
+   API by `file:line` at the pinned version, and prove it cannot do the job.
 3. Only then add a local workaround, and mark it `// TODO(kit):`.
 
 ## Local development

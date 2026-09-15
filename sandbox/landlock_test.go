@@ -24,7 +24,7 @@ func landlockProvider(t *testing.T) *LandlockProvider {
 }
 
 // secretOutside puts a file where the agent must never reach, standing in for
-// the journal the live Slack agent read (docs/SPEC.md §4.9.1).
+// the journal the live Slack agent read.
 func secretOutside(t *testing.T) (dir, file string) {
 	t.Helper()
 	dir = t.TempDir()
@@ -93,7 +93,7 @@ func TestLandlockConfinesDescendants(t *testing.T) {
 }
 
 // TestLandlockRefusesToWriteOutside is the other half of the original
-// incident (docs/SPEC.md §4.9): a model asked to "deploy the app" wrote a
+// incident: a model asked to "deploy the app" wrote a
 // Dockerfile, a terraform/ directory, and three documents into the checkout.
 func TestLandlockRefusesToWriteOutside(t *testing.T) {
 	t.Parallel()
@@ -259,11 +259,10 @@ func TestLandlockRefusesNetworkPolicy(t *testing.T) {
 
 // TestLandlockIsAvailableOnThisKernel fails rather than skips on Linux.
 //
-// A skip is how a sandbox defect hides: docs/SPEC.md §4.11 records three real
-// microsandbox bugs that CI never saw because every case skipped. Landlock
-// needs nothing installed, so on Linux there is no honest reason to skip, and
-// a kernel too old to enforce it must be a loud failure on the machine that
-// is meant to be the floor.
+// A skip is how a sandbox defect hides: three real microsandbox bugs went
+// unseen because every case skipped. Landlock needs nothing installed, so on
+// Linux there is no honest reason to skip, and a kernel too old to enforce it
+// must be a loud failure on the machine that is meant to be the floor.
 func TestLandlockIsAvailableOnThisKernel(t *testing.T) {
 	t.Parallel()
 	if runtimeGOOS() != "linux" {

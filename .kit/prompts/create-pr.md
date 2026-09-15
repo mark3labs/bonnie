@@ -25,7 +25,7 @@ Open a GitHub pull request for the current branch, filling out the repository's 
 ## Guidelines
 
 - One PR per logical change
-- If the PR changes a public API, say so in the description and check whether `docs/` and `examples/` need the same change
+- If the PR changes a public API, say so in the description and check whether the godoc, `README.md`, and `examples/` need the same change
 - Never edit `.github/workflows/ci.yml` to make a check pass — the checks are the contract
 
 $@

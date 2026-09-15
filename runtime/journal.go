@@ -68,13 +68,12 @@ const (
 	// RecordState records a run-state transition.
 	RecordState RecordKind = "state"
 	// RecordRepair records that a restore dropped an incomplete trailing
-	// tool-calling step. See docs/SPEC.md §4.2.
+	// tool-calling step. See [repairTrailingOrphan].
 	RecordRepair RecordKind = "repair"
 	// RecordSandbox records that a sandbox opened for a run: which backend,
 	// which sandbox. It is the only record of a run's workspace, so a
 	// resumed run can tell a vanished workspace from a live one, and a
-	// reconciler can find the sandboxes of terminal runs. See
-	// docs/SPEC.md §4.10.
+	// reconciler can find the sandboxes of terminal runs.
 	RecordSandbox RecordKind = "sandbox"
 	// RecordContext records the per-turn context a channel handed the
 	// runner with one input: facts for the model that are not conversation
@@ -83,7 +82,7 @@ const (
 	// context reaches the model through the context-prepare hook on the
 	// turn it was sent with, and never again. Journalling it keeps replay
 	// honest — the record shows what the model saw — without turning it
-	// into a user message on resume. See docs/SPEC.md §3.7.
+	// into a user message on resume.
 	RecordContext RecordKind = "context"
 	// RecordClear records that the conversation was cleared: every message
 	// before it stays in the journal but leaves the model's context, and

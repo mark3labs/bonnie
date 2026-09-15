@@ -7,7 +7,7 @@ import (
 	kit "github.com/mark3labs/kit/pkg/kit"
 )
 
-// TestReplayPreservesToolCalls guards replay fidelity. See docs/SPEC.md §4.1.
+// TestReplayPreservesToolCalls guards replay fidelity.
 //
 // Restore decodes messages from Record.Payload, so tool calls, tool results,
 // files, and reasoning parts survive a resume in a new process. An earlier

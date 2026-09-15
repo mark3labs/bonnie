@@ -11,8 +11,7 @@ File a GitHub issue. The user wants to create an issue about: $@
 - **A Kit gap** (`pkg/kit` missing an export, wrong `SessionManager` behavior,
   something BONNIE can only work around) → file on `mark3labs/kit` instead.
   The ask must carry `file:line` citations into Kit at the pinned version and
-  a proof the public API cannot do it. Record the outcome in
-  `docs/UPSTREAM.md` — that document holds the standing asks and the format
+  a proof the public API cannot do it
 - Say which choice you made and why before filing
 
 ## BONNIE issue templates
@@ -32,11 +31,11 @@ File a GitHub issue. The user wants to create an issue about: $@
      `replace` directive in `go.mod` is in play — building against a local
      Kit checkout hides version-pinning bugs
    - For durability bugs: run `bonnie runs show <id> --json` and attach the
-     record kinds (redact message text if asked); state which invariant of
-     `docs/SPEC.md` §8 broke
-   - For features: check `docs/TASKS.md` and `docs/L2.md` first — the feature
-     may already be specified or deliberately out of scope; say so and stop
-     if it is (scope decisions live in SPEC §5 and §7)
+     record kinds (redact message text if asked); state which documented
+     contract broke, and cite the godoc that states it
+   - For features: check the package godoc and the open issues
+     first — the feature may already exist or be deliberately out of
+     scope; say so and stop if it is
 3. **Reproduce before writing**, when possible: a minimal `go run` against
    `examples/minimal` is worth more than a paragraph of guesswork
 4. **Write the issue** with the template filled truthfully:

@@ -37,8 +37,8 @@ func TestSandboxRecordSurvivesRestore(t *testing.T) {
 	}
 }
 
-// TestNoteSandboxUnavailableIsANoteNotASilence covers the decision recorded
-// in docs/SPEC.md §4.10: a vanished workspace is not a failure, but it must
+// TestNoteSandboxUnavailableIsANoteNotASilence covers the rule for a
+// vanished workspace: it is not a failure, but it must
 // never be silent. The model gets one note, the journal gets one gone
 // record, and a second discovery appends nothing.
 func TestNoteSandboxUnavailableIsANoteNotASilence(t *testing.T) {

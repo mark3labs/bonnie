@@ -13,8 +13,6 @@ import (
 // the ordinary case, not an edge case. If the dev loop watched it, that write
 // would trigger a rebuild and SIGTERM the child still serving the turn: the
 // agent would restart itself, mid-answer, for doing its job.
-//
-// Recorded in docs/SPEC.md §4.9.1.
 func TestWorkspaceIsNotWatched(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()

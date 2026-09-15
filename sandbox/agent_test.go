@@ -313,7 +313,7 @@ func TestPromptWorkingDirectoryIsTheToolWorkingDirectory(t *testing.T) {
 
 		if o.SessionDir != actual {
 			t.Fatalf("the prompt says the working directory is %q, the tools "+
-				"report %q: the model believes the prompt (docs/SPEC.md §4.9.1)",
+				"report %q: the model believes the prompt",
 				o.SessionDir, actual)
 		}
 

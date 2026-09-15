@@ -58,7 +58,7 @@ Every tool call runs in a sandbox. The default is landlock, which confines
 tool calls to the run's own workspace using the Linux Landlock LSM and needs
 nothing installed. It confines the filesystem and the environment, not the
 network: use --sandbox docker or microsandbox for a server reachable from
-outside, and --sandbox-deny-network to cut egress. See docs/SANDBOX.md.`,
+outside, and --sandbox-deny-network to cut egress.`,
 		RunE: func(_ *cobra.Command, _ []string) error { return runServe(o) },
 	}
 	f := cmd.Flags()
@@ -139,7 +139,7 @@ func serveOptions(ctx context.Context, o serveOpts) ([]bonnie.Option, error) {
 // The image reaches every backend that can honour it, and a backend that
 // cannot is refused rather than left to run its default in silence:
 // accepting a setting and ignoring it is the same broken promise a backend
-// makes when it swallows a network policy (docs/SPEC.md §8, invariant 13).
+// makes when it swallows a network policy.
 func sandboxProvider(ctx context.Context, kind, image string) (sandbox.Provider, error) {
 	switch kind {
 	case "landlock":

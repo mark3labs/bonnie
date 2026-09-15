@@ -70,8 +70,7 @@ var deviceFiles = []string{
 //     model-chosen command.
 //   - The network is NOT confined. A command can reach anything this host can
 //     reach. The provider therefore does not implement [Networked], so
-//     asking it for a network policy is refused rather than silently ignored
-//     (docs/SPEC.md §8, invariant 10).
+//     asking it for a network policy is refused rather than silently ignored.
 //   - **A unix socket is NOT confined, and this is the sharpest edge.**
 //     Landlock ABI 1 mediates opening a file, not connecting to a socket, so
 //     a command that knows a socket's path can talk to the daemon behind it
@@ -88,7 +87,7 @@ var deviceFiles = []string{
 // kernel) or [DockerProvider] (namespaces). This backend exists so that the
 // default configuration on a bare machine is confined rather than open: it
 // needs nothing installed, so "no sandbox" never has to be the convenient
-// choice. See docs/SANDBOX.md.
+// choice.
 //
 // # How it works
 //

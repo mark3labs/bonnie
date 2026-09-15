@@ -13,15 +13,10 @@ Review recent code changes, identify all documentation surfaces that should ment
 
 2. **Inventory the doc surfaces** — BONNIE's are:
    - `README.md` — user-facing; every snippet must compile and every claim must hold
-   - `docs/SPEC.md` — the authoritative spec. **Correct it in the same commit** when a change contradicts it: verified Kit facts (§3, with `file:line`), risks (§4), invariants (§8)
-   - `docs/TASKS.md` — new work gets the next free ID; shipped work moves to the archive with a one-line pointer
-   - `docs/L2.md` — the v0.2 discovery spec; update if the change touches the tree, manifest, or codegen contract
-   - `docs/SANDBOX.md` — adapter contracts and what was verified on what hardware
-   - `docs/HANDOVER.md` — state tables and "what I would do next"
-   - `docs/UPSTREAM.md` — only if the change answers or adds a Kit ask
+   - Godoc on every exported symbol — **this is the specification**. When a change contradicts a doc comment, correct the comment in the same commit
+   - `docs/RELEASE.md` — the release checklist and the record of each tag; update if the change touches releasing
    - `CHANGELOG.md` — user-visible changes under `[Unreleased]`
    - `examples/` and their `README.md` — runnable, so they cannot drift silently
-   - Godoc on every exported symbol — BONNIE is a public framework; the doc comment is part of the API
 
 3. **Audit each surface** with `grep`:
    - Search for names of APIs the change touched, and every page that discusses the area

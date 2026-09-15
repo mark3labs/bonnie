@@ -62,8 +62,8 @@ type AgentFactory func(ctx context.Context, s *Session) (Agent, error)
 // process that is already inside a container it controls. Rooting the tools
 // at a directory with kit.WithWorkDir is NOT isolation: a working directory
 // is consulted for relative paths only, and an absolute path walks straight
-// out of it. A live agent did exactly that and read its own journal
-// (docs/SPEC.md §4.9.1). Prefer [sandbox.Agent].
+// out of it. A live agent did exactly that and read its own journal.
+// Prefer [sandbox.Agent].
 //
 // # Why it applies options this way
 //
@@ -514,9 +514,9 @@ func (r *Runner) Resume(ctx context.Context, runID string, responses []InputResp
 }
 
 // Cancel stops the turn a run is executing now. Completed steps stay in the
-// journal — Kit persists a step's messages before it checks the context (see
-// docs/SPEC.md §3.3) — so a cancelled run restores to a provider-valid
-// conversation and can be continued with [Runner.Start].
+// journal — Kit persists a step's messages before it checks the context — so
+// a cancelled run restores to a provider-valid conversation and can be
+// continued with [Runner.Start].
 //
 // It returns [ErrRunNotActive] when this Runner is not executing the run.
 func (r *Runner) Cancel(runID string) error {

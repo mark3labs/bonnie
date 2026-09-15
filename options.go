@@ -131,7 +131,8 @@ func WithWorkspace(dir string) Option {
 // confinement deliberately with [sandbox.Local], which provides no isolation
 // at all and is for development only.
 //
-// See docs/SANDBOX.md for what each backend does and does not contain.
+// The godoc on each provider in package [sandbox] states what that backend
+// does and does not contain.
 func WithSandbox(p sandbox.Provider) Option {
 	return func(c *config) { c.sandbox = p }
 }

@@ -71,8 +71,8 @@ func TestCancelStopsInFlightTurn(t *testing.T) {
 }
 
 // TestCancelKeepsCompletedSteps states the persistence half of the claim. Kit
-// journals a step's messages before it checks the context (docs/SPEC.md §3.3),
-// so cancelling never throws away finished work.
+// journals a step's messages before it checks the context, so cancelling
+// never throws away finished work.
 func TestCancelKeepsCompletedSteps(t *testing.T) {
 	t.Parallel()
 	journal := NewMemoryJournal()
@@ -135,10 +135,10 @@ func TestCancelUnknownRun(t *testing.T) {
 // shares only the journal.
 //
 // A cancelled run is not a failed one. Kit persists a step's messages before
-// it looks at the context (docs/SPEC.md §3.3), so the finished work is on
-// disk and the conversation a resume rebuilds is provider-valid. Until this
-// test, the claim rested on a Restore in the first process — which proves
-// the records survive, not that another process can carry the run on.
+// it looks at the context, so the finished work is on disk and the
+// conversation a resume rebuilds is provider-valid. Until this test, the
+// claim rested on a Restore in the first process — which proves the records
+// survive, not that another process can carry the run on.
 func TestCancelledRunContinuesInASecondRunner(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

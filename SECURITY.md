@@ -66,8 +66,8 @@ id -nG          # look for: docker, podman, lxd, libvirt, kvm
 
 If any appear, either serve from an account without them or use
 `--sandbox microsandbox`. This is a known, reproduced gap, not a theoretical
-one — a live model found it and reported the route itself. See `docs/SPEC.md`
-§4.9 for why it is documented rather than closed.
+one — a live model found it and reported the route itself. It is documented
+rather than closed because closing it needs a backend with its own kernel.
 
 **For untrusted or hostile code, that floor is not enough.** Use a real
 backend and cut egress:
@@ -89,7 +89,7 @@ bonnie.New(
 runner := runtime.NewRunner(journal, sandbox.Agent(sandbox.Docker(), opts...))
 ```
 
-See `docs/SANDBOX.md`. Four backends ship: `Landlock` (the default:
+Four backends ship: `Landlock` (the default:
 filesystem containment, no isolation of the network or the kernel), `Local`
 (**no containment at all**, development only), `Docker` (container
 namespaces), and `Microsandbox` (microVM with a guest kernel).
@@ -120,7 +120,7 @@ a live Slack agent ran `find` over its own tree by **absolute path** and read
 `main.go`, `instructions.md`, and `.bonnie/journal.db` — the journal that made
 its own runs durable. Nothing failed and nothing warned either time. A working
 directory is a base, not a jail; that is why the sandbox is no longer
-optional. See `docs/SPEC.md` §4.9 and §4.9.1.
+optional.
 
 ### HTTP channel: no authentication verification in v0.1.0
 

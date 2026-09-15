@@ -15,7 +15,7 @@ builds:
     # configuration cannot start, which is worse than not shipping it.
     #
     # Restoring macOS means writing a seatbelt (sandbox-exec) backend of equal
-    # strength first, not adding the target back here. See docs/SANDBOX.md.
+    # strength first, not adding the target back here.
     goos:
       - linux
     goarch:

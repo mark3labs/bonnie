@@ -4,12 +4,16 @@ Always talk in ASD-STE100 Simplified Technical English.
 
 ## Start here
 
-Read [`docs/SPEC.md`](docs/SPEC.md) before changing anything. It holds the
-verified facts about Kit (with file:line citations), the known defects, and the
-invariants. Then read [`docs/TASKS.md`](docs/TASKS.md) for the work queue.
+**The code is the spec.** There is no specification document and no task
+file. The godoc on every exported symbol, and the comments on the tests,
+carry the reasoning — many of them record a real defect and why the shape is
+what it is. Read them before you change the shape.
 
-If you learn something that contradicts the spec, **correct the spec in the
-same commit**. A stale spec is worse than none.
+Open work is ad hoc or a
+[GitHub issue](https://github.com/mark3labs/bonnie/issues).
+
+When you learn something that a comment gets wrong, **correct the comment in
+the same commit**. A stale comment is worse than none.
 
 ## Build/Test Commands
 - **Shortcut**: `task` — `task check` (fmt, lint, test), `task ci` (CI parity), `task dev -- serve` (Taskfile.yml mirrors everything below)
@@ -53,8 +57,9 @@ of authority:
 **`depguard` is the authority.** The extension is a guard-rail: it only runs
 when a person drives Kit here, so it cannot see an edit made in an editor, by
 another tool, or by a dependency bump. Never delete the `depguard` rule
-because the extension exists. There is no `boundary` CI job any more;
-`docs/SPEC.md` §2 records why it went and what it had to get right.
+because the extension exists. There is no `boundary` CI job any more:
+`depguard` denies both paths by prefix whatever the module layout, so the job
+added nothing.
 
 ## Architecture
 
@@ -62,7 +67,7 @@ because the extension exists. There is no `boundary` CI job any more;
 L4  CLI, evals, traces                 CLI implemented; evals planned
 L3  channel/    inbound transports     channel/http implemented
 L2  discovery   agent/ tree + codegen  default layout, init, codegen, dev,
-                                       build; configuration is code (T-024)
+                                       build; configuration is code
 L1  runtime/    durable run executor   implemented
 L0  kit/pkg/kit                        upstream, unmodified
 ```
@@ -71,11 +76,11 @@ The root package `github.com/mark3labs/bonnie` is the entry point an agent
 tree calls: `bonnie.New().Serve()` is a complete agent. It owns the serving
 the default layout constants, and the CLI calls the same code, so the two
 cannot drift. **There is no manifest file** — a setting is a file at a fixed
-path or a Go option, never both (invariant 14). Do not add a config file back.
+path or a Go option, never both. Do not add a config file back.
 
 ### L1 durability seams (runtime/)
 BONNIE gets durability from four public Kit extension points. Know these before
-changing anything in `runtime/`. Full detail with citations in `docs/SPEC.md` §3.
+changing anything in `runtime/`.
 
 | Need | Kit public API | BONNIE file |
 |---|---|---|
@@ -117,8 +122,6 @@ Two more rules that are easy to break:
 - **Do not delete the torn-write repair** (`runtime/repair.go`) on the
   grounds that a step is now a transaction. Runs imported from the old JSONL
   format, and third-party journals, still carry the shape it fixes.
-
-See `docs/SPEC.md` §4.14.
 
 ## Code Style
 - **Imports**: stdlib → third-party → local (blank lines between)

@@ -20,7 +20,12 @@
 // cannot see an edit made in an editor, by a different tool, or by a
 // dependency bump. Do not delete the depguard rule because this file exists.
 //
-// Kit loads it automatically from .kit/extensions/. See docs/SPEC.md §2.
+// Kit loads it automatically from .kit/extensions/. See AGENTS.md.
+//
+// TODO(kit): this file has no test in this repository. Kit's harness at
+// pkg/extensions/test signs its API with internal/extensions types, so a test
+// would have to make the very import this guard forbids. Tracked upstream at
+// https://github.com/mark3labs/kit/issues/136; write the test when it lands.
 package main
 
 import (
@@ -86,7 +91,7 @@ func Init(api ext.API) {
 							Block: true,
 							Reason: "Blocked: this edit adds the import \"" + imp +
 								"\" to " + path + ".\n\n" + f.reason +
-								"\n\nSee AGENTS.md and docs/SPEC.md §2.",
+								"\n\nSee AGENTS.md.",
 						}
 					}
 				}

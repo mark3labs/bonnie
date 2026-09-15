@@ -93,7 +93,7 @@ func runSandboxPrune(o pruneOpts) error {
 	for _, runID := range runIDs {
 		// BONNIE's own bookkeeping runs are not agent runs: they hold the
 		// address map, never a sandbox, and they stay out of operator
-		// output (docs/SPEC.md §8, invariant 8).
+		// output.
 		if runtime.IsReservedRun(runID) {
 			continue
 		}

@@ -141,8 +141,7 @@ type Sandbox interface {
 	// engine or any other memoizing runtime must defeat its own cache. A
 	// cached tool result is indistinguishable from a real one to the model,
 	// so a repeated side effect becomes invisible: the run believes it
-	// charged a customer twice when it charged once. See the Dagger notes
-	// in docs/SANDBOX.md.
+	// charged a customer twice when it charged once.
 	//
 	// A non-zero exit is a Result, not an error.
 	Exec(ctx context.Context, cmd Command) (*Result, error)
@@ -244,9 +243,8 @@ type Imaged interface {
 // This exists so the system prompt can name the directory the tools actually
 // use. Kit renders a working directory into the prompt, and a model believes
 // the prompt over its own observation: telling it /workspace when `pwd` says
-// otherwise is the disagreement docs/SPEC.md §4.9.1 records, and a live model
-// hit it again — "my workspace is not actually /workspace" — when the value
-// was hard-coded.
+// otherwise is a disagreement a live model hit — "my workspace is not
+// actually /workspace" — when the value was hard-coded.
 //
 // It takes a run ID because the directory is per run, and it must not open
 // the sandbox: the prompt is built before the first tool call, and opening

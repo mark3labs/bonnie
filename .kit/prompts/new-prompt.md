@@ -68,7 +68,7 @@ Anything inside triple-backtick fences, `~~~` fences, or single-backtick `inline
 5. **Draft the body**:
    - Open with a single sentence stating the goal, weaving in `$1`/`$@` where the value belongs
    - Use `## Steps` for multi-step workflows; plain prose for simple prompts
-   - Be specific: name the repo's real commands and paths — `task ci`, `task test-live`, `docs/SPEC.md` §8, `bonnie runs show`
+   - Be specific: name the repo's real commands and paths — `task ci`, `task test-live`, `runtime/runner.go`, `bonnie runs show`
    - **Audit every backtick and code fence**: any `$N` or `$@` inside them will not expand — was that intentional?
 6. **Write the file** to `.kit/prompts/<slug>.md`
 7. **Verify substitution** by mentally (or actually) replacing `$1`/`$@` with a sample value and confirming every reference resolves — and that the prompt's *own* example snippets don't accidentally bump the required-arg count (wrap illustrative `$N` examples in triple-backtick fences, not 4-space indentation)

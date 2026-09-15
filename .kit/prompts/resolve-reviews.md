@@ -29,7 +29,7 @@ CodeRabbit line comments embed a `🤖 Prompt for AI Agents` block. Read the **f
 
 - **Still valid** → fix it, minimal and scoped to the finding
 - **Already addressed** → skip, note the commit that fixed it
-- **Intentional behavior the bot misread** → skip and reply on the thread. This repo has intentional weirdness a reviewer will flag: the deliberate `var _ kit.SessionManager = (*Session)(nil)` tripwire, `context.WithoutCancel` for terminal bookkeeping, repair-on-restore rewriting history, and the fang styling in `cmd/bonnie`. Explain with a citation to `docs/SPEC.md` before dismissing
+- **Intentional behavior the bot misread** → skip and reply on the thread. This repo has intentional weirdness a reviewer will flag: the deliberate `var _ kit.SessionManager = (*Session)(nil)` tripwire, `context.WithoutCancel` for terminal bookkeeping, repair-on-restore rewriting history, and the fang styling in `cmd/bonnie`. Explain with a citation to the godoc that states the reason before dismissing
 - **Wrong or out of scope** → skip with a brief reason; do not silently ignore
 
 ## Round-trip

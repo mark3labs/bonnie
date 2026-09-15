@@ -213,8 +213,7 @@ func TestSandboxIsTheDefault(t *testing.T) {
 // It used to assert that a network policy with NO sandbox fails. There is no
 // such configuration now, so the honest version of the same rule is one level
 // down: the default backend confines the filesystem and not the network, so a
-// policy it cannot enforce must be refused and must name a backend that can
-// (docs/SPEC.md §8, invariant 10).
+// policy it cannot enforce must be refused and must name a backend that can.
 func TestDenyNetworkOnTheDefaultSandboxIsRejected(t *testing.T) {
 	t.Parallel()
 	c := resolve(WithNetwork(sandbox.NetworkPolicy{Mode: sandbox.NetworkDenyAll}))
@@ -374,8 +373,8 @@ func TestChannelNeedsItsSecrets(t *testing.T) {
 //
 // The refusal is what matters. [require] is tested directly above, but only
 // this test proves each option is actually wired to it — an option that built
-// its channel without checking would mount an unverified webhook, which is the
-// failure docs/CHANNELS.md exists to prevent.
+// its channel without checking would mount an unverified webhook — a webhook
+// anyone on the internet could drive.
 func TestChatChannelOptionsMount(t *testing.T) {
 	cases := []struct {
 		name  string

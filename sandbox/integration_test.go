@@ -113,7 +113,7 @@ func TestLiveAgentWorksInsideTheSandbox(t *testing.T) {
 
 // TestLiveAgentCannotReachTheHost is the security claim, tested rather than
 // asserted. BONNIE's own live test once ran without a sandbox and the model
-// wrote Terraform into the repository — see docs/SPEC.md §4.9. This is the
+// wrote Terraform into the repository. This is the
 // regression test for that class of failure.
 func TestLiveAgentCannotReachTheHost(t *testing.T) {
 	model, provider := requireLive(t)

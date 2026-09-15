@@ -1,5 +1,5 @@
 ---
-description: Tag and publish a release — goreleaser owns the artifacts, T-011 owns the checklist
+description: Tag and publish a release — goreleaser owns the artifacts, docs/RELEASE.md owns the checklist
 ---
 
 Prepare, validate, and cut a release of BONNIE. The user's input, if any: $@
@@ -9,11 +9,11 @@ Prepare, validate, and cut a release of BONNIE. The user's input, if any: $@
 1. **Fetch remote tags**: `git fetch --tags origin`, and read the latest:
    `git tag -l | sort -V | tail -5`
 
-2. **Work the release checklist** — `docs/TASKS.md` T-011 is the source of
+2. **Work the release checklist** — `docs/RELEASE.md` is the source of
    truth; confirm each box:
    - `task release-check` (goreleaser check) and `task release-snapshot`
      (goreleaser build --snapshot --clean) must both succeed
-   - All CI jobs green on `master`, including `boundary` (`gh run list`)
+   - All CI jobs green on `master` — `test` and `lint` (`gh run list`)
    - `CHANGELOG.md` has the release's changes under a section matching the
      version, in Keep-a-Changelog shape
    - Release notes must state the three claims — survives process death,
@@ -46,8 +46,8 @@ Prepare, validate, and cut a release of BONNIE. The user's input, if any: $@
      the injected version, not `dev`
    - Check the published artifacts exist on the release page
 
-7. **Close out**: tick T-011's boxes in `docs/TASKS.md` and move it to the
-   shipped table; drop the `[Unreleased]` heading in `CHANGELOG.md` to the
+7. **Close out**: add the version's confirmed boxes to `docs/RELEASE.md`
+   history; drop the `[Unreleased]` heading in `CHANGELOG.md` to the
    released version.
 
 ## Guidelines

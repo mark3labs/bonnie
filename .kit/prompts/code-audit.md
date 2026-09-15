@@ -18,8 +18,8 @@ audit the whole repo, prioritising the highest-traffic packages first
 1. **Map the repo first**:
    - `ls` / `find` the top-level layout; list every Go package and its layer
      (L0 Kit → L1 runtime → L3 channel → L4 cmd; `sandbox/` beside L1)
-   - Read `AGENTS.md`, `docs/SPEC.md` (§8 invariants), and `docs/L2.md` — the
-     invariants define what counts as a violation
+   - Read `AGENTS.md` and the package godoc — the contracts stated there
+     define what counts as a violation
    - Note the public surface: `runtime/`, `channel/`, `sandbox/` are the SDK;
      `cmd/bonnie/` is a developer CLI, not the framework
 

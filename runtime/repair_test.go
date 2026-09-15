@@ -9,8 +9,7 @@ import (
 )
 
 // tornSession journals a step whose tool result never arrived, which is what a
-// crash between Kit's two AppendMessage calls leaves behind. See
-// docs/SPEC.md §4.2.
+// crash between Kit's two AppendMessage calls leaves behind.
 func tornSession(t *testing.T, runID string) Journal {
 	t.Helper()
 	j := NewMemoryJournal()
@@ -200,7 +199,7 @@ func TestRepairKeepsTrailingTextOnlyTurn(t *testing.T) {
 	}
 }
 
-// assertNoOrphan states invariant 3 of docs/SPEC.md as an assertion: every
+// assertNoOrphan states the no-orphan invariant as an assertion: every
 // tool call in the conversation has a result.
 func assertNoOrphan(t *testing.T, msgs []kit.LLMMessage) {
 	t.Helper()

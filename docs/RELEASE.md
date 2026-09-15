@@ -1,0 +1,166 @@
+# Releasing BONNIE
+
+The procedure every tag follows. The code is the spec; this file is the one
+procedure that is not in the code. Open work is ad hoc or a GitHub issue.
+
+The three claims a release must state: **survives process death**, **parks
+indefinitely**, **reachable over HTTP**. State the limits from the current
+`README.md` just as plainly.
+
+## The checklist
+
+1. Run `task release-check` (`goreleaser check`) and `task release-snapshot`
+   (`goreleaser build --snapshot --clean`).
+2. Confirm every CI job is green on `master` at the commit you will tag.
+   That means `test` and `lint`. There is no `boundary` job any more —
+   `depguard` in `lint` is the authority.
+3. Write the `CHANGELOG.md` section for the version **before** you push the
+   tag. State the three claims — survives process death, parks indefinitely,
+   reachable over HTTP — and state the limits from the **current**
+   `README.md` just as plainly. `release.yml` slices this section out with
+   `scripts/release-notes.sh` and gives it to `goreleaser --release-notes`;
+   a tag with no matching section fails the workflow.
+4. Tag the version and push the tag. `release.yml` fires on `v*`.
+5. Check the published artifacts: the downloaded binary must print the
+   injected version, not `dev`, its checksum must verify, and it must be
+   statically linked.
+
+### Every box must be confirmed
+
+- [ ] `goreleaser check` passes; the snapshot builds on every target and the
+      binary prints the injected version
+- [ ] No `replace` directive is committed in `go.mod`
+- [ ] `test` and `lint` green on `master` at the tagged commit
+- [ ] `CHANGELOG.md` carries the version's section in Keep-a-Changelog shape
+- [ ] The release notes state both the claims and the limits
+- [ ] Tag pushed and artifacts published
+- [ ] A downloaded binary prints the injected version
+
+## Watch for
+
+- **Notes written mid-release must be re-checked against the code at tag
+  time.** A later commit in the same release can make an earlier entry false,
+  and nothing in CI notices.
+- **Do not copy the previous release's limits forward.** That is how a stale
+  limit gets published.
+- **A guard pinned to a fixed version is worse than no guard: it reports
+  success.** `TestRepositoryChangelogStatesClaimsAndLimits` derives the
+  version from the newest released heading for this reason.
+- **Raise the golangci-lint pin whenever the `go` line in `go.mod` moves.**
+  golangci-lint refuses to load its config when its own toolchain is older
+  than the target, and exits 3.
+- The sandbox conformance suite **skips** any backend whose runtime is not on
+  the machine, and a bare CI runner has neither Docker nor microsandbox. CI
+  green does not mean those adapters were exercised. When a backend matters,
+  check that it *ran*, not that the suite was green.
+
+## History
+
+`v0.1.0` was tagged at `15e1727` and published on 2026-09-12; `release.yml`
+completed successfully. Verified post-publish, not assumed: a downloaded
+`linux_amd64` artifact prints `bonnie 0.1.0` (the injected version, not
+`dev`), and the GitHub release notes lead with the three claims and the
+limits — the auto-generated notes had only the commit list, so the notes were
+edited to the required form.
+
+| Version | Commit | Date |
+|---|---|---|
+| `v0.1.0` | `15e1727` | 2026-09-12 |
+| `v0.2.0` | `b1fff6d` | 2026-09-13 |
+| `v0.3.0` | `38a511d` | 2026-09-13 |
+| `v0.4.0` | `9ccb959` | 2026-09-14 |
+| `v0.5.0` | `f9794d1` | 2026-09-15 |
+| `v0.6.0` | `09f5293` | 2026-09-15 |
+
+### `v0.6.0`, 2026-09-15 — every box confirmed
+
+- [x] `task release-check` — goreleaser 2.17.1, 1 config validated
+- [x] `task release-snapshot` — four targets, archives and checksums
+- [x] All CI jobs green on `master` at the tagged commit `09f5293`:
+      `test` and `lint` (run `34972788215`)
+- [x] `CHANGELOG.md` carries a `[0.6.0]` section in Keep-a-Changelog shape
+- [x] Release notes state the three claims **and** the limits, published
+      with no human edit (the second tag with automatic notes)
+- [x] Tag pushed; `release.yml` run `34973928983` succeeded
+- [x] Five artifacts published; the downloaded `linux_amd64` binary prints
+      `bonnie 0.6.0`, its checksum verifies, and it is statically linked
+
+**The guard added at `v0.5.0` was itself broken, and this release caught it.**
+`TestRepositoryChangelogStatesClaimsAndLimits` named `v0.5.0` literally, so it
+would have inspected an already-shipped section forever and passed while a new
+release went out with no claims and no limits — the exact failure the
+automatic notes exist to prevent. It now derives the version from the newest
+released heading in
+`CHANGELOG.md`. **A guard pinned to a fixed version is worse than no guard: it
+reports success.** Verified by removing one claim from the `0.6.0` section and
+watching it fail by name.
+
+**Version choice.** Two commits, prefixed `fix:` and `docs:`, which reads as a
+PATCH. It was cut as a MINOR because the release **adds a public endpoint**,
+`POST /bonnie/v1/addresses/{address}`: the wire API under `/bonnie/v1` is a
+public contract, and a changelog with an *Added* section is not a patch. The
+exported `cmd/bonnie/tui.Client` interface also gained a method, which breaks
+any out-of-tree implementer. No exported signature in `runtime/`, `channel/`,
+or `sandbox/` changed, so the rule in the checklist did not force this — the
+public addition did.
+
+### `v0.5.0`, 2026-09-15 — every box confirmed
+
+- [x] `task release-check` — goreleaser 2.17.1, 1 config validated
+- [x] `task release-snapshot` — four targets, archives and checksums
+- [x] All CI jobs green on `master` at the tagged commit `f9794d1`:
+      `test` and `lint` (run `34968133708`). There is no `boundary` job to
+      confirm any more — see the note above
+- [x] `CHANGELOG.md` carries a `[0.5.0]` section in Keep-a-Changelog shape
+- [x] Release notes state the three claims **and** the limits — in the tag
+      annotation and, **for the first time with no human edit**, on the
+      GitHub release, because the notes extractor landed in this release
+- [x] Tag pushed; `release.yml` run `34968699731` succeeded
+- [x] Five artifacts published; the downloaded `linux_amd64` binary prints
+      `bonnie 0.5.0` (the injected version, not `dev`), its checksum
+      verifies, and it is statically linked
+
+**Re-checking the notes at tag time caught three defects**, exactly as the
+`v0.4.0` entry below warns. The section written across the increment had two
+separate `### Changed` headings, omitted `bonnie.WithName` from *Added*
+though it is a new exported option, and carried neither the claims nor the
+limits. The limits were then taken from the current `README.md` rather than
+copied from the `0.4.0` section, which still describes the `flock` ownership
+model that the SQLite journal replaced. **Copying the previous release's
+limits forward is how a stale limit gets published.**
+
+### `v0.4.0`, 2026-09-14 — every box confirmed
+
+- [x] `task release-check` — goreleaser 2.17.1, 1 config validated
+- [x] `task release-snapshot` — four targets, archives and checksums, 2m16s
+- [x] All CI jobs green on `master` at the tagged commit, including
+      `boundary` (run `34862857167`)
+- [x] `CHANGELOG.md` carries a `[0.4.0]` section in Keep-a-Changelog shape
+- [x] Release notes state the three claims **and** the limits — in the tag
+      annotation and, after an edit, on the GitHub release
+- [x] Tag pushed; `release.yml` run `34863448503` succeeded in 5m20s
+- [x] Five artifacts published; a downloaded binary prints `bonnie 0.4.0`,
+      its checksum verifies, and it serves
+
+**`0.4.0` had been written into `CHANGELOG.md` and never tagged.** Four more
+commits then accumulated under `[Unreleased]`, so the two sections were merged
+into one `0.4.0` rather than tagging `v0.5.0` and leaving a changelog heading
+no tag would ever match. Merging found three claims that intra-release churn
+had made false — `Manifest.WorkspaceDir` under *Added* after the manifest was
+deleted, the seeding fix described through a manifest key that no longer
+exists, and two new exported options missing from the list. **Notes written
+mid-release must be re-checked against the code at tag time**; a later commit
+in the same release can invalidate an earlier entry, and nothing in CI
+notices.
+
+**`goreleaser` does not read `CHANGELOG.md` — fixed in `v0.5.0`.**
+`.goreleaser.yaml` builds the body from commit subjects, so the published
+notes were a commit list until someone replaced them. This cost an edit at
+`v0.1.0` and again at `v0.4.0`. It is closed now: `release.yml` slices the
+tag's section out of `CHANGELOG.md` with `scripts/release-notes.sh` and passes
+it to `goreleaser --release-notes`, and a tag with no matching section fails
+the workflow instead of publishing an empty body. **Step 3 above is no longer
+manual** — but the section must exist before the tag is pushed.
+
+**The `boundary` CI job no longer exists.** `depguard` in
+the `lint` job is the authority and denies both forbidden paths by prefix.

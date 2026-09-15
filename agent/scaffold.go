@@ -214,8 +214,7 @@ func main() {
 		// Every tool call runs in a sandbox. The default is landlock, which
 		// confines tool calls to the run's own workspace and needs nothing
 		// installed — it confines the filesystem and the environment, not the
-		// network. Uncomment for stronger isolation, or to cut egress; see
-		// docs/SANDBOX.md.
+		// network. Uncomment for stronger isolation, or to cut egress.
 		//
 		//	bonnie.WithSandbox(sandbox.Docker()),
 		//	bonnie.WithNetwork(sandbox.NetworkPolicy{Mode: sandbox.NetworkDenyAll}),

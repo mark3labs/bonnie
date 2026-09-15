@@ -16,10 +16,11 @@ var ErrCorruptConversation = errors.New("bonnie: replayed conversation is corrup
 // repairTrailingOrphan removes an incomplete trailing tool-calling step.
 //
 // Kit appends the assistant message that carries a tool call and the tool
-// message that carries its result as two separate AppendMessage calls (see
-// docs/SPEC.md §3.3). A crash between them leaves the journal with an
-// assistant message whose tool_use has no tool_result. Every provider rejects
-// such a conversation, so the run would become permanently unresumable.
+// message that carries its result as two separate AppendMessage calls
+// (verified against Kit v0.106.0). A crash between them leaves the journal
+// with an assistant message whose tool_use has no tool_result. Every provider
+// rejects such a conversation, so the run would become permanently
+// unresumable.
 //
 // Dropping the step is the correct semantics: the step never finished, so the
 // model is free to run it again.

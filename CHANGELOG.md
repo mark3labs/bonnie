@@ -21,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   directory is consulted for **relative** paths only. A live Slack agent ran
   `find /home/<user>/Workspace/my-agent -type f` and read `main.go`,
   `instructions.md`, and `.bonnie/journal.db` — the journal that made its own
-  runs durable. Nothing refused it. See `docs/SPEC.md` §4.9.1.
+  runs durable. Nothing refused it.
 
 - **`--sandbox none` is refused by name**, with a message naming the
   replacement. It was the default, so it lives in scripts and unit files; a
@@ -403,7 +403,7 @@ that hides its limits gets deployed into situations it cannot handle.
    `agent.toml`, `agent.json`) no longer exist. A tree's data lives at fixed
    paths and everything else is a Go option on `bonnie.New`, so a setting that
    does not exist is a compile error rather than a key nothing reads. See
-   **Migration** below, `docs/TASKS.md` T-024, and `docs/L2.md`.
+   **Migration** below.
 2. **`bonnie.New().Serve()` replaces `bonnie.Main()`.** The root package is
    new in this release and owns the serving path.
 3. **The journal is SQLite.** `runtime.FileJournal` and
@@ -411,8 +411,7 @@ that hides its limits gets deployed into situations it cannot handle.
    `runtime.OpenSQLiteJournal`. One `<root>/journal.db` holds every run
    instead of one JSONL file per run plus a lock file per run. The driver is
    pure Go (`modernc.org/sqlite`), so BONNIE still builds and cross-compiles
-   with `CGO_ENABLED=0` and `bonnie build` still ships one static binary. See
-   `docs/SPEC.md` §4.14 and `docs/TASKS.md` T-025.
+   with `CGO_ENABLED=0` and `bonnie build` still ships one static binary.
 
 **Your existing runs are migrated, not lost.** A `.bonnie` that still holds
 `runs/*.jsonl` is imported the first time the new journal opens it: records
@@ -489,7 +488,7 @@ keep their sequence numbers, and each source file is renamed to
   everything at `/workspace`, so the two modes now agree. The banner names the
   resolved workspace. Serving without a tree is unchanged: the process's own
   directory stays the root. Note that this is a root, not a jail — an absolute
-  path still escapes, which is what the sandbox is for (`docs/SPEC.md` §4.9.1).
+  path still escapes, which is what the sandbox is for.
 - `gopkg.in/yaml.v3` and `github.com/pelletier/go-toml/v2` return to indirect
   dependencies. `go.sum` is unchanged.
 
@@ -677,8 +676,8 @@ defects that swallowed tool calls are fixed.
 
 ### Fixed
 
-- Live events that share one journal anchor were dropped past the first one
-  (`docs/SPEC.md` §4.8.1). A tool-call start, parsed call, execution, and
+- Live events that share one journal anchor were dropped past the first one.
+  A tool-call start, parsed call, execution, and
   result can all land on the same anchor, so the TUI lost tool calls the
   event bus held.
 - A TUI that reopened an existing address learned its run ID only after the
@@ -715,10 +714,9 @@ scaffold is now a Go module that builds against the public modules.
   `DISCORD_PUBLIC_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`),
   and a missing one is a startup error that names the variable. Secrets in
   the manifest are refused by construction: the keys do not exist.
-- New invariant 15 in `docs/SPEC.md` §8: a chat channel verifies its caller
-  or refuses to serve. See `docs/CHANNELS.md` for the per-platform setup,
-  the dispatch and steering rules, and what is deliberately not
-  implemented.
+- New rule: a chat channel verifies its caller or refuses to serve. The
+  per-platform setup, the dispatch and steering rules, and what is
+  deliberately not implemented are in the `channel` godoc.
 
 ### Changed
 

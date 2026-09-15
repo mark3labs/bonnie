@@ -23,7 +23,7 @@ Review the current git status and diff, then stage all changes, write a concise 
 
 - Read the actual diff — do not guess from filenames alone
 - Prefer one well-scoped commit; do not split unless the changes are clearly unrelated
-- If a change contradicts `docs/SPEC.md`, correct the spec **in the same commit** — a stale spec is worse than none
+- If a change contradicts a godoc or a comment, correct that comment **in the same commit** — the code is the spec, and a stale comment is worse than none
 - If `go.mod`/`go.sum` moved, say which dependency and why; the CI build must still pass (the Taskfile's `ci` task proves it)
 
 $@

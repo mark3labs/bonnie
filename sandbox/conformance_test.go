@@ -233,7 +233,7 @@ func TestExitCodesRoundTrip(t *testing.T) {
 
 // TestEveryCallExecutes is the anti-caching contract. A backend that memoizes
 // would return the first answer twice, and the model would never know a side
-// effect did not happen. See docs/SANDBOX.md.
+// effect did not happen.
 func TestEveryCallExecutes(t *testing.T) {
 	t.Parallel()
 	eachBackend(t, func(t *testing.T, _ backend, p Provider) {

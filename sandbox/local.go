@@ -22,7 +22,7 @@ import (
 // Do not use it in production. Use [DockerProvider] or
 // [MicrosandboxProvider], both of which are real. The distinction is not
 // theoretical: BONNIE's own live-model test once ran with host tools and the
-// model wrote Terraform files into the repository. See docs/SPEC.md §4.9.
+// model wrote Terraform files into the repository.
 type LocalProvider struct {
 	root string
 

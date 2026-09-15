@@ -96,7 +96,7 @@ func isolatedWorkspace(t *testing.T) func() {
 //  3. The replayed conversation is intact and has no orphaned tool call.
 //
 // Everything else in the package is verified with a fake agent. This is the
-// only place that proves Kit behaves as docs/SPEC.md §3 claims.
+// only place that proves Kit behaves as the durability seams claim.
 func TestLiveSuspendAndResume(t *testing.T) {
 	model := requireLiveModel(t)
 	assertWorkspaceUntouched := isolatedWorkspace(t)
@@ -203,7 +203,7 @@ func TestLiveSuspendAndResume(t *testing.T) {
 	}
 	if len(after) != len(before) {
 		t.Fatalf("Kit opened %d session(s) of its own — Options.SessionManager "+
-			"was not set before kit.New (docs/SPEC.md §3.1)", len(after)-len(before))
+			"was not set before kit.New", len(after)-len(before))
 	}
 }
 

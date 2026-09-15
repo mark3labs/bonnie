@@ -36,9 +36,9 @@ import (
 // walks tools/<name>/tool.go, requires each directory to export func Tool()
 // kit.Tool, and emits the one file BONNIE owns: bonnie_gen.go.
 //
-// The contract is in docs/L2.md §5. The generator emits only imports it is
-// allowed to (the tool packages, kit/pkg/kit, and embed) — it cannot emit a
-// boundary violation, because it never reaches for one.
+// The generator emits only imports it is allowed to (the tool packages,
+// kit/pkg/kit, and embed) — it cannot emit a boundary violation, because it
+// never reaches for one.
 
 // Tool is one discovered tool, named by its directory per the L2 contract.
 type Tool struct {

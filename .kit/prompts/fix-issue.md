@@ -14,9 +14,9 @@ Resolve GitHub issue #$1 by reading it, classifying it, and producing the approp
 
 2. **Is it really a BONNIE issue?** BONNIE is a layer over Kit. If the root
    cause sits in Kit (`pkg/kit` behavior, a missing export, a `SessionManager`
-   contract gap), stop here: file it upstream instead, per
-   `docs/UPSTREAM.md` — write the ask with `file:line` citations into that
-   document, then file the issue on `mark3labs/kit`. Record the local
+   contract gap), stop here: file it on `mark3labs/kit` instead, with
+   `file:line` citations into Kit at the pinned version and a proof the public
+   API cannot do it. Record the local
    workaround (if any) as `// TODO(kit):` in a separate commit.
 
 3. **Classify** from labels, title prefix, and body:
@@ -34,8 +34,8 @@ Resolve GitHub issue #$1 by reading it, classifying it, and producing the approp
    - **Bug**: reproduce first (a failing test if feasible); fix the cause,
      not the symptom; add a regression test. Durability bugs need the
      cross-process shape: a second `Runner` sharing only the journal
-   - **Feature**: check `docs/TASKS.md` and `docs/L2.md` first — if the
-     feature has a spec, follow it; if it is large or breaking, sketch the
+   - **Feature**: check the package godoc first — if the
+     feature has a stated contract, follow it; if it is large or breaking, sketch the
      design on the issue and wait for sign-off. Godoc on every exported
      symbol; `t.Parallel()` by default; new `Journal`/sandbox/channel
      implementations must join the matching conformance suite
@@ -53,8 +53,8 @@ Resolve GitHub issue #$1 by reading it, classifying it, and producing the approp
 ## Guidelines
 
 - **Stops at a clean working tree** — no `git commit`, `git push`, `gh pr create`
-- If the change teaches something that contradicts `docs/SPEC.md`, correct the
-  spec in the same commit and say so in the report
+- If the change teaches something that contradicts a godoc or a comment,
+  correct that comment in the same commit and say so in the report
 - Keep the change scoped; surface unrelated cleanups separately
 - If already fixed on `master`, comment with the reference and stop
 - Do not close the issue manually — the PR's `Fixes #$1` handles that

@@ -392,7 +392,9 @@ provider, err := sandbox.Select(ctx, sandbox.Microsandbox(), sandbox.Docker(), s
 ```
 
 The sandbox opens on the **first tool call that needs it**, so a parked run
-holds no container. Read [`docs/SANDBOX.md`](docs/SANDBOX.md) before deploying.
+holds no container. Read the godoc on each provider in
+[package `sandbox`](https://pkg.go.dev/github.com/mark3labs/bonnie/sandbox)
+before deploying: each one states what it does and does not contain.
 
 ## Serve over HTTP
 
@@ -481,10 +483,11 @@ deadline while the turn runs on. The reply posts back to the thread; a
 parked run posts its question, and the next message on the thread is the
 answer.
 
-The details are in [`docs/CHANNELS.md`](docs/CHANNELS.md): the per-platform
-setup, the dispatch and steering rules, and what is deliberately not
-implemented (streaming edits, button HITL, attachments, gateway
-transports).
+The per-platform setup, the dispatch and steering rules, and what is
+deliberately not implemented (streaming edits, button HITL, attachments,
+gateway transports) are in the godoc of
+[package `channel`](https://pkg.go.dev/github.com/mark3labs/bonnie/channel)
+and each adapter under it.
 
 ## CLI
 
@@ -642,7 +645,8 @@ demo and something you can deploy:
 - **Cancelling keeps finished work.** Steps are persisted before the context is
   checked, so a cancelled turn loses only the step in flight.
 
-Full detail, with the Kit citations, in [`docs/SPEC.md`](docs/SPEC.md).
+Full detail, with the Kit citations, is in the godoc of `runtime/` — the
+code is the specification.
 
 ## Limits
 
@@ -709,14 +713,10 @@ See [`examples/README.md`](examples/README.md) for copy-pasteable commands.
 
 | Document | Purpose |
 |---|---|
-| [`docs/HANDOVER.md`](docs/HANDOVER.md) | Picking up the project: state, pitfalls, what to do next |
-| [`docs/SANDBOX.md`](docs/SANDBOX.md) | Sandbox backends and the contracts an adapter must honour |
-| [`docs/SPEC.md`](docs/SPEC.md) | Specification: scope, verified Kit facts, known risks, invariants |
-| [`docs/L2.md`](docs/L2.md) | The agent tree: the default layout, configuration as code, `init`/`dev`/`build`, and the codegen contract |
-| [`docs/TASKS.md`](docs/TASKS.md) | Open work, and an archive of what shipped |
-| [`docs/UPSTREAM.md`](docs/UPSTREAM.md) | The home for BONNIE's future asks of Kit; answered ones live in `docs/archive/` |
+| [godoc](https://pkg.go.dev/github.com/mark3labs/bonnie) | The specification. Every exported symbol carries its contract and, often, the defect that shaped it |
+| [`docs/RELEASE.md`](docs/RELEASE.md) | The release checklist, and what each tag confirmed |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Boundary rule, workspace setup, commands |
-| [`SECURITY.md`](SECURITY.md) | Disclosure, and what v0.1.0 does not protect you from |
+| [`SECURITY.md`](SECURITY.md) | Disclosure, and what BONNIE does not protect you from |
 
 ## Contributing
 
