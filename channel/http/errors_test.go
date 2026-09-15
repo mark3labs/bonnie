@@ -9,8 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/mark3labs/bonnie/channel"
-
 	kit "github.com/mark3labs/kit/pkg/kit"
 )
 
@@ -24,23 +22,21 @@ func seqID() func() string {
 	}
 }
 
-// principal returns an authenticated caller, which an idempotent start
-// requires.
-func principal(id string) *channel.Principal {
-	return &channel.Principal{Authenticator: "test", Kind: "user", ID: id}
-}
-
 // Two starts with the same operation ID and principal return the same run,
 // and the agent ran once. The same operation ID under another principal is
 // a different run: the key is namespaced by the principal that owns it.
+//
+// The principal is the one an [Authenticator] proved. An idempotency key is
+// an ownership claim, and the channel refuses to honour one that rests on a
+// self-asserted body field — see TestOperationIDNeedsAVerifiedPrincipal.
 func TestOperationIDIsCreateOnce(t *testing.T) {
 	t.Parallel()
 	s := newTestServer(t, &stubAgent{turns: []*kit.TurnResult{{Response: "once"}}},
-		WithIDGenerator(seqID()))
+		WithIDGenerator(seqID()), WithAuthenticator(headerAuth))
 
-	req := StartRequest{Text: "hi", OperationID: "order-4213", Auth: principal("alice")}
-	firstResp, first := s.post(t, "/bonnie/v1/runs", req)
-	secondResp, second := s.post(t, "/bonnie/v1/runs", req)
+	req := StartRequest{Text: "hi", OperationID: "order-4213"}
+	firstResp, first := s.postAs(t, "alice", "/bonnie/v1/runs", req)
+	secondResp, second := s.postAs(t, "alice", "/bonnie/v1/runs", req)
 	if firstResp.StatusCode != http.StatusOK || secondResp.StatusCode != http.StatusOK {
 		t.Fatalf("starts returned %d and %d, want 200", firstResp.StatusCode, secondResp.StatusCode)
 	}
@@ -48,15 +44,15 @@ func TestOperationIDIsCreateOnce(t *testing.T) {
 		t.Fatalf("retried start = %q then %q, want one run", first.RunID, second.RunID)
 	}
 
-	_, other := s.post(t, "/bonnie/v1/runs", StartRequest{Text: "hi", OperationID: "order-4213", Auth: principal("bob")})
+	_, other := s.postAs(t, "bob", "/bonnie/v1/runs", req)
 	if other.RunID == first.RunID {
 		t.Fatal("another principal's operation ID resolved to alice's run")
 	}
-	// And without a principal it is refused: an idempotency key with no
-	// owner is a way to read someone else's run.
-	badResp, _ := s.post(t, "/bonnie/v1/runs", StartRequest{Text: "hi", OperationID: "order-4213"})
-	if badResp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("anonymous operation_id = %d, want 400", badResp.StatusCode)
+	// And without a credential it is refused before the handler runs: an
+	// idempotency key with no owner is a way to read someone else's run.
+	badResp, _ := s.post(t, "/bonnie/v1/runs", req)
+	if badResp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("anonymous operation_id = %d, want 401", badResp.StatusCode)
 	}
 }
 

@@ -29,6 +29,26 @@
 // The prefix is the framework's reserved namespace: the host refuses any
 // other channel a route under `/bonnie/`, so nothing can shadow these.
 //
+// # Identity
+//
+// Every other inbound adapter mints its principal from something it
+// verified: Slack an HMAC, Discord an Ed25519 signature, GitHub an HMAC.
+// This transport carries no platform signature, so identity is what the
+// host configures with [WithAuthenticator] — a bearer token, an OIDC
+// assertion, a client certificate.
+//
+// Without one the channel authenticates nobody, and the `auth` field of a
+// request body is recorded exactly as sent: unverified, and worth no more
+// than the network boundary around the deployment. That is the default
+// because it is what a loopback `bonnie dev` needs, NOT because it is safe
+// to expose. A deployment reachable by anyone else wants an authenticator,
+// or a reverse proxy that has already established who is calling.
+//
+// One route refuses to run on an unverified identity at all: an
+// `operation_id` start needs a principal an authenticator proved, because
+// the idempotency key is namespaced by the caller's identity and a
+// self-asserted one lets any caller claim any namespace.
+//
 // # From versus Attach
 //
 // From resolves a channel-local address — a Slack thread, a browser session —
@@ -44,6 +64,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"runtime/debug"
 	"strconv"
 
@@ -59,6 +80,7 @@ type Channel struct {
 	policy channel.TurnPolicy
 	idGen  []chat.CoreOption
 	info   Info
+	auth   Authenticator
 }
 
 var (
@@ -87,6 +109,45 @@ func WithIDGenerator(fn func() string) Option {
 // binary's build info.
 func WithInfo(info Info) Option {
 	return func(c *Channel) { c.info = info }
+}
+
+// Authenticator verifies a request and returns the principal it proves.
+//
+// It is the HTTP channel's equivalent of the signature check every webhook
+// adapter runs: Slack verifies an HMAC, Discord an Ed25519 signature, GitHub
+// an HMAC, and each then MINTS the principal from what the check proved. An
+// Authenticator does the same job for a transport that carries no platform
+// signature — a bearer token, an OIDC assertion, a mutual-TLS certificate,
+// a session cookie the host can resolve.
+//
+// Return [ErrUnauthenticated] to refuse the request with 401. Any other
+// error is a fault in the verifier itself and becomes a 500, because a
+// verifier that broke has not proved the caller is an impostor.
+//
+// A nil principal with a nil error means "no identity, and that is fine":
+// the request proceeds unattributed, which is what an open read-only
+// deployment wants.
+type Authenticator func(*http.Request) (*channel.Principal, error)
+
+// ErrUnauthenticated is what an [Authenticator] returns to refuse a caller.
+// It is the only error of a verifier that becomes a 401.
+var ErrUnauthenticated = errors.New("bonnie: channel/http: unauthenticated")
+
+// WithAuthenticator verifies every request except `GET /bonnie/v1/health`,
+// and makes the principal it returns the run's identity.
+//
+// With an authenticator set, the `auth` field of a request body is IGNORED
+// rather than merged: a caller must not be able to add claims to, or
+// override, an identity the verifier established. Without one, the body's
+// `auth` is recorded as before — unverified, self-asserted, and trusted only
+// as far as the deployment's own network boundary — and `operation_id` is
+// refused outright, because an idempotency key with no proven owner is a way
+// to read another caller's run by guessing the key.
+//
+// Health stays public so a deployment probe needs no credential; it reports
+// that the process is up and nothing about any run.
+func WithAuthenticator(fn Authenticator) Option {
+	return func(c *Channel) { c.auth = fn }
 }
 
 // Info is the body of `GET /bonnie/v1/info`: enough for a client to say what
@@ -194,11 +255,64 @@ func (c *Channel) HandlerWithOutbound(out channel.Outbound) http.Handler {
 	mux := http.NewServeMux()
 	for _, route := range c.Routes() {
 		handler := route.Handler
+		public := route.Path == channel.APIPrefix+"/health"
 		mux.HandleFunc(route.Method+" "+route.Path, func(w http.ResponseWriter, r *http.Request) {
+			if !public && !c.authenticate(w, r) {
+				return
+			}
 			handler(w, r, c, out)
 		})
 	}
 	return mux
+}
+
+// principalKey carries the verified principal from the mux wrapper to the
+// handler. It is request-scoped and never leaves this package: a handler
+// reads it with [verifiedPrincipal], and nothing can put one there from
+// outside.
+type principalKey struct{}
+
+// authenticate runs the configured [Authenticator] and stores what it
+// proved on the request. It reports whether the request may proceed, and
+// writes the refusal itself when it may not.
+func (c *Channel) authenticate(w http.ResponseWriter, r *http.Request) bool {
+	if c.auth == nil {
+		return true
+	}
+	p, err := c.auth(r)
+	switch {
+	case errors.Is(err, ErrUnauthenticated):
+		writeJSON(w, http.StatusUnauthorized, ErrorResponse{
+			Error: "the request carries no identity this deployment accepts",
+			Code:  errUnauthenticated,
+		})
+		return false
+	case err != nil:
+		// The verifier itself broke. That is not proof the caller is an
+		// impostor, and answering 401 would send a legitimate client off
+		// to re-authenticate against a fault it cannot fix.
+		logInternal("authenticator", err)
+		writeJSON(w, http.StatusInternalServerError, ErrorResponse{
+			Error: "the request could not be authenticated",
+			Code:  errInternal,
+		})
+		return false
+	}
+	if p != nil {
+		*r = *r.WithContext(context.WithValue(r.Context(), principalKey{}, p))
+	}
+	return true
+}
+
+// verifiedPrincipal returns the principal the [Authenticator] proved for
+// this request, and whether an authenticator ran at all. A handler uses the
+// second result to tell "verified, anonymous" from "never verified".
+func (c *Channel) verifiedPrincipal(r *http.Request) (*channel.Principal, bool) {
+	if c.auth == nil {
+		return nil, false
+	}
+	p, _ := r.Context().Value(principalKey{}).(*channel.Principal)
+	return p, true
 }
 
 // From implements [channel.Inbound]. The returned reference resolves the
@@ -302,7 +416,7 @@ type ErrorResponse struct {
 	// "run_active", "run_not_active", "run_retired",
 	// "run_owned_elsewhere", "compaction_unsupported",
 	// "unknown_turn_policy", "client_closed", "bad_request",
-	// "too_large", "internal".
+	// "too_large", "unauthenticated", "internal".
 	Code string `json:"code"`
 }
 
@@ -321,6 +435,7 @@ const (
 	errClientClosed       = "client_closed"
 	errBadRequest         = "bad_request"
 	errTooLarge           = "too_large"
+	errUnauthenticated    = "unauthenticated"
 	errInternal           = "internal"
 )
 
@@ -361,28 +476,43 @@ func (c *Channel) handleStart(w http.ResponseWriter, r *http.Request, in channel
 	if !decode(w, r, &req) {
 		return
 	}
-	if req.OperationID != "" && req.Auth == nil {
-		writeJSON(w, http.StatusBadRequest, ErrorResponse{
-			Error: "operation_id needs an authenticated principal: an idempotency key with no owner is a way to read someone else's run",
-			Code:  errBadRequest,
-		})
-		return
+	auth, verified := c.principalFor(r, req.Auth)
+	if req.OperationID != "" {
+		// Idempotency is an ownership claim, and an unverified body field
+		// cannot make one. Without an authenticator any caller could set
+		// auth to someone else's identity, guess an operation ID, and be
+		// handed that principal's run.
+		if !verified {
+			writeJSON(w, http.StatusBadRequest, ErrorResponse{
+				Error: "operation_id needs a verified principal: configure an authenticator on the channel, because an idempotency key with no proven owner is a way to read someone else's run",
+				Code:  errBadRequest,
+			})
+			return
+		}
+		if auth == nil {
+			writeJSON(w, http.StatusBadRequest, ErrorResponse{
+				Error: "operation_id needs an authenticated principal: an idempotency key with no owner is a way to read someone else's run",
+				Code:  errBadRequest,
+			})
+			return
+		}
 	}
 
 	var sess channel.SessionRef
-	if req.Address != "" {
+	switch {
+	case req.Address != "":
 		sess = in.From(req.Address)
-	} else if req.OperationID != "" {
+	case req.OperationID != "":
 		// The address map is the idempotency store: a namespaced key the
 		// principal owns. Resolving through it is create-once by the same
 		// rule every address follows, and the binding survives a restart.
-		sess = in.From(operationAddress(req.Auth, req.OperationID))
-	} else {
+		sess = in.From(operationAddress(auth, req.OperationID))
+	default:
 		sess = in.From(c.core.NewID())
 	}
 
 	run, err := sess.Send(r.Context(), req.Text, channel.SendOptions{
-		Auth:       req.Auth,
+		Auth:       auth,
 		TurnPolicy: req.TurnPolicy,
 		Title:      req.Title,
 		Kind:       req.Kind,
@@ -393,6 +523,18 @@ func (c *Channel) handleStart(w http.ResponseWriter, r *http.Request, in channel
 		return
 	}
 	writeJSON(w, http.StatusOK, runResponse(run))
+}
+
+// principalFor decides which identity a request carries, and whether it was
+// proved. A configured [Authenticator] wins outright: the body's auth is
+// dropped, never merged, so a caller cannot add a claim to a verified
+// identity. With no authenticator the body's auth is used as before, and
+// reported as unverified.
+func (c *Channel) principalFor(r *http.Request, body *channel.Principal) (*channel.Principal, bool) {
+	if p, verified := c.verifiedPrincipal(r); verified {
+		return p, true
+	}
+	return body, false
 }
 
 func (c *Channel) handleAddress(w http.ResponseWriter, r *http.Request, _ channel.Inbound, _ channel.Outbound) {
@@ -455,10 +597,11 @@ func (c *Channel) handleSend(w http.ResponseWriter, r *http.Request, in channel.
 	if !decode(w, r, &req) {
 		return
 	}
+	auth, _ := c.principalFor(r, req.Auth)
 	// Attach, not From: a message addressed to a run ID must never create one.
 	sess := in.Attach(r.PathValue("id"))
 	run, err := sess.Send(r.Context(), req.Text, channel.SendOptions{
-		Auth:       req.Auth,
+		Auth:       auth,
 		TurnPolicy: req.TurnPolicy,
 		Context:    req.Context,
 	})
@@ -619,6 +762,13 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 // writeError maps a runtime sentinel to a status code and a stable code.
 // Anything unrecognised is a 500: guessing would hide a real fault behind a
 // plausible 4xx.
+//
+// The mapped errors carry their own text to the client on purpose — "run not
+// found", "run is not waiting" is what the caller needs to act. An unmapped
+// one does not: it is whatever the journal, the driver, or the model client
+// said, and that text has carried file paths and SQL to whoever could reach
+// the API. The client gets the code and nothing else; the operator gets the
+// detail on stderr.
 func writeError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, runtime.ErrRunNotFound):
@@ -645,8 +795,20 @@ func writeError(w http.ResponseWriter, err error) {
 	case errors.Is(err, context.Canceled):
 		writeJSON(w, 499, ErrorResponse{Error: err.Error(), Code: errClientClosed})
 	default:
-		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: err.Error(), Code: errInternal})
+		logInternal("request", err)
+		writeJSON(w, http.StatusInternalServerError, ErrorResponse{
+			Error: "the request failed; the server log has the detail",
+			Code:  errInternal,
+		})
 	}
+}
+
+// logInternal reports a fault to the operator. It is the other half of an
+// opaque 500: the detail has to go somewhere, and stderr is where every
+// other adapter in this framework already reports a delivery it could not
+// make.
+func logInternal(what string, err error) {
+	fmt.Fprintf(os.Stderr, "bonnie: channel/http: %s: %v\n", what, err)
 }
 
 // opPrefix namespaces idempotency keys inside the address map, so an
@@ -655,8 +817,12 @@ const opPrefix = "operation/"
 
 // operationAddress is the address-map key of one idempotent start: the
 // principal's identity, the fixed prefix, and the caller's operation ID. A
-// key another principal chose cannot resolve to this one's run, which is
-// the whole security property.
+// key another principal chose cannot resolve to this one's run.
+//
+// That property holds only as far as the identity does. It is real when an
+// [Authenticator] proved the principal, which is why handleStart refuses an
+// operation ID without one: a self-asserted principal makes the namespace a
+// formality any caller can step into.
 func operationAddress(p *channel.Principal, operationID string) string {
 	return opPrefix + p.Authenticator + "/" + p.ID + "/" + operationID
 }

@@ -29,6 +29,9 @@ type stubAgent struct {
 	block   chan struct{}
 	started chan struct{}
 	session *runtime.Session
+	// err makes every turn fail with it, which is how a test reaches the
+	// unmapped branch of writeError without breaking a journal.
+	err error
 }
 
 // calls reports how many turns the agent has run.
@@ -57,6 +60,9 @@ func (a *stubAgent) PromptResult(ctx context.Context, msg string) (*kit.TurnResu
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.err != nil {
+		return nil, a.err
+	}
 	// The real agent journals its turns — the assistant message is what a
 	// response event anchors to, and a stream test that skips it would test
 	// a shape production never produces. Unscripted calls answer "done",
