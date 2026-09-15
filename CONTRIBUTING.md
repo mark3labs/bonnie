@@ -19,13 +19,25 @@ It must stay `// indirect` in `go.mod`.
 
 ### Enforcement layers
 
-1. **Go compiler** — BONNIE's module path is not a prefix of Kit's, so the
+Three layers, listed in the order they fire — which is not the order of
+authority:
+
+1. **The Kit extension in `.kit/extensions/kit-boundary.go`** — refuses a
+   `write` or `edit` tool call that would add a forbidden import to a `.go`
+   file, and tells the agent why in the same turn. It only runs when a person
+   drives Kit in this checkout, so it catches nothing an editor, a different
+   tool, or a dependency bump does. A guard-rail, not a gate.
+
+2. **Go compiler** — BONNIE's module path is not a prefix of Kit's, so the
    compiler already rejects internal imports at build time.
 
-2. **depguard in .golangci.yml** — linter enforcement as a safety net.
+3. **depguard in .golangci.yml** — **the authority.** It denies both paths by
+   prefix, whatever the module layout, and the CI `lint` job runs it on every
+   change whatever wrote that change. Do not remove this rule because the
+   extension exists.
 
-3. **CI boundary job in .github/workflows/ci.yml** — the final check: a
-   dedicated step that fails the build if the rule breaks.
+There is no separate `boundary` CI job; `docs/SPEC.md` §2 records why it was
+removed and the two traps to avoid if you ever rebuild it.
 
 If Kit exports a type but not a helper that operates on it, write the small
 helper in BONNIE. See `toolResultText` in `runtime/util.go` for an example.
@@ -58,18 +70,12 @@ go mod edit -replace github.com/mark3labs/kit=../kit
 go mod edit -dropreplace github.com/mark3labs/kit
 ```
 
-A `go.work` in the parent directory also works, and is equally uncommitted.
-Prefer the `replace`: a workspace silently covers every module in the graph,
-so it is easy to build against a stale local checkout without noticing.
-BONNIE used to require one for its build tests and no longer does.
-
 ### Publishing
 
-Never commit a `replace` directive in `go.mod`, and never commit a `go.work`.
+Never commit a `replace` directive in `go.mod`.
 
-CI runs with `GOWORK=off`, so the published module builds against the Kit
-version pinned in `go.mod`. This verifies the release works for users who
-have neither.
+CI builds against the Kit version pinned in `go.mod`, which verifies the
+release works for users who have no local checkout.
 
 ## Building and testing
 

@@ -28,9 +28,9 @@ File a GitHub issue. The user wants to create an issue about: $@
 2. **Gather evidence before writing**:
    - For bugs: the exact command, the journal directory contents
      (`sqlite3 .bonnie/journal.db "SELECT run_id, state FROM runs"`,
-     `bonnie runs show <id> --json`), the Go version,
-     and whether `GOWORK=off` reproduces it — a go.work checkout hides
-     version-pinning bugs
+     `bonnie runs show <id> --json`), the Go version, and whether a local
+     `replace` directive in `go.mod` is in play — building against a local
+     Kit checkout hides version-pinning bugs
    - For durability bugs: run `bonnie runs show <id> --json` and attach the
      record kinds (redact message text if asked); state which invariant of
      `docs/SPEC.md` §8 broke

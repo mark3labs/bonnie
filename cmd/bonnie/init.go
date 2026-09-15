@@ -38,8 +38,8 @@ files — and everything else is an option in main.go, so a setting that does
 not exist is a compile error rather than a key nothing reads.
 
 --tools adds a sample Go tool (tools/echo) so there is something wired by
-codegen to see. The mark3labs modules are public; no go.work or private access
-is needed. The model goes into main.go with --model.`,
+codegen to see. The mark3labs modules are public; no private access is needed.
+The model goes into main.go with --model.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(_ *cobra.Command, args []string) error {
 			dir := "."

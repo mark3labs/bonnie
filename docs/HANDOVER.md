@@ -46,10 +46,6 @@ a complete agent. A scaffolded `main.go` is that one call.
 - **`bonnie dev` links the tree's pinned release, not your working tree.** To
   test a local change through a scaffolded tree, put a `replace` in that
   tree's `go.mod` — `internal/treetest` does exactly this for the tests.
-- **No `go.work` anywhere.** `go.mod` pins Kit and the build tests write a
-  `replace` into the temporary tree they compile. A workspace file above the
-  checkout silently covers every module and can make a green local run lie;
-  CI runs `GOWORK=off` to catch it.
 - **The dev loop must never watch the workspace.** It is where the model
   writes, so watching it makes the agent restart itself mid-turn (SPEC
   §4.9.1).

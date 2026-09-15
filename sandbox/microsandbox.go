@@ -196,16 +196,7 @@ func (p *MicrosandboxProvider) Open(ctx context.Context, runID string) (Sandbox,
 // ensureRunning creates the sandbox when absent and starts it when stopped.
 func (p *MicrosandboxProvider) ensureRunning(ctx context.Context, sb *cliSandbox) error {
 	if p.exists(ctx, sb.name) {
-		p.start(ctx, sb.name)
-		// After start, not before: `msb inspect` reports no active config
-		// for a stopped sandbox, so the policy check needs the sandbox up.
-		// On a mismatch Open fails with the sandbox running, which is the
-		// same leftover every Open failure leaves; reclaiming those is
-		// T-012's reconciler.
-		if err := p.checkPolicy(ctx, sb); err != nil {
-			return err
-		}
-		return p.ensureWorkspace(ctx, sb)
+		return p.adopt(ctx, sb)
 	}
 
 	net, err := netArgs(p.policy)
@@ -223,11 +214,74 @@ func (p *MicrosandboxProvider) ensureRunning(ctx context.Context, sb *cliSandbox
 	args = append(args, p.image)
 
 	if _, stderr, code, err := runCLI(ctx, nil, p.bin, args...); err != nil || code != 0 {
-		return fmt.Errorf("bonnie: sandbox: create microsandbox from %s: %s",
-			p.image, firstLine(stderr))
+		// "already exists" is the state the caller asked for, so adopt it
+		// rather than fail. [exists] above is only a hint: msb reports an
+		// empty `ps --all` while sandboxes are running, so a sandbox that
+		// is plainly there can be reported absent. A pre-flight check can
+		// never be atomic against another creator either, so this ordering
+		// — try, then adopt the refusal — is the only reliable one.
+		if !msbAlreadyExists(stderr) {
+			return fmt.Errorf("bonnie: sandbox: create microsandbox from %s: %s",
+				p.image, msbError(stderr))
+		}
+		return p.adopt(ctx, sb)
 	}
 	p.start(ctx, sb.name)
 	return p.ensureWorkspace(ctx, sb)
+}
+
+// adopt takes over a sandbox that already exists, whether this process made
+// it or a previous one did.
+//
+// The policy check is the reason this is a named step rather than a fall
+// through. A sandbox someone else created may carry network rules this
+// provider would never have asked for, and adopting it silently would hand a
+// run more egress than its policy allows — so the check runs on every adopt
+// path, including the one reached by a create that lost the race.
+func (p *MicrosandboxProvider) adopt(ctx context.Context, sb *cliSandbox) error {
+	p.start(ctx, sb.name)
+	// After start, not before: `msb inspect` reports no active config for a
+	// stopped sandbox, so the policy check needs the sandbox up. On a
+	// mismatch Open fails with the sandbox running, which is the same
+	// leftover every Open failure leaves; reclaiming those is T-012's
+	// reconciler.
+	if err := p.checkPolicy(ctx, sb); err != nil {
+		return err
+	}
+	return p.ensureWorkspace(ctx, sb)
+}
+
+// msbAlreadyExists reports whether a create failed only because the sandbox
+// is already there.
+func msbAlreadyExists(stderr string) bool {
+	return strings.Contains(stderr, "already exists")
+}
+
+// msbError renders an msb failure without discarding its cause.
+//
+// msb puts the headline on the first line and the reason on indented "→"
+// continuation lines:
+//
+//	error: failed to start "bonnie-exec-codes"
+//	  → config: database error: ... (code: 5) database is locked
+//
+// [firstLine] keeps the headline and drops the reason, which is how a
+// diagnosable failure became an unreadable one and bought T-026 a wrong
+// diagnosis for a day. Join the lines instead, so the cause survives and the
+// failure is still a single log record.
+func msbError(stderr string) string {
+	var parts []string
+	for line := range strings.SplitSeq(stderr, "\n") {
+		line = strings.TrimSpace(line)
+		line = strings.TrimPrefix(line, "→ ")
+		if line = strings.TrimSpace(line); line != "" {
+			parts = append(parts, line)
+		}
+	}
+	if len(parts) == 0 {
+		return "no output"
+	}
+	return strings.Join(parts, ": ")
 }
 
 // start brings a sandbox up and tolerates one that is already up.
@@ -401,6 +455,14 @@ func (p *MicrosandboxProvider) ensureWorkspace(ctx context.Context, sb *cliSandb
 // The listing is decoded rather than searched as text. A substring match also
 // hits the image, command, and status fields, so a run whose ID resembles a
 // value in any of them would be reported as existing when it does not.
+//
+// **A false answer here is expected, not exceptional.** Measured on msb
+// 0.6.18, `msb ps --all --format json` intermittently returns an empty list,
+// exit 0, while sandboxes are running — 3 calls in 24 during one conformance
+// run. Every failure mode below also reports "absent" for a sandbox that may
+// be right there. So this is a hint, never a decision: [ensureRunning] must
+// stay correct when it is wrong, which is why a create that comes back
+// "already exists" is adopted rather than failed.
 func (p *MicrosandboxProvider) exists(ctx context.Context, name string) bool {
 	stdout, _, code, err := runCLI(ctx, nil, p.bin, "ps", "--all", "--format", "json")
 	if err != nil || code != 0 {

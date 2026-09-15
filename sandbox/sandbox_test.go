@@ -666,3 +666,47 @@ func TestMicrosandboxRefusesReattachPolicyMismatch(t *testing.T) {
 		t.Fatalf("reattach with the same policy must work: %v", err)
 	}
 }
+
+// TestMsbErrorKeepsTheCause pins the shape that cost T-026 a wrong diagnosis.
+//
+// msb reports a failure as a headline plus indented "→" continuation lines,
+// and the cause is only ever on the continuation. An error that keeps the
+// headline alone is not diagnosable: "failed to start" says nothing, while
+// "database is locked" says everything.
+func TestMsbErrorKeepsTheCause(t *testing.T) {
+	t.Parallel()
+
+	const stderr = "error: failed to start \"bonnie-exec-codes\"\n" +
+		"  → config: database error: (code: 5) database is locked\n" +
+		"  → run `msb logs --source system bonnie-exec-codes` for full diagnostics\n"
+
+	got := msbError(stderr)
+	for _, want := range []string{"failed to start", "database is locked"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("msbError dropped %q from the cause: got %q", want, got)
+		}
+	}
+	if strings.Contains(got, "\n") {
+		t.Errorf("msbError must stay one log record, got %q", got)
+	}
+	if msbError("   \n  \n") != "no output" {
+		t.Errorf("empty stderr must read as %q", "no output")
+	}
+}
+
+// TestMsbAlreadyExistsMatchesMsbWording keeps the adopt path wired to the
+// real message. `exists` is only a hint — msb reports an empty `ps --all`
+// while sandboxes run — so a create that loses the race must be adopted, and
+// that only happens if this predicate matches what msb actually prints.
+func TestMsbAlreadyExistsMatchesMsbWording(t *testing.T) {
+	t.Parallel()
+
+	const real = "error: sandbox already exists: sandbox 'bonnie-open-twice' " +
+		"already exists; remove it, start the stopped sandbox, or recreate with .replace()"
+	if !msbAlreadyExists(real) {
+		t.Errorf("msb's own wording must be recognised as already-exists: %q", real)
+	}
+	if msbAlreadyExists("error: failed to start \"x\"\n  → database is locked") {
+		t.Error("a locked store is not an already-exists: adopting it would hide a real failure")
+	}
+}

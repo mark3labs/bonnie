@@ -6,13 +6,9 @@
 // under test. The tree therefore gets a replace directive pointing at this
 // checkout, written into its own go.mod — never into BONNIE's.
 //
-// It is a replace and not a go.work on purpose. A workspace has to name every
-// module in the graph, so it needed a kit checkout beside this repo: tests
-// skipped where there was none, and where there was one they built against
-// whatever that checkout happened to be rather than the version go.mod pins.
-// A replace names only bonnie, and kit resolves through BONNIE's own go.mod —
-// so these tests build the same pair of versions CI and a user's `go mod
-// tidy` do.
+// The replace names only bonnie, and kit resolves through BONNIE's own
+// go.mod, so these tests build the same pair of versions CI and a user's
+// `go mod tidy` do.
 package treetest
 
 import (
@@ -65,21 +61,17 @@ func LinkToCheckout(t *testing.T, root string) {
 
 // BuildEnv is the environment a `go build` of a linked tree runs with.
 //
-// GOWORK is cleared: a developer with a workspace file above their checkout
-// would otherwise have it silently pulled in, and the build under test would
-// stop being the build CI runs.
-//
 // GOFLAGS=-mod=mod lets the build write the tree's go.sum. A scaffolded go.mod
 // carries no sums, and the default readonly mode refuses rather than add them.
 // Every module it needs is already in the cache, because this repository
 // requires the same ones, so no network call is made.
 func BuildEnv() []string {
-	env := make([]string, 0, len(os.Environ())+2)
+	env := make([]string, 0, len(os.Environ())+1)
 	for _, kv := range os.Environ() {
-		if strings.HasPrefix(kv, "GOWORK=") || strings.HasPrefix(kv, "GOFLAGS=") {
+		if strings.HasPrefix(kv, "GOFLAGS=") {
 			continue
 		}
 		env = append(env, kv)
 	}
-	return append(env, "GOWORK=off", "GOFLAGS=-mod=mod")
+	return append(env, "GOFLAGS=-mod=mod")
 }

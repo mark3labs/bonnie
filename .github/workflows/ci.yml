@@ -18,23 +18,13 @@ jobs:
           go-version: "1.27"
           cache: true
 
-      # GOWORK=off is deliberate. Locally a go.work file points BONNIE at a
-      # checkout of Kit, which hides the case where BONNIE fails to build
-      # against the PUBLISHED Kit version. CI must always use the version in
-      # go.mod. This is the classic multi-repo trap.
       - name: Build
-        env:
-          GOWORK: off
         run: go build ./...
 
       - name: Vet
-        env:
-          GOWORK: off
         run: go vet ./...
 
       - name: Test
-        env:
-          GOWORK: off
         run: go test -race ./...
 
       # The journal is SQLite, and `bonnie build` promises the user a single
@@ -43,7 +33,6 @@ jobs:
       # with CGO off rather than asserted in prose.
       - name: Build with CGO disabled
         env:
-          GOWORK: off
           CGO_ENABLED: "0"
         run: go build ./...
 
@@ -56,8 +45,6 @@ jobs:
           go-version: "1.27"
           cache: true
       - uses: golangci/golangci-lint-action@v8
-        env:
-          GOWORK: off
         with:
           # Must be built with a Go at least as new as the `go` line in
           # go.mod. golangci-lint loads the config with its own toolchain and
@@ -67,50 +54,3 @@ jobs:
           # built with go1.24 against a go.mod that asks for 1.27, so it could
           # never run. Raise this pin whenever the go.mod version moves.
           version: v2.13.2
-
-  boundary:
-    name: Public API boundary
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
-        with:
-          go-version: "1.27"
-          cache: true
-
-      # The compiler already blocks kit/internal because BONNIE's module path
-      # is not a prefix of Kit's. This job states the invariant explicitly so a
-      # future change that vendors Kit or merges the repos fails loudly here
-      # instead of silently eroding the boundary.
-      #
-      # NOTE: this must inspect DIRECT imports, not `go list -deps`. The
-      # transitive graph always contains kit/internal/... and the charm TUI
-      # stack because pkg/kit imports those packages — that is Kit's
-      # business, not ours. The -e flag is required: without it `go list`
-      # aborts on the very package we want to report, and the job fails with
-      # an opaque error.
-      #
-      # The template attributes every import to the package that imports it,
-      # so a failure names the offender, not just the import.
-      - name: Assert BONNIE touches only the public Kit SDK
-        env:
-          GOWORK: off
-        run: |
-          set -euo pipefail
-          go list -e -f '{{ $p := .ImportPath }}{{ range .Imports }}{{ $p }} {{ . }}{{ "\n" }}{{ end }}{{ range .TestImports }}{{ $p }} {{ . }}{{ "\n" }}{{ end }}{{ range .XTestImports }}{{ $p }} {{ . }}{{ "\n" }}{{ end }}' ./... \
-            | sort -u > /tmp/direct.txt
-          if awk '{print $2}' /tmp/direct.txt | grep -q 'mark3labs/kit/internal'; then
-            echo "::error::BONNIE directly imports a Kit internal package."
-            awk '$2 ~ /mark3labs\/kit\/internal/ {print "  " $0}' /tmp/direct.txt
-            exit 1
-          fi
-          # Kit re-exports every model type BONNIE needs as an alias in
-          # pkg/kit. Naming charm.land/fantasy directly would pin BONNIE to
-          # Kit's own transitive dependency and break when Kit moves it.
-          if awk '{print $2}' /tmp/direct.txt | grep -q '^charm.land/fantasy'; then
-            echo "::error::BONNIE directly imports charm.land/fantasy. Use the kit.LLM* aliases."
-            awk '$2 == "charm.land/fantasy" {print "  " $0}' /tmp/direct.txt
-            exit 1
-          fi
-          echo "Kit packages BONNIE imports directly:"
-          awk '$2 ~ /mark3labs\/kit/ {print "  " $0}' /tmp/direct.txt || echo "  (none)"

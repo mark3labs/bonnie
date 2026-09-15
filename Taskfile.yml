@@ -125,12 +125,10 @@ tasks:
       - task: lint
       - task: test
 
-  # CI parity, including GOWORK=off: CI must build against the Kit version
-  # pinned in go.mod, not a local checkout. Run this before pushing.
+  # CI parity: CI must build against the Kit version pinned in go.mod, not a
+  # local checkout. Run this before pushing.
   ci:
-    desc: Run exactly what CI runs (GOWORK=off build, vet, test, lint)
-    env:
-      GOWORK: "off"
+    desc: Run exactly what CI runs (build, vet, test, lint)
     cmds:
       - task: fmt-check
       - go build ./...

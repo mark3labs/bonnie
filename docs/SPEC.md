@@ -68,9 +68,16 @@ verified to fire:
 
 | Layer | Mechanism | Verified |
 |---|---|---|
+| Kit extension | `.kit/extensions/kit-boundary.go` blocks the `write`/`edit` tool call | 10 cases through Kit's Yaegi loader + 32 matcher cases, and live in-session, 2026-09-15 |
 | Go compiler | BONNIE's module path is not a prefix of Kit's, so the `internal` rule applies | `use of internal package ... not allowed` |
-| `depguard` | `.golangci.yml` denies `kit/internal` and `charm.land/fantasy` | configured |
-| CI | `.github/workflows/ci.yml` job `boundary` | catches a planted violation |
+| `depguard` | `.golangci.yml` denies `kit/internal` and `charm.land/fantasy` | configured; runs in the CI `lint` job |
+
+The three layers are ordered by when they fire, not by authority. **The
+authority is `depguard`**, because the CI `lint` job runs it on every change
+whatever wrote that change. The extension is a guard-rail, not a gate: it only
+runs when a person drives Kit in this checkout, so it cannot see an edit made
+in an editor, by another tool, or by a dependency bump. Never delete the
+`depguard` rule because the extension exists.
 
 The `charm.land/fantasy` denial is about **model types**, not the terminal
 stack. The CLI's built-in TUI (`cmd/bonnie/tui`) imports
@@ -80,11 +87,72 @@ surface that renders Kit's model types to the screen is a separate concern
 from naming the model types. It still never names fantasy or Kit internals;
 see §8 invariant 1.
 
-The CI job inspects **direct** imports, not `go list -deps`. The transitive
-graph always contains 18 `kit/internal/*` packages because `pkg/kit` imports
-its own internals — that is Kit's business, not a BONNIE violation. The job
-also needs `go list -e`, because without it `go list` aborts on the very
-package it is meant to report.
+**There was a fourth layer and it is gone (2026-09-15).** A CI job named
+`boundary` ran a `go list` template over direct imports and grepped the
+result. It was removed when the extension landed. It added nothing `depguard`
+did not already catch: `depguard` matches the denied path by prefix no matter
+how the module is laid out, so even the vendored-Kit and merged-repo cases it
+was written for still fail `lint`. What the job did have to get right is
+recorded here, because anyone who rebuilds it will hit the same two traps: it
+must inspect **direct** imports, not `go list -deps` (the transitive graph
+always holds 18 `kit/internal/*` packages, because `pkg/kit` imports its own
+internals — that is Kit's business, not a BONNIE violation), and it needs
+`go list -e`, because without it `go list` aborts on the very package it is
+meant to report.
+
+**The extension.** `.kit/extensions/kit-boundary.go` is Yaegi-interpreted Go
+that Kit discovers automatically from the project-local `.kit/extensions/`
+directory. It registers one `OnToolCall` handler and returns
+`ext.ToolCallResult{Block: true, Reason: ...}` when a `write` or `edit` would
+put a forbidden import into a `.go` file. The reason text names the import,
+the file, and the way out, so the model corrects itself in the same turn.
+
+Two decisions in it are not obvious, and **both were defects first, found by
+driving the extension live rather than by the unit tests that passed**:
+
+- **The import test is line-shaped, and the trailing check is load-bearing.**
+  An `edit` gives a fragment, and a fragment does not parse, so `go/parser` is
+  no use. The handler matches the import-spec form — an optional alias, a
+  quoted path, then nothing but an optional comment. The first version stopped
+  at the quoted path, and so read a composite-literal element on its own line,
+
+      var deny = []string{
+          "github.com/mark3labs/kit/internal",
+
+  as an import. It refused to let anyone write a deny-list, a test fixture, or
+  documentation-in-Go about this very rule. An import spec never carries a
+  comma; a gofmt'd literal element always does. That one check separates them,
+  and it also rejects a map key and a call argument.
+
+- **The guard is scoped to this repository, through `ctx.CWD`.** The rule is
+  about BONNIE's module. The first version applied to every `.go` path on
+  disk, so it blocked a write into Kit's own checkout — where importing
+  `kit/internal` is not merely legal but mandatory. Working against Kit HEAD
+  through a replace to `../kit` is documented in `AGENTS.md`, so this was not
+  a hypothetical. An absolute path counts only under `cwd + "/"` (the trailing
+  slash matters: a sibling `bonnie-scratch/` is not inside `bonnie/`), and a
+  relative path counts unless it climbs out with `../`.
+
+The guard also exempts its own directory, because the file names both
+forbidden paths in its own source, and a guard that refuses its own repair is
+a trap. That exemption paid for itself immediately: it is what let the two
+defects above be fixed.
+
+**Kit reloads an extension when its file changes** — verified live: the fix to
+a loaded guard took effect on the next tool call, with no restart.
+
+**BONNIE cannot test the extension, and that is the boundary working.** Kit's
+harness is at `pkg/extensions/test`, but `Harness.Emit` takes
+`extensions.Event` and returns `extensions.Result`, both from
+`internal/extensions` (`pkg/extensions/test/harness.go:152`). A BONNIE test
+using it would break the rule it is testing. The cases above were therefore
+run from a temporary test **inside the Kit checkout**, then deleted. See
+`docs/UPSTREAM.md`. `// TODO(kit):` export the extension event and result
+types from `pkg/extensions` so a consumer can test its own extensions.
+
+That gap is not cosmetic. Both defects above survived a unit-test pass and
+were caught only by using the guard. An extension a consumer cannot test in
+its own repository is an extension that rots.
 
 If Kit does not export something BONNIE needs:
 
@@ -661,17 +729,75 @@ sandbox 'bonnie-exec-codes' already exists
 ```
 
 Nothing leaks: `msb ps --all` is empty before and after. So this is not the
-reclaim defect fixed above — it is a **create/exists race inside one test**.
-`Open` asks `exists()`, `msb ps --all` does not yet report a sandbox that is
-mid-creation, `Open` creates, and `msb` refuses. The `--all` fix earlier in
-this section closed the *stopped-sandbox* half of the question and left the
-*being-created* half open. Load widens the window, which is why an unrelated
-change can move the rate without touching the adapter.
+reclaim defect fixed above.
+
+**Second correction, 2026-09-15: there were two defects, not one, and the
+second was the test harness.** The message above was truncated —
+`firstLine(stderr)` (`sandbox/docker.go:230`) kept msb's headline and dropped
+the indented `→` lines that carry the cause. With those restored, most
+failures read:
+
+```
+error: failed to start "bonnie-exec-codes"
+  → config: database error: ... (code: 5) database is locked
+```
+
+SQLite code 5 is `SQLITE_BUSY`, on **msb's own** store
+(`~/.microsandbox/db/msb.db`), not BONNIE's journal. But the load that caused
+it was manufactured by the suite: `backends()` built a *new provider per test
+case*, so 18 parallel cases meant 18 independent mutexes and ~20 concurrent
+`msb create` calls. **A real host never does this.** `cmd/bonnie/serve.go:110`
+builds one provider that every run shares, and `MicrosandboxProvider.Open`
+holds `p.mu` across `ensureRunning`, so a BONNIE process serialises every
+create it issues. Sharing one provider per backend in the suite — matching
+the product — took the pass rate from ~0/10 to 8/10 and the `database is
+locked` failure has not recurred in 20 runs since.
+
+**The original diagnosis was right after all.** With the harness noise gone,
+the remaining ~20% failure was exactly the reported one:
+
+```
+error: sandbox already exists: sandbox 'bonnie-open-twice' already exists
+```
+
+Instrumenting `exists()` found the mechanism, and it is not a mid-creation
+window: **`msb ps --all --format json` intermittently returns an empty list
+with exit 0 while sandboxes are running** — 3 calls out of 24 in the run that
+caught it. `exists()` believed it, reported absent, `Open` created, and msb
+refused. A pre-flight check cannot be made atomic against this, so
+`ensureRunning` now treats "already exists" as the state the caller asked for
+and adopts the sandbox. **20/20 consecutive runs pass.**
+
+The policy check moved with it: `adopt` runs `checkPolicy` on *every* path
+that takes over an existing sandbox, including a create that lost the race,
+so adopting one with foreign network rules still returns `ErrPolicyMismatch`
+(`TestMicrosandboxRefusesReattachPolicyMismatch`).
+
+Two lessons are worth more than the fix. **A truncated error cost a day and a
+wrong entry in this document** — `msbError` now keeps the cause, pinned by
+`TestMsbErrorKeepsTheCause`. And **a test harness that does not match the
+product invents defects**: the suite demanded a concurrency of msb that
+BONNIE never produces, and that noise hid the real defect underneath it.
 
 This is invisible to CI, which has no `msb` and skips the backend — so a
 green CI run says nothing about it, exactly as T-011's "Watch for" warns.
-Recorded as **T-026**; not fixed here, because the fix belongs to the
-microsandbox adapter and not to the change that exposed it.
+
+**The Docker backend, verified 2026-09-15.** Until this date the Docker cases
+had never run on the development machine either: the daemon was installed and
+enabled but not started, so `Available` failed and all 18 cases skipped. That
+is the same blind spot that hid the microsandbox defects, and it was quieter,
+because a skip is one indented line in a passing run. With `dockerd` started
+and no code change, **all 18 conformance cases pass for Docker, plus
+`TestDockerRefusesAllowList`**, and the whole sandbox suite now runs with
+**zero skips** — the first time every backend has been exercised together.
+Ten consecutive runs pass and leave no container and no microVM behind
+(`docker ps -a --filter name=bonnie` and `msb ps --all` are both empty).
+
+So the adapter was correct as written. What the exercise proves is narrower
+and more useful: the conformance contract in `sandbox/conformance_test.go` is
+now satisfied by three independent backends rather than two, which is the
+only real evidence that the contract describes BONNIE's behaviour rather than
+one implementation's habits.
 
 Resolved, same day. The live sandbox suite ran against microsandbox and
 **all four tests passed**:

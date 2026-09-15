@@ -17,7 +17,7 @@ type buildOpts struct {
 	output string
 
 	// env overrides the environment the go build inherits. It is test-only
-	// plumbing: a hermetic test points a temp go.work at the tree.
+	// plumbing: a hermetic test points the child build at a local checkout.
 	env []string
 }
 
@@ -35,7 +35,7 @@ no BONNIE install — the tree graduates into a binary it owns.
 The build machine needs Go. The host needs nothing. Binary output is ./<module>
 (or --output), where module is the base name from the tree's go.mod. The
 mark3labs modules are public, so the tree's go.mod resolves them from the proxy
-— no go.work or repository access needed.
+— no repository access needed.
 
 --dry-run prints the discovery plan — the files found, the tools generated, the
 embed set — without writing or building.`,

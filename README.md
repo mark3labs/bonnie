@@ -655,8 +655,8 @@ Stated plainly, because the failure modes are not obvious:
   `bonnie sandbox prune` deletes the sandboxes of terminal runs; `serve`
   does not sweep them on its own yet.
 - **The mark3labs modules are publicly fetchable.** A scaffolded module runs
-  `go mod tidy` and resolves `bonnie` and `kit` from the proxy; no `go.work`,
-  no `GOPRIVATE`. Authoring an agent needs Go on your machine; the binary
+  `go mod tidy` and resolves `bonnie` and `kit` from the proxy; no
+  `GOPRIVATE`. Authoring an agent needs Go on your machine; the binary
   `bonnie build` produces needs nothing on the host.
 
 ## Examples

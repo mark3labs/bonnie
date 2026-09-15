@@ -20,7 +20,6 @@ the known risks, and the invariants every task must preserve.
 | ID | Title | Priority | Size | Blocks |
 |---|---|---|---|---|
 | T-027 | goreleaser publishes a commit list, not the release notes | P2 | S | — |
-| T-026 | microsandbox `Open` races its own create under load | P2 | S | — |
 | T-022 | TUI transcript replay on reopen | P2 | M | — |
 | T-019 | Evals against a discovered agent | P2 | L | — |
 
@@ -34,6 +33,8 @@ the known risks, and the invariants every task must preserve.
 
 | ID | Delivered | Where |
 |---|---|---|
+| T-026 | The microsandbox conformance flake, which was two defects. **The harness**: `backends()` built a provider per test case, so 18 parallel cases issued ~20 concurrent `msb create` calls and locked msb's own SQLite store — a load a real host never produces, because `serve.go` shares one provider whose mutex serialises every create. One shared provider per backend took ~0/10 to 8/10. **The adapter**: `msb ps --all` intermittently returns an empty list with exit 0 while sandboxes run, so `exists()` reported absent and the create was refused; `ensureRunning` now adopts an "already exists" refusal, with `checkPolicy` on every adopt path. 20/20 runs pass. `msbError` keeps msb's `→` cause lines that `firstLine` dropped — the truncation that made the whole thing misdiagnosed | `sandbox/microsandbox.go`, `sandbox/conformance_test.go`, `sandbox/sandbox_test.go`, `docs/SPEC.md` §4.11 |
+| T-034 | The public-API boundary moved from a CI job to a Kit extension: `.kit/extensions/kit-boundary.go` blocks a `write`/`edit` that adds `kit/internal/...` or `charm.land/fantasy` to a `.go` file **in this repository**, naming the import and the way out. The `boundary` CI job is deleted — `depguard` in the `lint` job already denies both paths by prefix, whatever the module layout, so nothing was lost. Two defects that unit tests missed were found by driving it live and fixed: it read a composite-literal element as an import, and it applied to other checkouts including Kit's own. BONNIE cannot test it (Kit's harness signs its API with `internal/extensions` types — open ask in `docs/UPSTREAM.md`) | `.kit/extensions/kit-boundary.go`, `.github/workflows/ci.yml`, `docs/SPEC.md` §2, `docs/UPSTREAM.md` |
 | T-033 | Cross-channel hand-offs and proactive sessions: `channel.Outbound` in every route handler, `channel.Receiver` on all four platform adapters, `chat.Core.Proactive` (bind before dispatch so a mid-turn reply continues the run), the initiating principal carried to the destination run | `channel/channel.go`, `channel/chat/chat.go`, all four adapters, `run.go`, `handoff_test.go` |
 | T-029 | The GitHub App channel: comment mentions and bound-thread replies become turns; issue, PR, and review-thread addresses; the PR diff as per-turn context; `eyes` reactions; signature verification and delivery dedup; per-event installation tokens that never reach the journal; `OnIssue`/`OnPullRequest`/`OnCheckSuite` hooks; `bonnie.WithGitHub` | `channel/github/`, `options.go`, `docs/CHANNELS.md` |
 | T-031 | Idempotent start (`operation_id`, namespaced per authenticated principal, refused anonymous) and a stable `code` on every error body, listed in `docs/CHANNELS.md` | `channel/http/http.go`, `channel/http/errors_test.go` |
@@ -214,7 +215,7 @@ was deliberately left undone.
 ### Acceptance criteria
 
 - [x] `.goreleaser.yaml` and `.github/workflows/release.yml` exist and parse
-- [x] `go.work` is not committed
+- [x] No `replace` directive is committed in `go.mod`
 - [x] `goreleaser check` passes; `goreleaser build --snapshot --clean`
       builds working binaries on all four targets, and the binary prints the
       injected version
@@ -234,10 +235,14 @@ was deliberately left undone.
   and exits 3. `test` and `boundary` were green throughout, so only `lint` was
   ever failing. Fixed by pinning `v2.13.2` (built with go1.27.0). Raise that
   pin whenever the `go` line in `go.mod` moves.
-- The sandbox conformance suite **skips** Docker and microsandbox on a bare
-  runner. CI green does not mean those adapters were exercised. The
-  microsandbox defects fixed in T-013 were invisible to CI for exactly this
-  reason.
+- The sandbox conformance suite **skips** any backend whose runtime is not
+  on the machine, and a bare CI runner has neither Docker nor microsandbox.
+  CI green does not mean those adapters were exercised. The microsandbox
+  defects fixed in T-013 were invisible to CI for exactly this reason, and
+  the Docker backend went unexercised for as long because the daemon was
+  simply not running locally — nothing said so louder than one `SKIP` line
+  among many. When a backend matters, check that it *ran*, not that the
+  suite was green.
 
 ---
 
@@ -599,10 +604,9 @@ today requires a hand-written `main.go` for anything.
   `proxy.golang.org` serves `bonnie` and `kit`, and sum.golang.org has
   entries, so a scaffolded `go.mod` tidies and builds off the proxy with no
   workspace and no `GOPRIVATE`. `init --tools` writes a bare `go.mod`;
-  `go mod tidy` fills it. The guard test builds the fresh scaffold through a
-  synthetic `go.work` over the local checkouts (`TestScaffoldToolsModuleBuilds`)
-  to stay hermetic, but a standalone `go build` off the proxy is the verified
-  public path.
+  `go mod tidy` fills it. The guard test builds the fresh scaffold against
+  the local checkout (`TestScaffoldToolsModuleBuilds`) to stay hermetic, but
+  a standalone `go build` off the proxy is the verified public path.
 - **`skills:` is reserved, not wired.** Seeding skill files into a sandbox
   nothing reads would be a dead key — a control nothing applied. The key
   is refused with the same message class as `mcp`, until a skill-loading
@@ -936,7 +940,8 @@ the wrong invention.
    `--config`, `--format`, `--title`, `resolveServe`'s precedence and
    banner, `refuseGoTree`, `embeddedManifest`, the `_manifest` embed slot.
    `yaml.v3` and `go-toml/v2` are indirect again; `go.sum` is unchanged.
-6. **`internal/treetest`** replaced the `go.work` the build tests used.
+6. **`internal/treetest`** replaced the workspace file the build tests used
+   with a `replace` written into the temporary tree's own `go.mod`.
 
 ### Decisions, and why
 
@@ -1238,62 +1243,53 @@ of the section and must be kept.
 
 ---
 
-## T-026 — microsandbox `Open` races its own create under load
+## T-026 — microsandbox conformance flake
 
-**Priority** P2 · **Size** S · **Spec** §4.11 · **Found by** running the
-conformance suite repeatedly while committing T-025
+**SHIPPED 2026-09-15.** Two defects, and the first one hid the second.
 
-### Why
+**The harness demanded a concurrency the product never produces.**
+`backends()` built a fresh provider per test case, so 18 parallel cases meant
+18 independent mutexes and ~20 concurrent `msb create` calls, which lock
+msb's own SQLite store (`SQLITE_BUSY`). A real host shares one provider
+(`cmd/bonnie/serve.go:110`) and `Open` holds `p.mu` across `ensureRunning`,
+so BONNIE never issues two creates at once. One shared provider per backend
+took the pass rate from ~0/10 to 8/10.
 
-`sandbox/conformance_test.go` fails intermittently against the microsandbox
-backend — 2/6 runs on `master`, a different case each time:
+**Then the original diagnosis proved right.** The remaining ~20% was the
+reported `sandbox already exists`. Instrumenting `exists()` found why, and it
+is not a mid-creation window: `msb ps --all --format json` intermittently
+returns an empty list with exit 0 while sandboxes are running — 3 of 24 calls
+in the run that caught it. `ensureRunning` now adopts an "already exists"
+refusal instead of failing, because no pre-flight check can be atomic against
+that. `adopt` runs `checkPolicy` on every path that takes over an existing
+sandbox, so `ErrPolicyMismatch` still fires. **20/20 consecutive runs pass.**
 
-```
-create microsandbox from alpine:3.19: error: sandbox already exists:
-sandbox 'bonnie-exec-codes' already exists
-```
-
-Nothing leaks (`msb ps --all` is empty before and after), so this is not the
-reclaim defect §4.11 already fixed. `Open` asks `exists()`, `msb ps --all`
-does not yet report a sandbox that is mid-creation, `Open` creates anyway,
-and `msb` refuses. The earlier `--all` fix closed the stopped-sandbox half of
-the question; this is the being-created half.
-
-It matters beyond the test: `Open` is what a resumed run calls to reattach to
-its workspace. A host under load can therefore fail a tool call with
-"already exists" for a sandbox that is genuinely its own.
-
-**CI cannot see this.** A bare runner has no `msb`, so the backend skips —
-the trap T-011's "Watch for" already names.
-
-### Do
-
-1. Make `Open` tolerate the race rather than detect around it: treat "sandbox
-   already exists" from `msb create` as success and fall through to
-   attaching, which is what the caller asked for. A pre-flight `exists()`
-   check can never be atomic against another creator.
-2. Keep the policy check on the reattach path (`ErrPolicyMismatch`, §4.11) —
-   adopting a sandbox created by someone else must still refuse a policy
-   that does not match.
-3. Add a regression test that creates the same sandbox concurrently and
-   asserts both callers get a usable workspace.
+**The truncation was the expensive part.** `firstLine` kept msb's headline and
+dropped the indented `→` lines carrying the cause, which is how this was
+misdiagnosed in `docs/SPEC.md` §4.11 for a day. `msbError` keeps them.
 
 ### Acceptance criteria
 
-- [ ] 20 consecutive `go test -count=1 ./sandbox` runs pass with `msb`
+- [x] 20 consecutive `go test -count=1 ./sandbox` runs pass with `msb`
       installed, on a loaded machine
-- [ ] Concurrent `Open` of one sandbox name is safe, with a test that fails
-      without the fix
-- [ ] A reattach under a different network policy still returns
-      `ErrPolicyMismatch`
-- [ ] §4.11's correction note is updated to record the fix
+- [x] A failing `msb` command surfaces its `→` cause
+      (`TestMsbErrorKeepsTheCause`)
+- [x] The adopt path matches msb's real wording and does not swallow a
+      genuine failure (`TestMsbAlreadyExistsMatchesMsbWording`)
+- [x] A reattach under a different network policy still returns
+      `ErrPolicyMismatch` (`TestMicrosandboxRefusesReattachPolicyMismatch`)
+- [x] §4.11's correction notes record the fix
+- [ ] Report the empty-`ps --all` race upstream to `microsandbox`
 
-### Watch for
+### What this cost, and the lesson
 
-Do not "fix" this by serialising the conformance suite. The race is in the
-adapter, and hiding it behind a mutex in the test would leave the defect in
-the path a real host uses.
+The first diagnosis was wrong, and so was the correction to it. A one-line
+error hid the cause; a harness that did not match the product invented a
+second failure on top. Neither was visible to CI, which has no `msb`.
 
+Do not serialise the conformance suite to make this go away. The suite is now
+*less* parallel than before only in the sense that it shares a provider — the
+cases still run in parallel, which is what a multi-run host does.
 ---
 
 ## T-028 — Normalised inbound turn with a per-turn context slot

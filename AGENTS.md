@@ -12,7 +12,7 @@ If you learn something that contradicts the spec, **correct the spec in the
 same commit**. A stale spec is worse than none.
 
 ## Build/Test Commands
-- **Shortcut**: `task` — `task check` (fmt, lint, test), `task ci` (CI parity, GOWORK=off), `task dev -- serve` (Taskfile.yml mirrors everything below)
+- **Shortcut**: `task` — `task check` (fmt, lint, test), `task ci` (CI parity), `task dev -- serve` (Taskfile.yml mirrors everything below)
 - **Build**: `go build ./...`
 - **Test all**: `go test -race ./...`
 - **Test single**: `go test -race ./runtime -run TestResumeAcrossProcessBoundary`
@@ -40,6 +40,21 @@ If you need something Kit does not export:
 1. Check whether the public API can already do it. It usually can.
 2. If not, open an issue on Kit to export it from `pkg/kit`.
 3. Only then consider a local workaround, and mark it `// TODO(kit):`.
+
+The rule is enforced three ways, and the order they fire in is not the order
+of authority:
+
+| Layer | Where | Fires |
+|---|---|---|
+| Kit extension | `.kit/extensions/kit-boundary.go` | before the `write`/`edit` lands, in this checkout only |
+| Go compiler | module path is not a prefix of Kit's | at build time |
+| `depguard` | `.golangci.yml` | in `task lint` and the CI `lint` job |
+
+**`depguard` is the authority.** The extension is a guard-rail: it only runs
+when a person drives Kit here, so it cannot see an edit made in an editor, by
+another tool, or by a dependency bump. Never delete the `depguard` rule
+because the extension exists. There is no `boundary` CI job any more;
+`docs/SPEC.md` §2 records why it went and what it had to get right.
 
 ## Architecture
 
@@ -143,6 +158,6 @@ To work against Kit HEAD, add an **uncommitted** replace:
 go mod edit -replace github.com/mark3labs/kit=../kit
 ```
 
-Never put a `replace` directive in the published `go.mod`, and never commit a
-`go.work`. CI runs with `GOWORK=off` so a stray workspace file cannot make a
-green local run lie about the pinned Kit version.
+Never put a `replace` directive in the published `go.mod`. CI builds against
+the Kit version pinned there, so a release is always proven against the
+version a user gets.

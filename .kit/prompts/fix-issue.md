@@ -42,7 +42,7 @@ Resolve GitHub issue #$1 by reading it, classifying it, and producing the approp
    - **Docs**: update the surface named in the issue; verify examples compile
      (`go build ./...`) and snippets match real signatures
 
-6. **Verify**: `task ci` (fmt-check, GOWORK=off build and vet, `go test -race`,
+6. **Verify**: `task ci` (fmt-check, build and vet, `go test -race`,
    lint). If the change touches durability claims, also run the live suites
    (`task test-live`) when a provider key is present.
 

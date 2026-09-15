@@ -8,7 +8,7 @@ Review the current git status and diff, then stage all changes, write a concise 
 
 1. **Check status**: `git status` — understand what has changed
 2. **Review the diff**: `git diff` (and `git diff --cached` if anything is already staged) — read the actual changes
-3. **Gate on CI parity first**: run `task ci` (fmt-check, GOWORK=off build, vet, `go test -race`, lint). Do not commit a red tree
+3. **Gate on CI parity first**: run `task ci` (fmt-check, build, vet, `go test -race`, lint). Do not commit a red tree
 4. **Stage everything**: `git add -A`
 5. **Craft the commit message** following Conventional Commits:
    - Format: `<type>: <short summary>` (the repo's history uses no scope)
@@ -24,6 +24,6 @@ Review the current git status and diff, then stage all changes, write a concise 
 - Read the actual diff — do not guess from filenames alone
 - Prefer one well-scoped commit; do not split unless the changes are clearly unrelated
 - If a change contradicts `docs/SPEC.md`, correct the spec **in the same commit** — a stale spec is worse than none
-- If `go.mod`/`go.sum` moved, say which dependency and why; the CI build must still pass with `GOWORK=off` (the Taskfile's `ci` task proves it)
+- If `go.mod`/`go.sum` moved, say which dependency and why; the CI build must still pass (the Taskfile's `ci` task proves it)
 
 $@

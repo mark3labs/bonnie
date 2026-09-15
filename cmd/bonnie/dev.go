@@ -93,7 +93,7 @@ type devServer struct {
 
 	// log carries the child's output. It is os.Stderr for a real dev run.
 	// env overrides the environment child builds inherit, so a hermetic test
-	// can point a temporary go.work at the tree.
+	// can point the child at a local checkout.
 	log io.Writer
 	env []string
 

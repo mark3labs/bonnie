@@ -7,7 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The microsandbox conformance suite is reliable again** (20/20 runs, was
+  ~0/10). Two defects. The suite built a sandbox provider per test case, so
+  parallel cases issued ~20 concurrent `msb create` calls and locked msb's
+  own SQLite store — a load BONNIE never produces, because a host shares one
+  provider whose mutex serialises every create. And `msb ps --all`
+  intermittently reports an empty list while sandboxes are running, so the
+  adapter thought a live sandbox was absent and tried to recreate it; `Open`
+  now adopts a sandbox that already exists, still refusing one whose network
+  policy does not match. An `msb` failure also keeps its own cause now
+  instead of only the headline. (T-026)
+
 ### Changed
+
+- **The public-API boundary is a Kit extension, not a CI job.**
+  `.kit/extensions/kit-boundary.go` blocks a `write` or `edit` that would add
+  `github.com/mark3labs/kit/internal/...` or `charm.land/fantasy` to a `.go`
+  file in this repository, and names the import, the file, and the way out in
+  the refusal, so the agent corrects itself in the same turn instead of
+  learning about it minutes later in CI. It is scoped to this repository: a
+  sibling checkout has its own rules, and Kit's own code must import Kit's
+  internals. The `boundary` CI job is removed: `depguard` in the `lint` job
+  already denies both paths by prefix, whatever the module layout, so the
+  rule loses no coverage. `depguard` remains the authority; the extension
+  only runs when a person drives Kit in this checkout. (T-034)
 
 - **Breaking: the HTTP channel lives under `/bonnie/v1`.** `POST /runs`
   is now `POST /bonnie/v1/runs`, and every other route moved the same way.

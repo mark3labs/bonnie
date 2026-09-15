@@ -9,7 +9,7 @@ Open a GitHub pull request for the current branch, filling out the repository's 
 1. **Verify the branch is pushed**:
    - `git status -sb` and `git log @{u}..HEAD --oneline 2>/dev/null` — if there is no upstream or unpushed commits, run `git push -u origin "$(git branch --show-current)"` first
    - If the working tree is dirty, stop and suggest `/commit-push`
-2. **Gate on CI parity first**: `task ci` — the PR will run test, lint, and the `boundary` job with `GOWORK=off`; do not open a PR that fails locally
+2. **Gate on CI parity first**: `task ci` — the PR will run the test and lint jobs; do not open a PR that fails locally
 3. **Gather context**:
    - `git log origin/master..HEAD --oneline`
    - `git diff origin/master...HEAD --stat`, then the full diff — read it

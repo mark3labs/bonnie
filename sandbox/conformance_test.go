@@ -25,11 +25,42 @@ type backend struct {
 	isolated bool
 }
 
+// The isolated backends are shared across the whole suite, one provider per
+// backend, because that is what a real host does: `cmd/bonnie/serve.go`
+// builds ONE provider and every run shares it for the process lifetime.
+//
+// This is not a convenience. `MicrosandboxProvider.Open` holds `p.mu` across
+// `ensureRunning`, so one provider serialises every `msb create` it issues —
+// BONNIE never asks msb to create two sandboxes at once. Building a provider
+// per test case broke that: 18 parallel cases meant 18 independent mutexes
+// and ~20 concurrent `msb create` calls, which lock msb's own SQLite store
+// (`SQLITE_BUSY`) and fail the *fixture* before any case can test anything.
+//
+// A microVM manager is not obliged to survive that, and nothing in BONNIE
+// asks it to. Sharing the provider makes the suite exercise the product's
+// concurrency instead of an artefact of the harness. See T-026.
+//
+// Availability is resolved once and cached with the provider, so a machine
+// without the backend skips every case without re-probing it.
+var (
+	sharedDocker = sync.OnceValues(func() (Provider, error) {
+		p := Docker()
+		return p, p.Available(context.Background())
+	})
+	sharedMicrosandbox = sync.OnceValues(func() (Provider, error) {
+		p := Microsandbox()
+		return p, p.Available(context.Background())
+	})
+)
+
 func backends() []backend {
 	return []backend{
 		{
 			name:     "local",
 			isolated: false,
+			// Local stays per-test: its root is a temp directory, it
+			// starts nothing, and a fresh root per case is the isolation
+			// the other backends get from the guest.
 			open: func(t *testing.T) Provider {
 				t.Helper()
 				return Local(WithLocalRoot(t.TempDir()), WithLocalCleanup())
@@ -40,8 +71,8 @@ func backends() []backend {
 			isolated: true,
 			open: func(t *testing.T) Provider {
 				t.Helper()
-				p := Docker()
-				if err := p.Available(context.Background()); err != nil {
+				p, err := sharedDocker()
+				if err != nil {
 					t.Skipf("docker unavailable: %v", err)
 				}
 				return p
@@ -52,8 +83,8 @@ func backends() []backend {
 			isolated: true,
 			open: func(t *testing.T) Provider {
 				t.Helper()
-				p := Microsandbox()
-				if err := p.Available(context.Background()); err != nil {
+				p, err := sharedMicrosandbox()
+				if err != nil {
 					t.Skipf("microsandbox unavailable: %v", err)
 				}
 				return p
