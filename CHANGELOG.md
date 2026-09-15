@@ -63,6 +63,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   adapter can wrap one — an authentication check, a rate limit, a trace span
   — without spelling the signature out inline.
 
+- **Chat surfaces gain the controls HTTP already had.** `/cancel`, `/clear`,
+  `/compact` and `/help` join `/new`, and every adapter that dispatches
+  through `chat.Dispatch` — Slack, Discord, Telegram, GitHub — honours them,
+  so a control means the same thing wherever a person is standing.
+
+  Until now a chat user could start a conversation over but could not stop a
+  turn, drop the context, or compact it, all three of which an HTTP client
+  reached as routes. `/cancel` in particular was unreachable by any means: the
+  default turn policy steers a mid-turn message into the running turn, so
+  anything typed while the agent worked was read by the model rather than
+  acted on. A control is now matched before the policy is consulted.
+
+  The match is the whole trimmed message and is case-insensitive, so "should I
+  use /new?" is still a question for the model and "/New" from a phone
+  keyboard is still a reset.
+
 - **`channeltest` gains capabilities and a durability case.** An adapter
   declares what it cannot do in `Fixture.Unsupported`, and the suite skips
   exactly those cases with a message naming the capability — so the set of

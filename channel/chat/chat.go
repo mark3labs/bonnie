@@ -631,14 +631,187 @@ func Route(ctx context.Context, ref *Ref, turn Turn) (*runtime.Run, error) {
 	return ref.Send(ctx, turn.Text, turn.Options())
 }
 
-// ResetCommand is the message that starts a fresh conversation in the same
-// place: the run serving the address is retired, the address is freed, and
-// the person is told. Every chat adapter honours it through [Dispatch], so
-// "/new" means the same thing in a Slack thread and a Telegram chat.
-const ResetCommand = "/new"
+// The controls a person can type on a chat surface. They act on the run
+// instead of becoming a turn, and every adapter that dispatches through
+// [Dispatch] honours them, so "/cancel" means the same thing in a Slack
+// thread, a Telegram chat, and a GitHub issue.
+//
+// HTTP reaches the same operations as routes — `POST
+// /bonnie/v1/runs/{id}/cancel` and its siblings. A chat surface has no route
+// to call, so it gets a vocabulary instead. The two sets are meant to stay
+// level: a run does not know which transport is driving it, and a control
+// that exists on one surface and not the other makes the same conversation
+// behave differently depending on where a person happens to be standing.
+// For a long time only [ResetCommand] existed, so a person on a chat surface
+// could start a conversation over but could not stop a turn, drop the
+// context, or compact it — all three of which an HTTP client already had.
+const (
+	// ResetCommand starts a fresh conversation in the same place: the run
+	// serving the address is retired, the address is freed, and the next
+	// message begins a new run.
+	ResetCommand = "/new"
+	// CancelCommand stops the turn in flight. The conversation survives:
+	// the completed steps stay journalled and the next message continues
+	// from them.
+	CancelCommand = "/cancel"
+	// ClearCommand drops the conversation from the model's context and keeps
+	// everything else — the same run, the same address, the same workspace.
+	ClearCommand = "/clear"
+	// CompactCommand summarises the conversation so far, now, without
+	// waiting for the context window to fill.
+	CompactCommand = "/compact"
+	// HelpCommand lists the controls. They are invisible otherwise: a chat
+	// surface has nowhere to advertise them, and a control nobody can
+	// discover is one nobody uses.
+	HelpCommand = "/help"
+)
 
-// resetNote is what the person sees after a reset.
-const resetNote = "Started a new conversation. The previous one is closed."
+// What a person sees after each control.
+const (
+	resetNote     = "Started a new conversation. The previous one is closed."
+	clearNote     = "Cleared the conversation. This is the same run, with nothing remembered."
+	compactNote   = "Compacted the conversation."
+	idleNote      = "Nothing is running."
+	emptyNote     = "There is no conversation here yet."
+	noCompactNote = "This agent cannot compact a conversation."
+)
+
+// command is one chat control: the word a person types, one line of help,
+// and what it does.
+type command struct {
+	name string
+	help string
+	// do performs the control and returns what to deliver. The run it
+	// returns acknowledges the COMMAND rather than reporting where the run
+	// is: its Response is the line the person reads, and its State is set
+	// only where the state is itself the answer. See [DeliveryText], which
+	// renders a cancelled run as "(cancelled)" and anything else by its
+	// response.
+	do func(ctx context.Context, ref *Ref) (*runtime.Run, error)
+}
+
+// commands is the control table, in the order [HelpCommand] lists it.
+//
+// It is filled in init rather than declared with its literal because the
+// table holds doHelp and doHelp reads the table back to render the list — a
+// composite literal naming a function that names the variable again is an
+// initialisation cycle. The indirection costs one line and keeps a single
+// list; the alternative is a second copy of every name and help line, kept
+// in sync by hand.
+var commands []command
+
+func init() {
+	commands = []command{
+		{ResetCommand, "start a fresh conversation here", doReset},
+		{CancelCommand, "stop the turn that is running", doCancel},
+		{ClearCommand, "forget the conversation, keep the run", doClear},
+		{CompactCommand, "summarise the conversation so far", doCompact},
+		{HelpCommand, "list these controls", doHelp},
+	}
+}
+
+// lookupCommand matches a whole message against the control table.
+//
+// The match is the entire trimmed message, case-insensitive. Whole-message,
+// so "should I use /new?" is a question for the model and not a reset;
+// case-insensitive, because a phone keyboard capitalises the first word of
+// a message and a person who typed "/New" meant "/new".
+func lookupCommand(text string) (command, bool) {
+	name := strings.ToLower(strings.TrimSpace(text))
+	for _, c := range commands {
+		if c.name == name {
+			return c, true
+		}
+	}
+	return command{}, false
+}
+
+// note is the acknowledgement carrier: the run the control acted on and the
+// line the person should see. State is deliberately unset, because the
+// message is about the command rather than about where the run now is.
+func note(runID, text string) *runtime.Run {
+	return &runtime.Run{ID: runID, Response: text}
+}
+
+func doReset(ctx context.Context, ref *Ref) (*runtime.Run, error) {
+	// An address that owns nothing still gets the note: "/new" on an empty
+	// thread asks for a fresh conversation, and the next message starts
+	// one, so the promise holds either way.
+	runID, _, _ := ref.resolveExisting(ctx)
+	if err := ref.Reset(ctx, "reset by "+ResetCommand); err != nil {
+		return nil, err
+	}
+	return &runtime.Run{ID: runID, State: runtime.RunRetired, Response: resetNote}, nil
+}
+
+func doCancel(ctx context.Context, ref *Ref) (*runtime.Run, error) {
+	runID, ok, err := ref.resolveExisting(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return note("", emptyNote), nil
+	}
+	switch err := ref.Cancel(ctx); {
+	case errors.Is(err, runtime.ErrRunNotActive):
+		// Nothing to stop is not a failure. Someone who types "/cancel" a
+		// second after the turn ended asked for a state they already have.
+		return note(runID, idleNote), nil
+	case err != nil:
+		return nil, err
+	}
+	// Here the state is the acknowledgement: DeliveryText renders a
+	// cancelled run as "(cancelled)", which is what was asked for.
+	return &runtime.Run{ID: runID, State: runtime.RunCancelled}, nil
+}
+
+func doClear(ctx context.Context, ref *Ref) (*runtime.Run, error) {
+	runID, ok, err := ref.resolveExisting(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return note("", emptyNote), nil
+	}
+	if err := ref.Clear(ctx); err != nil {
+		return nil, err
+	}
+	return note(runID, clearNote), nil
+}
+
+func doCompact(ctx context.Context, ref *Ref) (*runtime.Run, error) {
+	runID, ok, err := ref.resolveExisting(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return note("", emptyNote), nil
+	}
+	switch err := ref.Compact(ctx); {
+	case errors.Is(err, runtime.ErrCompactionUnsupported):
+		// The agent has no compactor. That is a fact about the deployment,
+		// not a fault, and a person should read it as one instead of as a
+		// failed run.
+		return note(runID, noCompactNote), nil
+	case err != nil:
+		return nil, err
+	}
+	return note(runID, compactNote), nil
+}
+
+func doHelp(ctx context.Context, ref *Ref) (*runtime.Run, error) {
+	runID, _, _ := ref.resolveExisting(ctx)
+	var b strings.Builder
+	for i, c := range commands {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(c.name)
+		b.WriteString(" — ")
+		b.WriteString(c.help)
+	}
+	return note(runID, b.String()), nil
+}
 
 // Dispatch delivers one inbound platform message and reports the outcome.
 //
@@ -659,11 +832,17 @@ const resetNote = "Started a new conversation. The previous one is closed."
 // waiting on a reply that never comes.
 //
 // A turn with no title gets one from its text, so a run started from a chat
-// surface is listed by what was asked. A turn whose text is [ResetCommand]
-// resets the address instead of running: the run is retired, the address
-// freed, and a note delivered as the run's response. Adapters deduplicate
-// platform deliveries before calling Dispatch, so a retried webhook cannot
-// retire the run that replaced the one it meant.
+// surface is listed by what was asked. A turn whose whole text is one of the
+// chat controls — [ResetCommand], [CancelCommand], [ClearCommand],
+// [CompactCommand], [HelpCommand] — acts on the run instead of running, and
+// the acknowledgement is delivered as the run's response. Adapters
+// deduplicate platform deliveries before calling Dispatch, so a retried
+// webhook cannot retire the run that replaced the one it meant.
+//
+// A control is handled before the turn policy is consulted, which is what
+// makes "/cancel" usable: the default policy steers a mid-turn message into
+// the running turn, so a control that went through [Route] would be read by
+// the model instead of stopping it.
 //
 // While the turn runs, a channel configured with [WithActivity] is told what
 // the agent is doing — thinking, working, which tool it called. The
@@ -675,14 +854,9 @@ func Dispatch(ctx context.Context, core *Core, turn Turn, deliver func(address s
 	}
 	go func() {
 		bg := context.WithoutCancel(ctx)
-		if strings.TrimSpace(turn.Text) == ResetCommand {
-			ref := core.From(turn.Address)
-			runID, _, _ := ref.resolveExisting(bg)
-			if err := ref.Reset(bg, "reset by "+ResetCommand); err != nil {
-				deliver(turn.Address, nil, err)
-				return
-			}
-			deliver(turn.Address, &runtime.Run{ID: runID, State: runtime.RunRetired, Response: resetNote}, nil)
+		if cmd, ok := lookupCommand(turn.Text); ok {
+			run, err := cmd.do(bg, core.From(turn.Address))
+			deliver(turn.Address, run, err)
 			return
 		}
 		ref := core.From(turn.Address)
