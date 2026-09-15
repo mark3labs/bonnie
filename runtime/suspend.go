@@ -25,8 +25,33 @@ type SuspendRequest struct {
 type InputResponse struct {
 	// Text is the freeform or selected answer.
 	Text string `json:"text"`
-	// Approved answers approval-kind suspensions.
-	Approved bool `json:"approved,omitempty"`
+	// Approved answers an approval-kind suspension. Nil means the responder
+	// said nothing about approval and [Text] is the whole answer, which is
+	// what a question-kind suspension gets.
+	//
+	// It is a pointer because a plain bool cannot say "rejected". The zero
+	// value of a bool is false, so a rejection and a response that never
+	// mentioned approval looked identical on the wire, and the field was
+	// read by nothing at all — an approval answered with a bare
+	// `{"approved": true}` resumed the agent with an empty message, because
+	// only Text ever reached the model. Three states are needed and a
+	// pointer is how JSON spells them: absent, true, false.
+	Approved *bool `json:"approved,omitempty"`
+}
+
+// Approve and Reject build an approval answer. They exist so a caller does
+// not have to take the address of a bool literal to answer a question the
+// agent asked.
+func Approve(note string) InputResponse {
+	yes := true
+	return InputResponse{Text: note, Approved: &yes}
+}
+
+// Reject is [Approve]'s refusal. The note, when given, tells the agent why,
+// which is usually what decides what it does next.
+func Reject(note string) InputResponse {
+	no := false
+	return InputResponse{Text: note, Approved: &no}
 }
 
 // Suspension kinds recognised by the runtime.

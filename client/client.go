@@ -203,12 +203,29 @@ func (c *Client) Send(ctx context.Context, runID, text string) (*runtime.Run, er
 	return out.toRun(), nil
 }
 
-// Respond answers a suspended run. The text is the answer to the prompt the
-// run's [runtime.SuspendRequest] carries.
+// Respond answers a suspended run with text. The text is the answer to the
+// prompt the run's [runtime.SuspendRequest] carries.
+//
+// Use [Client.RespondWith] to answer an approval, which needs a verdict and
+// not only words.
 func (c *Client) Respond(ctx context.Context, runID, text string) (*runtime.Run, error) {
+	return c.RespondWith(ctx, runID, []runtime.InputResponse{{Text: text}})
+}
+
+// RespondWith answers a suspended run with whatever the suspension asked
+// for: text for a question, a verdict for an approval.
+//
+//	_, err := c.RespondWith(ctx, runID, []runtime.InputResponse{
+//		runtime.Reject("that would drop the production table"),
+//	})
+//
+// An approval carries its verdict separately from its words, so "no, and
+// here is why" reaches the agent as a refusal with a reason rather than as
+// prose it has to interpret.
+func (c *Client) RespondWith(ctx context.Context, runID string, responses []runtime.InputResponse) (*runtime.Run, error) {
 	var out runResponse
 	err := c.post(ctx, apiPrefix+"/runs/"+url.PathEscape(runID)+"/respond",
-		map[string]any{"responses": []map[string]any{{"text": text}}}, &out)
+		map[string]any{"responses": responses}, &out)
 	if err != nil {
 		return nil, err
 	}

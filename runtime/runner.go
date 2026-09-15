@@ -719,19 +719,50 @@ func (r *Runner) release(runID string) {
 	}
 }
 
+// The words an approval answer reaches the model as. They are a fixed
+// vocabulary rather than the responder's phrasing, so a tool that asked for
+// approval reads the same verdict whether the answer arrived from a button,
+// a JSON field, or a person typing.
+const (
+	approvedWord = "approved"
+	rejectedWord = "rejected"
+)
+
+// renderResponses turns the answers to a suspension into the message that
+// resumes the turn.
+//
+// An approval verdict leads, and the responder's own words follow it when
+// there are any: the agent asked "may I?", so "rejected: too risky" answers
+// the question and explains it, while "too risky" alone leaves the verdict
+// to be inferred from prose. A response that says nothing about approval is
+// its text and nothing else, which is what a question-kind suspension gets.
 func renderResponses(responses []InputResponse) string {
-	if len(responses) == 0 {
+	switch len(responses) {
+	case 0:
 		return ""
-	}
-	if len(responses) == 1 {
-		return responses[0].Text
+	case 1:
+		return renderResponse(responses[0])
 	}
 	var out strings.Builder
 	for i, resp := range responses {
 		if i > 0 {
 			out.WriteString("\n")
 		}
-		out.WriteString(resp.Text)
+		out.WriteString(renderResponse(resp))
 	}
 	return out.String()
+}
+
+func renderResponse(resp InputResponse) string {
+	if resp.Approved == nil {
+		return resp.Text
+	}
+	verdict := rejectedWord
+	if *resp.Approved {
+		verdict = approvedWord
+	}
+	if resp.Text == "" {
+		return verdict
+	}
+	return verdict + ": " + resp.Text
 }

@@ -33,6 +33,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   carries the stable `"internal"` code and nothing else; the detail goes to
   stderr. The mapped sentinels keep their exact wording, which is contract.
 
+- **An approval verdict now reaches the model.** `InputResponse.Approved` was
+  declared and read by nothing: only `Text` ever reached the agent, so a run
+  parked by `runtime.ApprovalTool` and answered with a bare
+  `{"approved": true}` resumed with an **empty message** and the agent had to
+  guess what the human decided. Any structured approval — a button, a
+  checkbox, an API field — had no way to say yes.
+
+  The field is now `*bool`, because a plain bool cannot say "rejected": false
+  is its zero value, so a refusal and an answer that never mentioned approval
+  were the same value. An approval resumes the turn as `approved`,
+  `rejected`, or the verdict followed by the responder's own words
+  (`rejected: that drops production`).
+
 ### Added
 
 - **`client` — a public Go client for the wire API.** It speaks the whole
@@ -44,6 +57,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   into the server, which is what keeps the client honest: a capability the
   wire cannot express is one the TUI cannot show. `cmd/bonnie/tui.HTTP` and
   `tui.NewHTTP` remain as deprecated aliases.
+
+- **`runtime.Approve` and `runtime.Reject`** build an approval answer without
+  making a caller take the address of a bool literal, and
+  **`client.RespondWith`** puts one on the wire.
 
 - **`http.WithAuthenticator`** verifies every request except
   `GET /bonnie/v1/health` and makes the principal it returns the run's
