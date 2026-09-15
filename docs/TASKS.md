@@ -32,7 +32,8 @@ the known risks, and the invariants every task must preserve.
 
 | ID | Delivered | Where |
 |---|---|---|
-| T-027 | `goreleaser` published a commit list, so T-011's "the notes state the claims and the limits" was met only by a person editing the body after every tag — done by hand at `v0.1.0` and `v0.4.0`. `release.yml` now slices the tag's section out of `CHANGELOG.md` and passes it to `--release-notes`; a tag whose version has no section fails the workflow, naming the missing heading, instead of publishing an empty body. The extractor matches the bracketed version exactly (`0.5` does not match `0.5.0`, `0.1.0` does not match `0.10.0`) and stops at the next `## [`. Proven on the `v0.5.0` tag: 170 lines of notes, no human edit | `scripts/release-notes.sh`, `scripts/release_notes_test.go`, `.github/workflows/release.yml`, `Taskfile.yml` |
+| T-035 | The TUI missed the first turn's reasoning and tool events on a fresh tree, then rendered them after a restart — it learned its run ID from the reply to the first message and opened the stream once the turn was already over, and mid-turn deltas are live-only so no replay recovered them. `POST /bonnie/v1/addresses/{address}` binds an address to a run and runs no turn; the TUI holds the first message, resolves the run, opens the stream, and dispatches the turn from `streamReadyMsg`. **Subscribe before you speak.** A stream that will not open no longer strands the message. The earlier startup-lookup fix covered reopening only, which is why the defect survived it | `channel/http/http.go`, `cmd/bonnie/tui/model.go`, `cmd/bonnie/tui/client.go`, `docs/SPEC.md` §4.8 |
+| T-027 | `goreleaser` published a commit list, so T-011's "the notes state the claims and the limits" was met only by a person editing the body after every tag — done by hand at `v0.1.0` and `v0.4.0`. `release.yml` now slices the tag's section out of `CHANGELOG.md` and passes it to `--release-notes`; a tag whose version has no section fails the workflow, naming the missing heading, instead of publishing an empty body. The extractor matches the bracketed version exactly (`0.5` does not match `0.5.0`, `0.1.0` does not match `0.10.0`) and stops at the next `## [`. Proven on the `v0.5.0` tag: 170 lines of notes, no human edit. The guard on the notes was pinned to `0.5.0` and was corrected at `v0.6.0` to track the newest released section | `scripts/release-notes.sh`, `scripts/release_notes_test.go`, `.github/workflows/release.yml`, `Taskfile.yml` |
 | T-026 | The microsandbox conformance flake, which was two defects. **The harness**: `backends()` built a provider per test case, so 18 parallel cases issued ~20 concurrent `msb create` calls and locked msb's own SQLite store — a load a real host never produces, because `serve.go` shares one provider whose mutex serialises every create. One shared provider per backend took ~0/10 to 8/10. **The adapter**: `msb ps --all` intermittently returns an empty list with exit 0 while sandboxes run, so `exists()` reported absent and the create was refused; `ensureRunning` now adopts an "already exists" refusal, with `checkPolicy` on every adopt path. 20/20 runs pass. `msbError` keeps msb's `→` cause lines that `firstLine` dropped — the truncation that made the whole thing misdiagnosed | `sandbox/microsandbox.go`, `sandbox/conformance_test.go`, `sandbox/sandbox_test.go`, `docs/SPEC.md` §4.11 |
 | T-034 | The public-API boundary moved from a CI job to a Kit extension: `.kit/extensions/kit-boundary.go` blocks a `write`/`edit` that adds `kit/internal/...` or `charm.land/fantasy` to a `.go` file **in this repository**, naming the import and the way out. The `boundary` CI job is deleted — `depguard` in the `lint` job already denies both paths by prefix, whatever the module layout, so nothing was lost. Two defects that unit tests missed were found by driving it live and fixed: it read a composite-literal element as an import, and it applied to other checkouts including Kit's own. BONNIE cannot test it (Kit's harness signs its API with `internal/extensions` types — open ask in `docs/UPSTREAM.md`) | `.kit/extensions/kit-boundary.go`, `.github/workflows/ci.yml`, `docs/SPEC.md` §2, `docs/UPSTREAM.md` |
 | T-033 | Cross-channel hand-offs and proactive sessions: `channel.Outbound` in every route handler, `channel.Receiver` on all four platform adapters, `chat.Core.Proactive` (bind before dispatch so a mid-turn reply continues the run), the initiating principal carried to the destination run | `channel/channel.go`, `channel/chat/chat.go`, all four adapters, `run.go`, `handoff_test.go` |
@@ -160,6 +161,38 @@ subsequent tag follows, not as open work. Applications:
 | `v0.3.0` | `38a511d` | 2026-09-13 |
 | `v0.4.0` | `9ccb959` | 2026-09-14 |
 | `v0.5.0` | `f9794d1` | 2026-09-15 |
+| `v0.6.0` | `09f5293` | 2026-09-15 |
+
+### `v0.6.0`, 2026-09-15 — every box confirmed
+
+- [x] `task release-check` — goreleaser 2.17.1, 1 config validated
+- [x] `task release-snapshot` — four targets, archives and checksums
+- [x] All CI jobs green on `master` at the tagged commit `09f5293`:
+      `test` and `lint` (run `34972788215`)
+- [x] `CHANGELOG.md` carries a `[0.6.0]` section in Keep-a-Changelog shape
+- [x] Release notes state the three claims **and** the limits, published
+      with no human edit (T-027's second real tag)
+- [x] Tag pushed; `release.yml` run `34973928983` succeeded
+- [x] Five artifacts published; the downloaded `linux_amd64` binary prints
+      `bonnie 0.6.0`, its checksum verifies, and it is statically linked
+
+**The guard added at `v0.5.0` was itself broken, and this release caught it.**
+`TestRepositoryChangelogStatesClaimsAndLimits` named `v0.5.0` literally, so it
+would have inspected an already-shipped section forever and passed while a new
+release went out with no claims and no limits — the exact failure T-027 exists
+to prevent. It now derives the version from the newest released heading in
+`CHANGELOG.md`. **A guard pinned to a fixed version is worse than no guard: it
+reports success.** Verified by removing one claim from the `0.6.0` section and
+watching it fail by name.
+
+**Version choice.** Two commits, prefixed `fix:` and `docs:`, which reads as a
+PATCH. It was cut as a MINOR because the release **adds a public endpoint**,
+`POST /bonnie/v1/addresses/{address}`: the wire API under `/bonnie/v1` is a
+public contract, and a changelog with an *Added* section is not a patch. The
+exported `cmd/bonnie/tui.Client` interface also gained a method, which breaks
+any out-of-tree implementer. No exported signature in `runtime/`, `channel/`,
+or `sandbox/` changed, so the rule in the checklist did not force this — the
+public addition did.
 
 ### `v0.5.0`, 2026-09-15 — every box confirmed
 
