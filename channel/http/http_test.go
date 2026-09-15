@@ -31,6 +31,13 @@ type stubAgent struct {
 	session *runtime.Session
 }
 
+// calls reports how many turns the agent has run.
+func (a *stubAgent) calls() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.call
+}
+
 func (a *stubAgent) PromptResult(ctx context.Context, msg string) (*kit.TurnResult, error) {
 	a.mu.Lock()
 	if a.started != nil {
@@ -811,5 +818,40 @@ func TestStreamCatchUpPastTheBacklog(t *testing.T) {
 	}
 	if last := events[17]; last.State != runtime.RunCompleted {
 		t.Fatalf("last event = %+v, want the closing completed state", last)
+	}
+}
+
+// TestEnsureAddressBindsWithoutATurn: POSTing an address resolves it to a run,
+// creating one when it is new, and runs no turn. It is what lets a client
+// subscribe before it speaks — a turn's reasoning and tool events are
+// live-only, so a client that learns its run ID from the reply to its first
+// message has already missed them.
+func TestEnsureAddressBindsWithoutATurn(t *testing.T) {
+	t.Parallel()
+	agent := &stubAgent{turns: []*kit.TurnResult{{Response: "one"}}}
+	s := newTestServer(t, agent)
+
+	resp, ensured := s.post(t, "/bonnie/v1/addresses/tui-session", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if ensured.RunID == "" {
+		t.Fatal("no run was bound to the address")
+	}
+	if agent.calls() != 0 {
+		t.Fatalf("the model ran %d times, want 0: binding is not a turn", agent.calls())
+	}
+
+	// Idempotent: the same address keeps the same run.
+	_, again := s.post(t, "/bonnie/v1/addresses/tui-session", nil)
+	if again.RunID != ensured.RunID {
+		t.Fatalf("address resolved to %q then %q", ensured.RunID, again.RunID)
+	}
+
+	// And the turn that follows lands on that same run, so the stream a
+	// client opened on it sees the turn's events.
+	_, started := s.post(t, "/bonnie/v1/runs", StartRequest{Address: "tui-session", Text: "hi"})
+	if started.RunID != ensured.RunID {
+		t.Fatalf("the turn ran on %q, want the bound run %q", started.RunID, ensured.RunID)
 	}
 }

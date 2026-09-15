@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"charm.land/bubbletea/v2"
 	kit "github.com/mark3labs/kit/pkg/kit"
@@ -28,10 +29,25 @@ type fakeClient struct {
 	lookupRun   string
 	lookupAt    int
 	lookupErr   error
+	ensured     int
+	ensureRun   string
+	ensureAt    int
+	ensureErr   error
 }
 
 func (f *fakeClient) Lookup(_ context.Context, _ string) (string, int, error) {
 	return f.lookupRun, f.lookupAt, f.lookupErr
+}
+
+func (f *fakeClient) Ensure(_ context.Context, _ string) (string, int, error) {
+	f.ensured++
+	if f.ensureErr != nil {
+		return "", 0, f.ensureErr
+	}
+	if f.ensureRun == "" {
+		f.ensureRun = "run-1"
+	}
+	return f.ensureRun, f.ensureAt, nil
 }
 
 func (f *fakeClient) Start(_ context.Context, _ string, _ string) (*runtime.Run, error) {
@@ -97,6 +113,27 @@ func newTestModel(c Client) Model {
 	return next.(Model)
 }
 
+// firstSend drives the first message through the handshake the TUI now
+// performs: the run is resolved and the stream is opened before the turn is
+// dispatched. It returns the model and the command that runs the turn.
+func firstSend(t *testing.T, m Model, text string) (Model, tea.Cmd) {
+	t.Helper()
+	m, _ = submit(t, m, text)
+	if m.pending == "" {
+		t.Fatal("the first message was not held until the stream opened")
+	}
+	next, cmd := m.Update(ensureMsg{runID: "run-1"})
+	m = next.(Model)
+	if cmd != nil {
+		_ = cmd() // opens the stream on the fake client
+	}
+	next, turn := m.Update(streamReadyMsg{ch: make(chan runtime.Event)})
+	if turn == nil {
+		t.Fatal("no turn was dispatched once the stream was open")
+	}
+	return next.(Model), turn
+}
+
 func keyText(text string) tea.KeyPressMsg {
 	runes := []rune(text)
 	return tea.KeyPressMsg{Code: runes[0], Text: text}
@@ -118,13 +155,31 @@ func submit(t *testing.T, m Model, text string) (Model, tea.Cmd) {
 	return next.(Model), cmd
 }
 
+// runCmd executes a command and gives it a moment to produce a message. A
+// command that parks — the live stream read waits for an event the harness
+// never sends — reports nil, which is drive's signal that the loop has
+// settled.
+func runCmd(cmd tea.Cmd) tea.Msg {
+	done := make(chan tea.Msg, 1)
+	go func() { done <- cmd() }()
+	select {
+	case msg := <-done:
+		return msg
+	case <-time.After(100 * time.Millisecond):
+		return nil
+	}
+}
+
 // drive runs a command, feeds its message to the model, and keeps going until
 // the model produces no further command. This is how a synchronous event loop
 // would settle.
 func drive(t *testing.T, m Model, cmd tea.Cmd) Model {
 	t.Helper()
 	for cmd != nil {
-		msg := cmd()
+		msg := runCmd(cmd)
+		if msg == nil {
+			return m
+		}
 		if batch, ok := msg.(tea.BatchMsg); ok {
 			for _, batched := range batch {
 				m = drive(t, m, batched)
@@ -133,9 +188,6 @@ func drive(t *testing.T, m Model, cmd tea.Cmd) Model {
 		}
 		next, ncmd := m.Update(msg)
 		m = next.(Model)
-		if m.streamCh != nil {
-			return m
-		}
 		cmd = ncmd
 	}
 	return m
@@ -238,7 +290,7 @@ func TestModelFirstTurnParks(t *testing.T) {
 	f := &fakeClient{}
 	m := newTestModel(f)
 
-	m, cmd := submit(t, m, "deploy the app")
+	m, cmd := firstSend(t, m, "deploy the app")
 	m = drive(t, m, cmd)
 
 	if !f.started {
@@ -263,7 +315,7 @@ func TestModelResumeAnswersAQuestion(t *testing.T) {
 	f := &fakeClient{}
 	m := newTestModel(f)
 
-	m, cmd := submit(t, m, "deploy the app")
+	m, cmd := firstSend(t, m, "deploy the app")
 	m = drive(t, m, cmd)
 	if m.state != statusWaiting {
 		t.Fatalf("state = %v, want waiting before respond", m.state)
@@ -290,7 +342,7 @@ func TestModelRendersAssistantAnswer(t *testing.T) {
 	f := &fakeClient{startRes: &runtime.Run{ID: "run-1", State: runtime.RunCompleted, Response: "hello there"}}
 	m := newTestModel(f)
 
-	m, cmd := submit(t, m, "hi")
+	m, cmd := firstSend(t, m, "hi")
 	m = drive(t, m, cmd)
 
 	rendered := m.render()
@@ -470,7 +522,7 @@ func TestErrorShowsOnFailure(t *testing.T) {
 	f := &fakeClient{errs: []error{errTest{}}}
 	m := newTestModel(f)
 
-	m, cmd := submit(t, m, "boom")
+	m, cmd := firstSend(t, m, "boom")
 	m = drive(t, m, cmd)
 	if m.state != statusError {
 		t.Fatalf("state = %v, want error", m.state)
@@ -506,4 +558,86 @@ func encodedKitEvent(typ kit.EventType, value any) [2]string {
 		panic(err)
 	}
 	return [2]string{string(typ), string(data)}
+}
+
+// TestFirstTurnStreamsToolCalls is the mirror of
+// TestStartupLookupResumesToolStream for a session whose address is not bound
+// yet: the very first turn must also stream its tool and reasoning events.
+//
+// The regression it guards: the TUI used to learn its run ID from the reply
+// to the first message, so the stream opened after that turn had finished.
+// Reasoning deltas and tool events are live-only, so the first turn rendered
+// as a bare answer and every later turn rendered in full — quit and reopen
+// and the same agent suddenly "worked".
+func TestFirstTurnStreamsToolCalls(t *testing.T) {
+	t.Parallel()
+	f := &fakeClient{lookupErr: ErrNotFound, ensureRun: "run-1"}
+	m := newTestModel(f)
+
+	// Startup lookup finds nothing; there is no run to stream yet.
+	next, _ := m.Update(lookupMsg{err: ErrNotFound})
+	m = next.(Model)
+
+	// The user sends the first message. It is held, not dispatched.
+	sent, cmd := m.send("ls")
+	m = sent.(Model)
+	if cmd == nil {
+		t.Fatal("send produced no command")
+	}
+	if m.pending != "ls" {
+		t.Fatalf("pending = %q, want the message held until the stream opens", m.pending)
+	}
+	if f.started || f.turns != 0 {
+		t.Fatal("the turn was dispatched before the stream was open")
+	}
+
+	// Resolving the address yields the run and opens the stream.
+	next, cmd = m.Update(ensureMsg{runID: "run-1", cursor: 0})
+	m = next.(Model)
+	if m.runID != "run-1" {
+		t.Fatalf("runID = %q, want run-1 before the turn", m.runID)
+	}
+	if cmd == nil {
+		t.Fatal("ensure produced no stream command")
+	}
+	_ = cmd()
+	if f.streamed != 1 {
+		t.Fatalf("stream opened %d times, want 1 before the turn", f.streamed)
+	}
+
+	// Only once the stream is live is the held turn dispatched.
+	next, _ = m.Update(streamReadyMsg{ch: make(chan runtime.Event)})
+	m = next.(Model)
+	if m.pending != "" {
+		t.Fatalf("pending = %q, want it dispatched once the stream was open", m.pending)
+	}
+
+	// Events of that first turn now reach the transcript.
+	tc := kitEventToolCall("call-1", "shell", `{"command":"ls -la"}`)
+	m.apply(runtime.Event{RunID: "run-1", Seq: 1, Type: tc[0], Data: []byte(tc[1])})
+	if got := m.transcript(); !strings.Contains(got, styles.toolName.Render("shell")) {
+		t.Fatalf("the first turn misses its tool call:\n%s", got)
+	}
+}
+
+// A stream that will not open must not swallow the first message.
+func TestFirstTurnSendsWhenTheStreamFails(t *testing.T) {
+	t.Parallel()
+	f := &fakeClient{lookupErr: ErrNotFound, ensureErr: errTest{}}
+	m := newTestModel(f)
+
+	sent, _ := m.send("ls")
+	m = sent.(Model)
+
+	next, cmd := m.Update(ensureMsg{err: errTest{}})
+	m = next.(Model)
+	if m.pending != "" {
+		t.Fatalf("pending = %q, want the message sent anyway", m.pending)
+	}
+	if cmd == nil {
+		t.Fatal("the held message was dropped when the run would not resolve")
+	}
+	if _ = cmd(); !f.started {
+		t.Fatal("the fallback did not start the run by address")
+	}
 }

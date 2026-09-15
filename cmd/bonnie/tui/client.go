@@ -37,6 +37,13 @@ type Client interface {
 	// without creating one.
 	Lookup(ctx context.Context, address string) (string, int, error)
 
+	// Ensure resolves an address to its run, creating and binding one when
+	// the address is new, and runs no turn. It is how the TUI learns its run
+	// ID before it sends anything, so the stream is open in time to see the
+	// first turn's reasoning and tool events — those are live-only and no
+	// replay brings them back.
+	Ensure(ctx context.Context, address string) (string, int, error)
+
 	// Start begins a run for an address, or continues it — the channel
 	// resolves the address to the same run on every call, so a TUI session
 	// is one conversation. The returned run reports the turn's outcome.
@@ -94,6 +101,15 @@ func NewHTTP(base string, hc *http.Client) *HTTP {
 func (c *HTTP) Lookup(ctx context.Context, address string) (string, int, error) {
 	var out runResponse
 	if err := c.get(ctx, apiPrefix+"/addresses/"+url.PathEscape(address), &out); err != nil {
+		return "", 0, err
+	}
+	return out.RunID, out.Cursor, nil
+}
+
+// Ensure implements [Client].
+func (c *HTTP) Ensure(ctx context.Context, address string) (string, int, error) {
+	var out runResponse
+	if err := c.post(ctx, apiPrefix+"/addresses/"+url.PathEscape(address), nil, &out); err != nil {
 		return "", 0, err
 	}
 	return out.RunID, out.Cursor, nil

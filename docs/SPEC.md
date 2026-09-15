@@ -541,6 +541,29 @@ TUI resolves the address at startup and opens the stream from the served
 cursor. Guard tests: `TestStartupLookupResumesToolStream`,
 `TestAddressLookupDoesNotCreate`.
 
+**TUI first run.** That lookup fixed the *reopen* case and left the *first* one
+open, which is why `bonnie dev` showed no reasoning and no tool calls on a
+fresh tree and showed both after a quit and restart — the second run found the
+address bound, the first had nothing to look up. The run ID could only come
+back with the reply to the first message, by which point the turn was over and
+its live-only events were gone.
+
+A read-only lookup cannot fix this: on a new address there is nothing to read.
+So the channel also exposes **`POST /bonnie/v1/addresses/{address}`**, which
+resolves the address and *creates and binds* a run when it is new, and runs no
+turn. It is `Ref.RunID` on the wire. The TUI holds the first message, resolves
+the run, opens the stream, and only then dispatches the turn, so the
+subscription cannot lose a race with the turn it is meant to observe. A turn is
+never dispatched from `send` on a fresh session; it is dispatched from
+`streamReadyMsg`.
+
+The ordering is the invariant, not the endpoint: **subscribe before you speak**.
+Anything that learns its run ID from the result of a turn has already missed
+that turn. Guard tests: `TestFirstTurnStreamsToolCalls`,
+`TestFirstTurnSendsWhenTheStreamFails` (a stream that will not open must still
+deliver the message — a degraded transcript beats a dropped turn),
+`TestEnsureAddressBindsWithoutATurn`.
+
 ### 4.9 PARTLY RESOLVED — no sandbox, observed in practice
 
 **The `sandbox` package closes this. It is opt-in, so the risk returns for any

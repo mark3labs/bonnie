@@ -156,6 +156,7 @@ func (c *Channel) Routes() []channel.Route {
 		{Method: http.MethodGet, Path: p + "/info", Handler: c.handleInfo},
 		{Method: http.MethodPost, Path: p + "/runs", Handler: c.handleStart},
 		{Method: http.MethodGet, Path: p + "/addresses/{address}", Handler: c.handleAddress},
+		{Method: http.MethodPost, Path: p + "/addresses/{address}", Handler: c.handleEnsureAddress},
 		{Method: http.MethodGet, Path: p + "/runs/{id}", Handler: c.handleGet},
 		{Method: http.MethodPost, Path: p + "/runs/{id}", Handler: c.handleSend},
 		{Method: http.MethodPost, Path: p + "/runs/{id}/respond", Handler: c.handleRespond},
@@ -401,6 +402,31 @@ func (c *Channel) handleAddress(w http.ResponseWriter, r *http.Request, _ channe
 	}
 	if !ok {
 		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "address is not bound", Code: errNotFound})
+		return
+	}
+	cursor := 0
+	if p, ok := c.core.Runner().Journal().(runtime.Positioner); ok {
+		cursor, _ = p.Position(r.Context(), runID)
+	}
+	writeJSON(w, http.StatusOK, RunResponse{RunID: runID, Cursor: cursor})
+}
+
+// handleEnsureAddress resolves an address to its run, creating and binding
+// one when the address is new, and runs no turn.
+//
+// It exists so a client can subscribe before it speaks. A turn's reasoning
+// deltas and tool events are live-only — the journal holds the conversation,
+// not the mid-turn deltas (see [runtime.Runner.StreamEvents]) — so a client
+// that learns its run ID from the reply to its first message has already
+// missed that turn's events, and no replay can recover them. POST here first,
+// open the stream, then send.
+//
+// It is idempotent: an address that already owns a run returns that run and
+// binds nothing new.
+func (c *Channel) handleEnsureAddress(w http.ResponseWriter, r *http.Request, in channel.Inbound, _ channel.Outbound) {
+	runID, err := in.From(r.PathValue("address")).RunID(r.Context())
+	if err != nil {
+		writeError(w, err)
 		return
 	}
 	cursor := 0

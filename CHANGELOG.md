@@ -5,6 +5,31 @@ All notable changes to BONNIE are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **`bonnie dev` showed no reasoning and no tool calls on the first run of a
+  new tree**, then showed both after a quit and restart. The TUI learned its
+  run ID from the reply to the first message, so it opened the event stream
+  after that turn had already finished. Reasoning deltas and tool events are
+  live-only — the journal keeps the conversation, not the mid-turn deltas —
+  so replay could not bring them back. A restart found the address already
+  bound, resolved the run at startup, and streamed normally, which is why the
+  same agent appeared to work the second time.
+
+  `POST /bonnie/v1/addresses/{address}` now resolves an address to its run,
+  creating and binding one when it is new, and runs no turn. The TUI holds the
+  first message, resolves the run, opens the stream, and only then dispatches
+  the turn: it subscribes before it speaks. A stream that fails to open no
+  longer strands the message — it is sent anyway and the stream reconnects.
+
+### Added
+
+- `POST /bonnie/v1/addresses/{address}` binds an address to a run without
+  running a turn, and is idempotent. Any client that wants a turn's live
+  events needs its run ID before it sends the turn; this is how it gets one.
+
 ## [0.5.0] — 2026-09-15
 
 The channels increment. A run now reaches a person wherever they already are:

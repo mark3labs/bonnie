@@ -87,6 +87,15 @@ type streamReadyMsg struct {
 	err   error
 }
 
+// ensureMsg reports the run an address resolves to, created if it was new.
+// It runs no turn; it only teaches the TUI its run ID early enough to
+// subscribe.
+type ensureMsg struct {
+	runID  string
+	cursor int
+	err    error
+}
+
 // streamMsg carries one event from the run's stream.
 type streamMsg struct {
 	ev runtime.Event
@@ -122,8 +131,16 @@ type Model struct {
 	// address is the channel-local conversation key. The channel resolves it
 	// to one run for the whole session.
 	address string
-	// runID is the run the address resolved to, set on the first turn.
+	// runID is the run the address resolved to. It is resolved before the
+	// first turn is sent, not after it returns: a turn's reasoning and tool
+	// events are live-only, so a stream opened after the turn has already
+	// missed them.
 	runID string
+
+	// pending holds the first message while the run is resolved and the
+	// stream opens. It is sent once the stream is live, so the turn cannot
+	// outrun its own subscription. Empty at every other time.
+	pending string
 
 	state status
 	label string
@@ -204,11 +221,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.commitError(msg.err.Error())
 			return m, nil
 		}
-		if msg.runID == "" || m.runID != "" {
+		if msg.runID == "" || m.runID != "" || m.pending != "" {
+			// A held first message means the ensure path already owns the
+			// handshake. Two openers would leave one stream unreferenced.
 			return m, nil
 		}
 		m.runID = msg.runID
 		m.cursor = msg.cursor
+		return m, m.openStream()
+
+	case ensureMsg:
+		// The run is known (or could not be resolved). Either way the held
+		// message must go out; with a run, only after the stream is open.
+		if msg.err != nil {
+			m.label = "streaming unavailable"
+			return m.sendPending()
+		}
+		if m.runID == "" {
+			m.runID = msg.runID
+			m.cursor = msg.cursor
+		}
+		if m.streamCh != nil {
+			return m.sendPending()
+		}
 		return m, m.openStream()
 
 	case streamReadyMsg:
@@ -218,11 +253,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.quitting {
 				return m, nil
 			}
+			// A held first message must not wait on a stream that is not
+			// coming. Send it and let the reconnect catch up.
+			if m.pending != "" {
+				next, turn := m.sendPending()
+				next.label = "reconnecting"
+				return next, tea.Batch(turn, tea.Tick(250*time.Millisecond, func(time.Time) tea.Msg { return reconnectMsg{} }))
+			}
 			m.label = "reconnecting"
 			return m, tea.Tick(250*time.Millisecond, func(time.Time) tea.Msg { return reconnectMsg{} })
 		}
 		m.streamCh = msg.ch
 		m.streamUn = msg.unsub
+		// The stream is live, so the first turn can now be dispatched
+		// without racing its own events.
+		if m.pending != "" {
+			next, turn := m.sendPending()
+			return next, tea.Batch(turn, next.readStream())
+		}
 		return m, m.readStream()
 
 	case streamMsg:
@@ -354,22 +402,41 @@ func (m Model) send(text string) (tea.Model, tea.Cmd) {
 	m.label = "working"
 	m.commitUser(text)
 
+	// The run is not known yet, so nothing can be subscribed to. Resolve it
+	// first and hold the message: the turn is dispatched from
+	// streamReadyMsg, once the stream that will carry its reasoning and tool
+	// events exists. Sending now would race the subscription and lose them.
+	if start {
+		m.pending = text
+		return m, tea.Batch(m.ensure(), func() tea.Msg { return spinnerMsg{} })
+	}
+
 	var turn tea.Cmd
-	switch {
-	case start:
-		turn = m.run(func() (*runtime.Run, error) {
-			return m.client.Start(m.ctx, m.address, text)
-		})
-	case respond:
+	if respond {
 		turn = m.run(func() (*runtime.Run, error) {
 			return m.client.Respond(m.ctx, m.runID, text)
 		})
-	default:
+	} else {
 		turn = m.run(func() (*runtime.Run, error) {
 			return m.client.Send(m.ctx, m.runID, text)
 		})
 	}
 	return m, tea.Batch(turn, func() tea.Msg { return spinnerMsg{} })
+}
+
+// sendPending dispatches the held first message. The stream is open by now,
+// so the turn's events reach the transcript as they happen.
+//
+// It still goes through the address entry point: the address resolves to the
+// run [Model.ensure] just bound, so this is the same turn it always was, only
+// now it is sent to a conversation something is already listening to.
+func (m Model) sendPending() (Model, tea.Cmd) {
+	text := m.pending
+	m.pending = ""
+	address := m.address
+	return m, m.run(func() (*runtime.Run, error) {
+		return m.client.Start(m.ctx, address, text)
+	})
 }
 
 // run performs one entry point. The first turn of a session also opens the
@@ -439,6 +506,16 @@ func (m Model) lookup() tea.Cmd {
 	return func() tea.Msg {
 		runID, cursor, err := m.client.Lookup(m.ctx, m.address)
 		return lookupMsg{runID: runID, cursor: cursor, err: err}
+	}
+}
+
+// ensure resolves the address to a run, creating one if the address is new.
+// It runs no turn: it is what lets the TUI subscribe before it speaks.
+func (m Model) ensure() tea.Cmd {
+	address := m.address
+	return func() tea.Msg {
+		runID, cursor, err := m.client.Ensure(m.ctx, address)
+		return ensureMsg{runID: runID, cursor: cursor, err: err}
 	}
 }
 
