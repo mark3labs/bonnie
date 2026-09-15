@@ -179,6 +179,17 @@ type Outbound interface {
 // the turn runs, so a platform event that arrives while the turn is in
 // flight continues this run instead of racing it. The options carry the
 // initiating principal, so the destination run records who started it.
+//
+// A target that names a surface which already carries a conversation
+// continues it. Only a surface the hand-off creates — a new Slack thread —
+// is a new conversation; a chat, a channel, and an issue each have one
+// address, and a hand-off that re-keyed it would strand the run a person
+// is talking to.
+//
+// The error is for a hand-off that did not start: an unusable target, a
+// surface the platform refused to create, a credential the destination
+// needs and does not have. Delivery after that point is the destination's
+// own fire-and-log business — the journal keeps the result either way.
 type Receiver interface {
 	Receive(ctx context.Context, target any, text string, opts SendOptions) error
 }

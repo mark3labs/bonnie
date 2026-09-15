@@ -169,15 +169,26 @@ func (c *Channel) Routes() []channel.Route {
 
 // Handler mounts [Channel.Routes] on a fresh mux with the channel as the
 // inbound side. Mount it under a prefix with http.StripPrefix if the host
-// serves other things. The outbound registry is empty: a standalone
-// handler has no channels to hand work to.
+// serves other things. The outbound registry is empty rather than nil: a
+// standalone handler has no channels to hand work to, and a handler that
+// asks gets "not mounted", not a panic.
 func (c *Channel) Handler() http.Handler {
-	return c.HandlerWithOutbound(nil)
+	return c.HandlerWithOutbound(noOutbound{})
 }
 
+// noOutbound is the empty registry: nothing is mounted beside this
+// handler.
+type noOutbound struct{}
+
+func (noOutbound) To(string) (channel.Receiver, bool) { return nil, false }
+
 // HandlerWithOutbound is [Channel.Handler] with a registry of the other
-// mounted channels, for a host that serves hand-offs.
+// mounted channels, for a host that serves hand-offs. A nil registry is
+// the empty one.
 func (c *Channel) HandlerWithOutbound(out channel.Outbound) http.Handler {
+	if out == nil {
+		out = noOutbound{}
+	}
 	mux := http.NewServeMux()
 	for _, route := range c.Routes() {
 		handler := route.Handler

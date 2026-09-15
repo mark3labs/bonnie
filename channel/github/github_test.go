@@ -301,6 +301,35 @@ func TestReviewThreadAndTimelineAreSeparateRuns(t *testing.T) {
 	}
 }
 
+// A mention-free follow-up continues the conversation on a pull request,
+// exactly as it does on an issue. Boundness has to be asked of the
+// address the comment will use: a PR's conversation lives at the PR
+// address, so asking the issue address for the same number answers "never
+// joined" and the follow-up is dropped in silence.
+func TestMentionFreeFollowUpContinuesAPullRequest(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, github.Config{})
+	h.agent.Say(&kit.TurnResult{Response: "the answer"})
+	h.agent.Say(&kit.TurnResult{Response: "the follow-up"})
+
+	h.deliver(t, "p1", prTimelineComment("U1", "@my-agent summarise this"))
+	waitFor(t, func() bool { return len(h.fake.posts()) > 0 })
+	started, ok, _ := refRunID(h.ch, github.AddressPullRequest("octo", "repo", 7))
+	if !ok {
+		t.Fatal("the PR is not bound")
+	}
+
+	h.deliver(t, "p2", prTimelineComment("U1", "and in one sentence?"))
+	waitFor(t, func() bool { return len(h.fake.posts()) > 1 })
+	if calls := h.agent.Calls(); calls != 2 {
+		t.Fatalf("the agent ran %d turns, want 2", calls)
+	}
+	continued, _, _ := refRunID(h.ch, github.AddressPullRequest("octo", "repo", 7))
+	if continued != started {
+		t.Fatalf("the follow-up ran as %s, want %s", continued, started)
+	}
+}
+
 // The PR diff reaches the model as context, not as user text.
 func TestPullRequestContextCarriesTheDiff(t *testing.T) {
 	t.Parallel()

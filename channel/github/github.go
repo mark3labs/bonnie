@@ -463,14 +463,7 @@ func (c *Channel) finishHooked(turn *chat.Turn, env *envelope, owner, repoName, 
 func (c *Channel) turnForComment(env *envelope, owner, repoName string) (*chat.Turn, int64) {
 	body := env.Comment.Body
 	mentioned := mentionsBot(body, c.cfg.BotName)
-	_, bound, _ := c.core.Lookup(context.Background(), AddressIssue(owner, repoName, env.Issue.Number))
 	isPR := env.Issue.PullRequest != nil
-
-	if !mentioned && !bound {
-		// A comment in a thread the agent never joined, with no mention,
-		// is not for it. Everything in a repository is not its business.
-		return nil, 0
-	}
 
 	kind := chat.KindIssue
 	address := AddressIssue(owner, repoName, env.Issue.Number)
@@ -480,6 +473,17 @@ func (c *Channel) turnForComment(env *envelope, owner, repoName string) (*chat.T
 		// hook and a comment land on the same run.
 		kind = chat.KindPullRequest
 		address = AddressPullRequest(owner, repoName, env.Issue.Number)
+	}
+
+	// Boundness is asked of the address this comment will use. Asking the
+	// issue address for a PR comment says "not bound" however long the
+	// agent has been in that PR, and the mention-free follow-up that
+	// continues the conversation is then dropped.
+	_, bound, _ := c.core.Lookup(context.Background(), address)
+	if !mentioned && !bound {
+		// A comment in a thread the agent never joined, with no mention,
+		// is not for it. Everything in a repository is not its business.
+		return nil, 0
 	}
 	return &chat.Turn{
 		Address: address,
@@ -928,6 +932,14 @@ func deliveryPath(address, owner, repoName string) (string, bool) {
 type Target struct {
 	Owner, Repo string
 	Number      int
+	// PullRequest says the number names a pull request, not an issue. It
+	// decides the address, and the address decides whether a later comment
+	// continues this run: an inbound PR comment is addressed
+	// [AddressPullRequest], so a hand-off that bound [AddressIssue] for the
+	// same number would be answered by a second, separate run. GitHub
+	// numbers issues and PRs in one sequence and the API cannot tell them
+	// apart from the number, so the caller says which.
+	PullRequest bool
 }
 
 // Receive implements [channel.Receiver]. The target is a [Target]: the
@@ -945,16 +957,11 @@ func (c *Channel) Receive(ctx context.Context, target any, text string, opts cha
 	if c.cfg.InstallationID == 0 {
 		return errors.New("bonnie: channel/github: proactive turns need GITHUB_INSTALLATION_ID: a webhook carries its own, a hand-off does not")
 	}
-	turn := chat.Turn{
-		Address:    AddressIssue(t.Owner, t.Repo, t.Number),
-		Text:       text,
-		Kind:       chat.KindIssue,
-		Context:    opts.Context,
-		Title:      opts.Title,
-		TurnPolicy: opts.TurnPolicy,
-	}
-	if opts.Auth != nil {
-		turn.Auth = opts.Auth
+	// The address must be the one an inbound comment on this surface
+	// resolves to, or the reply to the hand-off starts a second run.
+	address, kind := AddressIssue(t.Owner, t.Repo, t.Number), chat.KindIssue
+	if t.PullRequest {
+		address, kind = AddressPullRequest(t.Owner, t.Repo, t.Number), chat.KindPullRequest
 	}
 	// The delivery needs an installation and a repository; a hand-off has
 	// no webhook to take them from, so the config supplies both.
@@ -962,8 +969,16 @@ func (c *Channel) Receive(ctx context.Context, target any, text string, opts cha
 		Repository:   repo{Owner: actor{Login: t.Owner}, Name: t.Repo},
 		Installation: &installation{ID: c.cfg.InstallationID},
 	}
-	return c.core.Proactive(ctx, turn, func(address string, run *runtime.Run, err error) {
-		c.deliver(env, address, run, err)
+	return c.core.Proactive(ctx, chat.Turn{
+		Address:    address,
+		Text:       text,
+		Kind:       kind,
+		Context:    opts.Context,
+		Title:      opts.Title,
+		TurnPolicy: opts.TurnPolicy,
+		Auth:       opts.Auth,
+	}, func(delivered string, run *runtime.Run, err error) {
+		c.deliver(env, delivered, run, err)
 	})
 }
 

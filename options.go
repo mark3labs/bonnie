@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/mark3labs/bonnie/channel"
@@ -256,8 +257,10 @@ func WithTelegram(cfg telegram.Config) Option {
 
 // WithGitHub mounts the GitHub App channel. GITHUB_APP_ID,
 // GITHUB_APP_PRIVATE_KEY, and GITHUB_WEBHOOK_SECRET come from the
-// environment; see [WithSlack]. The bot name is configured, not
-// environmental: it is a setting, not a secret.
+// environment; see [WithSlack]. GITHUB_INSTALLATION_ID comes from there
+// too, and only a hand-off needs it: a webhook carries its own
+// installation. The bot name is configured, not environmental: it is a
+// setting, not a secret.
 func WithGitHub(cfg github.Config) Option {
 	return WithChannel(func(r *runtime.Runner) (Channel, error) {
 		c := cfg
@@ -265,6 +268,9 @@ func WithGitHub(cfg github.Config) Option {
 		fill(&c.PrivateKey, "GITHUB_APP_PRIVATE_KEY")
 		fill(&c.WebhookSecret, "GITHUB_WEBHOOK_SECRET")
 		fill(&c.APIURL, "GITHUB_API_URL")
+		if err := fillInt(&c.InstallationID, "GITHUB_INSTALLATION_ID"); err != nil {
+			return nil, err
+		}
 		if err := require("github",
 			named{"GITHUB_APP_ID", c.AppID},
 			named{"GITHUB_APP_PRIVATE_KEY", c.PrivateKey},
@@ -284,6 +290,23 @@ func fill(field *string, env string) {
 	if *field == "" {
 		*field = os.Getenv(env)
 	}
+}
+
+// fillInt is [fill] for a numeric setting. A value that does not parse is
+// an error that names the variable, not a silent zero: a typo here would
+// otherwise surface much later, as a hand-off that says the setting is
+// missing while the operator can see it in the environment.
+func fillInt(field *int64, env string) error {
+	raw := os.Getenv(env)
+	if *field != 0 || raw == "" {
+		return nil
+	}
+	n, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return fmt.Errorf("bonnie: %s must be a number, not %q", env, raw)
+	}
+	*field = n
+	return nil
 }
 
 // named is one credential and the variable it comes from.

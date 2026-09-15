@@ -38,6 +38,10 @@ func TestConformance(t *testing.T) {
 	})
 }
 
+// fakeRootTS is the timestamp the fake answers a thread root with: the
+// thread ID a hand-off binds its address to.
+const fakeRootTS = "1700000000.000900"
+
 // fakeAPI is a stand-in for the Slack API. It records every postMessage.
 type fakeAPI struct {
 	mu     sync.Mutex
@@ -64,7 +68,13 @@ func newFakeAPI(t *testing.T) *fakeAPI {
 		f.mu.Lock()
 		f.sent = append(f.sent, body.ThreadTS+"|"+body.Text)
 		f.mu.Unlock()
-		_, _ = w.Write([]byte(`{"ok":true}`))
+		// Slack answers a post with its timestamp. A root message's is the
+		// thread ID every reply needs; a reply's is of no use to anyone here.
+		ts := fakeRootTS
+		if body.ThreadTS != "" {
+			ts = "1700000000.001000"
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"ts":"` + ts + `"}`))
 	}))
 	t.Cleanup(f.server.Close)
 	return f

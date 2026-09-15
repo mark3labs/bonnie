@@ -311,16 +311,44 @@ func (c *Channel) deliver(address string, run *runtime.Run, err error) {
 // Receive implements [channel.Receiver]. The target is the chat ID, or
 // "<chat_id>/<topic>" for a forum topic: the address binds before the
 // turn runs, and the reply lands in the same chat.
+//
+// The kind comes from the target, because the origin a run records must
+// match the one an inbound message on that surface writes. A topic is a
+// thread. Telegram numbers users positive and groups negative, so the
+// sign says which of the other two it is.
 func (c *Channel) Receive(ctx context.Context, target any, text string, opts channel.SendOptions) error {
 	s, ok := target.(string)
 	if !ok || s == "" {
 		return fmt.Errorf("bonnie: channel/telegram: the target of a hand-off is the chat ID, or \"<chat_id>/<topic>\", not %T", target)
 	}
-	turn := chat.Turn{Address: s, Text: text, Kind: chat.KindChannel, Context: opts.Context, Title: opts.Title, TurnPolicy: opts.TurnPolicy}
-	if opts.Auth != nil {
-		turn.Auth = opts.Auth
+	// A target that is not a chat ID would deliver to chat 0, silently: the
+	// address parses in deliver with the error dropped.
+	chatPart, topicPart, _ := strings.Cut(s, "/")
+	chatID, err := strconv.ParseInt(chatPart, 10, 64)
+	if err != nil {
+		return fmt.Errorf("bonnie: channel/telegram: the target of a hand-off is the chat ID, or \"<chat_id>/<topic>\", not %q", s)
 	}
-	return c.core.Proactive(ctx, turn, c.deliver)
+	if topicPart != "" {
+		if _, err := strconv.ParseInt(topicPart, 10, 64); err != nil {
+			return fmt.Errorf("bonnie: channel/telegram: the topic of a hand-off is a number, not %q", topicPart)
+		}
+	}
+	kind := chat.KindChannel
+	switch {
+	case topicPart != "":
+		kind = chat.KindThread
+	case chatID > 0:
+		kind = chat.KindDM
+	}
+	return c.core.Proactive(ctx, chat.Turn{
+		Address:    s,
+		Text:       text,
+		Kind:       kind,
+		Context:    opts.Context,
+		Title:      opts.Title,
+		TurnPolicy: opts.TurnPolicy,
+		Auth:       opts.Auth,
+	}, c.deliver)
 }
 
 // sendMessage posts one message. Fire-and-log: a delivery failure must not

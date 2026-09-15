@@ -19,7 +19,13 @@ Every adapter implements the same two interfaces:
 - **`channel.Inbound`** — `From(address)` and `Attach(runID)`, the same
   surface the HTTP channel exposes.
 
-Everything under those two methods is shared, in `channel/chat`:
+An adapter that can also be handed work by another channel implements a
+third, **`channel.Receiver`** — `Receive(ctx, target, text, opts)`. All
+four platform adapters do; see "Hand-offs and proactive sessions" below.
+A route handler receives both sides: `Inbound` for its own channel, and
+`channel.Outbound` for the channels mounted beside it.
+
+Everything under those interfaces is shared, in `channel/chat`:
 
 - **Every event becomes one `chat.Turn`.** An adapter's only job on the
   way in is to turn a platform payload into `Turn{Address, Text, Context,
@@ -218,6 +224,7 @@ Setup: create the GitHub App, point its webhook URL at
 | `GITHUB_APP_ID` | the App ID |
 | `GITHUB_APP_PRIVATE_KEY` | the App's private key (PEM) |
 | `GITHUB_WEBHOOK_SECRET` | verifies the webhook signature |
+| `GITHUB_INSTALLATION_ID` | the installation a hand-off posts with; only a hand-off needs it, because a webhook carries its own |
 | `GITHUB_API_URL` | optional override; tests point it at a fake |
 
 Mount it in `main.go`:
@@ -244,7 +251,21 @@ records who started it.
 | Slack | the channel ID | a new thread under the posted root message |
 | Discord | the channel or thread ID | the channel |
 | Telegram | the chat ID, or `<chat_id>/<topic>` | the chat or topic |
-| GitHub | `github.Target{Owner, Repo, Number}` | a comment on the issue or PR timeline; needs `GITHUB_INSTALLATION_ID` |
+| GitHub | `github.Target{Owner, Repo, Number, PullRequest}` | a comment on the issue or PR timeline; needs `GITHUB_INSTALLATION_ID` |
+
+The target has to name the surface exactly, because the address it derives
+is the one a later platform event resolves to. GitHub numbers issues and
+pull requests in one sequence and they have different addresses, so
+`Target.PullRequest` says which; a hand-off that named the wrong one would
+be answered by a second, separate run.
+
+**A hand-off continues a conversation that is already there.** Only Slack
+opens a fresh surface per hand-off; a Telegram chat, a Discord channel,
+and a GitHub issue each have one stable address, and a second hand-off to
+one of them joins the run already bound rather than replacing it —
+replacing it would strand the run a person is talking to while both runs
+kept delivering into the one surface. A caller that wants a clean
+conversation resets the address first.
 
 A hand-off is agent input, not a notification API. A caller that only wants
 to post text calls the platform; a notification that must survive a crash
@@ -276,7 +297,8 @@ the message came from Slack; the user ID inside it is Slack's word. The
 - **Button-driven HITL** (Slack Block Kit actions, Discord message
   components). A parked run is answered in text. The resume path behind it
   is the same; only the gesture is missing.
-- **Proactive sessions** — done in T-033: see "Hand-offs" below.
+- **Proactive sessions** — done in T-033: see "Hand-offs and proactive
+  sessions" above.
 - **Message attachments.** Text in, text out. The GitHub channel fetches
   the PR diff itself, which is what a file-bearing surface needs before an
   attachment slot does.

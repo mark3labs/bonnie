@@ -676,9 +676,18 @@ func Dispatch(ctx context.Context, core *Core, turn Turn, deliver func(address s
 // run instead of racing it. eve's `receive(...)` and
 // `ctx.to(channel, target).send(...)` end here.
 //
+// An address that already carries a conversation is **continued**, never
+// re-keyed. Only Slack mints a fresh surface per hand-off; a Telegram
+// chat, a Discord channel, and a GitHub issue all derive one stable
+// address from their target, and re-keying it would strand the run a
+// person is talking to while both runs still deliver into that one
+// surface. A caller that wants a clean conversation resets the address
+// first — [Ref.Reset] — which retires the run and frees the address.
+//
 // The turn must carry an address — the destination channel derives it from
-// its own target type. A nil-Auth turn records no principal; the run then
-// has no one to attribute.
+// its own target type. [Turn.Auth] is recorded by the dispatch, exactly as
+// an inbound message's is; a nil-Auth turn records no principal, and the
+// run then has no one to attribute.
 func (c *Core) Proactive(ctx context.Context, turn Turn, deliver func(address string, run *runtime.Run, err error)) error {
 	if turn.Address == "" {
 		return errors.New("bonnie: channel: a proactive turn needs an address")
@@ -686,16 +695,11 @@ func (c *Core) Proactive(ctx context.Context, turn Turn, deliver func(address st
 	if turn.Title == "" {
 		turn.Title = TitleFrom(turn.Text)
 	}
-	if err := c.addresses.Bind(ctx, c.Address(turn.Address), c.NewID()); err != nil {
+	// Resolve, not Bind: it creates and binds on first sight and returns the
+	// bound run on every sight after, which is the continue-never-re-key
+	// rule above. Either way the address is bound before Dispatch returns.
+	if _, err := c.addresses.Resolve(ctx, c.Address(turn.Address), c.newID); err != nil {
 		return fmt.Errorf("bonnie: channel: bind a proactive address: %w", err)
-	}
-	if turn.Auth != nil {
-		id, ok, err := c.Lookup(ctx, turn.Address)
-		if err == nil && ok {
-			if err := c.addresses.NotePrincipal(ctx, id, turn.Auth); err != nil {
-				return err
-			}
-		}
 	}
 	Dispatch(ctx, c, turn, deliver)
 	return nil

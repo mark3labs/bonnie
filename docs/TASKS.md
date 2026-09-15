@@ -1649,6 +1649,24 @@ because creating the surface (open a Slack thread, mint an installation
 token) is adapter logic a generic SessionRef cannot carry. The registry
 shape — `To(name)` — is the same.
 
+**Reviewed after the fact, six defects fixed.** The first cut ticked two
+criteria it did not meet. What the review found, and where the fix is
+pinned:
+
+| Defect | Fix | Test |
+|---|---|---|
+| Slack reports an application failure as HTTP 200 + `ok:false`; `postMessageTS` read the status line only, so a refused hand-off bound a broken address, ran a turn, and returned success | decode `ok`, and refuse a root with no timestamp | `channel/slack/handoff_test.go` |
+| `Proactive` re-keyed the address unconditionally, orphaning a live conversation on every stable-address channel | `Resolve`, not `Bind`: create on first sight, continue after | `TestProactiveContinuesAnExistingConversation` |
+| the principal was journalled twice — `Ref.Send` already notes it | drop the second note | `TestProactiveRecordsTheInitiatingPrincipalOnce` |
+| a PR hand-off bound the *issue* address, so the first reply started a second run | `Target.PullRequest` picks the address an inbound comment resolves to | `TestReceiveBindsTheAddressAnInboundCommentResolvesTo` |
+| `GITHUB_INSTALLATION_ID` was named in an error and in the docs but never read | `fillInt` in `WithGitHub`; a value that does not parse is a startup error | `TestGitHubInstallationIDComesFromTheEnvironment` |
+| (found while fixing the fourth) a mention-free follow-up on a PR was dropped: boundness was asked of the issue address | ask the address the comment will use | `TestMentionFreeFollowUpContinuesAPullRequest` |
+
+Smaller: `http.Channel.Handler` passed a nil `Outbound` where its own doc
+said empty; Telegram recorded every hand-off as kind `channel` and
+accepted a target that is not a chat ID, which would have delivered to
+chat 0 in silence.
+
 ### Why
 
 eve lets a route on one channel start or continue a conversation on another
@@ -1677,10 +1695,13 @@ chat adapter to own both halves.
 ### Acceptance criteria
 
 - [x] A test channel's route starts a run on a fake Slack adapter, and the
-      reply lands in the thread the adapter opened
+      reply lands in the thread the adapter opened — `handoff_test.go`
 - [x] A run started through `Receive` is bound to its address, so a later
-      platform reply continues it
-- [x] `Principal` on the destination run is the initiator's
+      platform reply continues it — `TestACommentContinuesTheRunAHandOffStarted`
+      (GitHub, the case where the address had to be got right),
+      `TestProactiveBindsANewAddressBeforeTheTurn`
+- [x] `Principal` on the destination run is the initiator's —
+      `TestProactiveRecordsTheInitiatingPrincipalOnce`
 - [x] `docs/CHANNELS.md` removes proactive sessions from "not implemented"
 
 ### Watch for
@@ -1688,6 +1709,11 @@ chat adapter to own both halves.
 `To(...).Send` is agent input, not a notification API. A caller that only
 wants to post text calls the platform; a notification that must survive a
 crash goes through an outbox, which is a separate task if anyone needs it.
+
+A hand-off's address must be the one an inbound event on that surface
+resolves to. Every defect above except the Slack one is a version of this:
+an address that is nearly right splits one conversation into two runs that
+both deliver into one place, and nothing fails loudly when it happens.
 
 ---
 

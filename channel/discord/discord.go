@@ -257,17 +257,23 @@ func (c *Channel) handleInteraction(w http.ResponseWriter, r *http.Request, _ ch
 
 // Receive implements [channel.Receiver]. The target is a channel or thread
 // ID: the instruction is posted there, the address binds before the turn
-// runs, and the reply lands in the same place.
+// runs, and the reply lands in the same place. Discord's IDs are
+// snowflakes with nothing in them to say which of the two it is, so the
+// kind is the channel it is delivered to.
 func (c *Channel) Receive(ctx context.Context, target any, text string, opts channel.SendOptions) error {
 	channelID, ok := target.(string)
 	if !ok || channelID == "" {
 		return fmt.Errorf("bonnie: channel/discord: the target of a hand-off is the channel ID, not %T", target)
 	}
-	turn := chat.Turn{Address: channelID, Text: text, Kind: chat.KindChannel, Context: opts.Context, Title: opts.Title, TurnPolicy: opts.TurnPolicy}
-	if opts.Auth != nil {
-		turn.Auth = opts.Auth
-	}
-	return c.core.Proactive(ctx, turn, c.deliver)
+	return c.core.Proactive(ctx, chat.Turn{
+		Address:    channelID,
+		Text:       text,
+		Kind:       chat.KindChannel,
+		Context:    opts.Context,
+		Title:      opts.Title,
+		TurnPolicy: opts.TurnPolicy,
+		Auth:       opts.Auth,
+	}, c.deliver)
 }
 
 // commandText extracts the command's `message` option.

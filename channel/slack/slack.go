@@ -360,6 +360,10 @@ func (c *Channel) postMessage(ctx context.Context, channelID, threadTS, text str
 // postMessageTS posts one message and returns its timestamp, which is the
 // thread ID a reply needs. The boolean is false on any failure; the
 // message still posts or it does not — fire-and-log.
+//
+// Slack reports an application failure — an unknown channel, a revoked
+// token, a rate limit — as HTTP 200 with `"ok": false`, so the status line
+// alone says almost nothing. The body decides.
 func (c *Channel) postMessageTS(ctx context.Context, channelID, threadTS, text string) (string, bool) {
 	if c.cfg.BotToken == "" {
 		return "", false // nothing to send with; the conformance suite drives Inbound
@@ -386,9 +390,22 @@ func (c *Channel) postMessageTS(ctx context.Context, channelID, threadTS, text s
 		return "", false
 	}
 	var out struct {
-		TS string `json:"ts"`
+		OK    bool   `json:"ok"`
+		TS    string `json:"ts"`
+		Error string `json:"error"`
 	}
-	_ = json.NewDecoder(resp.Body).Decode(&out)
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		fmt.Fprintf(os.Stderr, "bonnie: slack: deliver: undecodable answer: %v\n", err)
+		return "", false
+	}
+	if !out.OK {
+		reason := out.Error
+		if reason == "" {
+			reason = "the API refused the message"
+		}
+		fmt.Fprintf(os.Stderr, "bonnie: slack: deliver: %s\n", reason)
+		return "", false
+	}
 	return out.TS, true
 }
 
@@ -403,22 +420,22 @@ func (c *Channel) Receive(ctx context.Context, target any, text string, opts cha
 	if !ok || channelID == "" {
 		return fmt.Errorf("bonnie: channel/slack: the target of a hand-off is the channel ID, not %T", target)
 	}
+	// A root with no timestamp is not a thread: the address "<channel>/"
+	// would point every hand-off to this channel at one run, and the reply
+	// would land loose in the channel instead of inside a thread.
 	root, ok := c.postMessageTS(ctx, channelID, "", text)
-	if !ok {
+	if !ok || root == "" {
 		return errors.New("bonnie: channel/slack: the thread could not be opened")
 	}
-	turn := chat.Turn{
+	return c.core.Proactive(ctx, chat.Turn{
 		Address:    channelID + "/" + root,
 		Text:       text,
 		Kind:       chat.KindThread,
 		Context:    opts.Context,
 		Title:      opts.Title,
 		TurnPolicy: opts.TurnPolicy,
-	}
-	if opts.Auth != nil {
-		turn.Auth = opts.Auth
-	}
-	return c.core.Proactive(ctx, turn, c.deliver)
+		Auth:       opts.Auth,
+	}, c.deliver)
 }
 
 // writeOK answers Slack's webhook with the ack it expects.

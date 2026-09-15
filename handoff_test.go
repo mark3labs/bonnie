@@ -75,6 +75,13 @@ func (a *digestAgent) PromptResult(ctx context.Context, msg string) (*kit.TurnRe
 func (a *digestAgent) InjectSteer(string) {}
 func (a *digestAgent) Close() error       { return nil }
 
+// digestFactory is [stubFactory] for a test that actually runs a turn:
+// the stub answers with a nil result, which only a test that never
+// prompts can use.
+func digestFactory(_ context.Context, s *runtime.Session) (runtime.Agent, error) {
+	return &digestAgent{session: s}, nil
+}
+
 // The hand-off: a route on one channel starts a run on Slack, the reply
 // lands in the thread the Slack adapter opened, and the run is bound so a
 // later platform reply continues it.
@@ -93,9 +100,7 @@ func TestCrossChannelHandOff(t *testing.T) {
 		caller,
 		WithSlack(slack.Config{APIURL: fake.server.URL}),
 		WithJournal(journalDir),
-		WithAgentFactory(func(_ context.Context, s *runtime.Session) (runtime.Agent, error) {
-			return &digestAgent{session: s}, nil
-		}),
+		WithAgentFactory(digestFactory),
 	)
 
 	// Drive the hand-off.
