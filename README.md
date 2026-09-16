@@ -85,6 +85,11 @@ Set a provider key. BONNIE uses the provider that Kit is configured for:
 export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY, or GEMINI_API_KEY
 ```
 
+BONNIE also reads a `.env` in the working directory when one is there, so you
+can write the key (and any channel credential) into a file instead of
+exporting it each time. An exported variable still wins over the file, and a
+missing `.env` is not an error.
+
 BONNIE needs Go 1.27+ and **Linux**. The kernel must be 5.13 or newer with
 Landlock enabled, which is the default on each current distribution. A sandbox
 is not optional, and the default sandbox needs no installation. Docker or `msb`

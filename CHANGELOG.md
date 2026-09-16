@@ -48,6 +48,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A `.env` in the working directory is loaded at startup.** `Agent.Run`
+  reads `.env` before it builds the agent or mounts a channel, so a provider
+  key (`ANTHROPIC_API_KEY`) or a channel credential (`SLACK_SIGNING_SECRET`)
+  can live in a file instead of a shell `export`. An exported variable still
+  wins over the file — the file fills a gap, the same rule the channel
+  credentials already follow — and a missing `.env` is not an error. The
+  startup banner names the file when it loaded one. It is not a manifest: it
+  sets no BONNIE setting, only the environment BONNIE already reads.
+
 - **`client` — a public Go client for the wire API.** It speaks the whole
   `/bonnie/v1` contract: health, info, address lookup and bind, start, send,
   respond, get, cancel, reset, clear, compact, and the NDJSON event stream

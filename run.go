@@ -93,6 +93,15 @@ func (a *Agent) Serve() {
 func (a *Agent) Run(ctx context.Context) error {
 	c := a.cfg
 
+	// Load a .env before anything reads the environment: the provider key the
+	// agent factory needs and the channel credentials resolved below both come
+	// from os.Getenv, so the file has to fill the gaps first. An exported
+	// variable still wins over the file.
+	dotenv, err := loadDotenv()
+	if err != nil {
+		return err
+	}
+
 	prompt, err := c.systemPrompt()
 	if err != nil {
 		return err
@@ -182,7 +191,7 @@ func (a *Agent) Run(ctx context.Context) error {
 		}
 	}
 
-	c.banner(ln.Addr().String(), workspace, skills)
+	c.banner(ln.Addr().String(), workspace, skills, dotenv)
 	return c.serve(ctx, mux, ln)
 }
 
@@ -532,12 +541,15 @@ func embedRel(path string) string {
 // run to warn about. The backend is always named instead: the warning existed
 // to make a dangerous default visible, and naming the confinement in force is
 // what replaces it.
-func (c *config) banner(addr, workspace, skills string) {
+func (c *config) banner(addr, workspace, skills string, dotenv bool) {
 	if c.quiet {
 		return
 	}
 	line := func(label, value string) {
 		fmt.Fprintf(os.Stderr, "bonnie: %s %s\n", label, value)
+	}
+	if dotenv {
+		line("env", "loaded "+DefaultDotenv)
 	}
 	line("serving on", addr)
 	line("journal", c.journal)
