@@ -472,6 +472,46 @@ func TestOptInHooks(t *testing.T) {
 	}
 }
 
+// OnComment replaces the default gate. A host that requires an allowlist
+// drops a mentioning stranger and admits a listed author, and the gate
+// sees the comment's mention and boundness so it can build on the default
+// behaviour rather than replace it wholesale.
+func TestOnCommentGate(t *testing.T) {
+	t.Parallel()
+	var mu sync.Mutex
+	var seen []github.CommentCtx
+	h := newHarness(t, github.Config{
+		OnComment: func(cc github.CommentCtx) bool {
+			mu.Lock()
+			seen = append(seen, cc)
+			mu.Unlock()
+			return cc.Sender == "maintainer"
+		},
+	})
+	h.agent.Say(&kit.TurnResult{Response: "the answer"})
+
+	// A stranger who mentions the bot is refused: mention is not enough
+	// once the host owns the gate.
+	h.deliver(t, "g1", issueComment("U1", "@my-agent do the thing"))
+	// A maintainer who mentions the bot is admitted.
+	h.deliver(t, "g2", issueComment("maintainer", "@my-agent do the thing"))
+	waitFor(t, func() bool { return len(h.fake.posts()) > 0 })
+	time.Sleep(100 * time.Millisecond)
+
+	if calls := h.agent.Calls(); calls != 1 {
+		t.Fatalf("agent ran %d turns, want 1 (only the maintainer)", calls)
+	}
+	if _, bound, _ := refRunID(h.ch, github.AddressIssue("octo", "repo", 42)); !bound {
+		t.Fatal("the maintainer's comment did not start a run")
+	}
+	// The gate saw the mention it could have gated on itself.
+	mu.Lock()
+	defer mu.Unlock()
+	if len(seen) != 2 || !seen[0].Mentioned || seen[0].Kind != chat.KindIssue {
+		t.Fatalf("gate saw %+v", seen)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Payloads
 // ---------------------------------------------------------------------------

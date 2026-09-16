@@ -121,6 +121,19 @@ type Config struct {
 	// (GITHUB_INSTALLATION_ID) because it is deployment-specific.
 	InstallationID int64
 
+	// OnComment gates a comment before it becomes a run. When set, it
+	// replaces the default gate: without it a comment reaches the agent
+	// when it mentions the bot or continues a thread the agent already
+	// joined. Return true to dispatch the turn, false to ignore the
+	// comment. Use it to require a repository role, an allowlist, or any
+	// other admission rule the platform does not enforce for you — the
+	// webhook makes every commenter look the same. CommentCtx carries the
+	// mention and boundness the default gate uses, so a hook can keep that
+	// behaviour and add to it. The channel still owns the turn it builds:
+	// the invocation token is stripped, the PR diff and the sender reach
+	// the model as context, and the sender is the run's principal.
+	OnComment func(CommentCtx) bool
+
 	// OnIssue, OnPullRequest, and OnCheckSuite are the opt-in hooks for
 	// events that are not a comment. Return a turn to dispatch one, or nil
 	// to ignore the event. The channel fills Kind, the sender context, and
@@ -129,6 +142,24 @@ type Config struct {
 	OnIssue       func(IssueCtx) *chat.Turn
 	OnPullRequest func(PullRequestCtx) *chat.Turn
 	OnCheckSuite  func(CheckSuiteCtx) *chat.Turn
+}
+
+// CommentCtx is what an OnComment gate sees: one comment that mentions the
+// bot or lands on a thread the agent already joined, before the channel
+// turns it into a run.
+type CommentCtx struct {
+	Owner, Repo string
+	Number      int
+	// Kind is "issue", "pull_request", or "review_thread".
+	Kind string
+	// Sender is the comment author's login.
+	Sender string
+	// Body is the raw comment, invocation token included.
+	Body string
+	// Mentioned reports whether the comment names the bot.
+	Mentioned bool
+	// Bound reports whether the agent already joined this thread.
+	Bound bool
 }
 
 // IssueCtx is what an OnIssue hook sees.
@@ -480,7 +511,10 @@ func (c *Channel) turnForComment(env *envelope, owner, repoName string) (*chat.T
 	// agent has been in that PR, and the mention-free follow-up that
 	// continues the conversation is then dropped.
 	_, bound, _ := c.core.Lookup(context.Background(), address)
-	if !mentioned && !bound {
+	if !c.admit(CommentCtx{
+		Owner: owner, Repo: repoName, Number: env.Issue.Number, Kind: kind,
+		Sender: env.Sender.Login, Body: body, Mentioned: mentioned, Bound: bound,
+	}) {
 		// A comment in a thread the agent never joined, with no mention,
 		// is not for it. Everything in a repository is not its business.
 		return nil, 0
@@ -513,7 +547,10 @@ func (c *Channel) turnForReviewComment(env *envelope, owner, repoName string) (*
 	address := AddressReview(owner, repoName, env.PullRequest.Number, root)
 	mentioned := mentionsBot(env.Comment.Body, c.cfg.BotName)
 	_, bound, _ := c.core.Lookup(context.Background(), address)
-	if !mentioned && !bound {
+	if !c.admit(CommentCtx{
+		Owner: owner, Repo: repoName, Number: env.PullRequest.Number, Kind: chat.KindReviewThread,
+		Sender: env.Sender.Login, Body: env.Comment.Body, Mentioned: mentioned, Bound: bound,
+	}) {
 		return nil, 0
 	}
 	return &chat.Turn{
@@ -533,6 +570,16 @@ func (c *Channel) turnForReviewComment(env *envelope, owner, repoName string) (*
 			},
 		},
 	}, env.Comment.ID
+}
+
+// admit decides whether a comment becomes a run. OnComment, when set,
+// replaces the default gate; otherwise a comment is admitted when it
+// mentions the bot or continues a thread the agent already joined.
+func (c *Channel) admit(cc CommentCtx) bool {
+	if c.cfg.OnComment != nil {
+		return c.cfg.OnComment(cc)
+	}
+	return cc.Mentioned || cc.Bound
 }
 
 // AddressIssue is the channel-local address of an issue or a PR timeline.
