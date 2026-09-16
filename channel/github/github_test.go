@@ -472,6 +472,134 @@ func TestOptInHooks(t *testing.T) {
 	}
 }
 
+// A labeled issue starts a coding run: the hook filters on the triggering
+// label, sees the full typed context and the raw event, and the turn
+// carries the checkout descriptor an agent clones from. This is the
+// label-driven trigger the whole flow hangs on.
+func TestLabeledIssueTriggersACodingRun(t *testing.T) {
+	t.Parallel()
+	var mu sync.Mutex
+	var seen github.IssueCtx
+	h := newHarness(t, github.Config{
+		OnIssue: func(ctx github.IssueCtx) *chat.Turn {
+			mu.Lock()
+			seen = ctx
+			mu.Unlock()
+			// Act only on the trigger label, and only when it was just added.
+			if ctx.Action != "labeled" || ctx.Label != "agent-fix" {
+				return nil
+			}
+			return &chat.Turn{Text: "Fix issue #" + fmt.Sprint(ctx.Number) + ": " + ctx.Title}
+		},
+	})
+	h.agent.Say(&kit.TurnResult{Response: "on it"})
+
+	h.deliver(t, "l1", issueLabeled("login is broken", "agent-fix", "bug", "agent-fix"))
+	waitFor(t, func() bool { return len(h.fake.posts()) > 0 })
+
+	id, bound, _ := refRunID(h.ch, github.AddressIssue("octo", "repo", 11))
+	if !bound {
+		t.Fatal("the labeled issue did not start a run")
+	}
+
+	// The hook saw the full typed context.
+	mu.Lock()
+	defer mu.Unlock()
+	if seen.Label != "agent-fix" {
+		t.Fatalf("triggering label = %q, want agent-fix", seen.Label)
+	}
+	if len(seen.Labels) != 2 {
+		t.Fatalf("labels = %v, want the full set of two", seen.Labels)
+	}
+	if seen.Body != "please fix" || seen.State != "open" {
+		t.Fatalf("body/state = %q/%q", seen.Body, seen.State)
+	}
+	if len(seen.Assignees) != 1 || seen.Assignees[0] != "maintainer" {
+		t.Fatalf("assignees = %v", seen.Assignees)
+	}
+	// Raw carries anything the typed layer omits.
+	var raw struct {
+		Action string `json:"action"`
+	}
+	if err := json.Unmarshal(seen.Raw, &raw); err != nil || raw.Action != "labeled" {
+		t.Fatalf("raw event = %s (err %v)", seen.Raw, err)
+	}
+
+	// The checkout descriptor reached the model as context, not as history.
+	recs, _ := h.journal.Replay(context.Background(), id)
+	var ctxText string
+	for _, rec := range recs {
+		if rec.Kind == runtime.RecordContext {
+			ctxText += rec.Text
+		}
+		if rec.Kind == runtime.RecordMessage && strings.Contains(rec.Text, "clone") {
+			t.Fatalf("the checkout descriptor entered the conversation: %q", rec.Text)
+		}
+	}
+	if !strings.Contains(ctxText, "https://github.com/octo/repo.git") ||
+		!strings.Contains(ctxText, "default branch main") {
+		t.Fatalf("checkout context = %q", ctxText)
+	}
+}
+
+// A non-triggering issue action reaches the hook and is ignored when the
+// hook returns nil: the channel no longer gates on "opened" itself, so the
+// filter lives entirely in the hook.
+func TestNonTriggeringIssueActionIsHookGated(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, github.Config{
+		OnIssue: func(ctx github.IssueCtx) *chat.Turn {
+			if ctx.Action != "labeled" || ctx.Label != "agent-fix" {
+				return nil
+			}
+			return &chat.Turn{Text: "work"}
+		},
+	})
+	// A label that is not the trigger: the hook sees it and declines.
+	h.deliver(t, "n1", issueLabeled("something", "question", "question"))
+	time.Sleep(200 * time.Millisecond)
+	if calls := h.agent.Calls(); calls != 0 {
+		t.Fatalf("agent ran %d turns, want 0", calls)
+	}
+}
+
+// A newly opened pull request carries the base, head, and clone URL a
+// coding agent needs to check the change out and work on it.
+func TestPullRequestOpenedCarriesCheckoutContext(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, github.Config{
+		OnPullRequest: func(ctx github.PullRequestCtx) *chat.Turn {
+			if ctx.Action != "opened" {
+				return nil
+			}
+			return &chat.Turn{Text: "Review PR #" + fmt.Sprint(ctx.Number) + " (" + ctx.HeadRef + ")"}
+		},
+	})
+	h.agent.Say(&kit.TurnResult{Response: "reviewing"})
+
+	h.deliver(t, "pro1", pullRequestOpened("add caching"))
+	waitFor(t, func() bool { return len(h.fake.posts()) > 0 })
+
+	id, bound, _ := refRunID(h.ch, github.AddressPullRequest("octo", "repo", 8))
+	if !bound {
+		t.Fatal("the opened pull request did not start a run")
+	}
+	recs, _ := h.journal.Replay(context.Background(), id)
+	var ctxText string
+	for _, rec := range recs {
+		if rec.Kind == runtime.RecordContext {
+			ctxText += rec.Text
+		}
+	}
+	for _, want := range []string{
+		"https://github.com/octo/repo.git", "base main", "head feature", "headsha",
+	} {
+		if !strings.Contains(ctxText, want) {
+			t.Fatalf("PR checkout context %q missing %q", ctxText, want)
+		}
+	}
+}
+
 // OnComment replaces the default gate. A host that requires an allowlist
 // drops a mentioning stranger and admits a listed author, and the gate
 // sees the comment's mention and boundness so it can build on the default
@@ -556,6 +684,41 @@ func issueOpened(title string) string {
 		"repository":{"owner":{"login":"octo"},"name":"repo"},
 		"installation":{"id":77},
 		"issue":{"number":5,"title":%q}
+	}`, title)
+}
+
+// issueLabeled is an `issues` webhook with the `labeled` action: a label was
+// just added, the full label set is present, and the repository carries the
+// clone URL and default branch a checkout needs.
+func issueLabeled(title, added string, labels ...string) string {
+	var ls []string
+	for _, l := range labels {
+		ls = append(ls, fmt.Sprintf(`{"name":%q}`, l))
+	}
+	return fmt.Sprintf(`{
+		"action":"labeled",
+		"sender":{"login":"U1","type":"User"},
+		"repository":{"owner":{"login":"octo"},"name":"repo",
+			"default_branch":"main","clone_url":"https://github.com/octo/repo.git"},
+		"installation":{"id":77},
+		"label":{"name":%q},
+		"issue":{"number":11,"title":%q,"state":"open","body":"please fix",
+			"labels":[%s],"assignees":[{"login":"maintainer"}]}
+	}`, added, title, strings.Join(ls, ","))
+}
+
+// pullRequestOpened is a `pull_request` webhook with the `opened` action,
+// carrying the base and head a checkout descriptor names.
+func pullRequestOpened(title string) string {
+	return fmt.Sprintf(`{
+		"action":"opened",
+		"sender":{"login":"U1","type":"User"},
+		"repository":{"owner":{"login":"octo"},"name":"repo",
+			"default_branch":"main","clone_url":"https://github.com/octo/repo.git"},
+		"installation":{"id":77},
+		"pull_request":{"number":8,"title":%q,"state":"open","draft":false,
+			"base":{"ref":"main","sha":"basesha"},
+			"head":{"ref":"feature","sha":"headsha"}}
 	}`, title)
 }
 

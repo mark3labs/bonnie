@@ -176,6 +176,7 @@ On your test repository:
 | Pull request | Comment `@bonnie review this` on a PR | It answers with the diff in mind |
 | Review thread | Mention it in a review comment on a line | A reply in that thread, as a separate run |
 | New issue | Open a new issue | An unprompted triage comment, from `OnIssue` |
+| Label trigger | Add the `agent-fix` label to an issue | The agent clones, branches, and works the change (needs a coding sandbox — see below) |
 | Durability | `Ctrl-C` mid-answer, then start again | `bonnie runs list` shows the run |
 
 Every run is in the journal, `.bonnie` inside the tree:
@@ -184,6 +185,43 @@ Every run is in the journal, `.bonnie` inside the tree:
 bonnie runs list --journal .bonnie
 bonnie runs show --journal .bonnie github/<owner>/<repo>/issues/1
 ```
+
+## Coding on a label
+
+The `OnIssue` hook fires for **every** `issues` action, not only `opened`, so
+the bot decides what to act on. This example triages a new issue and, when a
+maintainer adds the `agent-fix` label, treats the issue as a request to write
+the change.
+
+Every issue and pull-request turn carries a **checkout descriptor** in its
+context — the clone URL, the default branch, and a pull request's base and
+head. It is public repository metadata, never a token, so it is safe in the
+journal a replay re-injects. The agent clones from it with the `bash` tool and
+branches from the default branch.
+
+Two things the coding path needs that the default setup does not give:
+
+- **A sandbox with network egress.** The default Landlock sandbox has none, so
+  `git clone` cannot reach GitHub. Select a Docker sandbox and an allow-list
+  network policy in `main.go`:
+
+  ```go
+  bonnie.WithSandbox(sandbox.Docker()),
+  bonnie.WithNetwork(sandbox.NetworkPolicy{
+      Mode:  sandbox.NetworkAllowList,
+      Allow: []string{"github.com", "*.githubusercontent.com", "codeload.github.com"},
+  }),
+  ```
+
+  The Docker image must have `git` installed.
+
+- **Authenticated egress for a private repository.** A public repository
+  clones over the token-free HTTPS URL the descriptor names. A private one
+  needs a credential to reach the remote, and this example injects none — so
+  it clones public repositories only. Pushing a branch and opening a pull
+  request need the same authenticated egress, plus a `POST /pulls` call. That
+  is a deliberately separate step, because putting a token where `git` can
+  read it changes the channel's "the token never enters a run" guarantee.
 
 ## Notes
 

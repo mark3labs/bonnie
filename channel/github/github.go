@@ -139,6 +139,21 @@ type Config struct {
 	// to ignore the event. The channel fills Kind, the sender context, and
 	// the PR anchor; the hook supplies the instruction, the address when
 	// it is not the obvious one, and anything else the model should know.
+	//
+	// OnIssue and OnPullRequest fire for EVERY action GitHub sends —
+	// opened, edited, closed, labeled, assigned, and the rest — so the
+	// hook decides which ones matter by reading IssueCtx.Action and the
+	// label set. A bot that acts on a triage label returns a turn only
+	// when Action is "labeled" and Labels contains that label. The typed
+	// fields cover the common case; Raw carries the whole event for
+	// anything they omit.
+	//
+	// Every turn these hooks build also carries a checkout descriptor in
+	// its context — the clone URL, the default branch, and a pull
+	// request's base and head — so a coding agent can clone the repository
+	// and branch from it. See CommentCtx and the package doc for the
+	// invariant this respects: the descriptor is public metadata, never a
+	// token.
 	OnIssue       func(IssueCtx) *chat.Turn
 	OnPullRequest func(PullRequestCtx) *chat.Turn
 	OnCheckSuite  func(CheckSuiteCtx) *chat.Turn
@@ -162,18 +177,52 @@ type CommentCtx struct {
 	Bound bool
 }
 
-// IssueCtx is what an OnIssue hook sees.
+// IssueCtx is what an OnIssue hook sees. It fires for every issues webhook
+// action, so the hook filters on Action and Labels.
 type IssueCtx struct {
 	Owner, Repo           string
 	Number                int
 	Title, Action, Sender string
+	// State is "open" or "closed".
+	State string
+	// Body is the issue description, as authored.
+	Body string
+	// Labels is every label on the issue now.
+	Labels []string
+	// Label is the one added or removed on a "labeled"/"unlabeled" action,
+	// empty on any other action.
+	Label string
+	// Assignees is every assignee's login.
+	Assignees []string
+	// Raw is the full webhook event JSON, for a field the typed layer
+	// omits. Unmarshal it into a shape of your own.
+	Raw json.RawMessage
 }
 
-// PullRequestCtx is what an OnPullRequest hook sees.
+// PullRequestCtx is what an OnPullRequest hook sees. It fires for every
+// pull_request webhook action, so the hook filters on Action and Labels.
 type PullRequestCtx struct {
 	Owner, Repo           string
 	Number                int
 	Title, Action, Sender string
+	// State is "open" or "closed".
+	State string
+	// Body is the pull request description, as authored.
+	Body string
+	// Draft reports whether the pull request is a draft.
+	Draft bool
+	// Labels is every label on the pull request now.
+	Labels []string
+	// Label is the one added or removed on a "labeled"/"unlabeled" action,
+	// empty on any other action.
+	Label string
+	// BaseRef and HeadRef are the branch names the pull request merges into
+	// and from; HeadSHA is the head commit. They name what an agent checks
+	// out to work on the change.
+	BaseRef, HeadRef, HeadSHA string
+	// Raw is the full webhook event JSON, for a field the typed layer
+	// omits. Unmarshal it into a shape of your own.
+	Raw json.RawMessage
 }
 
 // CheckSuiteCtx is what an OnCheckSuite hook sees.
@@ -286,6 +335,17 @@ type envelope struct {
 	PullRequest  *pullRequest  `json:"pull_request"`
 	Comment      *comment      `json:"comment"`
 	CheckSuite   *checkSuite   `json:"check_suite"`
+	// Label is the label added or removed on a "labeled"/"unlabeled"
+	// action. Issue.Labels and PullRequest.Labels carry the full set; this
+	// is the one the event turned on.
+	Label *label `json:"label"`
+
+	// raw is the exact webhook body, handed to a hook as IssueCtx.Raw or
+	// PullRequestCtx.Raw so it can read a field the typed layer omits. It
+	// is not a JSON field: handleEvent sets it after unmarshalling, so a
+	// hook can act on anything GitHub sends now or later without the
+	// channel growing a field for it first.
+	raw json.RawMessage
 }
 
 type actor struct {
@@ -296,6 +356,26 @@ type actor struct {
 type repo struct {
 	Owner actor  `json:"owner"`
 	Name  string `json:"name"`
+	// FullName, DefaultBranch, CloneURL, and Private come straight off the
+	// webhook's repository object. They feed the checkout descriptor the
+	// channel puts in a turn's context, so a coding agent knows what to
+	// clone and which branch to base work on without a second API call.
+	FullName      string `json:"full_name"`
+	DefaultBranch string `json:"default_branch"`
+	CloneURL      string `json:"clone_url"`
+	Private       bool   `json:"private"`
+}
+
+// label is one issue or pull-request label. Only the name reaches a hook.
+type label struct {
+	Name string `json:"name"`
+}
+
+// ref is one side of a pull request: a branch name and the commit it points
+// at. The checkout descriptor names both so an agent can fetch the head.
+type ref struct {
+	Ref string `json:"ref"`
+	SHA string `json:"sha"`
 }
 
 type installation struct {
@@ -305,12 +385,24 @@ type installation struct {
 type issue struct {
 	Number      int       `json:"number"`
 	Title       string    `json:"title"`
+	State       string    `json:"state"`
+	Body        string    `json:"body"`
+	Labels      []label   `json:"labels"`
+	Assignees   []actor   `json:"assignees"`
+	HTMLURL     string    `json:"html_url"`
 	PullRequest *struct{} `json:"pull_request"`
 }
 
 type pullRequest struct {
-	Number int    `json:"number"`
-	Title  string `json:"title"`
+	Number  int     `json:"number"`
+	Title   string  `json:"title"`
+	State   string  `json:"state"`
+	Body    string  `json:"body"`
+	Draft   bool    `json:"draft"`
+	Labels  []label `json:"labels"`
+	HTMLURL string  `json:"html_url"`
+	Base    ref     `json:"base"`
+	Head    ref     `json:"head"`
 }
 
 type comment struct {
@@ -353,6 +445,8 @@ func (c *Channel) handleEvent(w http.ResponseWriter, r *http.Request, _ channel.
 	if err := json.Unmarshal(body, &env); err != nil {
 		return
 	}
+	// Keep the exact body so a hook can read a field the typed layer omits.
+	env.raw = body
 	// Bots never trigger the agent: the channel's own replies are comments
 	// too, and the loop must not close.
 	if strings.HasSuffix(env.Sender.Login, "[bot]") || env.Sender.Type == "Bot" {
@@ -420,26 +514,33 @@ func (c *Channel) normalise(env *envelope) (*chat.Turn, int64) {
 	case env.Comment != nil && env.PullRequest != nil:
 		return c.turnForReviewComment(env, owner, repoName)
 
-	case env.Issue != nil && env.Action == "opened":
+	case env.Issue != nil:
 		if c.cfg.OnIssue == nil {
 			return nil, 0
 		}
 		turn := c.cfg.OnIssue(IssueCtx{
 			Owner: owner, Repo: repoName, Number: env.Issue.Number,
 			Title: env.Issue.Title, Action: env.Action, Sender: env.Sender.Login,
+			State: env.Issue.State, Body: env.Issue.Body,
+			Labels: labelNames(env.Issue.Labels), Label: labelName(env.Label),
+			Assignees: logins(env.Issue.Assignees), Raw: env.raw,
 		})
 		if turn != nil && turn.Address == "" {
 			turn.Address = AddressIssue(owner, repoName, env.Issue.Number)
 		}
 		return c.finishHooked(turn, env, owner, repoName, chat.KindIssue), 0
 
-	case env.PullRequest != nil && env.Action == "opened":
+	case env.PullRequest != nil:
 		if c.cfg.OnPullRequest == nil {
 			return nil, 0
 		}
 		turn := c.cfg.OnPullRequest(PullRequestCtx{
 			Owner: owner, Repo: repoName, Number: env.PullRequest.Number,
 			Title: env.PullRequest.Title, Action: env.Action, Sender: env.Sender.Login,
+			State: env.PullRequest.State, Body: env.PullRequest.Body, Draft: env.PullRequest.Draft,
+			Labels: labelNames(env.PullRequest.Labels), Label: labelName(env.Label),
+			BaseRef: env.PullRequest.Base.Ref, HeadRef: env.PullRequest.Head.Ref,
+			HeadSHA: env.PullRequest.Head.SHA, Raw: env.raw,
 		})
 		if turn != nil && turn.Address == "" {
 			turn.Address = AddressPullRequest(owner, repoName, env.PullRequest.Number)
@@ -478,8 +579,8 @@ func (c *Channel) normalise(env *envelope) (*chat.Turn, int64) {
 	}
 }
 
-// finishHooked fills the parts a hook does not own: the kind and the
-// event context.
+// finishHooked fills the parts a hook does not own: the kind, the event
+// context, and the checkout descriptor a coding agent works from.
 func (c *Channel) finishHooked(turn *chat.Turn, env *envelope, owner, repoName, kind string) *chat.Turn {
 	if turn == nil {
 		return nil
@@ -487,7 +588,76 @@ func (c *Channel) finishHooked(turn *chat.Turn, env *envelope, owner, repoName, 
 	turn.Kind = kind
 	turn.Context = append(turn.Context,
 		"GitHub event "+env.Action+" on "+owner+"/"+repoName+", triggered by "+env.Sender.Login+".")
+	if line := repoCheckoutLine(env); line != "" {
+		turn.Context = append(turn.Context, line)
+	}
 	return turn
+}
+
+// labelNames projects a label list to its names, dropping empties.
+func labelNames(ls []label) []string {
+	if len(ls) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(ls))
+	for _, l := range ls {
+		if l.Name != "" {
+			out = append(out, l.Name)
+		}
+	}
+	return out
+}
+
+// labelName is the name of the label an event turned on, empty when the
+// event carries none.
+func labelName(l *label) string {
+	if l == nil {
+		return ""
+	}
+	return l.Name
+}
+
+// logins projects an actor list to their logins, dropping empties.
+func logins(as []actor) []string {
+	if len(as) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(as))
+	for _, a := range as {
+		if a.Login != "" {
+			out = append(out, a.Login)
+		}
+	}
+	return out
+}
+
+// repoCheckoutLine is the checkout descriptor the channel adds to a turn's
+// context: the clone URL, the default branch, and — for a pull request — its
+// base and head. It is public repository metadata, never a token, so it is
+// safe in a journalled record that a replay re-injects. A private repository
+// still needs auth to clone; the descriptor names what to fetch, not how the
+// egress is authenticated. It returns "" when the repository is unknown.
+func repoCheckoutLine(env *envelope) string {
+	r := env.Repository
+	url := r.CloneURL
+	if url == "" && r.Owner.Login != "" && r.Name != "" {
+		url = "https://github.com/" + r.Owner.Login + "/" + r.Name + ".git"
+	}
+	if url == "" {
+		return ""
+	}
+	line := "Repository checkout: clone " + url
+	if r.DefaultBranch != "" {
+		line += " (default branch " + r.DefaultBranch + ")"
+	}
+	if pr := env.PullRequest; pr != nil && (pr.Base.Ref != "" || pr.Head.Ref != "") {
+		line += fmt.Sprintf(". Pull request base %s, head %s", pr.Base.Ref, pr.Head.Ref)
+		if pr.Head.SHA != "" {
+			line += " at " + pr.Head.SHA
+		}
+		line += "."
+	}
+	return line
 }
 
 // turnForComment normalises an issue or PR-timeline comment.
@@ -674,11 +844,15 @@ func titleFor(title string, isPR bool) string {
 }
 
 // contextFor builds the per-turn context of a comment: the event, the
-// sender, whether the bot was mentioned, and — for a PR — the diff.
+// sender, whether the bot was mentioned, the repository checkout, and — for
+// a PR — the diff.
 func (c *Channel) contextFor(env *envelope, owner, repoName string, mentioned, isPR bool) []string {
 	lines := []string{
 		fmt.Sprintf("GitHub %s comment on %s/%s#%d by %s; the agent was %s.",
 			eventKind(env), owner, repoName, number(env), env.Sender.Login, mentionedOrNot(mentioned)),
+	}
+	if line := repoCheckoutLine(env); line != "" {
+		lines = append(lines, line)
 	}
 	if isPR {
 		lines = append(lines, c.pullRequestContext(env, owner, repoName, number(env))...)
