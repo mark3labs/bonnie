@@ -41,6 +41,17 @@ indefinitely**, **reachable over HTTP**. State the limits from the current
 - **Notes written mid-release must be re-checked against the code at tag
   time.** A later commit in the same release can make an earlier entry false,
   and nothing in CI notices.
+- **Re-read the commit list, not the section.** No test knows what a release
+  forgot to say, so a feature that never reached `CHANGELOG.md` ships unnamed.
+  Read `git log <latest-tag>..HEAD` against the notes; `v0.7.0` was 22 commits
+  and four of them had added a public surface the section never mentioned.
+- **A limit can go stale inside one release.** At `v0.7.0` the README limit
+  "the HTTP channel does not verify auth" was falsified by a commit of that
+  same increment. Check each limit against the code you are tagging, not
+  against the README you remember.
+- **Prove a behaviour from the downloaded artifact.** That it builds and
+  prints its version says nothing about the claim the release is *for*. At
+  `v0.7.0` the published binary was made to refuse `--sandbox none` by name.
 - **Do not copy the previous release's limits forward.** That is how a stale
   limit gets published.
 - **A guard pinned to a fixed version is worse than no guard: it reports
@@ -71,6 +82,61 @@ edited to the required form.
 | `v0.4.0` | `9ccb959` | 2026-09-14 |
 | `v0.5.0` | `f9794d1` | 2026-09-15 |
 | `v0.6.0` | `09f5293` | 2026-09-15 |
+| `v0.7.0` | `4b6fa58` | 2026-09-16 |
+
+### `v0.7.0`, 2026-09-16 — every box confirmed
+
+- [x] `task release-check` — goreleaser 2.17.1, 1 config validated
+- [x] `task release-snapshot` — **two** targets, archives and checksums. Two
+      and not four is correct here: this is the release that makes BONNIE
+      Linux-only
+- [x] No `replace` directive in `go.mod`; Kit stays `v0.106.0`
+- [x] All CI jobs green on `master` at the tagged commit `4b6fa58`:
+      `test` and `lint` (run `35110883200`)
+- [x] `CHANGELOG.md` carries a `[0.7.0]` section in Keep-a-Changelog shape
+- [x] Release notes state the three claims **and** the limits, published
+      with no human edit (the third tag with automatic notes)
+- [x] Tag pushed; `release.yml` run `35111993043` succeeded
+- [x] Three artifacts published; the downloaded `linux_amd64` binary prints
+      `bonnie 0.7.0`, its checksum verifies, and it is statically linked
+
+**Re-checking the notes at tag time found six defects**, the largest count so
+far, and the reason is worth recording: this increment ran to 22 commits. Four
+features were in the tree and not in the notes — the chat activity indicator
+(`chat.WithActivity`, Slack `Config.Activity`), `sandbox.EnvInjected` with
+`bonnie.WithSandboxEnv`, `github.Config.OnComment`, and the label-triggered
+coding run with its checkout descriptor, which also **changes behaviour** by
+firing `OnIssue` and `OnPullRequest` on every action. The
+`fix!: authenticate in Routes, not in the mux wrapper` entry was missing from
+*Security* and the example swap from *Removed*. The section also carried two
+separate `### Added` headings and no claims at all.
+
+**The guard catches one defect of the six.** `TestRepositoryChangelogStates
+ClaimsAndLimits` would have failed on the missing claims and passed over the
+four unrecorded features, because no test knows what a release forgot to say.
+The longer the increment, the more the notes depend on reading
+`git log <tag>..HEAD` against the notes line by line. **A long increment needs
+the commit list read, not the section re-read.**
+
+**Two stale limits were corrected rather than published.** `README.md` still
+said "The HTTP channel does not verify auth" after `http.WithAuthenticator`
+landed *in this same increment* — the limit went stale between two commits of
+one release, which is faster than the warning above anticipates — and
+`AGENTS.md` still listed `examples/minimal` and `examples/hitl-restart`, both
+deleted. The `0.7.0` limits were then taken from the corrected `README.md`.
+
+**Verified from the artifact, not from the source tree.** The headline of this
+release is that a tool call cannot escape its workspace, so the downloaded
+binary was made to prove a *behaviour*: `bonnie serve --sandbox none` is
+refused by name, with the message naming `--sandbox landlock` and
+`--sandbox local`. A snapshot that builds says nothing about whether the
+sandbox floor holds.
+
+**Version choice.** MINOR, and not a close call: three commits are `feat!` or
+`fix!`, and exported signatures moved in all of `runtime/`, `channel/`, and
+`sandbox/` — `InputResponse.Approved` became `*bool`, every `sandbox.Provider`
+consumer now gets a backend it did not ask for, and `channel.RouteHandler` is
+new.
 
 ### `v0.6.0`, 2026-09-15 — every box confirmed
 
