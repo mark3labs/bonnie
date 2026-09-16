@@ -5,57 +5,107 @@ All notable changes to BONNIE are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.7.0] — 2026-09-16
 
-**Breaking: every tool call now runs in a sandbox, and BONNIE is Linux-only.**
+**Breaking: every tool call now runs in a sandbox, BONNIE is Linux-only, and a
+turn no longer dies with the caller that started it.**
 
-### Security
+### The claims
 
-- **A turn is no longer killed by the caller that started it.**
-  `runtime.Runner` now derives a turn's context with `context.WithoutCancel`,
-  so an HTTP client that hangs up, a webhook handler that returns, or a CLI a
-  person interrupts no longer stops a durable run. The journal kept such a run
-  at its last checkpoint instead of at an answer. Stopping a turn is
-  `Runner.Cancel` and nothing else; a caller's deadline no longer bounds how
-  long the agent may think.
+Still what BONNIE is for. Two of the three moved this release:
 
-- **`operation_id` now requires a principal an authenticator proved.** The
-  idempotency key is namespaced by the caller's identity, but the HTTP channel
-  derived that identity from the request body, which the caller writes. Any
-  caller could name another principal, guess an operation ID, and be handed
-  that principal's run. A start that carries `operation_id` without
-  `http.WithAuthenticator` configured is now refused with 400 and a message
-  naming what is missing.
+- **A run survives process death.** The conversation is journalled as it
+  happens, so another process — after a crash, on another machine — resumes
+  the run with the whole history, including which tools it already called, so
+  a side effect is not repeated. A tool-calling step commits as one SQLite
+  transaction: whole, or absent. A turn now survives the **caller** going away
+  as well: an HTTP client that hangs up no longer stops the run, and the
+  mandatory `channeltest` case *"a turn survives the caller going away"* holds
+  that for all five transports.
+- **A run parks indefinitely.** A run waiting on a person holds no process and
+  no compute — the sandbox opens lazily, so a parked run costs a row in a
+  database. Exit the process and answer tomorrow. The answer now carries the
+  verdict: a run parked on an approval resumes knowing what the human decided,
+  and on Discord the person answers by pressing a button.
+- **A run is reachable over HTTP.** `channel/http` mounts its routes under
+  `/bonnie/v1` — health, info, idempotent start, stable error codes, session
+  controls — and an NDJSON event stream that survives a reconnect and a
+  restart; the Slack, Discord, Telegram, and GitHub adapters carry the same
+  durable run into a thread. A host can now put an authenticator in front of
+  every route, and `client` speaks the whole contract from Go.
 
-- **Unmapped errors no longer reach the client verbatim.** `writeError`
-  returned `err.Error()` for anything it did not recognise, which sent journal
-  paths, driver messages, and SQL to whoever could reach the API. A 500 now
-  carries the stable `"internal"` code and nothing else; the detail goes to
-  stderr. The mapped sentinels keep their exact wording, which is contract.
-
-- **An approval verdict now reaches the model.** `InputResponse.Approved` was
-  declared and read by nothing: only `Text` ever reached the agent, so a run
-  parked by `runtime.ApprovalTool` and answered with a bare
-  `{"approved": true}` resumed with an **empty message** and the agent had to
-  guess what the human decided. Any structured approval — a button, a
-  checkbox, an API field — had no way to say yes.
-
-  The field is now `*bool`, because a plain bool cannot say "rejected": false
-  is its zero value, so a refusal and an answer that never mentioned approval
-  were the same value. An approval resumes the turn as `approved`,
-  `rejected`, or the verdict followed by the responder's own words
-  (`rejected: that drops production`).
+The limits are under **Known limits** below, stated as plainly. A framework
+that hides its limits gets deployed into situations it cannot handle.
 
 ### Added
+
+- **`sandbox.Landlock()`** — the floor backend, and the default. It confines
+  tool calls to the run's own workspace with the Linux Landlock LSM and needs
+  nothing installed: no daemon, no image, no KVM, no root.
+
+  Because a Landlock domain is irreversible and process-wide, BONNIE cannot
+  restrict its own server — that would take away the journal. Each command
+  runs in a child that re-executes BONNIE's binary, restricts itself, and only
+  then becomes the command. The restriction survives `execve` and is inherited,
+  so **a subshell cannot escape it**. It also builds the child's environment
+  from nothing, so a provider API key in the server's environment never reaches
+  a model-chosen command.
+
+  It passes all 18 conformance cases. One new dependency,
+  `github.com/landlock-lsm/go-landlock`, which issues the syscalls with no cgo
+  — `CGO_ENABLED=0` still produces a single static binary.
+
+- `sandbox.ErrOutsideWorkspace`, returned by the file tools when a path would
+  leave the workspace, including through a symlink the agent created.
+
+- `sandbox.WorkingDirReporter`, implemented by a backend whose commands do not
+  run at `/workspace`. It is how the system prompt learns the real working
+  directory; `sandbox.Seeded` and `sandbox.EnvInjected` forward it.
+
+- **`sandbox.EnvInjected` and `bonnie.WithSandboxEnv`** put a fixed set of
+  `KEY=value` pairs into every command a sandbox runs, so a run gets a
+  credential or a setting **the model must not choose**. The wrapper injects
+  over the `Command.Env` seam every backend already honours, so one
+  implementation covers Local, Docker, microsandbox, and Landlock alike.
+  Injected values are appended last, so an operator-fixed value wins over a
+  per-command variable of the same name and cannot be clobbered. It conflicts
+  with `WithAgentFactory`, which owns the agent and would otherwise accept the
+  setting and ignore it.
+
+- **The tree's `skills/` directory is loaded.** It was embedded by codegen
+  from the first release and read by nothing, which `bonnie.Tree.Skills`
+  admitted in its own doc comment. `Agent.Run` now resolves it and hands it to
+  Kit as `Options.SkillsDir`: each skill's name and description reach the
+  system prompt, and the body arrives when the model calls `activate_skill`.
+
+  The path is resolved the way the instructions file is — the tree on disk
+  first, the copy codegen embedded second. Kit takes a path, so a built binary
+  on a bare host unpacks the embedded skills beside its journal, into
+  `<journal>/skills`. That copy is replaced on each start rather than kept: a
+  skill is authored data the model never writes, so a skill withdrawn from the
+  tree must not survive in the prompt.
+
+- **`bonnie.WithSkills(dir)`**, the option that replaces the tree's skills
+  directory, beside `WithInstructions` and `WithWorkspace`. `WithSkills("")`
+  is a host with no tree, and is what `bonnie serve` passes.
+
+  A tree with no skills now says so to Kit (`Options.NoSkills`) instead of
+  leaving auto-discovery on. Kit would otherwise load `~/.agents/skills` — the
+  operator's own editor skills — and the `.agents/skills` under
+  `Options.SessionDir`, which `sandbox.Agent` points at the sandbox root. A
+  served agent must not take instructions from a directory it merely sits
+  beside. Skills a host configured itself through `WithKit` are untouched.
 
 - **A `.env` in the working directory is loaded at startup.** `Agent.Run`
   reads `.env` before it builds the agent or mounts a channel, so a provider
   key (`ANTHROPIC_API_KEY`) or a channel credential (`SLACK_SIGNING_SECRET`)
   can live in a file instead of a shell `export`. An exported variable still
   wins over the file — the file fills a gap, the same rule the channel
-  credentials already follow — and a missing `.env` is not an error. The
-  startup banner names the file when it loaded one. It is not a manifest: it
-  sets no BONNIE setting, only the environment BONNIE already reads.
+  credentials already follow — and a missing `.env` is not an error, while a
+  file that cannot be parsed is, named at startup rather than surfacing later
+  as an agent with no credentials. The startup banner names the file when it
+  loaded one. It is not a manifest: it sets no BONNIE setting, only the
+  environment BONNIE already reads.
 
 - **`client` — a public Go client for the wire API.** It speaks the whole
   `/bonnie/v1` contract: health, info, address lookup and bind, start, send,
@@ -64,12 +114,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   BONNIE's own TUI is now one of its callers rather than a privileged path
   into the server, which is what keeps the client honest: a capability the
-  wire cannot express is one the TUI cannot show. `cmd/bonnie/tui.HTTP` and
-  `tui.NewHTTP` remain as deprecated aliases.
+  wire cannot express is one the TUI cannot show.
 
 - **`runtime.Approve` and `runtime.Reject`** build an approval answer without
   making a caller take the address of a bool literal, and
-  **`client.RespondWith`** puts one on the wire.
+  **`client.Client.RespondWith`** puts one on the wire.
 
 - **`http.WithAuthenticator`** verifies every request except
   `GET /bonnie/v1/health` and makes the principal it returns the run's
@@ -124,6 +173,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   message without its buttons, which is the double-press guard. Slack and
   Telegram still answer in text; the shared layer is what they will use.
 
+- **A chat thread shows what the agent is doing while a turn runs.**
+  `chat.WithActivity` and `chat.ActivityFunc` report Thinking…, Working…, the
+  line of reasoning the model is following, and the tool it called with its
+  most telling argument — `read_file runner.go`, `bash go test ./...`, plus
+  `+N more` when the model asked for several at once. Slack renders it and
+  chooses the surface with `Config.Activity`; the default edits one italic
+  placeholder in place and needs no scope the channel does not already have.
+
+  The reducer lives in `channel/chat`, so Discord and Telegram get the same
+  statuses when their renderers are written. L1 is untouched: the statuses come
+  from Kit's lifecycle events the runner already puts on `Runner.Events`, so an
+  indicator costs no extra model work and writes **no journal record**.
+  Clearing waits for the watching goroutine to return, because a status still
+  in flight would otherwise strand "Working…" above the answer for ever — the
+  one failure a thread keeps.
+
+- **The GitHub channel starts a coding run from a label.** `OnIssue` and
+  `OnPullRequest` now see every `issues` and `pull_request` action, so the hook
+  owns the filter and a maintainer adding `agent-fix` can start a run.
+  `IssueCtx` and `PullRequestCtx` gain `State`, `Body`, `Labels`, `Label`,
+  `Assignees`, a pull request's `BaseRef`, `HeadRef` and `HeadSHA`, and `Raw` —
+  the exact webhook body, for a field the typed layer omits.
+
+  Every issue, pull-request, and comment turn carries a **checkout descriptor**
+  in its context — clone URL, default branch, and a pull request's base, head,
+  and SHA — so a coding agent clones and branches with the bash tool it has. It
+  is public repository metadata and never a token, so it is safe in a
+  `RecordContext` that a replay re-injects; a guard test asserts it never lands
+  in a `RecordMessage`.
+
+- **`github.Config.OnComment`** replaces the channel's hardwired
+  mention-or-bound gate, so a host can admit a comment on its own terms —
+  "answer only repository admins" was impossible without forking the channel.
+  `CommentCtx` carries the sender, kind, body, and the `Mentioned`/`Bound`
+  booleans the default gate uses, so a hook extends the default instead of
+  re-deriving it. With no hook the behaviour is unchanged.
+
 - **`channeltest` gains capabilities and a durability case.** An adapter
   declares what it cannot do in `Fixture.Unsupported`, and the suite skips
   exactly those cases with a message naming the capability — so the set of
@@ -133,18 +219,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   survives the caller going away"*, holds the durability claim above for every
   transport; all five adapters pass it.
 
-### Fixed
-
-- **An address now resolves to a run that exists.** `POST
-  /bonnie/v1/addresses/{address}` journalled the binding but not the run, so
-  the ID it handed back answered 404 on every ID-addressed route until the
-  first turn happened to write a record — defeating the route's whole purpose,
-  which is to give a client a usable run ID *before* it speaks. A run created
-  through the address map is now journalled as `pending` first, so the ID
-  works straight away.
-
-  Two visible consequences: such a run carries one extra journal record, and a
-  stream read from cursor 0 now opens with a `pending` state event.
+- **`examples/github-bot` and `examples/slack-bot`** — each a runnable agent
+  tree in this module, with a README that walks through creating the GitHub App
+  or Slack app by hand and live-testing with `bonnie dev`. The scaffold's
+  channel menu now lists `bonnie.WithGitHub` beside the others.
 
 ### Changed
 
@@ -176,65 +254,103 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   prompt over its own `pwd`.
 
 - **Linux only.** Releases build `linux/amd64` and `linux/arm64`. macOS and
-  Windows are no longer supported and are off the roadmap.
+  Windows are no longer supported and are off the roadmap. Restoring macOS
+  needs a seatbelt backend of equal strength first, not one more build target.
 
-### Added
+- **A GitHub hook now fires on actions it never saw.** `OnIssue` and
+  `OnPullRequest` ran on `opened` only; they run on `labeled`, `edited`,
+  `closed`, and the rest as well. A hook written against the old behaviour must
+  filter on `Action` itself or it will start runs it did not before.
 
-- **The tree's `skills/` directory is loaded.** It was embedded by codegen
-  from the first release and read by nothing, which `bonnie.Tree.Skills`
-  admitted in its own doc comment. `Agent.Run` now resolves it and hands it to
-  Kit as `Options.SkillsDir`: each skill's name and description reach the
-  system prompt, and the body arrives when the model calls `activate_skill`.
+- **`README.md` was rewritten against the code**, and `AGENTS.md`
+  restructured to the agents.md format.
 
-  The path is resolved the way the instructions file is — the tree on disk
-  first, the copy codegen embedded second. Kit takes a path, so a built binary
-  on a bare host unpacks the embedded skills beside its journal, into
-  `<journal>/skills`. That copy is replaced on each start rather than kept: a
-  skill is authored data the model never writes, so a skill withdrawn from the
-  tree must not survive in the prompt.
+### Deprecated
 
-- **`bonnie.WithSkills(dir)`**, the option that replaces the tree's skills
-  directory, beside `WithInstructions` and `WithWorkspace`. `WithSkills("")`
-  is a host with no tree, and is what `bonnie serve` passes.
+- `cmd/bonnie/tui.HTTP` and `tui.NewHTTP` remain as aliases for the `client`
+  package. Use `client.Client` and `client.New`.
 
-  A tree with no skills now says so to Kit (`Options.NoSkills`) instead of
-  leaving auto-discovery on. Kit would otherwise load `~/.agents/skills` — the
-  operator's own editor skills — and the `.agents/skills` under
-  `Options.SessionDir`, which `sandbox.Agent` points at the sandbox root. A
-  served agent must not take instructions from a directory it merely sits
-  beside. Skills a host configured itself through `WithKit` are untouched.
+### Removed
 
-- **`sandbox.Landlock()`** — the floor backend, and the default. It confines
-  tool calls to the run's own workspace with the Linux Landlock LSM and needs
-  nothing installed: no daemon, no image, no KVM, no root.
+- **`examples/minimal` and `examples/hitl-restart`.** The two starter examples
+  demonstrated the library rather than a deployment; `github-bot` and
+  `slack-bot` replace them, and park-and-resume across a real process kill is
+  proven by the live smoke procedure instead of by an example.
+- **The spec documents** (`docs/SPEC.md`, `docs/L2.md`, `docs/CHANNELS.md`,
+  `docs/SANDBOX.md`, `docs/TASKS.md`, `docs/HANDOVER.md`, `docs/UPSTREAM.md`).
+  The code is the spec: the godoc on each exported symbol and the comments on
+  the tests carry the reasoning. `docs/RELEASE.md` stays, because the release
+  procedure is the one thing that is not in the code.
 
-  Because a Landlock domain is irreversible and process-wide, BONNIE cannot
-  restrict its own server — that would take away the journal. Each command
-  runs in a child that re-executes BONNIE's binary, restricts itself, and only
-  then becomes the command. The restriction survives `execve` and is inherited,
-  so **a subshell cannot escape it**. It also builds the child's environment
-  from nothing, so a provider API key in the server's environment never reaches
-  a model-chosen command.
+### Fixed
 
-  It passes all 18 conformance cases. One new dependency,
-  `github.com/landlock-lsm/go-landlock`, which issues the syscalls with no cgo
-  — `CGO_ENABLED=0` still produces a single static binary.
+- **An address now resolves to a run that exists.** `POST
+  /bonnie/v1/addresses/{address}` journalled the binding but not the run, so
+  the ID it handed back answered 404 on every ID-addressed route until the
+  first turn happened to write a record — defeating the route's whole purpose,
+  which is to give a client a usable run ID *before* it speaks. A run created
+  through the address map is now journalled as `pending` first, so the ID
+  works straight away.
 
-- `sandbox.ErrOutsideWorkspace`, returned by the file tools when a path would
-  leave the workspace, including through a symlink the agent created.
+  Two visible consequences: such a run carries one extra journal record, and a
+  stream read from cursor 0 now opens with a `pending` state event.
 
-- `sandbox.WorkingDirReporter`, implemented by a backend whose commands do not
-  run at `/workspace`. It is how the system prompt learns the real working
-  directory; `sandbox.Seeded` forwards it.
+### Security
+
+- **A turn is no longer killed by the caller that started it.**
+  `runtime.Runner` now derives a turn's context with `context.WithoutCancel`,
+  so an HTTP client that hangs up, a webhook handler that returns, or a CLI a
+  person interrupts no longer stops a durable run. The journal kept such a run
+  at its last checkpoint instead of at an answer. Stopping a turn is
+  `Runner.Cancel` and nothing else; a caller's deadline no longer bounds how
+  long the agent may think.
+
+- **The authenticator is applied in `Routes`, not in the mux wrapper.** It was
+  applied by `HandlerWithOutbound`, but `Routes()` has a second consumer:
+  BONNIE's own `Serve` mounts the same routes on a mux of its own, and that
+  path never saw the check. An authenticator therefore protected a hand-wired
+  host and left the framework's own server wide open — health and info answered
+  200 with no credential. Every unit test used `Handler()`, so every unit test
+  passed; a live run against a scaffolded tree found it in one request. The
+  guard now belongs to the channel's single definition of its own surface, so
+  both mounting paths are covered by construction.
+
+- **`operation_id` now requires a principal an authenticator proved.** The
+  idempotency key is namespaced by the caller's identity, but the HTTP channel
+  derived that identity from the request body, which the caller writes. Any
+  caller could name another principal, guess an operation ID, and be handed
+  that principal's run. A start that carries `operation_id` without
+  `http.WithAuthenticator` configured is now refused with 400 and a message
+  naming what is missing.
+
+- **Unmapped errors no longer reach the client verbatim.** `writeError`
+  returned `err.Error()` for anything it did not recognise, which sent journal
+  paths, driver messages, and SQL to whoever could reach the API. A 500 now
+  carries the stable `"internal"` code and nothing else; the detail goes to
+  stderr. The mapped sentinels keep their exact wording, which is contract.
+
+- **An approval verdict now reaches the model.** `InputResponse.Approved` was
+  declared and read by nothing: only `Text` ever reached the agent, so a run
+  parked by `runtime.ApprovalTool` and answered with a bare
+  `{"approved": true}` resumed with an **empty message** and the agent had to
+  guess what the human decided. Any structured approval — a button, a
+  checkbox, an API field — had no way to say yes.
+
+  The field is now `*bool`, because a plain bool cannot say "rejected": false
+  is its zero value, so a refusal and an answer that never mentioned approval
+  were the same value. An approval resumes the turn as `approved`,
+  `rejected`, or the verdict followed by the responder's own words
+  (`rejected: that drops production`).
 
 ### Known limits
 
-- **A skill's bundled files stay on the host.** Kit names a skill's
-  `scripts/`, `references/`, and `assets/` files in the text it injects when
-  the skill is activated, with a host path. The tools run in a sandbox that
-  does not have that path, so the model is told about a file it cannot open.
-  Put what the model must read in the skill body, and put a file it must open
-  in `workspace/`, which is copied into the sandbox.
+Stated as plainly as the claims, and taken from the current
+[`README.md`](README.md#limits) rather than carried forward.
+
+- **Linux only.** The floor is the Landlock LSM, so a release builds
+  `linux/amd64` and `linux/arm64` and nothing else. A kernel older than 5.13,
+  or one booted with Landlock disabled, has no default sandbox: BONNIE refuses
+  to start rather than run a tool unconfined, naming `--sandbox docker`.
 - **The default backend is containment, not isolation.** `Landlock` confines
   the filesystem and withholds host credentials. It does **not** confine the
   network and it shares the host kernel, so a local privilege-escalation bug
@@ -249,11 +365,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   closes this; withholding `/var/run` was tried and does not. Use a dedicated
   unprivileged user, or microsandbox. Found by a live model, which named the
   vector itself after every filesystem technique was refused.
-- A kernel older than 5.13, or one booted with Landlock disabled, has no
-  floor. BONNIE refuses to start rather than run unconfined, naming
-  `--sandbox docker`.
+- **Docker is namespaces, not a kernel.** Use microsandbox for hostile code.
+  microsandbox is verified on Linux with KVM, and its network policy is fixed
+  when the sandbox is made: reattaching under a different policy fails with
+  `ErrPolicyMismatch`.
+- **Sandbox egress is open** until a policy is set, and the default backend
+  cannot set one.
 - `sandbox.Local()` still exists and still provides **no** containment. It is
   no longer reachable by accident: it has to be named.
+- **A skill's bundled files stay on the host.** Kit names a skill's
+  `scripts/`, `references/`, and `assets/` files in the text it injects when
+  the skill is activated, with a host path. The tools run in a sandbox that
+  does not have that path, so the model is told about a file it cannot open.
+  Put what the model must read in the skill body, and put a file it must open
+  in `workspace/`, which is copied into the sandbox.
+- **The HTTP channel verifies a caller only when a host configures one.**
+  `http.WithAuthenticator` is new and off by default; without it the body's
+  `auth` field is self-asserted, trusted only as far as the deployment's own
+  network boundary, and `operation_id` is refused outright. The chat channels
+  are different: each verifies its platform's signature, and a channel with no
+  credentials refuses to serve. That verifies the platform and not the person:
+  a user ID in a verified Slack event is Slack's word.
+- **Run ownership is per host, and the journal does not refuse a second
+  writer.** SQLite serialises write transactions and rejects a reused sequence
+  number, so two processes that write one run cannot corrupt it. That is
+  journal integrity and not turn coordination: two servers that both execute
+  the same run still interleave the conversation. SQLite locking also needs
+  POSIX locks that work, so a journal on a network filesystem is unsafe.
+- **Events are journal-anchored, and mid-turn deltas are not.** A reconnect —
+  also after a restart — is served from the journal past the in-memory backlog,
+  so the stream has no gap. Kit's reasoning and tool deltas stay live-only, and
+  the activity indicator above is built from them: a client that is not
+  subscribed when a turn runs cannot recover that turn's deltas afterwards.
+  Bind the address, open the stream, then send.
+- **Sandbox lifecycle is journalled, and reclamation is manual.**
+  `bonnie sandbox prune` deletes the sandboxes of finished runs; `serve` does
+  not sweep them.
+- **The mark3labs modules are publicly fetchable.** A scaffolded module runs
+  `go mod tidy` and resolves `bonnie` and `kit` from the proxy; no `GOPRIVATE`.
+  Authoring an agent needs Go on your machine. The binary that `bonnie build`
+  makes needs nothing on the host.
 
 ## [0.6.0] — 2026-09-15
 
@@ -1034,6 +1185,7 @@ gets deployed into situations it cannot handle.
 
 ---
 
+[0.7.0]: https://github.com/mark3labs/bonnie/releases/tag/v0.7.0
 [0.6.0]: https://github.com/mark3labs/bonnie/releases/tag/v0.6.0
 [0.5.0]: https://github.com/mark3labs/bonnie/releases/tag/v0.5.0
 [0.4.0]: https://github.com/mark3labs/bonnie/releases/tag/v0.4.0

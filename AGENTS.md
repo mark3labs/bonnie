@@ -36,7 +36,7 @@ Layout:
 | `agent/` | agent-tree scaffold and code generation |
 | `sandbox/` | tool sandboxes: local, exec, docker, landlock, microsandbox |
 | `cmd/bonnie/` | CLI (`init`, `dev`, `chat`, `serve`, `build`, `runs`, `sandbox`) |
-| `examples/` | `minimal`, `hitl-restart` |
+| `examples/` | `github-bot`, `slack-bot` |
 
 ## The one rule that matters
 

@@ -820,11 +820,15 @@ Stated plainly, because the failure modes are not obvious:
   with a different policy fails with `ErrPolicyMismatch`.
 - **Sandbox egress is open** until you set a policy, and the default backend
   cannot set one — it refuses the policy instead of ignoring it.
-- **The HTTP channel does not verify auth.** It carries a `Principal`, it does
-  not examine one. Authenticate in front of it. The chat channels are
-  different: each one verifies its platform's signature, and a channel with no
-  credentials refuses to serve. That verifies the platform and not the person:
-  a user ID in a verified Slack event is Slack's word.
+- **The HTTP channel verifies a caller only when you configure one.**
+  `http.WithAuthenticator` (or `bonnie.WithHTTPAuthenticator`) checks every
+  route but `GET /bonnie/v1/health` and mints the run's identity from what it
+  proved. Without one the channel carries a `Principal` it does not examine,
+  so authenticate in front of it, and `operation_id` is refused because an
+  idempotency key with no proven owner reads another caller's run. The chat
+  channels are different: each one verifies its platform's signature, and a
+  channel with no credentials refuses to serve. That verifies the platform and
+  not the person: a user ID in a verified Slack event is Slack's word.
 - **Run ownership is per host, and the journal does not refuse a second
   writer.** SQLite serialises write transactions and rejects a reused sequence
   number, thus two processes that write one run cannot corrupt it. That is
@@ -848,6 +852,7 @@ Stated plainly, because the failure modes are not obvious:
 | Example | Shows |
 |---|---|
 | [`examples/github-bot`](examples/github-bot) | a durable agent on GitHub: issues, pull requests, review threads |
+| [`examples/slack-bot`](examples/slack-bot) | a durable agent in Slack: threads, controls, a live activity indicator |
 
 ```bash
 go run ./examples/github-bot
