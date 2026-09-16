@@ -415,6 +415,12 @@ func (c *config) agentFactory(ctx context.Context, workspace string, opts []kit.
 		return nil, err
 	}
 
+	// Injected environment reaches every command before the workspace seed,
+	// so a bootstrap the seed relies on can read an operator-set variable.
+	if len(c.sandboxEnv) > 0 {
+		provider = sandbox.EnvInjected(provider, c.sandboxEnv)
+	}
+
 	// The workspace is a seed here: its files are mirrored into every
 	// sandbox before the model's first command, and an edit the model made
 	// is never reverted on resume.
@@ -434,6 +440,8 @@ func (c *config) agentConflicts() string {
 		return "WithSystemPrompt"
 	case c.sandbox != nil:
 		return "WithSandbox"
+	case len(c.sandboxEnv) > 0:
+		return "WithSandboxEnv"
 	case c.network != nil:
 		return "WithNetwork"
 	case len(c.tools) > 0:

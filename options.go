@@ -2,6 +2,7 @@ package bonnie
 
 import (
 	"fmt"
+	"maps"
 	"net"
 	"os"
 	"strconv"
@@ -42,6 +43,7 @@ type config struct {
 	skillsPath string
 	workspace  string
 	sandbox    sandbox.Provider
+	sandboxEnv map[string]string
 	network    *sandbox.NetworkPolicy
 	tools      []kit.Tool
 	kitOpts    []kit.Option
@@ -161,6 +163,29 @@ func WithSandbox(p sandbox.Provider) Option {
 	return func(c *config) { c.sandbox = p }
 }
 
+// WithSandboxEnv injects environment variables into every command the sandbox
+// runs. It is how a run gets a credential or a setting the model must not
+// choose — a database URL, a registry token, a feature flag — configured out
+// of band so the model never holds the value.
+//
+// The variables reach every backend, because the injection travels over the
+// same seam a per-command environment does. An injected value wins over a
+// per-command variable of the same name, so a fixed secret cannot be clobbered.
+// Repeated calls merge, and a later key overrides an earlier one. See
+// [sandbox.EnvInjected] for the full statement.
+//
+// It does not encrypt the value or hide it from a command the model runs: a
+// command inside the sandbox can print any variable it is given. The isolation
+// is that the model cannot choose what is injected, not that it cannot read it.
+func WithSandboxEnv(env map[string]string) Option {
+	return func(c *config) {
+		if c.sandboxEnv == nil {
+			c.sandboxEnv = make(map[string]string, len(env))
+		}
+		maps.Copy(c.sandboxEnv, env)
+	}
+}
+
 // WithNetwork constrains what the sandbox may reach. It needs a backend that
 // can enforce it: a policy is refused at startup by a backend that cannot,
 // never stored and ignored. The default Landlock backend confines the
@@ -189,9 +214,9 @@ func WithKit(opts ...kit.Option) Option {
 //
 // It cannot be combined with the options that configure the agent BONNIE
 // would have built ([WithModel], [WithSystemPrompt], [WithSandbox],
-// [WithNetwork], [WithTools], [WithKit]): the factory owns the agent, so those
-// settings would be accepted and ignored. [Agent.Run] refuses instead, naming
-// both.
+// [WithSandboxEnv], [WithNetwork], [WithTools], [WithKit]): the factory owns
+// the agent, so those settings would be accepted and ignored. [Agent.Run]
+// refuses instead, naming both.
 //
 // What the factory owns, it owns completely: the tree's instructions and the
 // tools codegen discovered do not reach it either. They are available through
