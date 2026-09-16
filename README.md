@@ -291,16 +291,10 @@ run, err := runner.Resume(ctx, "deploy-42",
 	[]runtime.InputResponse{{Text: "eu-west-1"}})
 ```
 
-A parked run holds **no compute**. To wait one week costs nothing.
-
-[`examples/hitl-restart`](examples/hitl-restart) does this with a real
-`os.Exit` between the two phases:
-
-```bash
-go run ./examples/hitl-restart -phase ask
-# ...the process stops, the run is parked on disk...
-go run ./examples/hitl-restart -phase answer -answer "eu-west-1"
-```
+A parked run holds **no compute**. To wait one week costs nothing. The
+[`examples/github-bot`](examples/github-bot) agent does this for real: it asks
+a question in a comment, the process can stop, and a later delivery resumes
+the run from the journal.
 
 ## Your own tools
 
@@ -848,11 +842,10 @@ Stated plainly, because the failure modes are not obvious:
 
 | Example | Shows |
 |---|---|
-| [`examples/minimal`](examples/minimal) | one durable run, start to finish |
-| [`examples/hitl-restart`](examples/hitl-restart) | park, **stop the process**, resume |
+| [`examples/github-bot`](examples/github-bot) | a durable agent on GitHub: issues, pull requests, review threads |
 
 ```bash
-go run ./examples/minimal -text "What is a durable agent run?"
+go run ./examples/github-bot
 ```
 
 See [`examples/README.md`](examples/README.md) for commands you can copy.

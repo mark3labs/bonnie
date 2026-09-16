@@ -1,100 +1,43 @@
 # BONNIE examples
 
-Every example is a real program. `go build ./...` compiles them, so they cannot
-go stale.
+Every example is a real program. `go build ./...` compiles them, so they
+cannot go stale.
 
-## Before you start
+They are **library examples, not agent trees.** Each one is a package inside
+BONNIE's own module, which is what keeps them compiled and fresh, so each runs
+with `go run`. Your own agent is a tree instead — its own Go module from
+`bonnie init`, run with `bonnie dev` and shipped with `bonnie build`. Run
+`bonnie init myagent` to see that shape.
 
 You need a model provider key. Kit reads the usual environment variables:
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
-# or
-export OPENAI_API_KEY=sk-...
-# or
-export GEMINI_API_KEY=...
+# or OPENAI_API_KEY, or GEMINI_API_KEY
 ```
 
-Pass `-model` to pick a model, for example
-`-model anthropic/claude-sonnet-4-5`. Without it, Kit uses its configured
-default.
+## github-bot
 
-Every example writes its journal to `.bonnie/journal.db`. That directory is
-in `.gitignore`. Delete it to start again.
-
-## minimal
-
-One durable run, one answer.
+An agent that lives on GitHub: mention it in an issue, a pull request, or a
+review thread and it answers there, and the thread is a durable run.
 
 ```bash
-go run ./examples/minimal -text "In one sentence, what is a durable agent run?"
+go run ./examples/github-bot
 ```
 
-The run is on disk when the program ends:
+It needs a GitHub App and a public URL, so it has its own instructions —
+including how to make the App by hand and how to run the real tree with
+`bonnie dev`: see [github-bot/README.md](github-bot/README.md).
+
+## slack-bot
+
+An agent that lives in Slack: mention it in a channel, reply in a thread it
+joined, or DM it, and it answers there, and the conversation is a durable run.
 
 ```bash
-bonnie runs list --journal .bonnie
-bonnie runs show --journal .bonnie minimal-1
+go run ./examples/slack-bot
 ```
 
-Send a second message to the same run. BONNIE replays the conversation first,
-so the agent remembers:
-
-```bash
-go run ./examples/minimal -text "What did I just ask you?"
-```
-
-## hitl-restart
-
-The headline demonstration. The agent asks a question, the process **exits**,
-and a new process finishes the run.
-
-```bash
-# Phase 1. The run parks and the process calls os.Exit.
-go run ./examples/hitl-restart -phase ask
-```
-
-The run now holds no compute. Look at it:
-
-```bash
-bonnie runs list --journal .bonnie --state waiting
-bonnie runs show --journal .bonnie hitl-1
-```
-
-Wait as long as you like. A minute or a week makes no difference.
-
-```bash
-# Phase 2. A new process. It shares only the journal.
-go run ./examples/hitl-restart -phase answer -answer "eu-west-1"
-```
-
-The second command prints a completed run. Nothing was kept in memory between
-the two commands.
-
-## Over HTTP
-
-The same run is reachable from outside the process:
-
-```bash
-go run ./cmd/bonnie serve --journal .bonnie
-```
-
-```bash
-# Start a run.
-curl -s localhost:8080/bonnie/v1/runs \
-  -d '{"text":"Deploy the app. Ask me which region first."}'
-
-# Watch it. The stream is newline-delimited JSON.
-curl -sN localhost:8080/bonnie/v1/runs/<run-id>/stream
-
-# Answer the question.
-curl -s localhost:8080/bonnie/v1/runs/<run-id>/respond \
-  -d '{"responses":[{"text":"eu-west-1"}]}'
-```
-
-Reconnect to a stream without a gap by passing the last sequence number you
-saw:
-
-```bash
-curl -sN "localhost:8080/bonnie/v1/runs/<run-id>/stream?cursor=12"
-```
+It needs a Slack app and a public URL, so it has its own instructions —
+including how to make the app by hand and how to run the real tree with
+`bonnie dev`: see [slack-bot/README.md](slack-bot/README.md).

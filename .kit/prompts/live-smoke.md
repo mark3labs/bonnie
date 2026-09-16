@@ -21,19 +21,27 @@ Run BONNIE's live smoke test: the whole claim against a real provider — a run 
    ```
    Verify: `TestLiveSuspendAndResume` in `runtime` RAN (not `ok` with skips alone — read the verbose output with `go test -race -tags integration -v ./runtime`), and the sandbox suite's backend cases ran. `task test-live` covers `./runtime ./sandbox`; with `BONNIE_TEST_SANDBOX=microsandbox` the sandbox suite drives the microVM backend.
 
-2. **Park and resume across a real process exit**:
-   ```bash
-   go run ./examples/hitl-restart -phase ask
-   # process exits, run is parked on disk
-   bonnie runs list --journal .bonnie --state waiting
-   go run ./examples/hitl-restart -phase answer -answer "eu-west-1"
-   ```
-   Verify: the first phase ends with the run `waiting` and the process gone; the second phase prints a **completed** run that remembers the question. Inspect the journal if anything looks wrong:
-   `bonnie runs show --journal .bonnie hitl-1 --json`.
-
-3. **Reachable over HTTP**:
+2. **Park and resume across a real process exit** — over `bonnie serve`, so
+   no dedicated example is needed. The kill is the point: the second process
+   shares only the journal.
    ```bash
    task dev -- serve --journal /tmp/bonnie-smoke --addr :8080 &
+   SERVER=$!
+   ID=$(curl -s localhost:8080/bonnie/v1/runs \
+     -d '{"text":"Deploy the app. Ask me which region first."}' | jq -r .id)
+   bonnie runs list --journal /tmp/bonnie-smoke --state waiting   # ID is waiting
+   kill -9 $SERVER                                                # real process death
+   task dev -- serve --journal /tmp/bonnie-smoke --addr :8080 &   # a new process
+   curl -s localhost:8080/bonnie/v1/runs/$ID/respond -d '{"responses":[{"text":"eu-west-1"}]}'
+   ```
+   Verify: the run is `waiting` before the kill; after a brand-new process
+   starts on the same journal, the resume prints a **completed** run that
+   remembers the question. This is the same claim `TestLiveSuspendAndResume`
+   makes in step 1, shown live. Inspect the journal if anything looks wrong:
+   `bonnie runs show --journal /tmp/bonnie-smoke $ID --json`.
+
+3. **Streaming and graceful shutdown** on that same server:
+   ```bash
    curl -s localhost:8080/bonnie/v1/runs -d '{"text":"Deploy the app. Ask me which region first."}'
    ```
    Verify, in order:

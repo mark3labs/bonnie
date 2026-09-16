@@ -11,6 +11,11 @@
 /.direnv/
 /.env
 
+# Credentials a live test writes: a channel's tokens or key and any env
+# file put beside them (see examples/github-bot, examples/slack-bot).
+/.secrets/
+*.pem
+
 # go-task cache
 /.task/
 

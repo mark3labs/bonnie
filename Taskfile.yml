@@ -109,9 +109,24 @@ tasks:
   fmt-check:
     desc: Check formatting (fails if files need formatting)
     cmds:
-      # git ls-files, never `gofmt -l .` — the latter walks .direnv/ and
-      # reports vendored files.
-      - test -z "$(gofmt -l $(git ls-files '*.go'))" || (echo "Files need formatting:" && gofmt -l $(git ls-files '*.go') && exit 1)
+      # Ask git for the file list, never `gofmt -l .`: .envrc puts GOPATH in
+      # .direnv/, so walking the tree reports the whole module cache.
+      #
+      # --others adds a file that is written but not staged yet, which
+      # --cached alone misses — a new package would otherwise reach CI
+      # unchecked. --exclude-standard keeps .gitignore honoured, so .direnv
+      # stays out however the list grows. A file staged in the index but
+      # deleted from the working tree (a removal not yet committed) is still
+      # --cached, so filter to paths that exist before gofmt stats them.
+      - |
+        files=$(git ls-files --cached --others --exclude-standard '*.go' | while IFS= read -r f; do [ -f "$f" ] && printf '%s\n' "$f"; done)
+        [ -n "$files" ] || exit 0
+        unformatted=$(gofmt -l $files)
+        [ -z "$unformatted" ] || {
+          echo "Files need formatting:"
+          echo "$unformatted"
+          exit 1
+        }
 
   tidy:
     desc: Tidy go.mod and go.sum

@@ -36,8 +36,9 @@ File a GitHub issue. The user wants to create an issue about: $@
    - For features: check the package godoc and the open issues
      first — the feature may already exist or be deliberately out of
      scope; say so and stop if it is
-3. **Reproduce before writing**, when possible: a minimal `go run` against
-   `examples/minimal` is worth more than a paragraph of guesswork
+3. **Reproduce before writing**, when possible: a minimal `go run`
+   reproduction, or a short-lived agent tree from `bonnie init`, is worth more
+   than a paragraph of guesswork
 4. **Write the issue** with the template filled truthfully:
    - Title: one line, the observable failure or the missing capability
    - Body: what happened, what was expected, the minimal reproduction, and

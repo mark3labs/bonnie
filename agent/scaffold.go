@@ -225,6 +225,7 @@ func main() {
 		//	bonnie.WithSlack(slack.Config{}),
 		//	bonnie.WithDiscord(discord.Config{}),
 		//	bonnie.WithTelegram(telegram.Config{Username: "mybot"}),
+		//	bonnie.WithGitHub(github.Config{BotName: "mybot"}),
 	).Serve()
 }
 `, modelLine)

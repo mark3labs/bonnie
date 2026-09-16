@@ -110,6 +110,27 @@ release is always proven against the version a user gets.
 Correct each test failure, lint message, and type error before you finish a
 task.
 
+### Do not walk the tree with a raw file globber
+
+`.envrc` puts `GOPATH` in `.direnv/`, **inside the repository**. A command
+that walks the working directory therefore reads the whole Go module cache:
+`gofmt -l .` reports thousands of vendored files, and `grep -r` and bare
+`find` are equally noisy.
+
+Go's `./...` pattern skips directories that start with `.`, so `go build`,
+`go vet`, `go test`, and `golangci-lint run ./...` are all safe as written
+above. When you need a list of files, ask git:
+
+```bash
+git ls-files --cached --others --exclude-standard '*.go'
+```
+
+`--others` adds a file you have just written but not staged — without it a
+new package is never checked — and `--exclude-standard` honours
+`.gitignore`, which is what keeps `.direnv/` out. `task fmt-check` uses
+exactly this command. Kit's `grep` and `find` tools honour `.gitignore` too,
+so prefer them over `shell`.
+
 The CGO-free build is proven, not assumed:
 
 ```bash
