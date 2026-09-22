@@ -220,9 +220,12 @@ func (p *MicrosandboxProvider) ensureRunning(ctx context.Context, sb *cliSandbox
 		// is plainly there can be reported absent. A pre-flight check can
 		// never be atomic against another creator either, so this ordering
 		// — try, then adopt the refusal — is the only reliable one.
-		if !msbAlreadyExists(stderr) {
-			return fmt.Errorf("bonnie: sandbox: create microsandbox from %s: %s",
-				p.image, msbError(stderr))
+		//
+		// Only a CLI that RAN can have refused for that reason. A msb that
+		// never started (err != nil) wrote no stderr, so it cannot be read
+		// as "already exists" and must surface as the fault it is.
+		if err != nil || !msbAlreadyExists(stderr) {
+			return cliError("create microsandbox from "+p.image, msbError(stderr), code, err)
 		}
 		return p.adopt(ctx, sb)
 	}

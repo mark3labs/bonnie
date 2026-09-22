@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -378,7 +379,7 @@ func TestEventBusSlowSubscriberKeepsEvents(t *testing.T) {
 
 	const n = 500
 	for i := range n {
-		bus.Publish(Event{RunID: "r", Type: EventResponse, Seq: i + 1, Text: itoa(i + 1)})
+		bus.Publish(Event{RunID: "r", Type: EventResponse, Seq: i + 1, Text: strconv.Itoa(i + 1)})
 	}
 	for i := range n {
 		select {

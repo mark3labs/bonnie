@@ -47,12 +47,11 @@
 package telegram
 
 import (
-	"bytes"
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -79,10 +78,11 @@ type Config struct {
 	// suite uses. Configure it in production or replies go nowhere.
 	Token string
 
-	// Secret is the webhook secret shared with `setWebhook`. When set, every
-	// request's `X-Telegram-Bot-Api-Secret-Token` header must match. Set it:
-	// the header check is what stops a stranger from driving the agent by
-	// POSTing to your webhook.
+	// Secret is the webhook secret shared with `setWebhook`. It is
+	// REQUIRED: [New] refuses an empty one with
+	// [channel.ErrUnverifiedWebhook]. Every request's
+	// `X-Telegram-Bot-Api-Secret-Token` header must match it, which is what
+	// stops a stranger from driving the agent by POSTing to the webhook.
 	Secret string
 
 	// Username is the bot's username without the @. When set, group messages
@@ -108,6 +108,7 @@ type Channel struct {
 	cfg  Config
 	api  string
 	http *http.Client
+	post chat.Delivery
 }
 
 var (
@@ -116,7 +117,17 @@ var (
 )
 
 // New returns a Telegram channel over a runner.
-func New(r *runtime.Runner, cfg Config, opts ...chat.CoreOption) *Channel {
+//
+// It refuses a config with no Secret: see [channel.ErrUnverifiedWebhook]
+// for why that is a construction error and not a per-request one. A Token
+// stays optional — a channel without one receives and runs turns but cannot
+// answer.
+func New(r *runtime.Runner, cfg Config, opts ...chat.CoreOption) (*Channel, error) {
+	if cfg.Secret == "" {
+		return nil, fmt.Errorf("%w: telegram needs Secret (TELEGRAM_WEBHOOK_SECRET), "+
+			"the same value passed to setWebhook, to prove a delivery came from Telegram",
+			channel.ErrUnverifiedWebhook)
+	}
 	if cfg.Command == "" {
 		cfg.Command = "ask"
 	}
@@ -124,12 +135,29 @@ func New(r *runtime.Runner, cfg Config, opts ...chat.CoreOption) *Channel {
 	if api == "" {
 		api = "https://api.telegram.org"
 	}
-	return &Channel{
+	c := &Channel{
 		core: chat.NewCore(r, "telegram", channel.PolicySteer, opts...),
 		cfg:  cfg,
 		api:  api,
 		http: &http.Client{Timeout: 15 * time.Second},
 	}
+	c.post = chat.Delivery{Client: c.http, Prefix: "telegram"}
+	return c, nil
+}
+
+// verify checks the secret token Telegram echoes on every delivery.
+//
+// The comparison is constant-time. A plain == on a secret leaks its prefix
+// through timing to anyone who can POST repeatedly, which a public webhook
+// URL invites by definition.
+func (c *Channel) verify(token string) bool {
+	if c.cfg.Secret == "" {
+		// Unreachable through [New], which refuses an empty secret. False
+		// rather than true so the only failure mode is the safe one; see
+		// the same guard in package slack.
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(token), []byte(c.cfg.Secret)) == 1
 }
 
 // Name implements [channel.Channel].
@@ -184,7 +212,7 @@ type tgUpdate struct {
 
 // handleUpdate implements the webhook.
 func (c *Channel) handleUpdate(w http.ResponseWriter, r *http.Request, _ channel.Inbound, _ channel.Outbound) {
-	if c.cfg.Secret != "" && r.Header.Get("X-Telegram-Bot-Api-Secret-Token") != c.cfg.Secret {
+	if !c.verify(r.Header.Get("X-Telegram-Bot-Api-Secret-Token")) {
 		// Not Telegram. Say nothing about why: a probe learns only that the
 		// door did not open.
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -361,22 +389,8 @@ func (c *Channel) sendMessage(ctx context.Context, chatID, thread int64, text st
 	if thread != 0 {
 		payload["message_thread_id"] = thread
 	}
-	body, _ := json.Marshal(payload)
 	url := fmt.Sprintf("%s/bot%s/sendMessage", c.api, c.cfg.Token)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := c.http.Do(req)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "bonnie: telegram: deliver: %v\n", err)
-		return
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		fmt.Fprintf(os.Stderr, "bonnie: telegram: deliver: %s\n", resp.Status)
-	}
+	c.post.PostJSON(ctx, url, nil, payload)
 }
 
 // writeOK answers Telegram's webhook with the body it expects.

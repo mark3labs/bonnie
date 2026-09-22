@@ -101,7 +101,9 @@ type Config struct {
 	BotName string
 	// AppID, PrivateKey (PEM), and WebhookSecret are the GitHub App's
 	// credentials. They come from the environment through the WithGitHub
-	// option.
+	// option. WebhookSecret is REQUIRED: [New] refuses an empty one with
+	// [channel.ErrUnverifiedWebhook], because a delivery BONNIE cannot
+	// attribute to GitHub is one it must not act on.
 	AppID         string
 	PrivateKey    string
 	WebhookSecret string
@@ -244,6 +246,7 @@ type Channel struct {
 	api  string
 	key  *rsa.PrivateKey
 	http *http.Client
+	post chat.Delivery
 
 	seenMu sync.Mutex
 	seen   map[string]bool
@@ -257,9 +260,17 @@ var (
 // New returns a GitHub channel over a runner. The config's credentials must
 // be set; the WithGitHub option fills them from the environment and refuses
 // a mount without them.
+//
+// An empty WebhookSecret is refused with [channel.ErrUnverifiedWebhook]:
+// see there for why an unverified webhook adapter cannot be allowed to
+// exist at all.
 func New(r *runtime.Runner, cfg Config) (*Channel, error) {
 	if cfg.BotName == "" {
 		return nil, errors.New("bonnie: channel/github: BotName is required: it is the invocation token a comment must contain")
+	}
+	if cfg.WebhookSecret == "" {
+		return nil, fmt.Errorf("%w: github needs WebhookSecret (GITHUB_WEBHOOK_SECRET) "+
+			"to prove a delivery came from GitHub", channel.ErrUnverifiedWebhook)
 	}
 	if cfg.APIURL == "" {
 		cfg.APIURL = DefaultAPIURL
@@ -271,12 +282,14 @@ func New(r *runtime.Runner, cfg Config) (*Channel, error) {
 	if err != nil {
 		return nil, fmt.Errorf("bonnie: channel/github: %w", err)
 	}
+	hc := &http.Client{Timeout: 30 * time.Second}
 	return &Channel{
 		core: chat.NewCore(r, "github", channel.PolicySteer),
 		cfg:  cfg,
 		api:  strings.TrimSuffix(cfg.APIURL, "/"),
 		key:  key,
-		http: &http.Client{Timeout: 30 * time.Second},
+		http: hc,
+		post: chat.Delivery{Client: hc, Prefix: "channel/github"},
 		seen: make(map[string]bool),
 	}, nil
 }
@@ -470,7 +483,10 @@ func (c *Channel) handleEvent(w http.ResponseWriter, r *http.Request, _ channel.
 // body, keyed by the webhook secret, hex-encoded with a "sha256=" prefix.
 func (c *Channel) verify(signature string, body []byte) bool {
 	if c.cfg.WebhookSecret == "" {
-		return true // unverified: the host accepts the risk by configuring so
+		// Unreachable through [New], which refuses an empty secret. False
+		// rather than true so the only failure mode is the safe one; see
+		// the same guard in package slack.
+		return false
 	}
 	mac := hmac.New(sha256.New, []byte(c.cfg.WebhookSecret))
 	mac.Write(body)
@@ -1042,26 +1058,13 @@ func (c *Channel) postComment(ctx context.Context, env *envelope, path, text str
 		fmt.Fprintf(os.Stderr, "bonnie: channel/github: deliver: %v\n", err)
 		return
 	}
-	payload, _ := json.Marshal(map[string]string{"body": text})
+	payload := map[string]string{"body": text}
 	owner, repoName := env.Repository.Owner.Login, env.Repository.Name
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		c.api+"/repos/"+owner+"/"+repoName+path, bytes.NewReader(payload))
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "bonnie: channel/github: deliver: %v\n", err)
-		return
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("Accept", "application/vnd.github+json")
-	resp, err := c.http.Do(req)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "bonnie: channel/github: deliver: %v\n", err)
-		return
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode >= 300 {
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		fmt.Fprintf(os.Stderr, "bonnie: channel/github: deliver: %s: %s\n", resp.Status, strings.TrimSpace(string(b)))
-	}
+	c.post.PostJSON(ctx, c.api+"/repos/"+owner+"/"+repoName+path,
+		http.Header{
+			"Authorization": {"Bearer " + token},
+			"Accept":        {"application/vnd.github+json"},
+		}, payload)
 }
 
 // react acknowledges a triggering comment with an eyes reaction, so the

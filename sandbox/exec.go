@@ -70,6 +70,28 @@ func runCLIRaw(ctx context.Context, stdin []byte, name string, args ...string) (
 	}
 }
 
+// cliError reports a [runCLI] outcome as an error, keeping the two failure
+// modes apart.
+//
+// err means the CLI never ran — a missing binary, a dead daemon, a killed
+// context — and is wrapped with %w so errors.Is reaches it. A non-zero code
+// means the CLI ran and refused, and detail carries what it said on stderr.
+// A zero code with no error is nil.
+//
+// Collapsing the two, as `if err != nil || code != 0` with only stderr in
+// the message, loses both halves: the cause becomes unwrappable, and a CLI
+// that never ran wrote no stderr to quote, so a missing docker binary was
+// reported as "bonnie: sandbox: rm bonnie-x: no output".
+func cliError(what, detail string, code int, err error) error {
+	switch {
+	case err != nil:
+		return fmt.Errorf("bonnie: sandbox: %s: %w", what, err)
+	case code != 0:
+		return fmt.Errorf("bonnie: sandbox: %s: %s", what, detail)
+	}
+	return nil
+}
+
 // markerPrefix tags the line that carries the guest command's exit code.
 const markerPrefix = "__bonnie_exit_"
 

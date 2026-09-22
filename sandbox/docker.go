@@ -173,10 +173,8 @@ func (p *DockerProvider) ensureRunning(ctx context.Context, sb *cliSandbox) erro
 	case "":
 		return p.create(ctx, sb)
 	default:
-		if _, stderr, code, err := runCLI(ctx, nil, p.bin, "start", sb.name); err != nil || code != 0 {
-			return fmt.Errorf("bonnie: sandbox: start container %s: %s", sb.name, firstLine(stderr))
-		}
-		return nil
+		_, stderr, code, err := runCLI(ctx, nil, p.bin, "start", sb.name)
+		return cliError("start container "+sb.name, firstLine(stderr), code, err)
 	}
 }
 
@@ -214,9 +212,9 @@ func (p *DockerProvider) create(ctx context.Context, sb *cliSandbox) error {
 	args = append(args, "--entrypoint", "sh", p.image,
 		"-c", "mkdir -p "+Workspace+" && while true; do sleep 3600; done")
 
-	if _, stderr, code, err := runCLI(ctx, nil, p.bin, args...); err != nil || code != 0 {
-		return fmt.Errorf("bonnie: sandbox: create container from %s: %s",
-			p.image, firstLine(stderr))
+	_, stderr, code, err := runCLI(ctx, nil, p.bin, args...)
+	if cerr := cliError("create container from "+p.image, firstLine(stderr), code, err); cerr != nil {
+		return cerr
 	}
 	// A fresh image may not have the workspace yet, and the entrypoint runs
 	// in parallel with the first exec.

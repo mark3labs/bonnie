@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -18,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mark3labs/bonnie/channel"
 	"github.com/mark3labs/bonnie/channel/chat"
 	"github.com/mark3labs/bonnie/channel/github"
 	"github.com/mark3labs/bonnie/channeltest"
@@ -112,6 +114,33 @@ func newHarness(t *testing.T, cfg github.Config) *harness {
 	t.Helper()
 	fake := newFakeAPI(t, false, "", "")
 	return newHarnessOn(t, cfg, fake)
+}
+
+// GitHub's only proof that a delivery is GitHub's is the X-Hub-Signature-256
+// HMAC. Without the webhook secret the adapter would mint a
+// [channel.Principal] from whatever sender the payload claimed, and act on
+// a repository the caller chose.
+//
+// New already refused an empty BotName, so the refusal shape was
+// established; this pins that the credential joins it.
+func TestNewRefusesAnEmptyWebhookSecret(t *testing.T) {
+	t.Parallel()
+	runner := runtime.NewRunner(runtime.NewMemoryJournal(), channeltest.NewScriptAgent().Factory())
+
+	ch, err := github.New(runner, github.Config{
+		BotName:    "my-agent",
+		AppID:      "1",
+		PrivateKey: testKey(),
+	})
+	if !errors.Is(err, channel.ErrUnverifiedWebhook) {
+		t.Fatalf("New with no webhook secret = %v, want channel.ErrUnverifiedWebhook", err)
+	}
+	if ch != nil {
+		t.Fatal("New returned a channel beside the refusal")
+	}
+	if !strings.Contains(err.Error(), "GITHUB_WEBHOOK_SECRET") {
+		t.Fatalf("the refusal does not name the variable to set: %v", err)
+	}
 }
 
 func newHarnessOn(t *testing.T, cfg github.Config, fake *fakeAPI) *harness {

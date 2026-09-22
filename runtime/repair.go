@@ -15,15 +15,25 @@ var ErrCorruptConversation = errors.New("bonnie: replayed conversation is corrup
 
 // repairTrailingOrphan removes an incomplete trailing tool-calling step.
 //
-// Kit appends the assistant message that carries a tool call and the tool
-// message that carries its result as two separate AppendMessage calls
-// (verified against Kit v0.106.0). A crash between them leaves the journal
-// with an assistant message whose tool_use has no tool_result. Every provider
-// rejects such a conversation, so the run would become permanently
-// unresumable.
+// It is the pure form of the repair, over a plain message slice. The
+// production path is [Session.repairTail], which does the same thing to a
+// restored conversation tree and journals a [RecordRepair]; this function
+// states the rule on its own, and the repair tests exercise it directly.
 //
-// Dropping the step is the correct semantics: the step never finished, so the
-// model is free to run it again.
+// Why the shape exists: a tool-calling step is an assistant message that
+// carries the call and a tool message that carries the result. Kit hands
+// both to [Session.AppendStep] in one call as of v0.106.0, and a
+// [StepJournal] commits them together — so current BONNIE cannot produce
+// the orphan. It is still on disk in journals BONNIE inherited: those
+// written before v0.106.0, when a step was two independent AppendMessage
+// calls, those imported from the original JSONL format, and those from any
+// [Journal] that does not implement [StepJournal] and still takes the
+// per-record fallback.
+//
+// An assistant tool_use with no tool_result is a conversation every provider
+// rejects, so leaving it would make the run permanently unresumable.
+// Dropping the step is the correct semantics: the step never finished, so
+// the model is free to run it again.
 //
 // It returns the messages unchanged when the conversation is whole, and
 // [ErrCorruptConversation] when the unanswered call is not at the tail.

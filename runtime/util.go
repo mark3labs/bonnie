@@ -51,21 +51,7 @@ func (g *idgen) next(prefix string) string {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.n++
-	return prefix + "-" + itoa(g.n)
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var buf [20]byte
-	i := len(buf)
-	for n > 0 {
-		i--
-		buf[i] = byte('0' + n%10)
-		n /= 10
-	}
-	return string(buf[i:])
+	return prefix + "-" + strconv.Itoa(g.n)
 }
 
 // entrySeq reads the counter out of an entry ID such as "m-12". It returns 0

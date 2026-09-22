@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mark3labs/bonnie/channel"
 	"github.com/mark3labs/bonnie/channel/chat"
 	"github.com/mark3labs/bonnie/channeltest"
 	"github.com/mark3labs/bonnie/runtime"
@@ -23,6 +25,11 @@ import (
 
 // The Inbound contract is platform-independent: the adapter joins the
 // conformance suite like any other transport.
+//
+// The signing secret is here because [New] requires one: an adapter that
+// cannot verify its callers must not exist, even in a test that never
+// posts to the webhook. The bot token is absent for the opposite reason —
+// delivery IS optional, and the suite drives Inbound directly.
 func TestConformance(t *testing.T) {
 	t.Parallel()
 	channeltest.RunConformance(t, func(t *testing.T) *channeltest.Fixture {
@@ -31,11 +38,53 @@ func TestConformance(t *testing.T) {
 		agent := channeltest.NewScriptAgent()
 		runner := runtime.NewRunner(j, agent.Factory())
 		return &channeltest.Fixture{
-			Inbound: New(runner, Config{}),
+			Inbound: mustNew(t, runner, Config{SigningSecret: "conformance"}),
 			Agent:   agent,
 			Journal: j,
 		}
 	})
+}
+
+// mustNew builds a channel or fails the test.
+func mustNew(t *testing.T, r *runtime.Runner, cfg Config) *Channel {
+	t.Helper()
+	ch, err := New(r, cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	return ch
+}
+
+// A Slack channel without a signing secret cannot tell Slack from anyone
+// else who found the URL, and it mints a [channel.Principal] from the body
+// regardless. Refusing at construction is the only point where that can be
+// stopped without either dropping every delivery in silence or trusting
+// every delivery.
+func TestNewRefusesAnEmptySigningSecret(t *testing.T) {
+	t.Parallel()
+	runner := runtime.NewRunner(runtime.NewMemoryJournal(), channeltest.NewScriptAgent().Factory())
+
+	ch, err := New(runner, Config{BotToken: "xoxb-test"})
+	if !errors.Is(err, channel.ErrUnverifiedWebhook) {
+		t.Fatalf("New with no signing secret = %v, want channel.ErrUnverifiedWebhook", err)
+	}
+	if ch != nil {
+		t.Fatal("New returned a channel beside the refusal")
+	}
+	if !strings.Contains(err.Error(), "SLACK_SIGNING_SECRET") {
+		t.Fatalf("the refusal does not name the variable to set: %v", err)
+	}
+}
+
+// Defence in depth: a Channel that somehow holds no secret refuses every
+// delivery rather than accepting every delivery. [New] makes the state
+// unreachable; this pins which way it fails if that guard is ever lost.
+func TestVerifyFailsClosedWithoutASecret(t *testing.T) {
+	t.Parallel()
+	bare := &Channel{}
+	if bare.verify("v0=anything", fmt.Sprint(time.Now().Unix()), []byte("{}")) {
+		t.Fatal("a channel with no signing secret accepted an unsigned delivery")
+	}
 }
 
 // fakeRootTS is the timestamp the fake answers a thread root with: the
@@ -146,7 +195,7 @@ func adapter(t *testing.T, script []*kit.TurnResult) *harness {
 	runner := runtime.NewRunner(j, agent.Factory())
 	fake := newFakeAPI(t)
 	const secret = "trustno1"
-	ch := New(runner, Config{
+	ch := mustNew(t, runner, Config{
 		BotToken:      "xoxb-test",
 		SigningSecret: secret,
 		APIURL:        fake.server.URL,
@@ -364,37 +413,26 @@ func TestDirectMessageIsOneConversation(t *testing.T) {
 
 // Slack retries on a slow ack; the retried event must not send the same
 // message into the turn again.
+//
+// Each delivery is signed, because every delivery now is: the adapter has
+// no unverified mode to fall back on, so the retry has to be recognised by
+// its event ID rather than waved through.
 func TestRedeliveredEventIsDropped(t *testing.T) {
 	t.Parallel()
-	j := runtime.NewMemoryJournal()
-	agent := channeltest.NewScriptAgent()
-	agent.Say(&kit.TurnResult{Response: "once"})
-	runner := runtime.NewRunner(j, agent.Factory())
-	fake := newFakeAPI(t)
-	ch := New(runner, Config{BotToken: "xoxb", APIURL: fake.server.URL}) // no secret: signature off
-	mux := http.NewServeMux()
-	for _, rt := range ch.Routes() {
-		mux.HandleFunc(rt.Method+" "+rt.Path, func(w http.ResponseWriter, req *http.Request) {
-			rt.Handler(w, req, ch, nil)
-		})
-	}
-	server := httptest.NewServer(mux)
-	t.Cleanup(server.Close)
+	h := adapter(t, []*kit.TurnResult{{Response: "once"}})
 
 	const body = `{"type":"event_callback","event_id":"Ev-dup","event":{"type":"app_mention","text":"<@U1> hello","ts":"1.1","channel":"C1","user":"U7"}}`
 	for range 3 {
-		resp, err := http.Post(server.URL+DefaultPath, "application/json", strings.NewReader(body))
-		if err != nil {
-			t.Fatal(err)
+		if resp := h.post(t, body, ""); resp.StatusCode != http.StatusOK {
+			t.Fatalf("a signed delivery got %d", resp.StatusCode)
 		}
-		_ = resp.Body.Close()
 	}
-	waitFor(t, func() bool { return len(fake.messages()) > 0 })
+	waitFor(t, func() bool { return len(h.fake.messages()) > 0 })
 	time.Sleep(100 * time.Millisecond) // a duplicate would land by now
-	if got := fake.messages(); len(got) != 1 || !strings.HasSuffix(got[0], "|once") {
+	if got := h.fake.messages(); len(got) != 1 || !strings.HasSuffix(got[0], "|once") {
 		t.Fatalf("three deliveries of one event gave %q", got)
 	}
-	if calls := agent.Calls(); calls != 1 {
+	if calls := h.agent.Calls(); calls != 1 {
 		t.Fatalf("agent ran %d turns, want 1: the retry must be dropped", calls)
 	}
 }

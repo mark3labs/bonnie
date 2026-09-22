@@ -301,7 +301,7 @@ func WithSlack(cfg slack.Config) Option {
 		); err != nil {
 			return nil, err
 		}
-		return slack.New(r, c), nil
+		return slack.New(r, c)
 	})
 }
 
@@ -337,7 +337,7 @@ func WithTelegram(cfg telegram.Config) Option {
 		); err != nil {
 			return nil, err
 		}
-		return telegram.New(r, c), nil
+		return telegram.New(r, c)
 	})
 }
 

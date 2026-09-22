@@ -60,7 +60,6 @@
 package slack
 
 import (
-	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -102,8 +101,10 @@ type Config struct {
 	// receiving works without it, which is what the conformance suite uses.
 	BotToken string
 
-	// SigningSecret verifies that Slack sent this request. Set it: without
-	// verification, anyone who can reach the webhook drives the agent.
+	// SigningSecret verifies that Slack sent this request. It is REQUIRED:
+	// [New] refuses an empty one with [channel.ErrUnverifiedWebhook],
+	// because without verification anyone who can reach the webhook drives
+	// the agent under any identity they care to claim.
 	SigningSecret string
 
 	// APIURL overrides the Slack API base URL. Tests point it at a fake;
@@ -127,6 +128,7 @@ type Channel struct {
 	cfg    Config
 	api    string
 	http   *http.Client
+	post   chat.Delivery
 	seenMu sync.Mutex
 	seen   map[string]bool
 
@@ -142,7 +144,16 @@ var (
 )
 
 // New returns a Slack channel over a runner.
-func New(r *runtime.Runner, cfg Config, opts ...chat.CoreOption) *Channel {
+//
+// It refuses a config with no SigningSecret: see
+// [channel.ErrUnverifiedWebhook] for why that is a construction error and
+// not a per-request one. A BotToken stays optional — a channel without one
+// receives and runs turns but cannot answer.
+func New(r *runtime.Runner, cfg Config, opts ...chat.CoreOption) (*Channel, error) {
+	if cfg.SigningSecret == "" {
+		return nil, fmt.Errorf("%w: slack needs SigningSecret (SLACK_SIGNING_SECRET) "+
+			"to prove a delivery came from Slack", channel.ErrUnverifiedWebhook)
+	}
 	api := cfg.APIURL
 	if api == "" {
 		api = "https://slack.com/api"
@@ -154,6 +165,7 @@ func New(r *runtime.Runner, cfg Config, opts ...chat.CoreOption) *Channel {
 		seen:   make(map[string]bool),
 		active: make(map[string]*activity),
 	}
+	c.post = chat.Delivery{Client: c.http, Prefix: "slack"}
 	// The channel's own option comes first, so a host that passes
 	// [chat.WithActivity] itself replaces the indicator rather than fighting
 	// it.
@@ -161,7 +173,7 @@ func New(r *runtime.Runner, cfg Config, opts ...chat.CoreOption) *Channel {
 		opts = append([]chat.CoreOption{opt}, opts...)
 	}
 	c.core = chat.NewCore(r, "slack", channel.PolicySteer, opts...)
-	return c
+	return c, nil
 }
 
 // Name implements [channel.Channel].
@@ -261,7 +273,12 @@ func (c *Channel) handleEvent(w http.ResponseWriter, r *http.Request, _ channel.
 // timestamp inside the signature bounds replays.
 func (c *Channel) verify(signature, timestamp string, body []byte) bool {
 	if c.cfg.SigningSecret == "" {
-		return true // unverified: the host accepts the risk by configuring so
+		// Unreachable through [New], which refuses an empty secret. It is
+		// false rather than true so that the one failure mode this check
+		// can have is the safe one: a Channel built some other way, or a
+		// later edit that drops the constructor guard, closes the door
+		// instead of opening it.
+		return false
 	}
 	ts, err := strconv.ParseInt(timestamp, 10, 64)
 	if err != nil || time.Since(time.Unix(ts, 0)) > replayWindow {
@@ -404,21 +421,9 @@ func (c *Channel) postMessageTS(ctx context.Context, channelID, threadTS, text s
 	if threadTS != "" {
 		payload["thread_ts"] = threadTS
 	}
-	body, _ := json.Marshal(payload)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.api+"/chat.postMessage", bytes.NewReader(body))
-	if err != nil {
-		return "", false
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.cfg.BotToken)
-	resp, err := c.http.Do(req)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "bonnie: slack: deliver: %v\n", err)
-		return "", false
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		fmt.Fprintf(os.Stderr, "bonnie: slack: deliver: %s\n", resp.Status)
+	answer, ok := c.post.PostJSON(ctx, c.api+"/chat.postMessage",
+		chat.BearerHeader("Bearer", c.cfg.BotToken), payload)
+	if !ok {
 		return "", false
 	}
 	var out struct {
@@ -426,7 +431,7 @@ func (c *Channel) postMessageTS(ctx context.Context, channelID, threadTS, text s
 		TS    string `json:"ts"`
 		Error string `json:"error"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+	if err := json.Unmarshal(answer, &out); err != nil {
 		fmt.Fprintf(os.Stderr, "bonnie: slack: deliver: undecodable answer: %v\n", err)
 		return "", false
 	}

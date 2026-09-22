@@ -25,11 +25,16 @@ const gitkeep = ".gitkeep"
 // seed and stated here so nobody mistakes it for a bug.
 //
 // The wrapper forwards the optional provider interfaces: [Networked],
-// [ExistenceChecker], and [RunDeleter]. A backend that cannot enforce a
-// network policy still refuses one — the wrapper refuses on its behalf — so
-// wrapping never widens what a caller can request.
+// [ExistenceChecker], [RunDeleter], [WorkingDirReporter], and [Imaged]. A
+// backend that cannot enforce a network policy still refuses one — the
+// wrapper refuses on its behalf — so wrapping never widens what a caller
+// can request.
 func Seeded(p Provider, dir string) Provider {
-	return &seeded{p: p, dir: dir}
+	s := &seeded{p: p, dir: dir}
+	if _, ok := p.(Imaged); ok {
+		return &seededImaged{s}
+	}
+	return s
 }
 
 // seeded is the [Seeded] wrapper.
@@ -112,6 +117,26 @@ func (s *seeded) WorkingDir(runID string) string {
 	}
 	return r.WorkingDir(runID)
 }
+
+// seededImaged is a [seeded] whose backend runs a named image.
+//
+// The capability is mirrored rather than always advertised, the way
+// [newEnvSandbox] mirrors [Deleter]: for a REPORT, "" and "no such method"
+// mean different things — an unnamed image against no image at all — and a
+// wrapper that always answers turns [LandlockProvider], which runs no image,
+// into one that claims to run a nameless one.
+//
+// Forwarding it at all is the point. run.go wraps the default backend in
+// [EnvInjected] and then [Seeded] before the agent sees it, so a host that
+// type-asserts [Imaged] after configuration reaches the wrapper. Dropping
+// the method there is the defect [Seeded.WorkingDir] records for the
+// neighbouring interface, one interface over.
+type seededImaged struct{ *seeded }
+
+var _ Imaged = (*seededImaged)(nil)
+
+// Image implements [Imaged] by forwarding to the wrapped provider.
+func (s *seededImaged) Image() string { return s.p.(Imaged).Image() }
 
 // seedInto mirrors dir into the sandbox, relative to [Workspace], skipping
 // files that are already there and skipping [gitkeep].

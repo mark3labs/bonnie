@@ -2,6 +2,7 @@ package telegram
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mark3labs/bonnie/channel"
 	"github.com/mark3labs/bonnie/channeltest"
 	"github.com/mark3labs/bonnie/runtime"
 
@@ -17,6 +19,11 @@ import (
 
 // The Inbound contract is platform-independent: the adapter joins the
 // conformance suite like any other transport.
+//
+// The webhook secret is here because [New] requires one: an adapter that
+// cannot verify its callers must not exist, even in a test that never
+// posts to the webhook. The bot token is absent for the opposite reason —
+// delivery IS optional, and the suite drives Inbound directly.
 func TestConformance(t *testing.T) {
 	t.Parallel()
 	channeltest.RunConformance(t, func(t *testing.T) *channeltest.Fixture {
@@ -25,11 +32,51 @@ func TestConformance(t *testing.T) {
 		agent := channeltest.NewScriptAgent()
 		runner := runtime.NewRunner(j, agent.Factory())
 		return &channeltest.Fixture{
-			Inbound: New(runner, Config{}),
+			Inbound: mustNew(t, runner, Config{Secret: "conformance"}),
 			Agent:   agent,
 			Journal: j,
 		}
 	})
+}
+
+// mustNew builds a channel or fails the test.
+func mustNew(t *testing.T, r *runtime.Runner, cfg Config) *Channel {
+	t.Helper()
+	ch, err := New(r, cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	return ch
+}
+
+// Telegram's only proof that a delivery is Telegram's is the secret token
+// header. Without a secret to compare it against, the adapter would mint a
+// [channel.Principal] from the `from` field of whatever JSON arrived.
+func TestNewRefusesAnEmptySecret(t *testing.T) {
+	t.Parallel()
+	runner := runtime.NewRunner(runtime.NewMemoryJournal(), channeltest.NewScriptAgent().Factory())
+
+	ch, err := New(runner, Config{Token: "t0ken"})
+	if !errors.Is(err, channel.ErrUnverifiedWebhook) {
+		t.Fatalf("New with no secret = %v, want channel.ErrUnverifiedWebhook", err)
+	}
+	if ch != nil {
+		t.Fatal("New returned a channel beside the refusal")
+	}
+	if !strings.Contains(err.Error(), "TELEGRAM_WEBHOOK_SECRET") {
+		t.Fatalf("the refusal does not name the variable to set: %v", err)
+	}
+}
+
+// Defence in depth: a Channel that somehow holds no secret refuses every
+// delivery rather than accepting every delivery. [New] makes the state
+// unreachable; this pins which way it fails if that guard is ever lost.
+func TestVerifyFailsClosedWithoutASecret(t *testing.T) {
+	t.Parallel()
+	bare := &Channel{}
+	if bare.verify("") || bare.verify("anything") {
+		t.Fatal("a channel with no secret accepted an unverified delivery")
+	}
 }
 
 // fakeAPI is a stand-in for the Telegram Bot API. It records every
@@ -102,12 +149,24 @@ type harness struct {
 	agent  *channeltest.ScriptAgent
 	fake   *fakeAPI
 	server *httptest.Server
+	// secret is the webhook secret the channel was built with. Every
+	// adapter has one now — [New] refuses otherwise — so a test that does
+	// not care which value it is posts with this.
+	secret string
 }
+
+// defaultTestSecret is the webhook secret [adapter] uses when a test does
+// not choose one. There is no "no secret" case to test any more: [New]
+// refuses that config outright, which TestNewRefusesAnEmptySecret pins.
+const defaultTestSecret = "s3cret"
 
 // adapter builds a channel over a scripted agent with the fake API wired
 // in and its webhook mounted on a test server.
 func adapter(t *testing.T, script []*kit.TurnResult, secret, username string) *harness {
 	t.Helper()
+	if secret == "" {
+		secret = defaultTestSecret
+	}
 	j := runtime.NewMemoryJournal()
 	agent := channeltest.NewScriptAgent()
 	for _, s := range script {
@@ -115,7 +174,7 @@ func adapter(t *testing.T, script []*kit.TurnResult, secret, username string) *h
 	}
 	runner := runtime.NewRunner(j, agent.Factory())
 	fake := newFakeAPI(t)
-	ch := New(runner, Config{
+	ch := mustNew(t, runner, Config{
 		Token:    "t0ken",
 		Secret:   secret,
 		Username: username,
@@ -127,7 +186,7 @@ func adapter(t *testing.T, script []*kit.TurnResult, secret, username string) *h
 			r.Handler(w, req, ch, nil)
 		})
 	}
-	h := &harness{ch: ch, agent: agent, fake: fake, server: httptest.NewServer(mux)}
+	h := &harness{ch: ch, agent: agent, fake: fake, server: httptest.NewServer(mux), secret: secret}
 	t.Cleanup(h.server.Close)
 	return h
 }
@@ -162,7 +221,7 @@ func TestWebhookDeliversTheResponse(t *testing.T) {
 			"chat": map[string]any{"id": 42, "type": "private"},
 		},
 	}
-	resp := h.post(t, "", msg)
+	resp := h.post(t, h.secret, msg)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("webhook = %d, want 200 (the ack must be immediate)", resp.StatusCode)
 	}
@@ -240,7 +299,7 @@ func TestReplyToAParkedRunResumesIt(t *testing.T) {
 		{Response: "Deployed to eu-west-1."},
 	}, "", "")
 
-	h.post(t, "", map[string]any{"message": map[string]any{
+	h.post(t, h.secret, map[string]any{"message": map[string]any{
 		"text": "deploy please",
 		"from": map[string]any{"id": 7, "username": "ada", "is_bot": false},
 		"chat": map[string]any{"id": 42, "type": "private"},
@@ -255,7 +314,7 @@ func TestReplyToAParkedRunResumesIt(t *testing.T) {
 	})
 
 	// The answer: a plain reply in the same chat.
-	h.post(t, "", map[string]any{"message": map[string]any{
+	h.post(t, h.secret, map[string]any{"message": map[string]any{
 		"text": "eu-west-1",
 		"from": map[string]any{"id": 7, "username": "ada", "is_bot": false},
 		"chat": map[string]any{"id": 42, "type": "private"},

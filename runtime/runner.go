@@ -389,7 +389,7 @@ func (r *Runner) replayEvents(runID string, after int, out chan<- Event, done <-
 			if rec.Seq > *emitted {
 				lastMsgSeq = rec.Seq
 			}
-			if string(rec.Role) == "assistant" {
+			if rec.Role == "assistant" {
 				msg, derr := decodeMessage(rec)
 				if derr != nil {
 					return derr

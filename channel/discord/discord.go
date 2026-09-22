@@ -45,7 +45,6 @@
 package discord
 
 import (
-	"bytes"
 	"context"
 	"crypto/ed25519"
 	"encoding/hex"
@@ -53,7 +52,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -111,8 +109,10 @@ type Config struct {
 	BotToken string
 
 	// PublicKey is the application's public key, hex-encoded, from the
-	// Developer Portal. Set it: without verification, anyone who can reach
-	// the webhook drives the agent.
+	// Developer Portal. It is REQUIRED: [New] refuses an empty or
+	// unparsable one with [channel.ErrUnverifiedWebhook], because without
+	// verification anyone who can reach the webhook drives the agent under
+	// any identity they care to claim.
 	PublicKey string
 
 	// Command is the slash command this adapter answers. The default is
@@ -135,6 +135,7 @@ type Channel struct {
 	api  string
 	key  ed25519.PublicKey
 	http *http.Client
+	post chat.Delivery
 }
 
 var (
@@ -142,10 +143,25 @@ var (
 	_ channel.Inbound = (*Channel)(nil)
 )
 
-// New returns a Discord channel over a runner. A public key that does not
-// parse is a misconfiguration that would leave the webhook unverified —
-// New refuses rather than run wide open.
+// New returns a Discord channel over a runner.
+//
+// It refuses a config with no PublicKey, and one whose key does not parse:
+// either leaves the webhook unable to tell Discord from anyone who found
+// the URL. See [channel.ErrUnverifiedWebhook]. A BotToken stays optional —
+// a channel without one receives and runs turns but cannot answer.
+//
+// Nothing is built before the key is proven, so a refused config never
+// reaches the runner.
 func New(r *runtime.Runner, cfg Config, opts ...chat.CoreOption) (*Channel, error) {
+	if cfg.PublicKey == "" {
+		return nil, fmt.Errorf("%w: discord needs PublicKey (DISCORD_PUBLIC_KEY) from the "+
+			"application's General Information page, to prove an interaction came from Discord",
+			channel.ErrUnverifiedWebhook)
+	}
+	key, err := hex.DecodeString(cfg.PublicKey)
+	if err != nil || len(key) != ed25519.PublicKeySize {
+		return nil, fmt.Errorf("bonnie: discord: the public key is not %d bytes of hex: %q", ed25519.PublicKeySize, cfg.PublicKey)
+	}
 	if cfg.Command == "" {
 		cfg.Command = "ask"
 	}
@@ -157,15 +173,10 @@ func New(r *runtime.Runner, cfg Config, opts ...chat.CoreOption) (*Channel, erro
 		core: chat.NewCore(r, "discord", channel.PolicySteer, opts...),
 		cfg:  cfg,
 		api:  api,
+		key:  ed25519.PublicKey(key),
 		http: &http.Client{Timeout: 15 * time.Second},
 	}
-	if cfg.PublicKey != "" {
-		key, err := hex.DecodeString(cfg.PublicKey)
-		if err != nil || len(key) != ed25519.PublicKeySize {
-			return nil, fmt.Errorf("bonnie: discord: the public key is not %d bytes of hex: %q", ed25519.PublicKeySize, cfg.PublicKey)
-		}
-		c.key = ed25519.PublicKey(key)
-	}
+	c.post = chat.Delivery{Client: c.http, Prefix: "discord"}
 	return c, nil
 }
 
@@ -412,7 +423,10 @@ func commandText(d *discordData) string {
 // check inside ed25519.Verify.
 func (c *Channel) verify(signature, timestamp string, body []byte) bool {
 	if c.key == nil {
-		return true // unverified: the host accepts the risk by configuring so
+		// Unreachable through [New], which refuses an empty public key.
+		// False rather than true so the only failure mode is the safe one;
+		// see the same guard in package slack.
+		return false
 	}
 	sig, err := hex.DecodeString(signature)
 	if err != nil || len(sig) != ed25519.SignatureSize {
@@ -502,22 +516,8 @@ func (c *Channel) postMessage(ctx context.Context, channelID, text string, compo
 	if len(components) > 0 {
 		payload["components"] = components
 	}
-	body, _ := json.Marshal(payload)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.api+"/channels/"+channelID+"/messages", bytes.NewReader(body))
-	if err != nil {
-		return
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bot "+c.cfg.BotToken)
-	resp, err := c.http.Do(req)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "bonnie: discord: deliver: %v\n", err)
-		return
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		fmt.Fprintf(os.Stderr, "bonnie: discord: deliver: %s\n", resp.Status)
-	}
+	c.post.PostJSON(ctx, c.api+"/channels/"+channelID+"/messages",
+		chat.BearerHeader("Bot", c.cfg.BotToken), payload)
 }
 
 // respond writes an interaction response.

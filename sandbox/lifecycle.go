@@ -47,8 +47,9 @@ func (p *DockerProvider) DeleteRun(ctx context.Context, runID string) (bool, err
 	if state == "" {
 		return false, nil
 	}
-	if _, stderr, code, err := runCLI(ctx, nil, p.bin, "rm", "--force", name); err != nil || code != 0 {
-		return true, fmt.Errorf("bonnie: sandbox: rm %s: %s", name, firstLine(stderr))
+	_, stderr, code, rerr := runCLI(ctx, nil, p.bin, "rm", "--force", name)
+	if cerr := cliError("rm "+name, firstLine(stderr), code, rerr); cerr != nil {
+		return true, cerr
 	}
 	return true, nil
 }
@@ -66,8 +67,9 @@ func (p *MicrosandboxProvider) DeleteRun(ctx context.Context, runID string) (boo
 	if !p.exists(ctx, name) {
 		return false, nil
 	}
-	if _, stderr, code, err := runCLI(ctx, nil, p.bin, "rm", "--force", name); err != nil || code != 0 {
-		return true, fmt.Errorf("bonnie: sandbox: rm %s: %s", name, firstLine(stderr))
+	_, stderr, code, err := runCLI(ctx, nil, p.bin, "rm", "--force", name)
+	if cerr := cliError("rm "+name, msbError(stderr), code, err); cerr != nil {
+		return true, cerr
 	}
 	return true, nil
 }

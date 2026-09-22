@@ -71,6 +71,32 @@ const (
 // silently falls back to a default.
 var ErrUnknownTurnPolicy = errors.New("bonnie: channel: unknown turn policy")
 
+// ErrUnverifiedWebhook is returned by an adapter's New when the credential
+// that proves a delivery came from the platform is missing: Slack's signing
+// secret, Discord's public key, Telegram's webhook secret, GitHub's webhook
+// secret.
+//
+// It is a construction error rather than a per-request one because the
+// alternative does not work. An adapter that accepts an empty credential
+// has to decide what to do when a request arrives, and both answers are
+// wrong: refusing every delivery is a channel that silently never answers,
+// and accepting every delivery is a channel whose [Principal] is whatever
+// the body claimed. A webhook handler MINTS an identity from what the
+// signature proved, and the run is journalled under it — so an unverified
+// adapter does not degrade to "anonymous", it degrades to "whoever can
+// reach the URL is whoever they say they are".
+//
+// This is the rule the sandbox layer already follows for a network policy a
+// backend cannot enforce: a control that silently does nothing is worse
+// than no control, because the operator believes they are protected.
+// Refuse at the one moment the whole configuration is known.
+//
+// A verification credential is not a delivery token. A bot token stays
+// optional — an adapter without one receives messages and runs turns but
+// cannot write back, which is what the conformance suite drives. There is
+// no matching mode for verification.
+var ErrUnverifiedWebhook = errors.New("bonnie: channel: webhook verification credential is missing")
+
 // Principal identifies who is on the other end of a channel. It is carried
 // into the run so tools can make per-tenant authorisation decisions.
 type Principal struct {

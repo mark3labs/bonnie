@@ -521,8 +521,13 @@ func (s *Session) AppendMessage(msg kit.LLMMessage) (string, error) {
 		Text:      text,
 		Payload:   payload,
 	})
-	// The record's sequence is what the event stream anchors to.
+	// The record's sequence is what the event stream anchors to. The entry
+	// is already published into s.entries, so this write is taken under the
+	// lock like every other field of a shared entry — [Session.LastMessageSeq]
+	// reads it under RLock, and [Session.AppendStep] writes it the same way.
+	s.mu.Lock()
 	e.journalSeq = seq
+	s.mu.Unlock()
 	return id, err
 }
 

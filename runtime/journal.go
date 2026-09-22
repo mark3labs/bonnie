@@ -68,7 +68,7 @@ const (
 	// RecordState records a run-state transition.
 	RecordState RecordKind = "state"
 	// RecordRepair records that a restore dropped an incomplete trailing
-	// tool-calling step. See [repairTrailingOrphan].
+	// tool-calling step. See [Session.repairTail].
 	RecordRepair RecordKind = "repair"
 	// RecordSandbox records that a sandbox opened for a run: which backend,
 	// which sandbox. It is the only record of a run's workspace, so a

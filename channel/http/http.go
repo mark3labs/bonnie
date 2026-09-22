@@ -114,11 +114,22 @@ func WithInfo(info Info) Option {
 // Authenticator verifies a request and returns the principal it proves.
 //
 // It is the HTTP channel's equivalent of the signature check every webhook
-// adapter runs: Slack verifies an HMAC, Discord an Ed25519 signature, GitHub
-// an HMAC, and each then MINTS the principal from what the check proved. An
-// Authenticator does the same job for a transport that carries no platform
-// signature — a bearer token, an OIDC assertion, a mutual-TLS certificate,
-// a session cookie the host can resolve.
+// adapter runs: Slack verifies an HMAC, Discord an Ed25519 signature,
+// Telegram a shared secret token, GitHub an HMAC, and each then MINTS the
+// principal from what the check proved — which is why none of them will
+// build without its verification credential (see
+// [channel.ErrUnverifiedWebhook]). An Authenticator does the same job for a
+// transport that carries no platform signature — a bearer token, an OIDC
+// assertion, a mutual-TLS certificate, a session cookie the host can
+// resolve.
+//
+// The HTTP channel is the one adapter whose verifier is OPTIONAL, and that
+// is not an inconsistency. A webhook adapter mints an identity from
+// whatever arrives, so an unverified one launders a claim into a fact. This
+// channel mints nothing on its own: with no Authenticator the body's `auth`
+// is recorded as self-asserted, and `operation_id` — the one field that
+// lets a caller reach another caller's run — is refused outright. An open
+// deployment degrades to "unattributed", never to "impersonated".
 //
 // Return [ErrUnauthenticated] to refuse the request with 401. Any other
 // error is a fault in the verifier itself and becomes a 500, because a
@@ -447,8 +458,8 @@ type ErrorResponse struct {
 	// versions: "run_not_found", "invalid_run_id", "run_not_waiting",
 	// "run_active", "run_not_active", "run_retired",
 	// "run_owned_elsewhere", "compaction_unsupported",
-	// "unknown_turn_policy", "client_closed", "bad_request",
-	// "too_large", "unauthenticated", "internal".
+	// "conversation_corrupt", "unknown_turn_policy", "client_closed",
+	// "bad_request", "too_large", "unauthenticated", "internal".
 	Code string `json:"code"`
 }
 
@@ -463,6 +474,7 @@ const (
 	errRetired            = "run_retired"
 	errOwnedElsewhere     = "run_owned_elsewhere"
 	errCompactUnsupported = "compaction_unsupported"
+	errCorrupt            = "conversation_corrupt"
 	errUnknownPolicy      = "unknown_turn_policy"
 	errClientClosed       = "client_closed"
 	errBadRequest         = "bad_request"
@@ -827,6 +839,16 @@ func writeError(w http.ResponseWriter, err error) {
 		writeJSON(w, http.StatusConflict, ErrorResponse{Error: err.Error(), Code: errOwnedElsewhere})
 	case errors.Is(err, runtime.ErrCompactionUnsupported):
 		writeJSON(w, http.StatusNotImplemented, ErrorResponse{Error: err.Error(), Code: errCompactUnsupported})
+	case errors.Is(err, runtime.ErrCorruptConversation):
+		// The journal holds an unanswered tool call somewhere other than
+		// the tail, so [runtime.Restore] refused to rewrite history. No
+		// retry fixes it and no request body caused it: an operator has to
+		// look at the run. 409 says "this run is in a state that forbids
+		// the request", which is what [runtime.ErrRunOwnedElsewhere] gets
+		// and for the same reason — a client that read 500 would retry
+		// for ever. The text names the run; the detail goes to stderr.
+		logInternal("corrupt conversation", err)
+		writeJSON(w, http.StatusConflict, ErrorResponse{Error: err.Error(), Code: errCorrupt})
 	case errors.Is(err, channel.ErrUnknownTurnPolicy):
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error(), Code: errUnknownPolicy})
 	case errors.Is(err, context.Canceled):

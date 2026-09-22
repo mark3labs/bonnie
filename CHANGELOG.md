@@ -5,6 +5,90 @@ All notable changes to BONNIE are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+**Breaking: a chat adapter will not build without the credential that proves
+a delivery came from the platform.**
+
+### Breaking changes
+
+- `slack.New` and `telegram.New` now return `(*Channel, error)`. Both refuse
+  a config with no verification credential, as `discord.New` and
+  `github.New` — which already returned an error — now do too. The new
+  sentinel is `channel.ErrUnverifiedWebhook`.
+
+  A host that builds an adapter through `bonnie.WithSlack` and friends is
+  unaffected: those options already required the credential from the
+  environment and refused a mount without it. A host that calls the adapter
+  package directly gets a compile error, then a startup error naming the
+  variable to set.
+
+  Why it is a refusal and not a warning: every webhook handler MINTS a
+  `channel.Principal` from what its signature check proved, and the run is
+  journalled under that identity. An adapter with no credential therefore
+  did not degrade to "anonymous", it degraded to "whoever can reach the URL
+  is whoever they say they are" — while `channel/http`'s own doc claimed
+  each adapter "MINTS the principal from what the check proved". The
+  sandbox layer has always refused a control it cannot enforce; the channel
+  layer now does the same.
+
+  A bot TOKEN stays optional. An adapter without one receives messages and
+  runs turns but cannot write back, which is what the conformance suite
+  drives.
+
+### Security
+
+- Each adapter's signature check now fails CLOSED. A `Channel` holding no
+  credential refuses every delivery instead of accepting every delivery.
+  `New` makes that state unreachable, so this is defence in depth: the guard
+  that remains if the constructor's is ever lost.
+- Telegram compares its webhook secret in constant time. A plain `==` on a
+  secret leaks its prefix through timing to anyone who can POST repeatedly,
+  which a public webhook URL invites by definition.
+
+### Fixed
+
+- **A data race on the event anchor.** `Session.AppendMessage` wrote the
+  journal sequence onto a tree entry outside the session lock, while
+  `Session.LastMessageSeq` read it under the read lock.
+  `Session.AppendStep` already took the lock for the same write.
+- **The event bus no longer holds its lock across a journal read.**
+  `EventBus.Publish` resolved an event's anchor — for `SQLiteJournal`, a
+  real query — while holding `b.mu`. Every live Kit event takes that path,
+  one per streamed delta, so a streaming turn serialised thousands of
+  database reads against every other publisher and against `Subscribe` and
+  its unsubscribe: an HTTP client connecting or disconnecting waited behind
+  a disk read.
+- **`runtime.ErrCorruptConversation` reaches the wire as 409, not 500.** A
+  journal that `Restore` refuses to rewrite fell through to an opaque
+  `"internal"` 500, which invites a retry that cannot help. It now carries
+  the stable code `conversation_corrupt`, the same treatment
+  `ErrRunOwnedElsewhere` gets and for the same reason. A repairable torn
+  write is unaffected: it is still repaired and the turn still runs.
+- **`Seeded` and `EnvInjected` forward `sandbox.Imaged`.** Both wrappers
+  dropped it, and `bonnie.Run` applies both to the default backend before
+  the agent sees it, so a host asking which image was in force was told the
+  backend runs none. The capability is mirrored, not invented: a wrapper
+  over a backend that runs no image still does not claim `Imaged`.
+- **A sandbox CLI that never ran is reported as itself.** `DeleteRun`,
+  container start, and container create collapsed "the CLI failed to run"
+  with "the CLI ran and refused" into one branch that quoted stderr — so a
+  missing `docker` binary was reported as `rm bonnie-x: no output`, and the
+  cause could not be reached with `errors.Is`.
+
+### Changed
+
+- The four chat adapters share one delivery helper, `chat.Delivery`. It
+  replaces the same twenty lines copied into each: marshal, build, set the
+  content type, authorise, send, log the transport error, close the body,
+  check the status, log that too. A 2xx now counts as delivered — `201` and
+  `204` were previously logged as failures by a bare `!= 200`.
+- `runtime.Record.Payload`'s doc link for the torn-write repair points at
+  `Session.repairTail`, the production path, rather than the pure helper.
+  `repairTrailingOrphan`'s own doc no longer claims Kit v0.106.0 appends a
+  step as two calls — it appends it as one, which `Session.AppendStep`
+  already documented. The repair stays for the journals BONNIE inherited.
+
 ## [0.7.0] — 2026-09-16
 
 **Breaking: every tool call now runs in a sandbox, BONNIE is Linux-only, and a

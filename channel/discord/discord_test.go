@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mark3labs/bonnie/channel"
 	"github.com/mark3labs/bonnie/channeltest"
 	"github.com/mark3labs/bonnie/runtime"
 
@@ -22,6 +24,11 @@ import (
 
 // The Inbound contract is platform-independent: the adapter joins the
 // conformance suite like any other transport.
+//
+// The public key is here because [New] requires one: an adapter that cannot
+// verify its callers must not exist, even in a test that never posts to the
+// webhook. The bot token is absent for the opposite reason — delivery IS
+// optional, and the suite drives Inbound directly.
 func TestConformance(t *testing.T) {
 	t.Parallel()
 	channeltest.RunConformance(t, func(t *testing.T) *channeltest.Fixture {
@@ -30,11 +37,52 @@ func TestConformance(t *testing.T) {
 		agent := channeltest.NewScriptAgent()
 		runner := runtime.NewRunner(j, agent.Factory())
 		return &channeltest.Fixture{
-			Inbound: mustNew(t, runner, Config{}),
+			Inbound: mustNew(t, runner, Config{PublicKey: testPublicKey(t)}),
 			Agent:   agent,
 			Journal: j,
 		}
 	})
+}
+
+// testPublicKey returns a well-formed hex Ed25519 public key, for a test
+// that needs [New] to accept a config but never verifies a signature.
+func testPublicKey(t *testing.T) string {
+	t.Helper()
+	pub, _, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	return hex.EncodeToString(pub)
+}
+
+// Discord's only proof that an interaction is Discord's is the Ed25519
+// signature. Without the application's public key the adapter would mint a
+// [channel.Principal] from whatever member or user the body claimed.
+func TestNewRefusesAnEmptyPublicKey(t *testing.T) {
+	t.Parallel()
+	runner := runtime.NewRunner(runtime.NewMemoryJournal(), channeltest.NewScriptAgent().Factory())
+
+	ch, err := New(runner, Config{BotToken: "dt0ken"})
+	if !errors.Is(err, channel.ErrUnverifiedWebhook) {
+		t.Fatalf("New with no public key = %v, want channel.ErrUnverifiedWebhook", err)
+	}
+	if ch != nil {
+		t.Fatal("New returned a channel beside the refusal")
+	}
+	if !strings.Contains(err.Error(), "DISCORD_PUBLIC_KEY") {
+		t.Fatalf("the refusal does not name the variable to set: %v", err)
+	}
+}
+
+// Defence in depth: a Channel that somehow holds no key refuses every
+// interaction rather than accepting every interaction. [New] makes the
+// state unreachable; this pins which way it fails if that guard is lost.
+func TestVerifyFailsClosedWithoutAKey(t *testing.T) {
+	t.Parallel()
+	bare := &Channel{}
+	if bare.verify("", "", []byte("{}")) {
+		t.Fatal("a channel with no public key accepted an unsigned interaction")
+	}
 }
 
 func mustNew(t *testing.T, r *runtime.Runner, cfg Config) *Channel {

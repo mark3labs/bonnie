@@ -93,17 +93,36 @@ func (b *EventBus) Anchor(fn func(runID string) int) {
 	b.anchor = fn
 }
 
+// anchorFn reads the anchor under the lock and returns it, so [EventBus.Publish]
+// can call it without holding the lock. [EventBus.Anchor] may run
+// concurrently with a publish — a Runner wires its bus while nothing else
+// holds it, but the bus is exported and makes no such promise.
+func (b *EventBus) anchorFn() func(runID string) int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.anchor
+}
+
 // Publish stamps an event and delivers it to every subscriber. An event that
 // carries no Seq of its own is anchored to the current journal position.
 // Callers that know the record an event belongs to set Seq themselves and
 // win.
+//
+// The anchor is resolved BEFORE the lock is taken. It reaches the journal —
+// for [SQLiteJournal] that is a real query — and every live Kit event goes
+// through here, one per streamed delta. Holding b.mu across that made a
+// streaming turn serialise thousands of database reads against every other
+// publisher, and against [EventBus.Subscribe] and its unsubscribe, so an
+// HTTP client connecting or disconnecting waited behind a disk read.
 func (b *EventBus) Publish(ev Event) Event {
+	anchor := b.anchorFn()
+	if ev.Seq == 0 && anchor != nil {
+		ev.Seq = anchor(ev.RunID)
+	}
+
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if ev.Seq == 0 && b.anchor != nil {
-		ev.Seq = b.anchor(ev.RunID)
-	}
 	if ev.Time.IsZero() {
 		ev.Time = now()
 	}

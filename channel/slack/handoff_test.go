@@ -44,7 +44,7 @@ func TestReceiveReportsARefusedRoot(t *testing.T) {
 			t.Parallel()
 			j := runtime.NewMemoryJournal()
 			agent := channeltest.NewScriptAgent()
-			ch := New(runtime.NewRunner(j, agent.Factory()), Config{
+			ch := mustNew(t, runtime.NewRunner(j, agent.Factory()), Config{
 				BotToken:      "xoxb-test",
 				SigningSecret: "s3cret",
 				APIURL:        refusingAPI(t, c.body).URL,
@@ -75,7 +75,7 @@ func TestReceiveBindsTheThreadItOpened(t *testing.T) {
 	j := runtime.NewMemoryJournal()
 	agent := channeltest.NewScriptAgent()
 	fake := newFakeAPI(t)
-	ch := New(runtime.NewRunner(j, agent.Factory()), Config{
+	ch := mustNew(t, runtime.NewRunner(j, agent.Factory()), Config{
 		BotToken:      "xoxb-test",
 		SigningSecret: "s3cret",
 		APIURL:        fake.server.URL,
@@ -103,7 +103,7 @@ func TestReceiveRefusesATargetThatIsNotAChannelID(t *testing.T) {
 	t.Parallel()
 	j := runtime.NewMemoryJournal()
 	agent := channeltest.NewScriptAgent()
-	ch := New(runtime.NewRunner(j, agent.Factory()), Config{BotToken: "xoxb-test", SigningSecret: "s3cret"})
+	ch := mustNew(t, runtime.NewRunner(j, agent.Factory()), Config{BotToken: "xoxb-test", SigningSecret: "s3cret"})
 	for _, target := range []any{42, "", nil} {
 		if err := ch.Receive(context.Background(), target, "hi", channel.SendOptions{}); err == nil {
 			t.Fatalf("Receive accepted %#v as a target", target)

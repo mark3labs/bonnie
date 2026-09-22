@@ -30,9 +30,10 @@ import (
 // dropped; a value may be anything, including the empty string.
 //
 // Like [Seeded], the wrapper forwards the optional provider interfaces
-// [Networked], [ExistenceChecker], [RunDeleter], and [WorkingDirReporter], and
-// forwards the [Sandbox]-level [Deleter] when the backend supports it, so
-// wrapping never narrows what a caller can do with the provider.
+// [Networked], [ExistenceChecker], [RunDeleter], [WorkingDirReporter], and
+// [Imaged], and forwards the [Sandbox]-level [Deleter] when the backend
+// supports it, so wrapping never narrows what a caller can do with the
+// provider.
 func EnvInjected(p Provider, env map[string]string) Provider {
 	kv := make([]string, 0, len(env))
 	for k, v := range env {
@@ -47,7 +48,11 @@ func EnvInjected(p Provider, env map[string]string) Provider {
 	// Sort so the injected set is deterministic: a journal record, a log
 	// line, or a test reads the same order every run.
 	sort.Strings(kv)
-	return &envProvider{p: p, env: kv}
+	e := &envProvider{p: p, env: kv}
+	if _, ok := p.(Imaged); ok {
+		return &envImagedProvider{e}
+	}
+	return e
 }
 
 // envProvider is the [EnvInjected] wrapper.
@@ -116,6 +121,16 @@ func (e *envProvider) WorkingDir(runID string) string {
 	}
 	return r.WorkingDir(runID)
 }
+
+// envImagedProvider is an [envProvider] whose backend runs a named image.
+// The capability is mirrored rather than always advertised, for the reason
+// given on [seededImaged].
+type envImagedProvider struct{ *envProvider }
+
+var _ Imaged = (*envImagedProvider)(nil)
+
+// Image implements [Imaged] by forwarding to the wrapped provider.
+func (e *envImagedProvider) Image() string { return e.p.(Imaged).Image() }
 
 // envSandbox adds the injected environment to every command. It embeds the
 // wrapped [Sandbox], so ID, ReadFile, WriteFile, Stop, and Close forward

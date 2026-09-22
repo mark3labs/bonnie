@@ -17,7 +17,7 @@ func renderer(t *testing.T, mode ActivityMode) (*Channel, *fakeAPI) {
 	t.Helper()
 	fake := newFakeAPI(t)
 	runner := runtime.NewRunner(runtime.NewMemoryJournal(), channeltest.NewScriptAgent().Factory())
-	ch := New(runner, Config{BotToken: "xoxb-test", APIURL: fake.server.URL, Activity: mode})
+	ch := mustNew(t, runner, Config{BotToken: "xoxb-test", APIURL: fake.server.URL, Activity: mode, SigningSecret: "s3cret"})
 	return ch, fake
 }
 
@@ -118,11 +118,12 @@ func TestActivityRefusesAnUnknownMode(t *testing.T) {
 }
 
 // A channel with no bot token cannot write to Slack at all. The conformance
-// suite drives one, and it must not try.
+// suite drives one, and it must not try. A signing secret is still
+// required — the two credentials answer different questions.
 func TestActivityNeedsABotToken(t *testing.T) {
 	t.Parallel()
 	runner := runtime.NewRunner(runtime.NewMemoryJournal(), channeltest.NewScriptAgent().Factory())
-	ch := New(runner, Config{})
+	ch := mustNew(t, runner, Config{SigningSecret: "s3cret"})
 	if opt := ch.activityOption(); opt != nil {
 		t.Fatal("a channel with no token wired an indicator")
 	}
