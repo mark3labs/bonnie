@@ -88,6 +88,14 @@ a delivery came from the platform.**
   `repairTrailingOrphan`'s own doc no longer claims Kit v0.106.0 appends a
   step as two calls — it appends it as one, which `Session.AppendStep`
   already documented. The repair stays for the journals BONNIE inherited.
+- Dependencies updated. Kit moves to v0.110.0 and `modernc.org/sqlite` to
+  v1.59.0; the transitive set moves with them. No BONNIE source changed:
+  `kit.SessionManager` still has exactly 20 methods, so the compile-time
+  tripwire in `runtime/session.go` held, and the CGO-free build still
+  passes. `charm.land/fantasy` stays `// indirect`, and its OpenAI provider
+  now pulls `github.com/charmbracelet/openai-go` in place of
+  `github.com/openai/openai-go/v3` — both transitive, neither named by
+  BONNIE.
 
 ## [0.7.0] — 2026-09-16
 
