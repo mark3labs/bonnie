@@ -1414,6 +1414,7 @@ gets deployed into situations it cannot handle.
 
 ---
 
+[0.8.0]: https://github.com/mark3labs/bonnie/releases/tag/v0.8.0
 [0.7.0]: https://github.com/mark3labs/bonnie/releases/tag/v0.7.0
 [0.6.0]: https://github.com/mark3labs/bonnie/releases/tag/v0.6.0
 [0.5.0]: https://github.com/mark3labs/bonnie/releases/tag/v0.5.0

@@ -60,7 +60,9 @@ indefinitely**, **reachable over HTTP**. State the limits from the current
   prints its version says nothing about the claim the release is *for*. At
   `v0.7.0` the published binary was made to refuse `--sandbox none` by name.
 - **Do not copy the previous release's limits forward.** That is how a stale
-  limit gets published.
+  limit gets published. **Do not drop one silently either:** a previous limit
+  that is missing from the README must be proven false before it is left out.
+  At `v0.8.0` one had left the README while it still held.
 - **A guard pinned to a fixed version is worse than no guard: it reports
   success.** `TestRepositoryChangelogStatesClaimsAndLimits` derives the
   version from the newest released heading for this reason.
@@ -90,6 +92,56 @@ edited to the required form.
 | `v0.5.0` | `f9794d1` | 2026-09-15 |
 | `v0.6.0` | `09f5293` | 2026-09-15 |
 | `v0.7.0` | `4b6fa58` | 2026-09-16 |
+| `v0.8.0` | `c03de52` | 2026-09-23 |
+
+### `v0.8.0`, 2026-09-23 — every box confirmed
+
+- [x] `task release-check` — 1 config validated
+- [x] `task release-snapshot` — two targets (linux amd64, arm64), archives
+      and checksums; the snapshot binary prints its injected version
+- [x] No `replace` directive in `go.mod`; Kit moves to `v0.110.0`
+- [x] All CI jobs green on `master` at the tagged commit `c03de52`:
+      `test`, `examples`, and `lint` (run `35858048401`)
+- [x] `CHANGELOG.md` carries a `[0.8.0]` section in Keep-a-Changelog shape
+- [x] Release notes state the three claims **and** the limits, published
+      with no human edit
+- [x] Tag pushed; `release.yml` run `35858568031` succeeded
+- [x] Three artifacts published; the downloaded `linux_amd64` binary prints
+      `bonnie 0.8.0`, its checksum verifies, and it is statically linked
+- [x] The examples are pinned to `v0.8.0` and `task examples` passes
+
+**The section written across the increment had no claims, no limits, and a
+non-standard `### Breaking changes` heading**, folded into *Changed*. Reading
+`git log v0.7.0..HEAD` against it found three public surfaces never named —
+`chat.Delivery` with `chat.BearerHeader`, `channel.ErrUnverifiedWebhook`, and
+the wire code `conversation_corrupt` — and two removals with no *Removed*
+entry: `go run ./examples/...` and `bonnie` on `aarch64-darwin` in the flake.
+
+**A limit can drop out as well as go stale.** "A skill's bundled files stay on
+the host" was in the `0.7.0` notes, had left `README.md`, and still holds (the
+`WithSkills` godoc says so). Taking the limits from the current README alone
+would have published without it. It was restored to `README.md` first. So
+compare the previous release's limits with the current README in both
+directions: a limit in the README must still be true, and a previous limit
+that is not in the README must be false.
+
+**Verified from the artifact.** The headline change, the chat adapter's
+refusal to build without a webhook credential, lives in a tree's `WithSlack`
+and friends, which the CLI binary does not mount — so it cannot be proven from
+the artifact, and `TestNewRefuses*` in each adapter is its proof. The release's
+new artifact-facing surface is `install.sh`, so it was run from `master`
+against the published release: it verified the checksum, installed, and the
+installed binary prints `bonnie 0.8.0`. The downloaded binary still refuses
+`--sandbox none` by name.
+
+**Version choice.** MINOR: `fix!` changed the exported signatures of
+`slack.New` and `telegram.New`, and `feat:` added `install.sh`.
+
+**`task examples-pin` had never run, and it could not pass.** It changed
+`go.mod` and `go.sum` and then called `examples`, whose `git diff
+--exit-code -- examples/` then failed on the pin itself. The pin was correct and
+the trees built. The task now stages the pin before it calls `examples`, so the
+check sees only what `bonnie build` changes.
 
 ### `v0.7.0`, 2026-09-16 — every box confirmed
 
