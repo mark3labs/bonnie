@@ -185,6 +185,10 @@ tasks:
         for d in examples/*/; do
           (cd "$d" && GOWORK=off go get github.com/mark3labs/bonnie@{{.TAG}} && GOWORK=off go mod tidy)
         done
+        # Stage the pin. `examples` fails on any unstaged diff under
+        # examples/, and `git diff` compares against the index, so staging
+        # leaves it seeing only what `bonnie build` changed — not the pin.
+        git add examples/
       - task: examples
 
   check:
