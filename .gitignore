@@ -13,6 +13,7 @@
 
 # Credentials a live test writes: a channel's tokens or key and any env
 # file put beside them (see examples/github-bot, examples/slack-bot).
+# The examples are agent trees; each ignores its own `bonnie build` binary.
 /.secrets/
 *.pem
 

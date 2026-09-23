@@ -60,6 +60,11 @@ a delivery came from the platform.**
 
 ### Fixed
 
+- **`bonnie_gen.go` is gofmt-clean.** A tree with no tools generated its
+  empty `Tools` literal across two lines, so every such tree failed a
+  `gofmt -l` check on a file its author is told never to edit. The
+  generator now formats its output with `go/format`. The examples, now
+  committed trees, found it.
 - **The Nix flake builds again.** `nix/bonnie.nix` had a stale
   `vendorHash`, so `nix profile add github:mark3labs/bonnie` and `nix run`
   failed on `master` and at `v0.7.0`. The hash is refreshed, and the
@@ -116,6 +121,16 @@ a delivery came from the platform.**
   now pulls `github.com/charmbracelet/openai-go` in place of
   `github.com/openai/openai-go/v3` — both transitive, neither named by
   BONNIE.
+- **`examples/github-bot` and `examples/slack-bot` are agent trees.** Each
+  was made with `bonnie init`, is its own Go module pinned to a released
+  bonnie, and is run with `bonnie dev` and shipped with `bonnie build` — the
+  way a user runs their own agent. They were packages in BONNIE's module,
+  run with `go run`, and each README told the reader to rebuild the example
+  as a tree by hand. The prompt is now `instructions.md`, not a
+  `WithSystemPrompt` constant. `examples/examples_test.go` refuses a drift
+  back to the old shape and compiles every tree against the checkout, and a
+  new CI `examples` job (`task examples`) builds each tree against its pin.
+  After each release, `task examples-pin TAG=…` moves the pins.
 
 ## [0.7.0] — 2026-09-16
 

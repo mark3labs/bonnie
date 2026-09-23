@@ -133,6 +133,60 @@ tasks:
     cmds:
       - go mod tidy
 
+  # -----------------------------------------------------------------------
+  # Examples
+  #
+  # Each examples/<name> is an agent tree: its own module, made with
+  # `bonnie init`, pinned to a released bonnie. `go test ./examples/` checks
+  # the shape and builds every tree against this checkout; these tasks do
+  # what a user does. GOWORK=off keeps a contributor's go.work from
+  # redirecting bonnie to the checkout, which would hide a broken pin.
+  # -----------------------------------------------------------------------
+
+  examples:
+    desc: Build every example as a user does - bonnie build against its pinned release, no diff left
+    cmds:
+      - go build -ldflags "{{.LDFLAGS}}" -o {{.OUTPUT_DIR}}/{{.BINARY}} ./cmd/bonnie
+      - |
+        set -e
+        cli="$PWD/{{.OUTPUT_DIR}}/{{.BINARY}}"
+        for d in examples/*/; do
+          d=${d%/}
+          echo "== $d"
+          (cd "$d" && GOWORK=off "$cli" build --output "$cli-example" && GOWORK=off go vet ./...)
+        done
+        rm -f "$cli-example"
+        # bonnie build regenerates bonnie_gen.go and go build refuses a go.sum
+        # that is missing an entry, so a clean tree proves the committed files
+        # are the ones a user gets.
+        git diff --exit-code -- examples/ || {
+          echo "bonnie build changed a committed example file; run task examples-gen and commit"
+          exit 1
+        }
+
+  examples-gen:
+    desc: Regenerate bonnie_gen.go in every example with this checkout's codegen
+    cmds:
+      # bonnie build writes bonnie_gen.go first, then compiles the tree, so
+      # the build also proves the regenerated file compiles.
+      - |
+        set -e
+        for d in examples/*/; do
+          GOWORK=off go run ./cmd/bonnie build --output /dev/null "$d"
+        done
+
+  examples-pin:
+    desc: Pin every example to a released bonnie (TAG=v0.8.0), after the tag is on the proxy
+    requires:
+      vars: [TAG]
+    cmds:
+      - |
+        set -e
+        for d in examples/*/; do
+          (cd "$d" && GOWORK=off go get github.com/mark3labs/bonnie@{{.TAG}} && GOWORK=off go mod tidy)
+        done
+      - task: examples
+
   check:
     desc: Run the quality loop a developer actually wants (fmt, lint, test)
     cmds:
@@ -154,6 +208,9 @@ tasks:
       # binary `bonnie build` promises, so CGO-off is proven, not assumed.
       - CGO_ENABLED=0 go build ./...
       - golangci-lint run ./...
+      # The examples are nested modules ./... never reaches. go test above
+      # built them against this checkout; this builds them as a user does.
+      - task: examples
 
   # -----------------------------------------------------------------------
   # Release

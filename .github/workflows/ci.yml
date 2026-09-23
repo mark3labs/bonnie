@@ -36,6 +36,23 @@ jobs:
           CGO_ENABLED: "0"
         run: go build ./...
 
+  # Each examples/<name> is an agent tree: a nested module that ./... above
+  # never reaches. `go test` already built every tree against this checkout
+  # (examples/examples_test.go); this job builds each one as a user does,
+  # with `bonnie build` against the release its go.mod pins, and fails when
+  # that leaves a diff — a stale bonnie_gen.go or an incomplete go.sum.
+  examples:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.27"
+          cache: true
+      - uses: go-task/setup-task@v1
+      - name: Build the examples as a user does
+        run: task examples
+
   lint:
     runs-on: ubuntu-latest
     steps:

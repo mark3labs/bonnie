@@ -1,7 +1,9 @@
 package agent
 
 import (
+	"bytes"
 	"errors"
+	"go/format"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -70,6 +72,34 @@ func TestCodegenIsIdempotent(t *testing.T) {
 	}
 	if string(first) != string(second) {
 		t.Fatalf("codegen is not idempotent: two runs over one tree differ\n--- first\n%s\n--- second\n%s", first, second)
+	}
+}
+
+// The generated file must be gofmt-clean with no tools and with several: it is
+// committed in a user's tree, and a repository that checks formatting would
+// otherwise fail on a file its author is told never to edit. The tool-less
+// case is the one that regressed: its empty Tools literal spanned two lines.
+func TestGeneratedFileIsGofmtClean(t *testing.T) {
+	t.Parallel()
+	bare := filepath.Join(t.TempDir(), "bare")
+	if _, err := Scaffold(bare, InitOptions{}); err != nil {
+		t.Fatalf("Scaffold: %v", err)
+	}
+	tools := scaffoldTools(t)
+	writeTool(t, tools, "charge_card", "charge_card")
+
+	for name, root := range map[string]string{"no tools": bare, "two tools": tools} {
+		got, _, err := Generate(root)
+		if err != nil {
+			t.Fatalf("%s: Generate: %v", name, err)
+		}
+		want, err := format.Source(got)
+		if err != nil {
+			t.Fatalf("%s: generated file does not parse: %v", name, err)
+		}
+		if !bytes.Equal(got, want) {
+			t.Errorf("%s: generated file is not gofmt-clean\n--- got\n%s\n--- gofmt\n%s", name, got, want)
+		}
 	}
 }
 

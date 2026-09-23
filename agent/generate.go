@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"go/ast"
+	"go/format"
 	"go/parser"
 	"go/token"
 	"os"
@@ -302,6 +303,11 @@ func firstToolName(path string) string {
 // Render produces the byte-identical content of the generated wiring file for
 // a plan. It is pure, so two runs over one tree are identical.
 //
+// The output is gofmt-clean. The template alone was not: a tree with no tools
+// rendered an empty composite literal across two lines, so every tree's
+// bonnie_gen.go failed a `gofmt -l` check the moment it was committed. The
+// examples, which are committed trees, are what found it.
+//
 // The file declares nothing the author could collide with: it binds the embed
 // slots to unexported variables and hands everything to [bonnie.Register]
 // from init. The three slots — instructions, skills, workspace — are always
@@ -374,7 +380,11 @@ func init() {
 	})
 }
 `)
-	return []byte(b.String()), nil
+	out, err := format.Source([]byte(b.String()))
+	if err != nil {
+		return nil, fmt.Errorf("bonnie: agent: format generated file: %w", err)
+	}
+	return out, nil
 }
 
 // String is the --dry-run report: the files found, the tools generated, and

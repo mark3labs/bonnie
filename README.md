@@ -868,13 +868,17 @@ Stated plainly, because the failure modes are not obvious:
 
 ## Examples
 
+Each example is an agent tree made with `bonnie init`, run with `bonnie dev`,
+and shipped with `bonnie build` — the same shape as your own agent.
+
 | Example | Shows |
 |---|---|
 | [`examples/github-bot`](examples/github-bot) | a durable agent on GitHub: issues, pull requests, review threads |
 | [`examples/slack-bot`](examples/slack-bot) | a durable agent in Slack: threads, controls, a live activity indicator |
 
 ```bash
-go run ./examples/github-bot
+cd examples/github-bot
+bonnie dev --addr 127.0.0.1:8081 --tui=false
 ```
 
 See [`examples/README.md`](examples/README.md) for commands you can copy.

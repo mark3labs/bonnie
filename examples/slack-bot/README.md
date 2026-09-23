@@ -5,23 +5,23 @@ a thread it has joined, or send it a direct message, and it answers in the same
 conversation. Each conversation is a durable run — stop the process mid-answer
 and the run is still there when it starts again.
 
-## Two shapes, one bonnie.New call
+## This directory is an agent tree
 
-`main.go` here is a **library example**: a package inside BONNIE's own module,
-so `go build ./...` compiles it and it never goes stale. Run it with `go run
-./examples/slack-bot`.
+This directory was made with `bonnie init slack-bot`. It is its own Go
+module, and you run and manage it with the `bonnie` CLI, the same way as your
+own agent:
 
-Your own agent is a **tree**: its own Go module from `bonnie init`, run with
-`bonnie dev` and shipped with `bonnie build`. A tree cannot live inside this
-repository — a nested Go module drops out of `go build ./...` and trips
-`go fix` — so you scaffold it elsewhere (step 3). Its `main.go` is the same
-`bonnie.New(...)` call you see here.
-
-Use the tree for a live test: it is how a BONNIE agent is really written and
-run.
+| File | What it is |
+|---|---|
+| `instructions.md` | the system prompt |
+| `main.go` | the `bonnie.New(...)` call: the Slack channel and its activity mode |
+| `bonnie_gen.go` | the wiring `bonnie dev` and `bonnie build` regenerate; do not edit |
+| `skills/`, `workspace/` | the agent's skills and its root for files, empty here |
+| `go.mod`, `go.sum` | pin a released BONNIE |
 
 ## What you need
 
+- The CLI: `go install github.com/mark3labs/bonnie/cmd/bonnie@latest`.
 - A model key: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GEMINI_API_KEY`.
 - A tunnel. Slack's Events API delivers over the internet, so the port must
   have a public URL.
@@ -79,23 +79,22 @@ User OAuth Token** (starts `xoxb-`); it is `SLACK_BOT_TOKEN`.
 Then invite the bot to a channel — in Slack, `/invite @your-bot` — or open a
 direct message with it.
 
-## 4. Scaffold the agent tree
+## 4. Get the tree
 
-Outside this repository, because a tree is its own module:
+Use this directory as it is, or copy it to start your own bot from it:
 
 ```bash
-bonnie init ~/bonnie-slack-bot
-cd ~/bonnie-slack-bot
+cp -r examples/slack-bot ~/my-slack-bot
+cd ~/my-slack-bot
 ```
 
-Put the channel in `main.go` — copy the `bonnie.New(...)` body from
-[`main.go`](main.go) in this directory (the `WithSlack` call and the
-`Activity` mode). Move the system prompt into `instructions.md`; in a tree the
-prompt is a file, not a `WithSystemPrompt` option.
+Edit `instructions.md` to change what the bot says, and `main.go` to change
+the `Activity` mode. `bonnie dev` picks up both.
 
 **Testing a local change to `channel/slack`?** Point the tree at your checkout
-with an uncommitted replace, so the dev loop builds your edits and not the
-released channel:
+with a replace, so the dev loop builds your edits and not the released
+channel. Do not commit it: `go test ./examples/` refuses a replace in an
+example.
 
 ```bash
 go mod edit -replace github.com/mark3labs/bonnie=/path/to/bonnie
@@ -137,7 +136,7 @@ Start the bot **before** you set the Request URL in step 2, so Slack's
 verification handshake finds it listening.
 
 To ship one static binary with no Go toolchain on the host, use `bonnie build`
-and run `./bonnie-slack-bot -addr 127.0.0.1:8081` instead.
+and run `./slack-bot -addr 127.0.0.1:8081` instead.
 
 Either way, a missing credential is a startup error that names the variable.
 Confirm the channel is mounted:
@@ -187,7 +186,7 @@ bonnie runs show --journal .bonnie slack/<channel-id>/<thread-ts>
 ## Clean up
 
 ```bash
-rm -rf ~/bonnie-slack-bot
+rm -rf .bonnie slack-bot
 ```
 
 Delete the app at <https://api.slack.com/apps> → your app → **Delete App**.

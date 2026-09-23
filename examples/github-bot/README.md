@@ -5,23 +5,23 @@ a pull request comment, or a review thread and it answers in the same thread.
 The conversation is a durable run — stop the process mid-answer and the run is
 still there when it starts again.
 
-## Two shapes, one bonnie.New call
+## This directory is an agent tree
 
-`main.go` here is a **library example**: a package inside BONNIE's own module,
-so `go build ./...` compiles it and it never goes stale. Run it with `go run
-./examples/github-bot`.
+This directory was made with `bonnie init github-bot`. It is its own Go
+module, and you run and manage it with the `bonnie` CLI, the same way as your
+own agent:
 
-Your own agent is a **tree**: its own Go module from `bonnie init`, run with
-`bonnie dev` and shipped with `bonnie build`. A tree cannot live inside this
-repository — a nested Go module drops out of `go build ./...` and trips
-`go fix` — so you scaffold it elsewhere (step 3). Its `main.go` is the same
-`bonnie.New(...)` call you see here.
-
-Use the tree for a live test: it is how a BONNIE agent is really written and
-run.
+| File | What it is |
+|---|---|
+| `instructions.md` | the system prompt |
+| `main.go` | the `bonnie.New(...)` call: the GitHub channel and its hooks |
+| `bonnie_gen.go` | the wiring `bonnie dev` and `bonnie build` regenerate; do not edit |
+| `skills/`, `workspace/` | the agent's skills and its root for files, empty here |
+| `go.mod`, `go.sum` | pin a released BONNIE |
 
 ## What you need
 
+- The CLI: `go install github.com/mark3labs/bonnie/cmd/bonnie@latest`.
 - A model key: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GEMINI_API_KEY`.
 - A tunnel. GitHub delivers a webhook over the internet, so the port must have
   a public URL.
@@ -92,24 +92,22 @@ Click **Create GitHub App**. Then, on the App's page:
 On the App's page, open **Install App**, install it on your account, and
 choose **Only select repositories** → your test repo.
 
-## 4. Scaffold the agent tree
+## 4. Get the tree
 
-Outside this repository, because a tree is its own module:
+Use this directory as it is, or copy it to start your own bot from it:
 
 ```bash
-bonnie init ~/bonnie-live-bot
-cd ~/bonnie-live-bot
+cp -r examples/github-bot ~/my-github-bot
+cd ~/my-github-bot
 ```
 
-Put the channel in `main.go` — copy the `bonnie.New(...)` body from
-[`main.go`](main.go) in this directory (the `WithGitHub` call, the `BotName`,
-and the `OnIssue` hook if you want the proactive triage comment). Move the
-system prompt into `instructions.md`; in a tree the prompt is a file, not a
-`WithSystemPrompt` option.
+Edit `instructions.md` to change what the bot says, and `main.go` to change
+the `BotName` or the `OnIssue` hook. `bonnie dev` picks up both.
 
 **Testing a local change to `channel/github`?** Point the tree at your
-checkout with an uncommitted replace, so the dev loop builds your edits and
-not the released channel:
+checkout with a replace, so the dev loop builds your edits and not the
+released channel. Do not commit it: `go test ./examples/` refuses a replace
+in an example.
 
 ```bash
 go mod edit -replace github.com/mark3labs/bonnie=/path/to/bonnie
@@ -151,7 +149,7 @@ Two flags matter, and the defaults are wrong for a webhook bot:
   bot directly instead.
 
 To ship one static binary with no Go toolchain on the host, use `bonnie build`
-and run `./bonnie-live-bot -addr 127.0.0.1:8081` instead.
+and run `./github-bot -addr 127.0.0.1:8081` instead.
 
 Either way, a missing credential is a startup error that names the variable.
 Confirm the channel is mounted:
@@ -203,7 +201,7 @@ Two things the coding path needs that the default setup does not give:
 
 - **A sandbox with network egress.** The default Landlock sandbox has none, so
   `git clone` cannot reach GitHub. Select a Docker sandbox and an allow-list
-  network policy in `main.go`:
+  network policy in `main.go` (the lines are there, commented out):
 
   ```go
   bonnie.WithSandbox(sandbox.Docker()),
@@ -238,7 +236,7 @@ Two things the coding path needs that the default setup does not give:
 ## Clean up
 
 ```bash
-rm -rf ~/bonnie-live-bot
+rm -rf .bonnie github-bot
 ```
 
 Delete the App in its settings page, and delete or archive the test

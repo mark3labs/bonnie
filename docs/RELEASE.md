@@ -12,7 +12,7 @@ indefinitely**, **reachable over HTTP**. State the limits from the current
 1. Run `task release-check` (`goreleaser check`) and `task release-snapshot`
    (`goreleaser build --snapshot --clean`).
 2. Confirm every CI job is green on `master` at the commit you will tag.
-   That means `test` and `lint`. There is no `boundary` job any more —
+   That means `test`, `examples`, and `lint`. There is no `boundary` job any more —
    `depguard` in `lint` is the authority.
 3. Write the `CHANGELOG.md` section for the version **before** you push the
    tag. State the three claims — survives process death, parks indefinitely,
@@ -24,6 +24,12 @@ indefinitely**, **reachable over HTTP**. State the limits from the current
 5. Check the published artifacts: the downloaded binary must print the
    injected version, not `dev`, its checksum must verify, and it must be
    statically linked.
+6. Pin the examples to the new tag, in the commit after the tag:
+   `task examples-pin TAG=vX.Y.Z`, then commit `chore: pin examples to
+   vX.Y.Z`. Each example is an agent tree whose `go.mod` pins a release, so
+   this cannot happen before the tag is on the proxy.
+   `TestExamplesGoModIsAUserGoMod` allows a pin one release behind for this
+   window, and fails at the next release if the step was forgotten.
 
 ### Every box must be confirmed
 
@@ -35,6 +41,7 @@ indefinitely**, **reachable over HTTP**. State the limits from the current
 - [ ] The release notes state both the claims and the limits
 - [ ] Tag pushed and artifacts published
 - [ ] A downloaded binary prints the injected version
+- [ ] The examples are pinned to the new tag and `task examples` passes
 
 ## Watch for
 

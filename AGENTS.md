@@ -36,7 +36,7 @@ Layout:
 | `agent/` | agent-tree scaffold and code generation |
 | `sandbox/` | tool sandboxes: local, exec, docker, landlock, microsandbox |
 | `cmd/bonnie/` | CLI (`init`, `dev`, `chat`, `serve`, `build`, `runs`, `sandbox`) |
-| `examples/` | `github-bot`, `slack-bot` |
+| `examples/` | `github-bot`, `slack-bot`: agent trees, each its own module (see below) |
 
 ## The one rule that matters
 
@@ -227,6 +227,28 @@ transaction per step. The driver is `modernc.org/sqlite`, which is pure Go.
 
 There is no manifest file. A setting is a file at a fixed path or a Go option,
 never both. Do not add a configuration file.
+
+### Examples are agent trees, managed with the CLI
+
+Each directory under `examples/` is an agent tree made with
+`bonnie init <name>`: its own Go module with `instructions.md`, `main.go`,
+`bonnie_gen.go`, `skills/`, `workspace/`, `go.mod`, and `go.sum`. A user runs
+it with `bonnie dev` and ships it with `bonnie build`. It is **never** a
+package in BONNIE's module run with `go run` — that was the old shape, and it
+showed readers a way to run BONNIE that no user uses.
+
+- The prompt is `instructions.md`. `main.go` must not call
+  `WithSystemPrompt`, `WithInstructions`, `WithSkills`, or `WithWorkspace`.
+- `go.mod` pins a released bonnie and has no `replace`.
+- `bonnie_gen.go` is committed and current: `task examples-gen`.
+- After a release is tagged, `task examples-pin TAG=vX.Y.Z` (see
+  `docs/RELEASE.md`).
+
+`examples/examples_test.go` enforces all of this in `go test ./...`, and
+compiles every tree against the checkout, because `./...` does not reach a
+nested module. The CI `examples` job builds each tree as a user does: with
+`bonnie build` against its pinned release. Do not weaken the guard to make an
+example easier to write; change the example.
 
 ### Terminal rendering
 
