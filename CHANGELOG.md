@@ -7,15 +7,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-09-23
+
 **Breaking: a chat adapter will not build without the credential that proves
 a delivery came from the platform.**
 
-### Breaking changes
+### The claims
 
-- `slack.New` and `telegram.New` now return `(*Channel, error)`. Both refuse
-  a config with no verification credential, as `discord.New` and
-  `github.New` — which already returned an error — now do too. The new
-  sentinel is `channel.ErrUnverifiedWebhook`.
+Still what BONNIE is for. All three hold as they did at `0.7.0`; this release
+makes the third one harder to misconfigure:
+
+- **A run survives process death.** The conversation is journalled as it
+  happens, so another process — after a crash, on another machine — resumes
+  the run with the whole history, including which tools it already called, so
+  a side effect is not repeated. A tool-calling step commits as one SQLite
+  transaction: whole, or absent. Kit moves to v0.110.0 and the compile-time
+  tripwire on `kit.SessionManager` held, so the seams the journal rests on did
+  not move.
+- **A run parks indefinitely.** A run waiting on a person holds no process and
+  no compute — the sandbox opens lazily, so a parked run costs a row in a
+  database. Exit the process and answer tomorrow.
+- **A run is reachable over HTTP.** `channel/http` mounts its routes under
+  `/bonnie/v1`, with an NDJSON event stream that survives a reconnect and a
+  restart; the Slack, Discord, Telegram, and GitHub adapters carry the same
+  durable run into a thread. **Every chat adapter now refuses to start without
+  the credential that verifies its webhook**, so a reachable adapter is never
+  one that believes whoever calls it.
+
+The limits are under **Known limits** below, stated as plainly. A framework
+that hides its limits gets deployed into situations it cannot handle.
+
+### Added
+
+- **`install.sh`, an install script for the CLI.**
+  `curl -fsSL https://raw.githubusercontent.com/mark3labs/bonnie/master/install.sh | bash`
+  downloads the release archive for the host, verifies it against the
+  release's SHA-256 checksum file, and installs `bonnie`. It refuses a
+  binary that it cannot verify, and it refuses macOS and other platforms
+  before it downloads. It warns when the host has no Landlock, no provider
+  key, or no Go. `scripts/install_test.go` runs it against a fake release,
+  and fails when `.goreleaser.yaml` changes the asset names that the script
+  expects.
+- **`chat.Delivery` and `chat.BearerHeader`**, the delivery helper the four
+  chat adapters now share (see *Changed*). `Delivery.PostJSON` marshals,
+  posts, reads a bounded body, closes it, and logs a failure under the
+  adapter's prefix; any 2xx counts as delivered. They are exported so an
+  out-of-tree adapter gets the same behaviour.
+- **`channel.ErrUnverifiedWebhook`**, the sentinel a chat adapter's `New`
+  returns when it has no verification credential. Test it with `errors.Is`.
+- **The wire error code `conversation_corrupt`** (HTTP 409). See *Fixed*.
+- **`task examples`, `task examples-gen`, and `task examples-pin TAG=…`**, and
+  a CI `examples` job that builds each example tree against its pinned
+  release.
+
+### Changed
+
+- **Breaking:** `slack.New` and `telegram.New` now return
+  `(*Channel, error)`. Both refuse a config with no verification credential,
+  as `discord.New` and `github.New` — which already returned an error — now
+  do too. The new sentinel is `channel.ErrUnverifiedWebhook`.
 
   A host that builds an adapter through `bonnie.WithSlack` and friends is
   unaffected: those options already required the credential from the
@@ -35,28 +85,44 @@ a delivery came from the platform.**
   A bot TOKEN stays optional. An adapter without one receives messages and
   runs turns but cannot write back, which is what the conformance suite
   drives.
+- The four chat adapters share one delivery helper, `chat.Delivery`. It
+  replaces the same twenty lines copied into each: marshal, build, set the
+  content type, authorise, send, log the transport error, close the body,
+  check the status, log that too. A 2xx now counts as delivered — `201` and
+  `204` were previously logged as failures by a bare `!= 200`.
+- `runtime.Record.Payload`'s doc link for the torn-write repair points at
+  `Session.repairTail`, the production path, rather than the pure helper.
+  `repairTrailingOrphan`'s own doc no longer claims Kit v0.106.0 appends a
+  step as two calls — it appends it as one, which `Session.AppendStep`
+  already documented. The repair stays for the journals BONNIE inherited.
+- Dependencies updated. Kit moves to v0.110.0 and `modernc.org/sqlite` to
+  v1.59.0; the transitive set moves with them. No BONNIE source changed:
+  `kit.SessionManager` still has exactly 20 methods, so the compile-time
+  tripwire in `runtime/session.go` held, and the CGO-free build still
+  passes. `charm.land/fantasy` stays `// indirect`, and its OpenAI provider
+  now pulls `github.com/charmbracelet/openai-go` in place of
+  `github.com/openai/openai-go/v3` — both transitive, neither named by
+  BONNIE.
+- **`examples/github-bot` and `examples/slack-bot` are agent trees.** Each
+  was made with `bonnie init`, is its own Go module pinned to a released
+  bonnie, and is run with `bonnie dev` and shipped with `bonnie build` — the
+  way a user runs their own agent. They were packages in BONNIE's module,
+  run with `go run`, and each README told the reader to rebuild the example
+  as a tree by hand. The prompt is now `instructions.md`, not a
+  `WithSystemPrompt` constant. `examples/examples_test.go` refuses a drift
+  back to the old shape and compiles every tree against the checkout, and a
+  new CI `examples` job (`task examples`) builds each tree against its pin.
+  After each release, `task examples-pin TAG=…` moves the pins.
 
-### Added
+### Removed
 
-- **`install.sh`, an install script for the CLI.**
-  `curl -fsSL https://raw.githubusercontent.com/mark3labs/bonnie/master/install.sh | bash`
-  downloads the release archive for the host, verifies it against the
-  release's SHA-256 checksum file, and installs `bonnie`. It refuses a
-  binary that it cannot verify, and it refuses macOS and other platforms
-  before it downloads. It warns when the host has no Landlock, no provider
-  key, or no Go. `scripts/install_test.go` runs it against a fake release,
-  and fails when `.goreleaser.yaml` changes the asset names that the script
-  expects.
-
-### Security
-
-- Each adapter's signature check now fails CLOSED. A `Channel` holding no
-  credential refuses every delivery instead of accepting every delivery.
-  `New` makes that state unreachable, so this is defence in depth: the guard
-  that remains if the constructor's is ever lost.
-- Telegram compares its webhook secret in constant time. A plain `==` on a
-  secret leaks its prefix through timing to anyone who can POST repeatedly,
-  which a public webhook URL invites by definition.
+- **`go run ./examples/github-bot` and `go run ./examples/slack-bot`.** The
+  examples are no longer packages in BONNIE's module; each is its own agent
+  tree with its own `go.mod`. Run one with `bonnie dev` from its directory.
+  `go build ./...` in BONNIE no longer builds them.
+- **The Nix flake no longer offers `bonnie` on `aarch64-darwin`.** The
+  release has been Linux-only since `0.7.0`; the flake now agrees.
+  `aarch64-darwin` keeps `microsandbox` and the dev shell.
 
 ### Fixed
 
@@ -101,36 +167,72 @@ a delivery came from the platform.**
   missing `docker` binary was reported as `rm bonnie-x: no output`, and the
   cause could not be reached with `errors.Is`.
 
-### Changed
+### Security
 
-- The four chat adapters share one delivery helper, `chat.Delivery`. It
-  replaces the same twenty lines copied into each: marshal, build, set the
-  content type, authorise, send, log the transport error, close the body,
-  check the status, log that too. A 2xx now counts as delivered — `201` and
-  `204` were previously logged as failures by a bare `!= 200`.
-- `runtime.Record.Payload`'s doc link for the torn-write repair points at
-  `Session.repairTail`, the production path, rather than the pure helper.
-  `repairTrailingOrphan`'s own doc no longer claims Kit v0.106.0 appends a
-  step as two calls — it appends it as one, which `Session.AppendStep`
-  already documented. The repair stays for the journals BONNIE inherited.
-- Dependencies updated. Kit moves to v0.110.0 and `modernc.org/sqlite` to
-  v1.59.0; the transitive set moves with them. No BONNIE source changed:
-  `kit.SessionManager` still has exactly 20 methods, so the compile-time
-  tripwire in `runtime/session.go` held, and the CGO-free build still
-  passes. `charm.land/fantasy` stays `// indirect`, and its OpenAI provider
-  now pulls `github.com/charmbracelet/openai-go` in place of
-  `github.com/openai/openai-go/v3` — both transitive, neither named by
-  BONNIE.
-- **`examples/github-bot` and `examples/slack-bot` are agent trees.** Each
-  was made with `bonnie init`, is its own Go module pinned to a released
-  bonnie, and is run with `bonnie dev` and shipped with `bonnie build` — the
-  way a user runs their own agent. They were packages in BONNIE's module,
-  run with `go run`, and each README told the reader to rebuild the example
-  as a tree by hand. The prompt is now `instructions.md`, not a
-  `WithSystemPrompt` constant. `examples/examples_test.go` refuses a drift
-  back to the old shape and compiles every tree against the checkout, and a
-  new CI `examples` job (`task examples`) builds each tree against its pin.
-  After each release, `task examples-pin TAG=…` moves the pins.
+- Each adapter's signature check now fails CLOSED. A `Channel` holding no
+  credential refuses every delivery instead of accepting every delivery.
+  `New` makes that state unreachable, so this is defence in depth: the guard
+  that remains if the constructor's is ever lost.
+- Telegram compares its webhook secret in constant time. A plain `==` on a
+  secret leaks its prefix through timing to anyone who can POST repeatedly,
+  which a public webhook URL invites by definition.
+
+### Known limits
+
+Stated as plainly as the claims, and taken from the current
+[`README.md`](README.md#limits) rather than carried forward.
+
+- **Linux only.** The floor is the Landlock LSM, so a release builds
+  `linux/amd64` and `linux/arm64` and nothing else. macOS and Windows are not
+  supported. A kernel older than 5.13, or one booted with Landlock disabled,
+  has no default sandbox: BONNIE refuses to start rather than run a tool
+  unconfined — use `--sandbox docker` there. `install.sh` refuses any other
+  platform before it downloads.
+- **The default sandbox is containment, not isolation.** Landlock confines the
+  filesystem and keeps host credentials away from a command. It does **not**
+  confine the network, and it shares the host kernel.
+- **Do not run BONNIE as a user in the `docker` group.** Landlock mediates
+  opening a file, not connecting to a socket, so a tool call reaches
+  `/var/run/docker.sock` whenever the process can — a full host escape. No
+  path setting closes it. Use an unprivileged user, or microsandbox.
+- **Docker is namespaces, not a kernel.** Use microsandbox for hostile code.
+  microsandbox is verified on Linux with KVM; its network policy is fixed when
+  the sandbox is made, and reattaching under a different one fails with
+  `ErrPolicyMismatch`.
+- **Sandbox egress is open** until a policy is set, and the default backend
+  cannot set one — it refuses the policy instead of ignoring it.
+- **A skill's bundled files stay on the host.** Kit names a skill's
+  `scripts/`, `references/`, and `assets/` files in the activation text with a
+  host path the sandbox does not have, so the model is told about a file it
+  cannot open. Put what it must read in the skill body, and a file it must
+  open in `workspace/`. (This limit had dropped out of `README.md` though it
+  still holds; it is restored there in this release.)
+- **The HTTP channel verifies a caller only when you configure one.**
+  `http.WithAuthenticator` (or `bonnie.WithHTTPAuthenticator`) checks every
+  route but `GET /bonnie/v1/health`. Without one the channel carries a
+  `Principal` it does not examine, so authenticate in front of it, and
+  `operation_id` is refused. The chat channels are different: each verifies
+  its platform's signature, and — **new in this release, enforced by `New`** —
+  a chat channel with no credential refuses to be built. That verifies the
+  platform and not the person: a user ID in a verified Slack event is Slack's
+  word.
+- **Run ownership is per host, and the journal does not refuse a second
+  writer.** SQLite serialises write transactions and rejects a reused sequence
+  number, so two processes that write one run cannot corrupt it. That is
+  journal integrity and not turn coordination: two servers that both execute
+  the same run still interleave the conversation. SQLite locking needs POSIX
+  locks that work, so a journal on a network filesystem is unsafe.
+- **Events are journal-anchored.** A reconnect — also after a restart — is
+  served from the journal past the in-memory backlog, so the stream has no
+  gap. Live-only deltas are the exception, and they are marked: a client that
+  is not subscribed when a turn runs cannot recover them.
+- **Sandbox lifecycle is journalled, and reclamation is manual.**
+  `bonnie sandbox prune` deletes the sandboxes of finished runs; `serve` does
+  not sweep them.
+- **The mark3labs modules are publicly fetchable.** A scaffolded module
+  resolves `bonnie` and `kit` from the proxy; no `GOPRIVATE`. Authoring an
+  agent needs Go on your machine. The binary that `bonnie build` makes, and
+  the one `install.sh` installs, need nothing on the host.
 
 ## [0.7.0] — 2026-09-16
 
