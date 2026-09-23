@@ -36,6 +36,18 @@ a delivery came from the platform.**
   runs turns but cannot write back, which is what the conformance suite
   drives.
 
+### Added
+
+- **`install.sh`, an install script for the CLI.**
+  `curl -fsSL https://raw.githubusercontent.com/mark3labs/bonnie/master/install.sh | bash`
+  downloads the release archive for the host, verifies it against the
+  release's SHA-256 checksum file, and installs `bonnie`. It refuses a
+  binary that it cannot verify, and it refuses macOS and other platforms
+  before it downloads. It warns when the host has no Landlock, no provider
+  key, or no Go. `scripts/install_test.go` runs it against a fake release,
+  and fails when `.goreleaser.yaml` changes the asset names that the script
+  expects.
+
 ### Security
 
 - Each adapter's signature check now fails CLOSED. A `Channel` holding no
@@ -48,6 +60,14 @@ a delivery came from the platform.**
 
 ### Fixed
 
+- **The Nix flake builds again.** `nix/bonnie.nix` had a stale
+  `vendorHash`, so `nix profile add github:mark3labs/bonnie` and `nix run`
+  failed on `master` and at `v0.7.0`. The hash is refreshed, and the
+  package now reports its release version instead of `0.1.0`. Two
+  `cmd/bonnie` tests that run `go build` on a scaffolded module need the
+  network, so the Nix build skips them. The flake now gives `bonnie` on
+  Linux only, as the release does. `aarch64-darwin` keeps `microsandbox`
+  and the dev shell.
 - **A data race on the event anchor.** `Session.AppendMessage` wrote the
   journal sequence onto a tree entry outside the session lock, while
   `Session.LastMessageSeq` read it under the read lock.

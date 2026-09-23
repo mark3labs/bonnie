@@ -67,7 +67,26 @@ As a library:
 go get github.com/mark3labs/bonnie
 ```
 
-As a CLI:
+As a CLI, with the install script. It downloads the release binary for your
+platform, verifies its SHA-256 checksum, and installs it. The default
+directory is `~/.local/bin`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mark3labs/bonnie/master/install.sh | bash
+```
+
+The script refuses a binary that it cannot verify. To pin a release or to
+choose the directory, give the options after `bash -s --`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mark3labs/bonnie/master/install.sh \
+  | bash -s -- --version v0.7.0 --bin-dir /usr/local/bin
+```
+
+The script also tells you when the host has no Landlock, no provider key, or
+no Go. It does not change the host for these.
+
+As a CLI, from source:
 
 ```bash
 go install github.com/mark3labs/bonnie/cmd/bonnie@latest
@@ -76,7 +95,7 @@ go install github.com/mark3labs/bonnie/cmd/bonnie@latest
 With Nix. This gives you the CLI, and the microsandbox CLI (`msb`) on its PATH:
 
 ```bash
-nix profile install github:mark3labs/bonnie   # or: nix run github:mark3labs/bonnie
+nix profile add github:mark3labs/bonnie   # or: nix run github:mark3labs/bonnie
 ```
 
 Set a provider key. BONNIE uses the provider that Kit is configured for:
@@ -90,11 +109,11 @@ can write the key (and any channel credential) into a file instead of
 exporting it each time. An exported variable still wins over the file, and a
 missing `.env` is not an error.
 
-BONNIE needs Go 1.27+ and **Linux**. The kernel must be 5.13 or newer with
-Landlock enabled, which is the default on each current distribution. A sandbox
-is not optional, and the default sandbox needs no installation. Docker or `msb`
-give stronger isolation. macOS and Windows are not supported — see
-[Limits](#limits).
+BONNIE needs **Linux**. To author an agent also needs Go 1.27+; the release
+binary does not. The kernel must be 5.13 or newer with Landlock enabled, which
+is the default on each current distribution. A sandbox is not optional, and
+the default sandbox needs no installation. Docker or `msb` give stronger
+isolation. macOS and Windows are not supported — see [Limits](#limits).
 
 ### Development shell
 

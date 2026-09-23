@@ -8,7 +8,7 @@
 
 buildGoModule (finalAttrs: {
   pname = "bonnie";
-  version = "0.1.0";
+  version = "0.7.0";
 
   src = lib.cleanSourceWith {
     src = ../.;
@@ -30,9 +30,13 @@ buildGoModule (finalAttrs: {
   # Refresh with:
   #   nix build .#bonnie.goModules --rebuild
   # or set this to lib.fakeHash and read the hash Nix prints.
-  vendorHash = "sha256-qFBVkgLgsZSYvqB2Qx6D8WRAhXe3+B9mOShEFRvcoqQ=";
+  vendorHash = "sha256-nlPVi8DXcEsjLV1rddjWBl3y6ZvTVeqZkHBmJEOt764=";
 
   subPackages = [ "cmd/bonnie" ];
+
+  checkFlags = [
+    "-skip=^(TestDevRestartCompletesParkedRun|TestBuildOutputServesEmbeddedInstructions)$"
+  ];
 
   env.CGO_ENABLED = 0;
 
@@ -56,5 +60,6 @@ buildGoModule (finalAttrs: {
     homepage = "https://github.com/mark3labs/bonnie";
     license = lib.licenses.mit;
     mainProgram = "bonnie";
+    platforms = lib.platforms.linux;
   };
 })

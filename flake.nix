@@ -39,7 +39,10 @@
           };
         in
         {
-          inherit bonnie microsandbox;
+          inherit microsandbox;
+        }
+        // nixpkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+          inherit bonnie;
           default = bonnie;
         }
       );
@@ -55,24 +58,29 @@
           };
         in
         {
-          default = bonnieApp;
-          bonnie = bonnieApp;
           msb = {
             type = "app";
             program = "${self.packages.${system}.microsandbox}/bin/msb";
             meta = self.packages.${system}.microsandbox.meta;
           };
         }
+        // nixpkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+          default = bonnieApp;
+          bonnie = bonnieApp;
+        }
       );
 
-      # `nix flake check` builds both packages.
+      # `nix flake check` builds each package of the system.
       checks = forAllSystems (
         pkgs:
         let
-          inherit (pkgs.stdenv.hostPlatform) system;
+          inherit (pkgs.stdenv.hostPlatform) system isLinux;
         in
         {
-          inherit (self.packages.${system}) bonnie microsandbox;
+          inherit (self.packages.${system}) microsandbox;
+        }
+        // nixpkgs.lib.optionalAttrs isLinux {
+          inherit (self.packages.${system}) bonnie;
         }
       );
 
