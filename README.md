@@ -843,6 +843,10 @@ Stated plainly, because the failure modes are not obvious:
   with a different policy fails with `ErrPolicyMismatch`.
 - **Sandbox egress is open** until you set a policy, and the default backend
   cannot set one — it refuses the policy instead of ignoring it.
+- **A halt stops the turn, not the step.** Kit runs the tool calls of one step
+  together, thus a tool that the model calls in the same step as
+  `request_approval` (or another halting tool) still runs before the run
+  parks. Approval gates the next step, not a sibling call.
 - **A skill's bundled files stay on the host.** Kit names a skill's
   `scripts/`, `references/`, and `assets/` files in the text of the
   activation, with a host path. The tools run in a sandbox that does not have

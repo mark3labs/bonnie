@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-09-25
+
+**Security: `request_approval` now holds the action back until a person
+answers, and a sandboxed agent no longer takes configuration from files Kit
+finds on the host.** Upgrade from any earlier release.
+
+### The claims
+
+Still what BONNIE is for. All three hold as they did at `0.8.0`; this release
+makes the second one mean what it says:
+
+- **A run survives process death.** The conversation is journalled as it
+  happens, so another process — after a crash, on another machine — resumes
+  the run with the whole history, including which tools it already called, so
+  a side effect is not repeated. A tool-calling step commits as one SQLite
+  transaction: whole, or absent. Kit moves to v0.113.3 and the compile-time
+  tripwire on `kit.SessionManager` held (20 methods). The four Kit seams are
+  now also proven against a real `*kit.Kit` in the standard test run, not
+  only behind the `integration` tag.
+- **A run parks indefinitely.** A run waiting on a person holds no process and
+  no compute — the sandbox opens lazily, so a parked run costs a row in a
+  database. Exit the process and answer tomorrow. **New in this release:**
+  the turn ends at the halting tool, so the model is not asked again, and
+  cannot act, until the run resumes with the answer.
+- **A run is reachable over HTTP.** `channel/http` mounts its routes under
+  `/bonnie/v1`, with an NDJSON event stream that survives a reconnect and a
+  restart; the Slack, Discord, Telegram, and GitHub adapters carry the same
+  durable run into a thread, and each refuses to start without the
+  credential that verifies its webhook.
+
+The limits are under **Known limits** below, stated as plainly. A framework
+that hides its limits gets deployed into situations it cannot handle.
+
 ### Security
 
 - **`request_approval` now holds the action back until the operator
@@ -40,6 +73,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking (behaviour):** `sandbox.Agent`, and thus `bonnie.New()`, no
+  longer loads Kit's context files (`AGENTS.md`), named agent definitions, or
+  extensions. See *Security* for why. Nothing fails to compile: a host that
+  relied on one of them loses it silently, and gets it back with
+  `WithKit(kit.WithContextFiles())`, `kit.WithAgents()`, or
+  `kit.WithExtensions()`. The tree's `instructions.md` and skills are
+  unaffected.
+- **Breaking (dependency):** BONNIE now requires Kit v0.113.3 or later. A
+  module that pinned an older Kit is moved up by Go's minimum version
+  selection. This is deliberate: an older Kit does not end the turn on
+  `Halt`.
 - **Test code may import `charm.land/fantasy`.** A `_test.go` file and
   `internal/fakemodel` may; shipped code still may not, and may not import
   `internal/fakemodel` either. depguard enforces both with per-file rules, and
@@ -55,6 +99,74 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   still passes. From Kit v0.113.0, an agent that BONNIE builds no longer
   writes a default `~/.kit.yml` into the home directory of the host that
   serves it.
+
+### Fixed
+
+- **`task examples-pin` passes on its own pin.** It changed each example's
+  `go.mod` and `go.sum` and then ran `task examples`, whose
+  `git diff --exit-code -- examples/` failed on the pin itself, so the
+  post-release step in `docs/RELEASE.md` could never pass. The task now
+  stages the pin first, so the check sees only what `bonnie build` changed.
+
+### Known limits
+
+Stated as plainly as the claims, and taken from the current
+[`README.md`](README.md#limits) rather than carried forward. Each was checked
+against the code at this tag, including the Kit it now requires.
+
+- **Linux only.** The floor is the Landlock LSM, so a release builds
+  `linux/amd64` and `linux/arm64` and nothing else. macOS and Windows are not
+  supported. A kernel older than 5.13, or one booted with Landlock disabled,
+  has no default sandbox: BONNIE refuses to start rather than run a tool
+  unconfined — use `--sandbox docker` there.
+- **The default sandbox is containment, not isolation.** Landlock confines the
+  filesystem and keeps host credentials away from a command. It does **not**
+  confine the network, and it shares the host kernel.
+- **Do not run BONNIE as a user in the `docker` group.** Landlock mediates
+  opening a file, not connecting to a socket, so a tool call reaches
+  `/var/run/docker.sock` whenever the process can — a full host escape. No
+  path setting closes it. Use an unprivileged user, or microsandbox.
+- **Docker is namespaces, not a kernel.** Use microsandbox for hostile code.
+  microsandbox is verified on Linux with KVM; its network policy is fixed when
+  the sandbox is made, and reattaching under a different one fails with
+  `ErrPolicyMismatch`.
+- **Sandbox egress is open** until a policy is set, and the default backend
+  cannot set one — it refuses the policy instead of ignoring it.
+- **A halt stops the turn, not the step.** **New in this release.** Kit runs
+  the tool calls of one step together, so a tool the model calls in the
+  **same** step as `request_approval` (or any halting tool) still runs
+  before the run parks. Approval gates the next step, not a sibling call.
+  Put the action that needs approval behind the answer, not beside the
+  question.
+- **A skill's bundled files stay on the host.** Kit v0.113.3 still names a
+  skill's `scripts/`, `references/`, and `assets/` files in the activation
+  text with a host path the sandbox does not have, so the model is told about
+  a file it cannot open. Put what it must read in the skill body, and a file
+  it must open in `workspace/`.
+- **The HTTP channel verifies a caller only when you configure one.**
+  `http.WithAuthenticator` (or `bonnie.WithHTTPAuthenticator`) checks every
+  route but `GET /bonnie/v1/health`. Without one the channel carries a
+  `Principal` it does not examine, so authenticate in front of it, and
+  `operation_id` is refused. The chat channels each verify their platform's
+  signature and refuse to be built without the credential. That verifies the
+  platform and not the person: a user ID in a verified Slack event is Slack's
+  word.
+- **Run ownership is per host, and the journal does not refuse a second
+  writer.** SQLite serialises write transactions and rejects a reused sequence
+  number, so two processes that write one run cannot corrupt it. That is
+  journal integrity and not turn coordination: two servers that both execute
+  the same run still interleave the conversation. SQLite locking needs POSIX
+  locks that work, so a journal on a network filesystem is unsafe.
+- **Events are journal-anchored.** A reconnect — also after a restart — is
+  served from the journal past the in-memory backlog, so the stream has no
+  gap. Live-only deltas are the exception, and they are marked.
+- **Sandbox lifecycle is journalled, and reclamation is manual.**
+  `bonnie sandbox prune` deletes the sandboxes of finished runs; `serve` does
+  not sweep them.
+- **The mark3labs modules are publicly fetchable.** A scaffolded module
+  resolves `bonnie` and `kit` from the proxy; no `GOPRIVATE`. Authoring an
+  agent needs Go on your machine. The binary that `bonnie build` makes, and
+  the one `install.sh` installs, need nothing on the host.
 
 ## [0.8.0] — 2026-09-23
 
@@ -1463,6 +1575,7 @@ gets deployed into situations it cannot handle.
 
 ---
 
+[0.9.0]: https://github.com/mark3labs/bonnie/releases/tag/v0.9.0
 [0.8.0]: https://github.com/mark3labs/bonnie/releases/tag/v0.8.0
 [0.7.0]: https://github.com/mark3labs/bonnie/releases/tag/v0.7.0
 [0.6.0]: https://github.com/mark3labs/bonnie/releases/tag/v0.6.0
