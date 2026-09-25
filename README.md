@@ -368,6 +368,10 @@ return kit.ToolOutput{
 The run stops, `Start` returns with `State == RunWaiting`, and
 `run.Suspend.Prompt` holds your question.
 
+The turn ends at the halting tool: the model is not asked again until the run
+resumes. A tool that the model calls in the **same** step as the halting tool
+still runs, because Kit runs the calls of one step together.
+
 In an agent tree, `bonnie init --tools` writes one sample tool. A tool there is
 `tools/<name>/tool.go` with `func Tool() kit.Tool`, and the directory name is
 the tool's name. `bonnie dev` and `bonnie build` generate the wiring again,

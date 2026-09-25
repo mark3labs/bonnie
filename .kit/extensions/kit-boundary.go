@@ -3,10 +3,13 @@
 // Package main holds BONNIE's public-API-boundary guard, a Kit extension.
 //
 // BONNIE uses the public Kit SDK only: github.com/mark3labs/kit/pkg/kit.
-// A direct import of github.com/mark3labs/kit/internal/... or of
-// charm.land/fantasy breaks that rule. This extension refuses the `write`
-// and `edit` tool calls that would add such an import, so the violation
-// never reaches the disk and the agent gets told why in the same turn.
+// A direct import of github.com/mark3labs/kit/internal/... breaks that rule
+// everywhere. A direct import of charm.land/fantasy breaks it in the code
+// BONNIE ships; a test, and the test-only package internal/fakemodel, may
+// import fantasy to build a scripted model for a real Kit. This extension
+// refuses the `write` and `edit` tool calls that would add a forbidden
+// import, so the violation never reaches the disk and the agent gets told why
+// in the same turn.
 //
 // This is the FIRST of three layers. The other two stay in place and remain
 // the authority:
@@ -36,9 +39,12 @@ import (
 )
 
 // forbidden lists the import path prefixes BONNIE must never name directly.
+// A rule with testOK set does not apply to test code: a _test.go file, or a
+// file in internal/fakemodel.
 var forbidden = []struct {
 	prefix string
 	reason string
+	testOK bool
 }{
 	{
 		prefix: "github.com/mark3labs/kit/internal",
@@ -48,12 +54,27 @@ var forbidden = []struct {
 	},
 	{
 		prefix: "charm.land/fantasy",
-		reason: "BONNIE names Kit model types through the aliases in " +
+		reason: "BONNIE's shipped code names Kit model types through the aliases in " +
 			"github.com/mark3labs/kit/pkg/kit (kit.LLMMessage, kit.LLMToolCallPart, ...), " +
 			"never through fantasy directly. A direct import pins BONNIE to Kit's own " +
-			"transitive dependency and breaks the moment Kit moves it. " +
-			"fantasy must stay // indirect in go.mod.",
+			"transitive dependency and breaks the moment Kit moves it. Only test code " +
+			"may import fantasy: a _test.go file, or internal/fakemodel.",
+		testOK: true,
 	},
+	{
+		prefix: "github.com/mark3labs/bonnie/internal/fakemodel",
+		reason: "internal/fakemodel imports charm.land/fantasy, so it is for tests " +
+			"only. Import it from a _test.go file; shipped code must not reach " +
+			"fantasy through it.",
+		testOK: true,
+	},
+}
+
+// isTestCode reports whether path is test code: a _test.go file, or a file
+// in the test-only package internal/fakemodel.
+func isTestCode(path string) bool {
+	p := strings.ReplaceAll(path, "\\", "/")
+	return strings.HasSuffix(p, "_test.go") || strings.Contains(p, "internal/fakemodel/")
 }
 
 // Init registers the guard on the two tools that put text into a Go file.
@@ -86,6 +107,9 @@ func Init(api ext.API) {
 					continue
 				}
 				for _, f := range forbidden {
+					if f.testOK && isTestCode(path) {
+						continue
+					}
 					if imp == f.prefix || strings.HasPrefix(imp, f.prefix+"/") {
 						return &ext.ToolCallResult{
 							Block: true,

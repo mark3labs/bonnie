@@ -92,13 +92,42 @@ func sandboxedKitOptions(open Opener, workdir string) []kit.Option {
 		// Setting it is safe precisely because BONNIE owns persistence:
 		// Kit skips InitTreeSession entirely when Options.SessionManager is
 		// set, so SessionDir no longer chooses where sessions are stored.
-		// What it still does is scope context-file and named-agent
-		// discovery, and pointing that at the sandbox root is right for the
-		// same reason: a confined agent must not silently inherit an
-		// AGENTS.md from a host directory it cannot read.
+		// It would also scope context-file and named-agent discovery, but
+		// the option below turns both off.
 		//
 		// Guard test: TestPromptWorkingDirectoryIsTheToolWorkingDirectory.
 		func(o *kit.Options) { o.SessionDir = workdir },
+
+		// Kit must not configure the agent from files it finds on its own.
+		// The tree is the agent's whole configuration, and what Kit finds
+		// is either the model's own work or the operator's:
+		//
+		//   - AGENTS.md is read from SessionDir, which is the sandbox's
+		//     working directory. On a host-mapped backend (landlock, the
+		//     default) the model can write there, and Kit put the file into
+		//     the system prompt of the next turn: a model could give itself
+		//     instructions that outlive the turn, outside instructions.md,
+		//     and nobody would review them. On a guest backend the same
+		//     option read a HOST path named /workspace, so the result also
+		//     depended on the backend.
+		//   - Named agent definitions come from .kit/agents under the same
+		//     directory and from the operator's ~/.config/kit/agents.
+		//   - Extensions come from the process's .kit/extensions, from
+		//     ~/.config/kit/extensions and from /usr/share/kit/extensions.
+		//     An extension is Go code that runs in the BONNIE process, so it
+		//     is not confined by the sandbox at all.
+		//
+		// Skills are the tree's slot and are handled by the root package.
+		// ~/.kit.yml is still read: model and provider settings live there.
+		// A host that wants one of these back passes it after this set,
+		// e.g. WithKit(kit.WithContextFiles()).
+		//
+		// Guard test: TestKitDiscoversNothingOnTheHost.
+		func(o *kit.Options) {
+			o.NoContextFiles = true
+			o.NoAgents = true
+			o.NoExtensions = true
+		},
 	}
 }
 

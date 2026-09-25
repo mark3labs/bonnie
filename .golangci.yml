@@ -12,7 +12,8 @@ linters:
       rules:
         # BONNIE is a separate Go module so the compiler already rejects
         # imports of github.com/mark3labs/kit/internal/... . This rule is the
-        # belt to that suspenders: it produces a readable error early.
+        # belt to that suspenders: it produces a readable error early. It
+        # applies to every file, tests included.
         public-kit-api-only:
           list-mode: lax
           deny:
@@ -21,13 +22,41 @@ linters:
                 BONNIE depends on the public Kit SDK only. Use
                 github.com/mark3labs/kit/pkg/kit. If something you need is not
                 exported, raise it upstream rather than reaching in.
+
+        # fantasy is Kit's model layer. The code BONNIE ships names its types
+        # through the aliases in kit/pkg/kit only. Test code may import it,
+        # because a scripted model for a real Kit (kit.WithProvider) must
+        # implement fantasy.LanguageModel and Kit does not alias the types
+        # that takes. internal/fakemodel is that model: test-only code in a
+        # non-test file, so it is exempt by path, and the next rule keeps
+        # shipped code from importing it.
+        fantasy-in-tests-only:
+          list-mode: lax
+          files:
+            - $all
+            - "!$test"
+            - "!**/internal/fakemodel/*.go"
+          deny:
             - pkg: charm.land/fantasy
               desc: >-
                 BONNIE names Kit types through the aliases in
                 github.com/mark3labs/kit/pkg/kit, never through fantasy
                 directly. Kit owns the model layer; a direct fantasy import
                 pins BONNIE to Kit's transitive dependency and breaks the
-                moment Kit changes it.
+                moment Kit changes it. Only a _test.go file or
+                internal/fakemodel may import it.
+
+        fakemodel-in-tests-only:
+          list-mode: lax
+          files:
+            - $all
+            - "!$test"
+          deny:
+            - pkg: github.com/mark3labs/bonnie/internal/fakemodel
+              desc: >-
+                internal/fakemodel imports charm.land/fantasy and exists for
+                tests. Import it from a _test.go file only, so fantasy never
+                reaches a package BONNIE ships.
 
         # `bonnie build` promises the user a single static binary, and
         # goreleaser cross-compiles four targets from one machine. Both stop

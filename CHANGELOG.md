@@ -7,6 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **`request_approval` now holds the action back until the operator
+  answers.** Before Kit v0.113.3, Kit did not end the agent loop on
+  `ToolOutput.Halt`, in any release BONNIE has used: it asked the model
+  again, with every tool, in the same turn. The run still parked, so this was
+  invisible from the outside, but a model that asked for approval and then
+  went ahead ran the action before anyone approved it. Kit v0.113.3 ends the
+  turn at a halting tool
+  ([mark3labs/kit#147](https://github.com/mark3labs/kit/issues/147)), and
+  BONNIE now requires it. This covers a host's own halting tool too. A tool
+  called in the same step as the halting tool still runs.
+- **A sandboxed agent no longer takes configuration from files Kit finds on
+  the host.** `sandbox.Agent`, and thus `bonnie.New()`, turns off Kit's
+  context files, named agent definitions and extensions. Kit read
+  `AGENTS.md` from the sandbox's working directory, which on the default
+  landlock backend the model can write, so a model could put instructions
+  into its own next system prompt. Extensions from `.kit/extensions`,
+  `~/.config/kit/extensions` and `/usr/share/kit/extensions` ran in the
+  BONNIE process, outside the sandbox. A host that wants one back passes
+  `WithKit(kit.WithContextFiles())`, `kit.WithAgents()` or
+  `kit.WithExtensions()`. `~/.kit.yml` is still read.
+
+### Added
+
+- `internal/fakemodel`, a scripted model for tests that drive a real Kit
+  through `kit.WithProvider`, with no network and no key. New tests use it to
+  prove the four Kit seams and the sandbox's options against a real
+  `*kit.Kit`; before, only the live tests behind the `integration` tag did.
+  It reproduced both defects above, and guards against their return.
+
+### Changed
+
+- **Test code may import `charm.land/fantasy`.** A `_test.go` file and
+  `internal/fakemodel` may; shipped code still may not, and may not import
+  `internal/fakemodel` either. depguard enforces both with per-file rules, and
+  the `kit-boundary` extension follows. `fantasy` is now a direct requirement
+  in `go.mod`; users get the same version as before.
+
+- Dependencies updated. Kit moves to v0.113.3, the first release that ends
+  the turn on `Halt`, and `charm.land/bubbletea/v2` to v2.0.10;
+  `anthropic-sdk-go`, `mcp-go`, `gax-go` and the AWS and Google clients move
+  transitively. `charm.land/fantasy` moves to v0.45.2, Kit's own version. The
+  examples take the same set and stay pinned to bonnie v0.8.0.
+  `kit.SessionManager` still has exactly 20 methods, and the CGO-free build
+  still passes. From Kit v0.113.0, an agent that BONNIE builds no longer
+  writes a default `~/.kit.yml` into the home directory of the host that
+  serves it.
+
 ## [0.8.0] — 2026-09-23
 
 **Breaking: a chat adapter will not build without the credential that proves

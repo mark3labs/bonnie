@@ -6,7 +6,7 @@
 
 - [ ] `go test -race ./...` passes
 - [ ] `golangci-lint run` passes
-- [ ] No new direct import of `kit/internal/*` or `charm.land/fantasy`
+- [ ] No new direct import of `kit/internal/*`, and no import of `charm.land/fantasy` or `internal/fakemodel` outside test code
       (`task lint` — `depguard` is the gate; the `.kit/extensions/kit-boundary.go`
       extension only guards edits made through Kit in your checkout)
 - [ ] Every exported symbol has a godoc comment

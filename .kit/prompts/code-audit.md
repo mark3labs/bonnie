@@ -40,10 +40,11 @@ audit the whole repo, prioritising the highest-traffic packages first
      only flag the latter; propose the helper's home package
 
 4. **Check concerns / boundary violations** — the ones this repo enforces:
-   - **Public Kit SDK only**: any direct import of `kit/internal/...` or
-     `charm.land/fantasy` outside `pkg/kit` is a violation (depguard and the
-     `boundary` CI job exist for this; verify they still fire by reading
-     `.golangci.yml` and `.github/workflows/ci.yml`)
+   - **Public Kit SDK only**: any direct import of `kit/internal/...` is a
+     violation; so is an import of `charm.land/fantasy` or
+     `internal/fakemodel` outside test code (a `_test.go` file or
+     `internal/fakemodel` itself). depguard enforces this; verify its rules
+     still fire by reading `.golangci.yml`
    - **Layering**: `runtime/` must not import `channel/` or `sandbox/`
      (invariants 6, and the same logic for `sandbox/`); `cmd/bonnie` may
      import everything

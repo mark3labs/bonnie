@@ -42,11 +42,17 @@ Layout:
 
 **BONNIE imports the public Kit SDK only: `github.com/mark3labs/kit/pkg/kit`.**
 
-- Never import `github.com/mark3labs/kit/internal/...`.
-- Never import `charm.land/fantasy`. Kit re-exports each model type as an
-  alias (`kit.LLMMessage`, `kit.LLMToolCallPart`,
-  `kit.LLMToolResultOutputContentText`). `fantasy` must stay `// indirect` in
-  `go.mod`.
+- Never import `github.com/mark3labs/kit/internal/...`, also not in a test.
+- Never import `charm.land/fantasy` in code BONNIE ships. Kit re-exports each
+  model type as an alias (`kit.LLMMessage`, `kit.LLMToolCallPart`,
+  `kit.LLMToolResultOutputContentText`).
+- **Test code may import `fantasy`**: a `_test.go` file, and
+  `internal/fakemodel`. A scripted model for a real Kit
+  (`kit.WithProvider`) must implement `fantasy.LanguageModel`, and Kit does
+  not alias the types that interface takes. Thus `fantasy` is a direct
+  requirement in `go.mod`, not `// indirect`. Prefer `internal/fakemodel`
+  to a new `fantasy` import: its API names only `kit` types. Shipped code
+  must never import `internal/fakemodel`.
 - Do not vendor Kit, copy internal code, or merge the two repositories.
 
 If Kit exports a type but not a helper for it, write the small helper in
@@ -71,7 +77,9 @@ authority:
 not see an edit from an editor, a different tool, or a dependency bump. Do not
 delete the `depguard` rule because the extension exists. There is no
 `boundary` CI job any more: `depguard` denies both paths by prefix whatever
-the module layout, so the job added nothing.
+the module layout, so the job added nothing. Three `depguard` rules carry the
+boundary: `public-kit-api-only` (every file), `fantasy-in-tests-only` and
+`fakemodel-in-tests-only` (every file that is not test code).
 
 ## Setup commands
 
@@ -143,8 +151,14 @@ CGO_ENABLED=0 go build ./...
   job builds, vets, tests with `-race`, and builds again with `CGO_ENABLED=0`.
   The `lint` job runs `golangci-lint`.
 - Use `t.Parallel()` by default.
-- Use `fakeAgent` from `runtime/runner_test.go`. Do not call a live model in a
-  standard test.
+- Use `fakeAgent` from `runtime/runner_test.go` to test the executor. Do not
+  call a live model in a standard test.
+- To test what a real Kit does with BONNIE's options and hooks, use
+  `internal/fakemodel`: `fakemodel.New(replies...).Option()` builds a real
+  `*kit.Kit` whose model answers from a script and records each request.
+  See `runtime/kit_seams_test.go` and `sandbox/kit_discovery_test.go`. Make
+  the Kit hermetic (no `~/.kit.yml`, context files, skills, extensions or
+  agents) unless that discovery is what the test is about.
 - Each durability claim needs a test that crosses a process boundary in
   spirit: make a second `Runner` that shares the journal only. See
   `TestResumeAcrossProcessBoundary`.
@@ -193,6 +207,13 @@ before you change `runtime/`.
 | Inject replayed context | `Kit.OnContextPrepare` | `runner.go` |
 | Suspend for human input | `ToolOutput{Halt, FinalValue}` | `suspend.go` |
 
+- **`Halt` ends the agent loop** from Kit `v0.113.3`
+  ([mark3labs/kit#147](https://github.com/mark3labs/kit/issues/147)). Before
+  it, Kit asked the model again with every tool, and `request_approval` held
+  nothing back. Do not lower the Kit pin below `v0.113.3`. Guard tests:
+  `TestKitApprovalBlocksTheActionUntilAnswered` and
+  `TestKitSuspendAndResumeAcrossProcessBoundary`, which require exactly one
+  model call in the turn that halts.
 - `Session` implements all 20 methods of `kit.SessionManager` (the count was
   recorded as 21 until `v0.106.0` was verified; it was wrong). The assertion
   `var _ kit.SessionManager = (*Session)(nil)` in `session.go` is a deliberate
@@ -268,7 +289,8 @@ here: the TUI talks to the wire the channel exposes, never to Kit internals.
 - Write what changed and why, not the process you followed.
 - Branch from `master`.
 - Run `task check` before each commit.
-- Make sure no new import of `kit/internal/*` or `charm.land/fantasy` exists.
+- Make sure no new import of `kit/internal/*` exists, and no import of
+  `charm.land/fantasy` or `internal/fakemodel` outside test code.
 - Complete each box in the PR template.
 - Release steps are in [`docs/RELEASE.md`](docs/RELEASE.md). Keep
   `CHANGELOG.md` current.
