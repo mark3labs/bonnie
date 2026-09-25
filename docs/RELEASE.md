@@ -93,6 +93,54 @@ edited to the required form.
 | `v0.6.0` | `09f5293` | 2026-09-15 |
 | `v0.7.0` | `4b6fa58` | 2026-09-16 |
 | `v0.8.0` | `c03de52` | 2026-09-23 |
+| `v0.9.0` | `fb23879` | 2026-09-25 |
+
+### `v0.9.0`, 2026-09-25 — every box confirmed
+
+- [x] `task release-check` — 1 config validated
+- [x] `task release-snapshot` — two targets (linux amd64, arm64), archives
+      and checksums; the snapshot binary prints its injected version
+- [x] No `replace` directive in `go.mod`; Kit moves to `v0.113.3`
+- [x] All CI jobs green on `master` at the tagged commit `fb23879`:
+      `test`, `examples`, and `lint` (run `36138369651`)
+- [x] `CHANGELOG.md` carries a `[0.9.0]` section in Keep-a-Changelog shape
+- [x] Release notes state the three claims **and** the limits, published
+      with no human edit
+- [x] Tag pushed; `release.yml` run `36138865116` succeeded
+- [x] Three artifacts published; the downloaded `linux_amd64` binary prints
+      `bonnie 0.9.0`, its checksum verifies, and it is statically linked
+- [x] The examples are pinned to `v0.9.0` and `task examples` passes
+
+**The section written across the increment again had no claims and no
+limits.** Reading `git log v0.8.0..HEAD` against it found two more gaps: the
+`task examples-pin` fix had no *Fixed* entry, and the change to Kit's
+discovery defaults was under *Security* only. That change breaks a host that
+relied on `AGENTS.md`, named agents, or extensions, and nothing fails to
+compile, so it also got a **Breaking** entry under *Changed*, with the Kit
+`v0.113.3` minimum.
+
+**A limit was in the README but not in its Limits section.** The approval
+section said that a tool called in the same step as a halting tool still
+runs. That is a limit of the release's headline fix, so it went into
+`README.md` **Limits** and into the notes. No BONNIE test proves it; Kit's
+`ToolOutput.Halt` godoc does. The skill bundled-files limit was checked
+against Kit `v0.113.3` directly (the activation still gives the host
+`BaseDir`) and still holds.
+
+**Verified from the artifact.** The headline fixes live in `bonnie.New()` and
+`sandbox.Agent`, and to prove them from the binary needs a live model. Their
+proof is `runtime/kit_seams_test.go` and `sandbox/kit_discovery_test.go`,
+which drive a real `*kit.Kit` through `internal/fakemodel`, and both halt
+tests fail on Kit `v0.113.1`. From the artifact: the downloaded binary still
+refuses `--sandbox none` by name, and `install.sh` from `master` resolved
+`v0.9.0` as the latest release, verified the checksum, and installed a binary
+that prints `bonnie 0.9.0`.
+
+**Version choice.** MINOR, although every commit is `fix:`, `docs:`, or
+`chore:` and no exported signature changed. The default of `bonnie.New()`
+changed in a way that a host sees only at run time, and the Kit floor moves
+every user's module up. A behaviour break with no compile error is the worst
+kind to put in a PATCH.
 
 ### `v0.8.0`, 2026-09-23 — every box confirmed
 
