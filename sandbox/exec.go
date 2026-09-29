@@ -133,12 +133,11 @@ func execWithMarker(cmd Command) (argv []string, nonce string, err error) {
 // never ran.
 func parseMarker(stdout, nonce string) (clean string, code int, found bool) {
 	marker := markerPrefix + nonce + ":"
-	idx := strings.LastIndex(stdout, marker)
-	if idx < 0 {
+	head, tail, ok := strings.CutLast(stdout, marker)
+	if !ok {
 		return stdout, 0, false
 	}
 
-	tail := stdout[idx+len(marker):]
 	digits := strings.TrimSpace(tail)
 	if cut := strings.IndexAny(digits, "\r\n"); cut >= 0 {
 		digits = digits[:cut]
@@ -149,7 +148,7 @@ func parseMarker(stdout, nonce string) (clean string, code int, found bool) {
 	}
 
 	// Drop the marker and the newline that printf put in front of it.
-	clean = strings.TrimSuffix(stdout[:idx], "\n")
+	clean = strings.TrimSuffix(head, "\n")
 	return clean, code, true
 }
 

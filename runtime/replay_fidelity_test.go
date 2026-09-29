@@ -74,6 +74,86 @@ func TestReplayPreservesToolCalls(t *testing.T) {
 	}
 }
 
+// TestReplayPreservesMediaToolResults guards replay fidelity for a tool
+// result that is not text. From Kit v0.114.0 the built-in read tool returns
+// an image file to the model as media (kit.LLMToolResultOutputContentMedia),
+// not as text. A journal that kept only text would restore the result with
+// the image gone, and a resumed run would read the file again or answer
+// without it. The run is restored from a second SQLite handle that shares
+// the journal directory only, as a new process would.
+func TestReplayPreservesMediaToolResults(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	dir := t.TempDir()
+
+	first, err := OpenSQLiteJournal(dir)
+	if err != nil {
+		t.Fatalf("OpenSQLiteJournal: %v", err)
+	}
+	s := NewSession("replay-media", first)
+	call := kit.LLMMessage{
+		Role: kit.LLMMessageRole("assistant"),
+		Content: []kit.LLMMessagePart{kit.LLMToolCallPart{
+			ToolCallID: "tc-1",
+			ToolName:   "read",
+			Input:      `{"path":"chart.png"}`,
+		}},
+	}
+	result := kit.LLMMessage{
+		Role: kit.LLMMessageRole("tool"),
+		Content: []kit.LLMMessagePart{kit.LLMToolResultPart{
+			ToolCallID: "tc-1",
+			Output: kit.LLMToolResultOutputContentMedia{
+				Data:      "iVBORw0KGgo=",
+				MediaType: "image/png",
+				Text:      "chart.png",
+			},
+		}},
+	}
+	for _, m := range []kit.LLMMessage{call, result} {
+		if _, err := s.AppendMessage(m); err != nil {
+			t.Fatalf("AppendMessage: %v", err)
+		}
+	}
+	if err := first.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	second, err := OpenSQLiteJournal(dir)
+	if err != nil {
+		t.Fatalf("OpenSQLiteJournal (second): %v", err)
+	}
+	t.Cleanup(func() { _ = second.Close() })
+	restored, err := Restore(ctx, "replay-media", second)
+	if err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+
+	var got []kit.LLMToolResultOutputContentMedia
+	for _, m := range restored.GetMessages() {
+		for _, part := range m.Content {
+			res, ok := part.(kit.LLMToolResultPart)
+			if !ok {
+				continue
+			}
+			switch v := res.Output.(type) {
+			case kit.LLMToolResultOutputContentMedia:
+				got = append(got, v)
+			case *kit.LLMToolResultOutputContentMedia:
+				got = append(got, *v)
+			default:
+				t.Fatalf("restored tool result output is %T, want media — replay is lossy", res.Output)
+			}
+		}
+	}
+	if len(got) != 1 {
+		t.Fatalf("restored %d media tool results, want 1 — replay is lossy", len(got))
+	}
+	if got[0].Data != "iVBORw0KGgo=" || got[0].MediaType != "image/png" || got[0].Text != "chart.png" {
+		t.Fatalf("restored media = %+v, want the original data, media type, and text", got[0])
+	}
+}
+
 // TestReplayKeepsContextOutOfTheConversation guards the other half of
 // fidelity: a turn's context is journalled so the record shows what the
 // model saw, but it is run metadata, not a message. A Restore that turned a

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Dependencies updated. Kit moves to v0.114.0, and `modernc.org/sqlite` to
+  v1.60.0. The example trees take the same versions. From Kit v0.114.0 the
+  built-in `read` tool gives an image file to the model as a media tool
+  result, not as text. The journal keeps that result whole across a resume.
+  Guard test: `TestReplayPreservesMediaToolResults`.
+- CI actions move to their current majors (`checkout` v7, `setup-go` v7,
+  `golangci-lint-action` v9, `setup-task` v2, `goreleaser-action` v7), and
+  `golangci-lint` to v2.14.0. The Nix flake input is updated, so the local
+  linter is the same version as CI.
+
 ## [0.9.0] — 2026-09-25
 
 **Security: `request_approval` now holds the action back until a person
