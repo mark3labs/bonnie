@@ -138,7 +138,7 @@ tasks:
   #
   # Each examples/<name> is an agent tree: its own module, made with
   # `bonnie init`, pinned to a released bonnie. `go test ./examples/` checks
-  # the shape and builds every tree against this checkout; these tasks do
+  # the shape and compiles every tree against this checkout; these tasks do
   # what a user does. GOWORK=off keeps a contributor's go.work from
   # redirecting bonnie to the checkout, which would hide a broken pin.
   # -----------------------------------------------------------------------
@@ -150,12 +150,26 @@ tasks:
       - |
         set -e
         cli="$PWD/{{.OUTPUT_DIR}}/{{.BINARY}}"
+        # The trees are independent modules, and most of each build is a
+        # link that uses about one core, so build them all at once. Each tree
+        # gets its own binary and log: a shared output path would race, and
+        # interleaved output hides which tree failed.
+        pids=""
         for d in examples/*/; do
-          d=${d%/}
-          echo "== $d"
-          (cd "$d" && GOWORK=off "$cli" build --output "$cli-example" && GOWORK=off go vet ./...)
+          d=${d%/}; n=$(basename "$d")
+          (cd "$d" && GOWORK=off "$cli" build --output "$cli-example-$n" && GOWORK=off go vet ./...) \
+            > "$cli-example-$n.log" 2>&1 &
+          pids="$pids $!:$d:$n"
         done
-        rm -f "$cli-example"
+        failed=0
+        for p in $pids; do
+          pid=${p%%:*}; rest=${p#*:}; d=${rest%%:*}; n=${rest#*:}
+          if wait "$pid"; then st=ok; else st=FAILED; failed=1; fi
+          echo "== $d ($st)"
+          cat "$cli-example-$n.log"
+          rm -f "$cli-example-$n" "$cli-example-$n.log"
+        done
+        [ "$failed" = 0 ]
         # bonnie build regenerates bonnie_gen.go and go build refuses a go.sum
         # that is missing an entry, so a clean tree proves the committed files
         # are the ones a user gets.
@@ -213,7 +227,7 @@ tasks:
       - CGO_ENABLED=0 go build ./...
       - golangci-lint run ./...
       # The examples are nested modules ./... never reaches. go test above
-      # built them against this checkout; this builds them as a user does.
+      # compiled them against this checkout; this builds them as a user does.
       - task: examples
 
   # -----------------------------------------------------------------------

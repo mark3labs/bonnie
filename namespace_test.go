@@ -47,6 +47,15 @@ func serveForTest(t *testing.T, opts ...Option) (string, string) {
 		}, opts...)...).Run(ctx)
 	}()
 	t.Cleanup(func() {
+		// Close the client's idle connections first. The tests talk through
+		// http.DefaultClient, and its transport sometimes dials a spare
+		// connection that it then leaves idle without ever sending a request
+		// on it. net/http's Shutdown treats a connection that has not sent a
+		// request (StateNew) as active until it is 5 s old, so one spare
+		// socket made this cleanup, and the test, take 5 s longer about one
+		// time in twenty. Closing it from the client side lets the server
+		// see EOF and drain at once.
+		http.DefaultClient.CloseIdleConnections()
 		cancel()
 		select {
 		case <-done:

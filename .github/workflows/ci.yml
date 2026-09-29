@@ -37,7 +37,7 @@ jobs:
         run: go build ./...
 
   # Each examples/<name> is an agent tree: a nested module that ./... above
-  # never reaches. `go test` already built every tree against this checkout
+  # never reaches. `go test` already compiled every tree against this checkout
   # (examples/examples_test.go); this job builds each one as a user does,
   # with `bonnie build` against the release its go.mod pins, and fails when
   # that leaves a diff — a stale bonnie_gen.go or an incomplete go.sum.

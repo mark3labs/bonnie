@@ -2,7 +2,6 @@ package agent
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -227,11 +226,5 @@ func TestScaffoldToolsModuleBuilds(t *testing.T) {
 		t.Fatalf("Scaffold: %v", err)
 	}
 	treetest.LinkToCheckout(t, dir)
-
-	build := exec.Command("go", "build", "./...")
-	build.Dir = dir
-	build.Env = treetest.BuildEnv()
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("the fresh scaffold does not build: %v\n%s", err, out)
-	}
+	treetest.Compile(t, dir, nil)
 }

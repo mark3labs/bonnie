@@ -212,16 +212,20 @@ func TestExamplesDocumentTheCLI(t *testing.T) {
 
 // TestExamplesBuildAgainstThisCheckout compiles and vets every tree against
 // the BONNIE under test. The tree's own go.mod pins a release, so it is not
-// used here: the tree is copied, given a go.mod that points at this checkout,
-// and built the way `bonnie build` builds it.
+// used here: the tree is copied and given a go.mod that points at this
+// checkout.
 //
 // This is what stops an example from going stale now that it is a nested
 // module `go build ./...` cannot see. Only bonnie is redirected; kit and
 // the rest resolve through BONNIE's own go.mod, from the module cache.
+//
+// It compiles and does not link (see [treetest.Compile]). The link cost about
+// 4 s per tree and proves nothing that the compile does not: the CI
+// `examples` job links each tree with `bonnie build`, as a user does.
 func TestExamplesBuildAgainstThisCheckout(t *testing.T) {
 	t.Parallel()
 	if testing.Short() {
-		t.Skip("builds a subprocess per example")
+		t.Skip("compiles and vets each example in a subprocess")
 	}
 	for _, name := range trees(t) {
 		t.Run(name, func(t *testing.T) {
@@ -235,16 +239,13 @@ func TestExamplesBuildAgainstThisCheckout(t *testing.T) {
 			treetest.LinkToCheckout(t, dst)
 
 			env := append(treetest.BuildEnv(), "GOWORK=off")
-			for _, args := range [][]string{
-				{"build", "-o", os.DevNull, "."},
-				{"vet", "./..."},
-			} {
-				cmd := exec.Command("go", args...)
-				cmd.Dir = dst
-				cmd.Env = env
-				if out, err := cmd.CombinedOutput(); err != nil {
-					t.Fatalf("examples/%s: go %s against this checkout: %v\n%s", name, strings.Join(args, " "), err, out)
-				}
+			treetest.Compile(t, dst, env)
+
+			vet := exec.Command("go", "vet", "./...")
+			vet.Dir = dst
+			vet.Env = env
+			if out, err := vet.CombinedOutput(); err != nil {
+				t.Fatalf("examples/%s: go vet against this checkout: %v\n%s", name, err, out)
 			}
 		})
 	}

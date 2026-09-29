@@ -206,11 +206,7 @@ func (p *DockerProvider) create(ctx context.Context, sb *cliSandbox) error {
 	if p.memory != "" {
 		args = append(args, "--memory", p.memory)
 	}
-	// The container must stay alive between tool calls so the workspace
-	// persists across a turn. `sleep infinity` is not in every busybox, so
-	// a portable loop is safer.
-	args = append(args, "--entrypoint", "sh", p.image,
-		"-c", "mkdir -p "+Workspace+" && while true; do sleep 3600; done")
+	args = append(args, "--entrypoint", "sh", p.image, "-c", idleScript)
 
 	_, stderr, code, err := runCLI(ctx, nil, p.bin, args...)
 	if cerr := cliError("create container from "+p.image, firstLine(stderr), code, err); cerr != nil {
@@ -223,6 +219,22 @@ func (p *DockerProvider) create(ctx context.Context, sb *cliSandbox) error {
 	}
 	return nil
 }
+
+// idleScript is the container's entrypoint: it keeps the container alive
+// between tool calls, so the workspace persists across a turn.
+//
+// The shell runs as PID 1, and the kernel delivers no signal to PID 1 that
+// it has no handler for. A bare `while true; do sleep 3600; done` therefore
+// ignored the SIGTERM from `docker stop`. Docker waited its full 10 s grace
+// period and then sent SIGKILL, so each [cliSandbox.Stop] — each parked run —
+// blocked for 10 s. The trap makes the SIGTERM end the container at once.
+// The sleep runs in the background under `wait`, because a shell runs a trap
+// only between commands, and a foreground sleep holds it for up to an hour.
+// Guard test: TestDockerStopIsPrompt.
+//
+// `sleep infinity` is not in every busybox, so a portable loop is safer.
+const idleScript = "trap 'exit 0' TERM INT; mkdir -p " + Workspace +
+	" && while true; do sleep 3600 & wait $!; done"
 
 // firstLine trims a CLI error down to something a human reads.
 func firstLine(s string) string {

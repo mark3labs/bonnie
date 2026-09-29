@@ -14,6 +14,7 @@ package treetest
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -65,6 +66,13 @@ func LinkToCheckout(t *testing.T, root string) {
 // carries no sums, and the default readonly mode refuses rather than add them.
 // Every module it needs is already in the cache, because this repository
 // requires the same ones, so no network call is made.
+//
+// -ldflags=-w omits DWARF from a binary a test links. Go never caches a link,
+// so each test that builds a binary pays for the link in full, and for a tree
+// that links Kit, DWARF is half of that cost: about 4 s becomes about 2 s.
+// A test never attaches a debugger. Panics and stack traces read the pclntab,
+// not DWARF, so the binary behaves the same. A command line that passes its
+// own -ldflags replaces this one.
 func BuildEnv() []string {
 	env := make([]string, 0, len(os.Environ())+1)
 	for _, kv := range os.Environ() {
@@ -73,5 +81,30 @@ func BuildEnv() []string {
 		}
 		env = append(env, kv)
 	}
-	return append(env, "GOFLAGS=-mod=mod")
+	return append(env, "GOFLAGS=-mod=mod -ldflags=-w")
+}
+
+// Compile compiles every package in the tree at dir with the Go compiler and
+// fails the test on the first error. It is for a test whose claim is "this
+// compiles". Use `go build` only when the test runs the binary.
+//
+// `go build ./...` links each main package and then discards the result. The
+// link is never cached, and for a tree that links Kit it takes about 4 s, which
+// is almost all the cost of such a test. `go list -export` runs the compiler
+// on each package as `go build` does, and shares its build cache, but stops
+// before the link. A type error, an undefined name, or a bad import fails it
+// exactly as it fails a build.
+//
+// env is the command's environment; nil means [BuildEnv].
+func Compile(t *testing.T, dir string, env []string) {
+	t.Helper()
+	if env == nil {
+		env = BuildEnv()
+	}
+	cmd := exec.Command("go", "list", "-export", "-f", "{{.ImportPath}}", "./...")
+	cmd.Dir = dir
+	cmd.Env = env
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("treetest: %s does not compile: %v\n%s", dir, err, out)
+	}
 }

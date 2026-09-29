@@ -5,7 +5,6 @@ import (
 	"errors"
 	"go/format"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -350,11 +349,5 @@ func TestGeneratedFileCompiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	treetest.LinkToCheckout(t, root)
-
-	build := exec.Command("go", "build", "./...")
-	build.Dir = root
-	build.Env = treetest.BuildEnv()
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("the generated file does not compile: %v\n%s", err, out)
-	}
+	treetest.Compile(t, root, nil)
 }

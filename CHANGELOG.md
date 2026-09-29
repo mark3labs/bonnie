@@ -18,6 +18,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `golangci-lint-action` v9, `setup-task` v2, `goreleaser-action` v7), and
   `golangci-lint` to v2.14.0. The Nix flake input is updated, so the local
   linter is the same version as CI.
+- The test suite is faster: `go test -race ./...` goes from about 25 s to
+  about 15 s, and `task examples` from about 12 s to about 5 s. A test that
+  claims a tree compiles no longer links it (`treetest.Compile`), a test
+  binary is linked without DWARF, and `task examples` builds its trees in
+  parallel.
+
+### Fixed
+
+- The docker sandbox stops at once. Its entrypoint shell ran as PID 1 and
+  ignored SIGTERM, so `docker stop` waited its full 10 s grace period and
+  each parked run held its caller for 10 s. Guard test:
+  `TestDockerStopIsPrompt`. A container made by an earlier release keeps its
+  old entrypoint until it is deleted.
 
 ## [0.9.0] — 2026-09-25
 
