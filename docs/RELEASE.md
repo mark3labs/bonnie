@@ -94,6 +94,48 @@ edited to the required form.
 | `v0.7.0` | `4b6fa58` | 2026-09-16 |
 | `v0.8.0` | `c03de52` | 2026-09-23 |
 | `v0.9.0` | `fb23879` | 2026-09-25 |
+| `v0.9.1` | `779289a` | 2026-09-29 |
+
+### `v0.9.1`, 2026-09-29 — every box confirmed
+
+- [x] `task release-check` — 1 config validated
+- [x] `task release-snapshot` — two targets (linux amd64, arm64), archives
+      and checksums; the snapshot binary prints its injected version
+- [x] No `replace` directive in `go.mod`; Kit moves to `v0.114.0`
+- [x] All CI jobs green on `master` at the tagged commit `779289a`:
+      `test`, `examples`, and `lint` (run `36572444674`)
+- [x] `CHANGELOG.md` carries a `[0.9.1]` section in Keep-a-Changelog shape
+- [x] Release notes state the three claims **and** the limits, published
+      with no human edit
+- [x] Tag pushed; `release.yml` run `36572985707` succeeded
+- [x] Three artifacts published; the downloaded `linux_amd64` binary prints
+      `bonnie 0.9.1`, its checksum verifies, and it is statically linked
+- [x] The examples are pinned to `v0.9.1` and `task examples` passes
+
+**The section written across the increment had no claims and no limits, for
+the fourth release in a row**, and no entry for the Kit `v0.114.0` floor that
+the dependency update imposes on every user. Both were added. Each limit was
+checked against Kit `v0.114.0`, not carried forward: the `ToolOutput.Halt`
+godoc still says a sibling call in the halting step runs, the skill
+activation still gives the host `BaseDir`, and `kit.SessionManager` still has
+20 methods. The README limits and the `0.9.0` limits match in both
+directions.
+
+**Verified the docker fix where it runs.** CI has no Docker, so
+`TestDockerStopIsPrompt` skips there. It was run on a host with Docker
+29.8.0 before the tag: `Stop` took 0.49 s, against the 10 s grace period
+before. From the artifact: the downloaded binary still refuses
+`--sandbox none` by name, and `install.sh` from `master` resolved `v0.9.1` as
+the latest release, verified the checksum, and installed a binary that
+prints `bonnie 0.9.1`.
+
+**Version choice.** PATCH: one `fix:` and one `chore:`, and no exported
+signature changed. The Kit floor moves every user's module up, which at
+`v0.9.0` was part of the case for a MINOR; there it came with a behaviour
+break in `bonnie.New()`. Here Kit `v0.114.0` changes no BONNIE behaviour a
+host relies on — the `read` tool's media result is kept whole by the
+journal (`TestReplayPreservesMediaToolResults`) — so the floor alone did not
+force a MINOR.
 
 ### `v0.9.0`, 2026-09-25 — every box confirmed
 
