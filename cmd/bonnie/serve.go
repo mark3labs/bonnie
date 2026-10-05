@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -117,6 +118,9 @@ func serveOptions(ctx context.Context, o serveOpts) ([]bonnie.Option, error) {
 		p, err := sandboxProvider(ctx, o.sandboxKind, o.sandboxImg)
 		if err != nil {
 			return nil, err
+		}
+		if o.sandboxKind == "landlock" {
+			p = sandbox.Landlock(sandbox.WithLandlockRoot(filepath.Join(o.journal, "workspaces")))
 		}
 		opts = append(opts, bonnie.WithSandbox(p))
 	}

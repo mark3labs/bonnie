@@ -25,22 +25,6 @@ func messageText(m kit.LLMMessage) string {
 	return b.String()
 }
 
-// toolResultText extracts the text of a tool-result output part.
-//
-// It exists so BONNIE never names charm.land/fantasy directly. Kit re-exports
-// the fantasy types as aliases, but not fantasy's generic accessor, so this is
-// the public-API-only way to read a tool result. The pointer case mirrors
-// fantasy's own accessor, which accepts either form.
-func toolResultText(out kit.LLMToolResultOutputContent) (string, bool) {
-	switch v := out.(type) {
-	case kit.LLMToolResultOutputContentText:
-		return v.Text, true
-	case *kit.LLMToolResultOutputContentText:
-		return v.Text, true
-	}
-	return "", false
-}
-
 // idgen produces monotonic entry IDs that are stable across a replay.
 type idgen struct {
 	mu sync.Mutex

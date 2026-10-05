@@ -267,7 +267,7 @@ func TestRunsShowDisplaysTheSandbox(t *testing.T) {
 		"backend docker",
 		"bonnie-run-sbx",
 		"sandbox opened",
-		"sandbox gone",
+		"sandbox unavailable",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("runs show output missing %q:\n%s", want, out)

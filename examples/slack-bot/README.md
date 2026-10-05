@@ -54,12 +54,14 @@ App** → **From scratch**, name it, and pick your workspace.
 | `app_mentions:read` | See the mentions that invoke the bot |
 | `chat:write` | Post replies, and the "working…" placeholder |
 | `im:history` | Read direct messages sent to the bot |
+| `channels:history` | Receive replies in public channel threads |
+| `groups:history` | Receive replies in private channel threads |
 
 **Basic Information → App Credentials** — copy the **Signing Secret**; it is
 `SLACK_SIGNING_SECRET`. Set it before you go further: without it, anyone who
 can reach the webhook drives the agent.
 
-**Event Subscriptions** — toggle **Enable Events** on, and set the **Request
+After step 5 starts the bot, return to **Event Subscriptions** — toggle **Enable Events** on, and set the **Request
 URL** to `https://<your-tunnel>/slack/events`. Slack immediately sends a
 one-time `url_verification` handshake, so **the bot must already be running**
 (step 5) for the URL to go green. Then, under **Subscribe to bot events**, add:
@@ -68,6 +70,8 @@ one-time `url_verification` handshake, so **the bot must already be running**
 |---|---|
 | `app_mention` | The bot answers when mentioned in a channel |
 | `message.im` | The bot answers direct messages |
+| `message.channels` | The bot receives replies in public channel threads |
+| `message.groups` | The bot receives replies in private channel threads |
 
 Save. Slack will prompt you to reinstall when scopes or events change.
 

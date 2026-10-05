@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	kit "github.com/mark3labs/kit/pkg/kit"
+
 	"github.com/mark3labs/bonnie/runtime"
 )
 
@@ -178,5 +180,37 @@ func TestHTTPClientNotFound(t *testing.T) {
 	_, err := c.Send(context.Background(), "nope", "hello")
 	if err == nil || !strings.Contains(err.Error(), "not found") {
 		t.Fatalf("err = %v, want the not-found marker", err)
+	}
+}
+
+// History is not limited to the 1 MiB error-body limit. Typed parts must also
+// survive the snapshot decode rather than become interface maps.
+func TestSnapshotLargeLosslessHistory(t *testing.T) {
+	t.Parallel()
+	text := strings.Repeat("x", (1<<20)+1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/bonnie/v1/runs/run-1/snapshot" {
+			t.Errorf("path = %q", r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(Snapshot{RunID: "run-1", Cursor: 12, State: runtime.RunCompleted,
+			Messages: []kit.LLMMessage{{Role: "assistant", Content: []kit.LLMMessagePart{
+				kit.LLMTextPart{Text: text}, kit.LLMToolCallPart{ToolCallID: "call-1", ToolName: "read", Input: `{}`},
+			}}},
+		})
+	}))
+	defer srv.Close()
+	snapshot, err := New(srv.URL).Snapshot(context.Background(), "run-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Cursor != 12 || len(snapshot.Messages) != 1 || len(snapshot.Messages[0].Content) != 2 {
+		t.Fatalf("snapshot shape = %+v", snapshot)
+	}
+	part, ok := snapshot.Messages[0].Content[0].(kit.LLMTextPart)
+	if !ok || part.Text != text {
+		t.Fatal("text was truncated")
+	}
+	if _, ok := snapshot.Messages[0].Content[1].(kit.LLMToolCallPart); !ok {
+		t.Fatal("tool call type was lost")
 	}
 }

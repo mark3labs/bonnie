@@ -373,9 +373,17 @@ func RunConformance(t *testing.T, build func(t *testing.T) *Fixture) {
 		f := build(t)
 		ctx := context.Background()
 
-		if _, err := refSend(ctx, f.Inbound.From("policy-addr"), "nope"); err == nil {
-			t.Fatal("an unknown policy must be refused, never guessed")
+		if _, err := refSend(ctx, f.Inbound.From("policy-addr"), "nope"); !errors.Is(err, channel.ErrUnknownTurnPolicy) {
+			t.Fatalf("unknown policy = %v, want ErrUnknownTurnPolicy", err)
 		}
+		ids, err := f.Journal.Runs(ctx, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(ids) != 0 || f.Agent.Calls() != 0 {
+			t.Fatalf("unknown policy started work: runs = %v, calls = %d", ids, f.Agent.Calls())
+		}
+
 	})
 
 	t.Run("respond answers a suspended run", func(t *testing.T) {
@@ -584,11 +592,19 @@ func RunConformance(t *testing.T, build func(t *testing.T) *Fixture) {
 			t.Fatalf("Send to the retired run = %v, want ErrRunRetired", err)
 		}
 		// Reset on an address that owns nothing is a no-op, not a create.
+		before, err := f.Journal.Runs(ctx, "")
+		if err != nil {
+			t.Fatal(err)
+		}
 		if err := f.Inbound.From("never-bound").Reset(ctx, ""); err != nil {
 			t.Fatalf("Reset on an unbound address: %v", err)
 		}
-		if _, err := f.Inbound.From("never-bound").RunID(ctx); err != nil {
-			t.Fatalf("RunID: %v", err)
+		after, err := f.Journal.Runs(ctx, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(after) != len(before) {
+			t.Fatalf("unbound reset created a run: %v -> %v", before, after)
 		}
 		if err := f.Inbound.Attach("no-such-run").Reset(ctx, ""); !errors.Is(err, runtime.ErrRunNotFound) {
 			t.Fatalf("Reset on an unknown run = %v, want ErrRunNotFound", err)

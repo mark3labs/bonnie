@@ -571,3 +571,67 @@ func TestOpenTwiceGivesSameWorkspace(t *testing.T) {
 		}
 	})
 }
+
+// TestTimeoutStopsDescendants checks the timeout error and a delayed child
+// write. Killing only the shell or host CLI leaves this write running.
+func TestTimeoutStopsDescendants(t *testing.T) {
+	t.Parallel()
+	eachBackend(t, func(t *testing.T, _ backend, p Provider) {
+		sb := openSandbox(t, p, "timeout-descendants")
+		cmd := Shell("(sleep 2; echo escaped > late.txt) & wait")
+		cmd.Timeout = 150 * time.Millisecond
+		start := time.Now()
+		if _, err := sb.Exec(testCtx(t), cmd); !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("timeout: %v", err)
+		}
+		if time.Since(start) > 35*time.Second {
+			t.Fatal("timeout did not bound cleanup")
+		}
+		time.Sleep(2200 * time.Millisecond)
+		if _, err := sb.ReadFile(testCtx(t), "late.txt"); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("descendant survived: %v", err)
+		}
+	})
+}
+
+// TestFreshProviderReopen shares only backend storage with the second
+// provider. An in-memory handle must not be needed to find durable files.
+func TestFreshProviderReopen(t *testing.T) {
+	t.Parallel()
+	eachBackend(t, func(t *testing.T, _ backend, p Provider) {
+		const runID = "fresh-provider-reopen"
+		sb := openSandbox(t, p, runID)
+		ctx := testCtx(t)
+		if err := sb.WriteFile(ctx, "memo", []byte("durable")); err != nil {
+			t.Fatal(err)
+		}
+		if err := sb.Stop(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if err := sb.Close(); err != nil {
+			t.Fatal(err)
+		}
+		var fresh Provider
+		switch p := p.(type) {
+		case *LocalProvider:
+			fresh = Local(WithLocalRoot(p.root), WithLocalCleanup())
+		case *LandlockProvider:
+			fresh = Landlock(WithLandlockRoot(p.root), WithLandlockCleanup())
+		case *DockerProvider:
+			fresh = Docker(WithDockerBinary(p.bin), WithDockerImage(p.image))
+		case *MicrosandboxProvider:
+			fresh = Microsandbox(WithMicrosandboxBinary(p.bin), WithMicrosandboxImage(p.image))
+		default:
+			t.Fatalf("unknown backend %T", p)
+		}
+		again, err := fresh.Open(ctx, runID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = again.Close() }()
+		data, err := again.ReadFile(ctx, "memo")
+		if err != nil || string(data) != "durable" {
+			t.Fatalf("reopen: %q, %v", data, err)
+		}
+	})
+}

@@ -19,6 +19,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/mark3labs/bonnie/internal/shelltest"
 )
 
 // fakeBinary is the content of the "bonnie" file in the fake archive.
@@ -98,10 +100,8 @@ func tarGz(t *testing.T, files map[string]string) []byte {
 func fakeUname(t *testing.T, osName, arch string) string {
 	t.Helper()
 	dir := t.TempDir()
-	script := fmt.Sprintf("#!/bin/sh\ncase \"$1\" in -s) echo %s ;; -m) echo %s ;; *) exit 1 ;; esac\n", osName, arch)
-	if err := os.WriteFile(filepath.Join(dir, "uname"), []byte(script), 0o755); err != nil {
-		t.Fatalf("write uname: %v", err)
-	}
+	script := fmt.Sprintf("case \"$1\" in -s) echo %s ;; -m) echo %s ;; *) exit 1 ;; esac\n", osName, arch)
+	shelltest.Write(t, filepath.Join(dir, "uname"), script)
 	return dir + string(os.PathListSeparator) + os.Getenv("PATH")
 }
 

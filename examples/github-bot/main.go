@@ -36,11 +36,11 @@ func main() {
 		bonnie.WithName("github-bot"),
 
 		// Every tool call runs in a sandbox. The default is landlock, which
-		// has no network, so `git clone` cannot reach GitHub. For the
-		// agent-fix coding path, select Docker (its image needs git) and an
-		// allow-list network policy:
+		// permits network egress but cannot filter it. To restrict destinations,
+		// select microsandbox with an image that has git and an allow-list
+		// network policy:
 		//
-		//	bonnie.WithSandbox(sandbox.Docker()),
+		//	bonnie.WithSandbox(sandbox.Microsandbox()),
 		//	bonnie.WithNetwork(sandbox.NetworkPolicy{
 		//		Mode:  sandbox.NetworkAllowList,
 		//		Allow: []string{"github.com", "*.githubusercontent.com", "codeload.github.com"},

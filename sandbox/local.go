@@ -1,7 +1,6 @@
 package sandbox
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -76,6 +75,9 @@ func (p *LocalProvider) Open(_ context.Context, runID string) (Sandbox, error) {
 		return sb, nil
 	}
 
+	if err := refuseUncheckedLegacy(p.root, runID); err != nil {
+		return nil, err
+	}
 	dir, err := filepath.Abs(filepath.Join(p.root, safeName("", runID)))
 	if err != nil {
 		return nil, fmt.Errorf("bonnie: sandbox: resolve workspace: %w", err)
@@ -121,8 +123,11 @@ func (s *localSandbox) isClosed() bool {
 // does not have.
 func (s *localSandbox) host(p string) string {
 	resolved := Resolve(p)
-	if rel, ok := strings.CutPrefix(resolved, Workspace); ok {
-		return filepath.Join(s.dir, filepath.FromSlash(strings.TrimPrefix(rel, "/")))
+	if resolved == Workspace {
+		return s.dir
+	}
+	if rel, ok := strings.CutPrefix(resolved, Workspace+"/"); ok {
+		return filepath.Join(s.dir, filepath.FromSlash(rel))
 	}
 	return filepath.FromSlash(resolved)
 }
@@ -148,29 +153,7 @@ func (s *localSandbox) Exec(ctx context.Context, cmd Command) (*Result, error) {
 		return nil, fmt.Errorf("bonnie: sandbox: create workdir: %w", err)
 	}
 	c.Env = append(os.Environ(), cmd.Env...)
-	if len(cmd.Stdin) > 0 {
-		c.Stdin = bytes.NewReader(cmd.Stdin)
-	}
-
-	var out, errb bytes.Buffer
-	c.Stdout, c.Stderr = &out, &errb
-
-	err := c.Run()
-	res := &Result{Stdout: out.String(), Stderr: errb.String()}
-
-	var ee *exec.ExitError
-	switch {
-	case err == nil:
-		res.ExitCode = 0
-	case errors.As(err, &ee):
-		// The command ran and failed. That is a result, not an error.
-		res.ExitCode = ee.ExitCode()
-	case errors.Is(ctx.Err(), context.DeadlineExceeded):
-		return nil, fmt.Errorf("bonnie: sandbox: command timed out after %s: %w", cmd.Timeout, ctx.Err())
-	default:
-		return nil, fmt.Errorf("bonnie: sandbox: exec: %w", err)
-	}
-	return res, nil
+	return runChild(ctx, c, cmd)
 }
 
 // ReadFile implements [Sandbox].

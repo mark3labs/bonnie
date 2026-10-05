@@ -34,8 +34,9 @@ type MicrosandboxProvider struct {
 	memory int
 	cpus   int
 
-	mu     sync.Mutex
-	opened map[string]*cliSandbox
+	policyMu sync.RWMutex
+	mu       sync.Mutex
+	opened   map[string]*cliSandbox
 }
 
 var (
@@ -130,8 +131,9 @@ func (p *MicrosandboxProvider) SetNetworkPolicy(policy NetworkPolicy) error {
 	default:
 		return fmt.Errorf("%w: unknown mode %q", ErrPolicyUnsupported, policy.Mode)
 	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	p.policyMu.Lock()
+	defer p.policyMu.Unlock()
+	policy.Allow = append([]string(nil), policy.Allow...)
 	p.policy = policy
 	return nil
 }
@@ -162,9 +164,13 @@ func (p *MicrosandboxProvider) Open(ctx context.Context, runID string) (Sandbox,
 			return append(args, argv...)
 		},
 		startFn: p.ensureRunning,
+		killFn: func(ctx context.Context, c *cliSandbox) error {
+			_, stderr, code, err := runCLI(ctx, nil, c.bin, "stop", "--force", c.name)
+			return cliError("kill microsandbox "+c.name, msbError(stderr), code, err)
+		},
 		stopFn: func(ctx context.Context, c *cliSandbox) error {
-			_, _, _, err := runCLI(ctx, nil, c.bin, "stop", c.name)
-			return err
+			_, stderr, code, err := runCLI(ctx, nil, c.bin, "stop", c.name)
+			return cliError("stop microsandbox "+c.name, msbError(stderr), code, err)
 		},
 		deleteFn: func(ctx context.Context, c *cliSandbox) error {
 			// -f stops the sandbox first. Without it msb refuses to remove
@@ -195,10 +201,15 @@ func (p *MicrosandboxProvider) Open(ctx context.Context, runID string) (Sandbox,
 
 // ensureRunning creates the sandbox when absent and starts it when stopped.
 func (p *MicrosandboxProvider) ensureRunning(ctx context.Context, sb *cliSandbox) error {
-	if p.exists(ctx, sb.name) {
+	p.policyMu.RLock()
+	defer p.policyMu.RUnlock()
+	exists, err := p.runKnown(ctx, sb.id)
+	if err != nil {
+		return err
+	}
+	if exists {
 		return p.adopt(ctx, sb)
 	}
-
 	net, err := netArgs(p.policy)
 	if err != nil {
 		return err
@@ -214,22 +225,16 @@ func (p *MicrosandboxProvider) ensureRunning(ctx context.Context, sb *cliSandbox
 	args = append(args, p.image)
 
 	if _, stderr, code, err := runCLI(ctx, nil, p.bin, args...); err != nil || code != 0 {
-		// "already exists" is the state the caller asked for, so adopt it
-		// rather than fail. [exists] above is only a hint: msb reports an
-		// empty `ps --all` while sandboxes are running, so a sandbox that
-		// is plainly there can be reported absent. A pre-flight check can
-		// never be atomic against another creator either, so this ordering
-		// — try, then adopt the refusal — is the only reliable one.
-		//
-		// Only a CLI that RAN can have refused for that reason. A msb that
-		// never started (err != nil) wrote no stderr, so it cannot be read
-		// as "already exists" and must surface as the fault it is.
+		// Inspect and create are not atomic. Another creator can win the
+		// race, so adopt only an explicit already-exists refusal.
 		if err != nil || !msbAlreadyExists(stderr) {
 			return cliError("create microsandbox from "+p.image, msbError(stderr), code, err)
 		}
 		return p.adopt(ctx, sb)
 	}
-	p.start(ctx, sb.name)
+	if err := p.start(ctx, sb.name); err != nil {
+		return err
+	}
 	return p.ensureWorkspace(ctx, sb)
 }
 
@@ -242,7 +247,9 @@ func (p *MicrosandboxProvider) ensureRunning(ctx context.Context, sb *cliSandbox
 // run more egress than its policy allows — so the check runs on every adopt
 // path, including the one reached by a create that lost the race.
 func (p *MicrosandboxProvider) adopt(ctx context.Context, sb *cliSandbox) error {
-	p.start(ctx, sb.name)
+	if err := p.start(ctx, sb.name); err != nil {
+		return err
+	}
 	// After start, not before: `msb inspect` reports no active config for a
 	// stopped sandbox, so the policy check needs the sandbox up. On a
 	// mismatch Open fails with the sandbox running, which is the same
@@ -293,8 +300,12 @@ func msbError(stderr string) string {
 // create reports "already running". That is the wanted state, not a failure,
 // and the call is kept because nothing documents create-implies-start as a
 // promise. Only the guest command that follows proves the sandbox is usable.
-func (p *MicrosandboxProvider) start(ctx context.Context, name string) {
-	_, _, _, _ = runCLI(ctx, nil, p.bin, "start", name)
+func (p *MicrosandboxProvider) start(ctx context.Context, name string) error {
+	_, stderr, code, err := runCLI(ctx, nil, p.bin, "start", name)
+	if err == nil && code != 0 && strings.Contains(stderr, "already running") {
+		return nil
+	}
+	return cliError("start microsandbox "+name, msbError(stderr), code, err)
 }
 
 // netArgs maps a policy onto the create flags msb understands.
@@ -355,8 +366,8 @@ func (p *MicrosandboxProvider) checkPolicy(ctx context.Context, sb *cliSandbox) 
 		return fmt.Errorf("bonnie: sandbox: inspect %s: %s", sb.name, firstLine(stderr))
 	}
 	var report struct {
-		ActiveConfig struct {
-			Network struct {
+		ActiveConfig *struct {
+			Network *struct {
 				Policy *msbNetworkPolicy `json:"policy"`
 			} `json:"network"`
 		} `json:"active_config"`
@@ -364,6 +375,11 @@ func (p *MicrosandboxProvider) checkPolicy(ctx context.Context, sb *cliSandbox) 
 	if err := json.Unmarshal([]byte(stdout), &report); err != nil {
 		return fmt.Errorf("bonnie: sandbox: inspect %s: %w", sb.name, err)
 	}
+	if report.ActiveConfig == nil || report.ActiveConfig.Network == nil {
+		return fmt.Errorf("%w: %s has no active configuration", ErrPolicyMismatch, sb.name)
+	}
+	// msb 0.6.18 omits policy for allow-all. An existing network object
+	// is required, but its missing policy is the documented default.
 	if policyMatches(report.ActiveConfig.Network.Policy, p.policy) {
 		return nil
 	}
@@ -440,49 +456,33 @@ func allowKey(host string) string {
 
 // ensureWorkspace creates the workspace directory inside the guest.
 func (p *MicrosandboxProvider) ensureWorkspace(ctx context.Context, sb *cliSandbox) error {
-	_, _, _, err := runCLI(ctx, nil, p.bin, "exec", sb.name, "--no-tty", "--",
+	_, stderr, code, err := runCLI(ctx, nil, p.bin, "exec", sb.name, "--no-tty", "--",
 		"mkdir", "-p", Workspace)
-	if err != nil {
-		return fmt.Errorf("bonnie: sandbox: create workspace: %w", err)
-	}
-	return nil
+	return cliError("create workspace", msbError(stderr), code, err)
 }
 
-// exists reports whether a named sandbox is known to msb, running or not.
-//
-// --all is required. Without it msb lists only running sandboxes, so a
-// sandbox that Stop released looks absent, Open tries to create it again, and
-// msb refuses with "sandbox already exists" — which strands a run that did
-// nothing wrong but park between turns.
-//
-// The listing is decoded rather than searched as text. A substring match also
-// hits the image, command, and status fields, so a run whose ID resembles a
-// value in any of them would be reported as existing when it does not.
-//
-// **A false answer here is expected, not exceptional.** Measured on msb
-// 0.6.18, `msb ps --all --format json` intermittently returns an empty list,
-// exit 0, while sandboxes are running — 3 calls in 24 during one conformance
-// run. Every failure mode below also reports "absent" for a sandbox that may
-// be right there. So this is a hint, never a decision: [ensureRunning] must
-// stay correct when it is wrong, which is why a create that comes back
-// "already exists" is adopted rather than failed.
-func (p *MicrosandboxProvider) exists(ctx context.Context, name string) bool {
-	stdout, _, code, err := runCLI(ctx, nil, p.bin, "ps", "--all", "--format", "json")
-	if err != nil || code != 0 {
-		return false
+// known uses inspect rather than ps. msb 0.6.18 can omit running sandboxes
+// from ps, so an empty list is not proof that a workspace was deleted.
+// Only the explicit missing-sandbox diagnostic proves absence.
+func (p *MicrosandboxProvider) known(ctx context.Context, name string) (bool, error) {
+	stdout, stderr, code, err := runCLI(ctx, nil, p.bin, "inspect", "--format", "json", name)
+	if err != nil {
+		return false, err
 	}
-	var entries []struct {
-		Name string `json:"name"`
-	}
-	if err := json.Unmarshal([]byte(stdout), &entries); err != nil {
-		return false
-	}
-	for _, e := range entries {
-		if e.Name == name {
-			return true
+	if code != 0 {
+		if strings.Contains(stderr, "sandbox not found: "+name) {
+			return false, nil
 		}
+		return false, cliError("inspect "+name, msbError(stderr), code, nil)
 	}
-	return false
+	var report map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(stdout), &report); err != nil {
+		return false, fmt.Errorf("bonnie: sandbox: inspect %s: %w", name, err)
+	}
+	if len(report) == 0 {
+		return false, fmt.Errorf("bonnie: sandbox: inspect %s returned no configuration", name)
+	}
+	return true, nil
 }
 
 // msbMissingPath reports whether an `msb cp` failure means the guest path is
@@ -539,12 +539,13 @@ func (p *MicrosandboxProvider) copyIn(ctx context.Context, c *cliSandbox, guestP
 	}
 
 	// cp does not create the parent, so make it first.
-	if _, _, _, err := runCLI(ctx, nil, c.bin, "exec", c.name, "--no-tty", "--",
-		"mkdir", "-p", parentDir(guestPath)); err != nil {
-		return fmt.Errorf("bonnie: sandbox: create parent of %s: %w", guestPath, err)
+	_, stderr, code, err := runCLI(ctx, nil, c.bin, "exec", c.name, "--no-tty", "--",
+		"mkdir", "-p", parentDir(guestPath))
+	if err := cliError("create parent of "+guestPath, msbError(stderr), code, err); err != nil {
+		return err
 	}
 
-	_, stderr, code, err := runCLI(ctx, nil, c.bin, "cp", local, c.name+":"+guestPath)
+	_, stderr, code, err = runCLI(ctx, nil, c.bin, "cp", local, c.name+":"+guestPath)
 	if err != nil {
 		return err
 	}
@@ -552,4 +553,26 @@ func (p *MicrosandboxProvider) copyIn(ctx context.Context, c *cliSandbox, guestP
 		return fmt.Errorf("bonnie: sandbox: write %s: %s", guestPath, firstLine(stderr))
 	}
 	return nil
+}
+
+// runKnown refuses an old encoded name without proof of run ownership. This
+// check also applies to existence and deletion, not only to Open.
+func (p *MicrosandboxProvider) runKnown(ctx context.Context, runID string) (bool, error) {
+	name := safeName("bonnie-", runID)
+	exists, err := p.known(ctx, name)
+	if err != nil || exists {
+		return exists, err
+	}
+	old := legacySafeName("bonnie-", runID)
+	if old == name {
+		return false, nil
+	}
+	exists, err = p.known(ctx, old)
+	if err != nil {
+		return false, err
+	}
+	if exists {
+		return false, fmt.Errorf("%w: legacy microsandbox %s has no checked run identity; migrate or delete it", ErrPolicyMismatch, old)
+	}
+	return false, nil
 }

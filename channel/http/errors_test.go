@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/mark3labs/bonnie/runtime"
 
 	kit "github.com/mark3labs/kit/pkg/kit"
 )
@@ -42,6 +45,10 @@ func TestOperationIDIsCreateOnce(t *testing.T) {
 	}
 	if first.RunID != second.RunID || first.RunID == "" {
 		t.Fatalf("retried start = %q then %q, want one run", first.RunID, second.RunID)
+	}
+
+	if s.agent.calls() != 1 || second.Response != first.Response {
+		t.Fatalf("retry ran again: calls = %d, responses = %q / %q", s.agent.calls(), first.Response, second.Response)
 	}
 
 	_, other := s.postAs(t, "bob", "/bonnie/v1/runs", req)
@@ -165,5 +172,60 @@ func TestAddressLookupCode(t *testing.T) {
 	}
 	if got.Code != errNotFound {
 		t.Fatalf("code = %q, want %q", got.Code, errNotFound)
+	}
+}
+
+// Unknown routes and wrong methods use the same stable JSON error shape.
+func TestRoutingErrorsAreJSON(t *testing.T) {
+	t.Parallel()
+	s := newTestServer(t, &stubAgent{})
+	for _, tc := range []struct {
+		method, path, code string
+		status             int
+	}{
+		{http.MethodGet, "/bonnie/v1/no-route", errNotFound, http.StatusNotFound},
+		{http.MethodDelete, "/bonnie/v1/runs", errMethodNotAllowed, http.StatusMethodNotAllowed},
+		{http.MethodPut, "/bonnie/v1/health", errMethodNotAllowed, http.StatusMethodNotAllowed},
+	} {
+		req, err := http.NewRequest(tc.method, s.URL+tc.path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var body ErrorResponse
+		err = json.NewDecoder(resp.Body).Decode(&body)
+		_ = resp.Body.Close()
+		if err != nil || resp.StatusCode != tc.status || body.Code != tc.code || resp.Header.Get("Content-Type") != "application/json" {
+			t.Fatalf("%s %s = %d %+v, %v", tc.method, tc.path, resp.StatusCode, body, err)
+		}
+		if tc.status == http.StatusMethodNotAllowed && resp.Header.Get("Allow") == "" {
+			t.Fatal("missing Allow header")
+		}
+	}
+}
+
+// Runtime refusals added by the executor keep stable status and code values.
+func TestRuntimeRefusalCodes(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		err    error
+		status int
+		code   string
+	}{
+		{runtime.ErrRunWaiting, http.StatusConflict, errWaiting},
+		{runtime.ErrFilesUnsupported, http.StatusNotImplemented, errFilesUnsupported},
+	} {
+		recorder := httptest.NewRecorder()
+		writeError(recorder, fmt.Errorf("wrapped: %w", tc.err))
+		var got ErrorResponse
+		if err := json.Unmarshal(recorder.Body.Bytes(), &got); err != nil {
+			t.Fatal(err)
+		}
+		if recorder.Code != tc.status || got.Code != tc.code {
+			t.Fatalf("%v = %d %+v", tc.err, recorder.Code, got)
+		}
 	}
 }

@@ -197,21 +197,22 @@ head. It is public repository metadata, never a token, so it is safe in the
 journal a replay re-injects. The agent clones from it with the `bash` tool and
 branches from the default branch.
 
-Two things the coding path needs that the default setup does not give:
+Two settings to check for the coding path:
 
-- **A sandbox with network egress.** The default Landlock sandbox has none, so
-  `git clone` cannot reach GitHub. Select a Docker sandbox and an allow-list
-  network policy in `main.go` (the lines are there, commented out):
+- **Network egress for GitHub.** The default Landlock sandbox permits egress
+  but cannot filter it. To restrict destinations, select microsandbox with an
+  allow-list network policy in `main.go`. Docker supports allow-all and deny-all,
+  not allow-list:
 
   ```go
-  bonnie.WithSandbox(sandbox.Docker()),
+  bonnie.WithSandbox(sandbox.Microsandbox()),
   bonnie.WithNetwork(sandbox.NetworkPolicy{
       Mode:  sandbox.NetworkAllowList,
       Allow: []string{"github.com", "*.githubusercontent.com", "codeload.github.com"},
   }),
   ```
 
-  The Docker image must have `git` installed.
+  The sandbox image must have `git` installed.
 
 - **Authenticated egress for a private repository.** A public repository
   clones over the token-free HTTPS URL the descriptor names. A private one

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -84,8 +85,8 @@ func NewSession(runID string, j Journal) *Session {
 }
 
 // Restore rebuilds a session by replaying its journal. Message, compaction,
-// and extension-data records are re-applied in sequence order; everything else
-// is run metadata that does not affect the conversation tree.
+// and extension-data records are re-applied in sequence order. Clear and branch
+// records select the active tree tip. Other records hold run metadata.
 //
 // The rebuild is lossless: messages are decoded from [Record.Payload], so tool
 // calls, tool results, files, and reasoning parts survive a resume in a new
@@ -112,8 +113,8 @@ func Restore(ctx context.Context, runID string, j Journal) (*Session, error) {
 	maxSeq := 0
 	for _, rec := range recs {
 		// A sandbox record is run metadata, not a tree entry: the latest one
-		// decides what LastSandbox reports. A journalled loss counts as
-		// already noted, so a resumed run does not note it twice.
+		// decides what LastSandbox reports. Noted confirms that the note
+		// was committed. Older marker-only losses are repaired below.
 		if rec.Kind == RecordSandbox {
 			if len(rec.Payload) > 0 {
 				var p sandboxPayload
@@ -122,7 +123,7 @@ func Restore(ctx context.Context, runID string, j Journal) (*Session, error) {
 				}
 				s.mu.Lock()
 				s.sandboxBackend, s.sandboxID, s.sandboxGone = p.Backend, p.SandboxID, p.Gone
-				s.sandboxNoted = p.Gone
+				s.sandboxNoted = p.Noted
 				s.mu.Unlock()
 			}
 			continue
@@ -134,6 +135,15 @@ func Restore(ctx context.Context, runID string, j Journal) (*Session, error) {
 			s.mu.Lock()
 			s.leaf = ""
 			s.mu.Unlock()
+			continue
+		}
+		if rec.Kind == RecordBranch {
+			if rec.ParentID != "" {
+				if _, ok := s.entries[rec.ParentID]; !ok {
+					return nil, fmt.Errorf("%w: %s", ErrEntryNotFound, rec.ParentID)
+				}
+			}
+			s.leaf = rec.ParentID
 			continue
 		}
 		// A record with no entry ID is run metadata, not a tree entry.
@@ -149,7 +159,11 @@ func Restore(ctx context.Context, runID string, j Journal) (*Session, error) {
 		if e == nil {
 			continue
 		}
+		e.journalSeq = rec.Seq
 		s.entries[rec.EntryID] = e
+		if rec.Kind == RecordMessage && strings.HasPrefix(rec.Text, "[bonnie] The sandbox workspace of this run (backend "+s.sandboxBackend+", id "+s.sandboxID+")") {
+			s.sandboxNoted = true
+		}
 		if parent, ok := s.entries[rec.ParentID]; ok {
 			parent.meta.Children = append(parent.meta.Children, rec.EntryID)
 		}
@@ -169,6 +183,11 @@ func Restore(ctx context.Context, runID string, j Journal) (*Session, error) {
 
 	if err := s.repairTail(ctx, recs); err != nil {
 		return nil, err
+	}
+	if s.sandboxGone && !s.sandboxNoted {
+		if err := s.NoteSandboxUnavailable(ctx, s.sandboxBackend, s.sandboxID, true); err != nil {
+			return nil, err
+		}
 	}
 	return s, nil
 }
@@ -249,6 +268,8 @@ type sandboxPayload struct {
 	// a pruned container, a removed microVM. The conversation note that
 	// tells the model its files vanished is journalled alongside it.
 	Gone bool `json:"gone,omitempty"`
+	// Noted says the conversation note was committed with this record.
+	Noted bool `json:"noted,omitempty"`
 }
 
 func encodeSandbox(p sandboxPayload) json.RawMessage {
@@ -269,16 +290,18 @@ func encodeSandbox(p sandboxPayload) json.RawMessage {
 // operator which backend a run used, or what is still holding its compute.
 func (s *Session) RecordSandboxOpen(ctx context.Context, backend, sandboxID string) error {
 	s.mu.Lock()
-	s.sandboxBackend, s.sandboxID = backend, sandboxID
-	s.sandboxGone, s.sandboxNoted = false, false
-	s.mu.Unlock()
-
+	defer s.mu.Unlock()
 	_, err := s.journal.Append(ctx, Record{
 		RunID: s.runID, Kind: RecordSandbox, Timestamp: now(),
 		Text:    fmt.Sprintf("sandbox opened: backend %s, id %s", backend, sandboxID),
 		Payload: encodeSandbox(sandboxPayload{Backend: backend, SandboxID: sandboxID}),
 	})
-	return err
+	if err != nil {
+		return err
+	}
+	s.sandboxBackend, s.sandboxID = backend, sandboxID
+	s.sandboxGone, s.sandboxNoted = false, false
+	return nil
 }
 
 // LastSandbox returns the backend and sandbox ID from the most recent sandbox
@@ -306,40 +329,48 @@ func (s *Session) LastSandbox() (backend, sandboxID string, gone, ok bool) {
 // The note is a user-role message with a fixed prefix. A system-role message
 // mid-conversation is rejected by some providers, and a note that never
 // reached the model would defeat the point. It is written once per
-// discovery; a second call about the same loss appends nothing.
+// discovery; a second call about the same loss appends nothing. A StepJournal
+// commits the note and metadata together. Other journals write the note first,
+// so a partial write cannot suppress the missing note on restore.
 func (s *Session) NoteSandboxUnavailable(ctx context.Context, backend, sandboxID string, verified bool) error {
-	s.mu.RLock()
-	noted := s.sandboxNoted && s.sandboxID == sandboxID
-	s.mu.RUnlock()
-	if noted {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.sandboxNoted && s.sandboxBackend == backend && s.sandboxID == sandboxID {
 		return nil
 	}
-
-	if verified {
-		s.mu.Lock()
-		s.sandboxGone, s.sandboxNoted = true, true
-		s.mu.Unlock()
-		if _, err := s.journal.Append(ctx, Record{
-			RunID: s.runID, Kind: RecordSandbox, Timestamp: now(),
-			Text:    fmt.Sprintf("sandbox gone: backend %s, id %s", backend, sandboxID),
-			Payload: encodeSandbox(sandboxPayload{Backend: backend, SandboxID: sandboxID, Gone: true}),
-		}); err != nil {
-			return err
-		}
-	} else {
-		s.mu.Lock()
-		s.sandboxNoted = true
-		s.mu.Unlock()
-	}
-
-	_, err := s.AppendMessage(kit.NewLLMUserMessage(
+	msg := kit.NewLLMUserMessage(
 		"[bonnie] The sandbox workspace of this run (backend " + backend +
 			", id " + sandboxID + ") is no longer available. It was removed while " +
 			"the run was not running, or this host now uses a different backend. " +
 			"The workspace is empty: files from earlier turns are gone. Mention " +
 			"this when it matters, and re-create any file you need before you " +
-			"rely on it."))
-	return err
+			"rely on it.")
+	payload, err := json.Marshal(msg)
+	if err != nil {
+		return fmt.Errorf("bonnie: encode sandbox note: %w", err)
+	}
+	id, parent, ts := s.ids.next("m"), s.leaf, now()
+	// Write the note first in the non-atomic fallback. A loss marker must
+	// never prevent recovery of a note that was not written.
+	recs := []Record{
+		{RunID: s.runID, Kind: RecordMessage, EntryID: id, ParentID: parent, Timestamp: ts, Role: string(msg.Role), Text: messageText(msg), Payload: payload},
+		{RunID: s.runID, Kind: RecordSandbox, Timestamp: ts,
+			Text:    fmt.Sprintf("sandbox unavailable: backend %s, id %s", backend, sandboxID),
+			Payload: encodeSandbox(sandboxPayload{Backend: backend, SandboxID: sandboxID, Gone: verified, Noted: true})},
+	}
+	seqs, err := s.journalStep(ctx, recs)
+	if err != nil {
+		return err
+	}
+	e, err := restoreEntry(recs[0])
+	if err != nil {
+		return err
+	}
+	e.journalSeq = seqs[0]
+	s.insertLocked(id, e)
+	s.sandboxBackend, s.sandboxID = backend, sandboxID
+	s.sandboxGone, s.sandboxNoted = verified, true
+	return nil
 }
 
 func encodeRepair(p repairPayload) json.RawMessage {
@@ -485,6 +516,7 @@ func (s *Session) AppendMessage(msg kit.LLMMessage) (string, error) {
 	}
 
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	id := s.ids.next("m")
 	parent := s.leaf
 	text := messageText(msg)
@@ -504,12 +536,6 @@ func (s *Session) AppendMessage(msg kit.LLMMessage) (string, error) {
 		},
 		msg: &msg,
 	}
-	s.entries[id] = e
-	if p, ok := s.entries[parent]; ok {
-		p.meta.Children = append(p.meta.Children, id)
-	}
-	s.leaf = id
-	s.mu.Unlock()
 
 	seq, err := s.journal.Append(context.Background(), Record{
 		RunID:     s.runID,
@@ -521,14 +547,12 @@ func (s *Session) AppendMessage(msg kit.LLMMessage) (string, error) {
 		Text:      text,
 		Payload:   payload,
 	})
-	// The record's sequence is what the event stream anchors to. The entry
-	// is already published into s.entries, so this write is taken under the
-	// lock like every other field of a shared entry — [Session.LastMessageSeq]
-	// reads it under RLock, and [Session.AppendStep] writes it the same way.
-	s.mu.Lock()
+	if err != nil {
+		return id, err
+	}
 	e.journalSeq = seq
-	s.mu.Unlock()
-	return id, err
+	s.insertLocked(id, e)
+	return id, nil
 }
 
 // LastMessageSeq returns the journal sequence of the last message appended
@@ -539,8 +563,10 @@ func (s *Session) AppendMessage(msg kit.LLMMessage) (string, error) {
 func (s *Session) LastMessageSeq() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if leaf, ok := s.entries[s.leaf]; ok {
-		return leaf.journalSeq
+	for _, e := range slices.Backward(s.branchLocked()) {
+		if e.msg != nil {
+			return e.journalSeq
+		}
 	}
 	return 0
 }
@@ -592,6 +618,8 @@ func (s *Session) AppendStep(ctx context.Context, msgs []kit.LLMMessage) ([]stri
 	}
 
 	s.mu.Lock()
+	defer s.mu.Unlock()
+	entries := make([]*sessionEntry, len(msgs))
 	ids := make([]string, len(msgs))
 	recs := make([]Record, len(msgs))
 	parent := s.leaf
@@ -623,14 +651,9 @@ func (s *Session) AppendStep(ctx context.Context, msgs []kit.LLMMessage) ([]stri
 			},
 			msg: &msgs[i],
 		}
-		s.entries[id] = e
-		if p, ok := s.entries[parent]; ok {
-			p.meta.Children = append(p.meta.Children, id)
-		}
-		s.leaf = id
+		entries[i] = e
 		parent = id
 	}
-	s.mu.Unlock()
 
 	// A completed step must survive an interrupted turn: keep the values,
 	// drop the cancellation. See the Cancellation section above.
@@ -639,14 +662,11 @@ func (s *Session) AppendStep(ctx context.Context, msgs []kit.LLMMessage) ([]stri
 	if err != nil {
 		return ids, err
 	}
-	// The records' sequences are what the event stream anchors to.
-	s.mu.Lock()
-	for i := range recs {
-		if e, ok := s.entries[ids[i]]; ok && i < len(seqs) {
-			e.journalSeq = seqs[i]
-		}
+	// Publish the committed entries and anchors together, in journal order.
+	for i, e := range entries {
+		e.journalSeq = seqs[i]
+		s.insertLocked(ids[i], e)
 	}
-	s.mu.Unlock()
 	return ids, nil
 }
 
@@ -656,7 +676,8 @@ func (s *Session) AppendStep(ctx context.Context, msgs []kit.LLMMessage) ([]stri
 //
 // The fallback has the same crash window the pre-v0.106 per-message writes
 // had; a host that wants crash-safe steps should implement [StepJournal].
-// Both paths keep the step a unit in the tree regardless.
+// The tree receives the step only after all records are committed. A failed
+// fallback write can leave a partial durable step; Restore repairs its tail.
 func (s *Session) journalStep(ctx context.Context, recs []Record) ([]int, error) {
 	if sj, ok := s.journal.(StepJournal); ok {
 		return sj.AppendStep(ctx, recs)
@@ -670,6 +691,15 @@ func (s *Session) journalStep(ctx context.Context, recs []Record) ([]int, error)
 		seqs = append(seqs, seq)
 	}
 	return seqs, nil
+}
+
+// insertLocked adds one entry at its recorded parent. The caller holds mu.
+func (s *Session) insertLocked(id string, e *sessionEntry) {
+	s.entries[id] = e
+	if p, ok := s.entries[e.meta.ParentID]; ok {
+		p.meta.Children = append(p.meta.Children, id)
+	}
+	s.leaf = id
 }
 
 // branchLocked walks from the current leaf to the root and returns the path in
@@ -763,16 +793,20 @@ func (s *Session) GetContextEntryIDs() []string {
 }
 
 // Branch implements [kit.SessionManager]. An empty entryID resets to root.
+// The selection is journalled even when no message follows it.
 func (s *Session) Branch(entryID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if entryID == "" {
-		s.leaf = ""
-		return nil
+	if entryID != "" {
+		if _, ok := s.entries[entryID]; !ok {
+			return fmt.Errorf("%w: %s", ErrEntryNotFound, entryID)
+		}
 	}
-	if _, ok := s.entries[entryID]; !ok {
-		return fmt.Errorf("%w: %s", ErrEntryNotFound, entryID)
+	if _, err := s.journal.Append(context.Background(), Record{
+		RunID: s.runID, Kind: RecordBranch, ParentID: entryID, Timestamp: now(),
+	}); err != nil {
+		return err
 	}
 	s.leaf = entryID
 	return nil
@@ -847,6 +881,7 @@ func (s *Session) AppendCompaction(summary, firstKeptEntryID string,
 	tokensBefore, tokensAfter, messagesRemoved int, readFiles, modifiedFiles []string,
 ) (string, error) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	id := s.ids.next("c")
 	parent := s.leaf
 	ts := now()
@@ -863,12 +898,6 @@ func (s *Session) AppendCompaction(summary, firstKeptEntryID string,
 			Timestamp: ts,
 		},
 	}
-	s.entries[id] = e
-	if p, ok := s.entries[parent]; ok {
-		p.meta.Children = append(p.meta.Children, id)
-	}
-	s.leaf = id
-	s.mu.Unlock()
 
 	_, err := s.journal.Append(context.Background(), Record{
 		RunID: s.runID, Kind: RecordCompaction, Timestamp: ts,
@@ -880,7 +909,11 @@ func (s *Session) AppendCompaction(summary, firstKeptEntryID string,
 			ReadFiles:       readFiles, ModifiedFiles: modifiedFiles,
 		}),
 	})
-	return id, err
+	if err != nil {
+		return id, err
+	}
+	s.insertLocked(id, e)
+	return id, nil
 }
 
 func encodeCompaction(p compactionPayload) json.RawMessage {
@@ -910,6 +943,7 @@ func (s *Session) GetLastCompaction() *kit.CompactionEntry {
 // BONNIE's durable, branch-aware key/value store for run state.
 func (s *Session) AppendExtensionData(extType, data string) (string, error) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	id := s.ids.next("x")
 	parent := s.leaf
 	ts := now()
@@ -920,18 +954,16 @@ func (s *Session) AppendExtensionData(extType, data string) (string, error) {
 		},
 		extData: &kit.ExtensionDataEntry{ID: id, ExtType: extType, Data: data},
 	}
-	s.entries[id] = e
-	if p, ok := s.entries[parent]; ok {
-		p.meta.Children = append(p.meta.Children, id)
-	}
-	s.leaf = id
-	s.mu.Unlock()
 
 	_, err := s.journal.Append(context.Background(), Record{
 		RunID: s.runID, Kind: RecordExtensionData, Timestamp: ts,
 		EntryID: id, ParentID: parent, ExtType: extType, Text: data,
 	})
-	return id, err
+	if err != nil {
+		return id, err
+	}
+	s.insertLocked(id, e)
+	return id, nil
 }
 
 // GetExtensionData implements [kit.SessionManager].
@@ -956,27 +988,26 @@ func (s *Session) GetExtensionData(extType string) []kit.ExtensionDataEntry {
 // memory would orphan every message appended after it on replay.
 func (s *Session) AppendModelChange(provider, modelID string) (string, error) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	id := s.ids.next("v")
 	parent := s.leaf
 	ts := now()
-	s.provider, s.modelID = provider, modelID
 	e := &sessionEntry{meta: kit.BranchEntry{
 		ID: id, ParentID: parent, Type: kit.EntryTypeModelChange,
 		Provider: provider, Model: modelID, Timestamp: ts,
 	}}
-	s.entries[id] = e
-	if p, ok := s.entries[parent]; ok {
-		p.meta.Children = append(p.meta.Children, id)
-	}
-	s.leaf = id
-	s.mu.Unlock()
 
 	_, err := s.journal.Append(context.Background(), Record{
 		RunID: s.runID, Kind: RecordModelChange, Timestamp: ts,
 		EntryID: id, ParentID: parent,
 		Payload: encodeModelChange(modelChangePayload{Provider: provider, Model: modelID}),
 	})
-	return id, err
+	if err != nil {
+		return id, err
+	}
+	s.provider, s.modelID = provider, modelID
+	s.insertLocked(id, e)
+	return id, nil
 }
 
 // modelChangePayload is the durable form of a model switch.
@@ -996,9 +1027,9 @@ func encodeModelChange(p modelChangePayload) json.RawMessage {
 // AppendBranchSummary implements [kit.SessionManager].
 func (s *Session) AppendBranchSummary(fromID, summary string) (string, error) {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	from, ok := s.entries[fromID]
 	if !ok {
-		s.mu.Unlock()
 		return "", fmt.Errorf("%w: %s", ErrEntryNotFound, fromID)
 	}
 	id := s.ids.next("b")
@@ -1008,18 +1039,16 @@ func (s *Session) AppendBranchSummary(fromID, summary string) (string, error) {
 		ID: id, ParentID: parent, Type: kit.EntryTypeBranchSummary,
 		Content: summary, Timestamp: ts,
 	}}
-	s.entries[id] = e
-	if p, ok := s.entries[parent]; ok {
-		p.meta.Children = append(p.meta.Children, id)
-	}
-	s.leaf = id
-	s.mu.Unlock()
 
 	_, err := s.journal.Append(context.Background(), Record{
 		RunID: s.runID, Kind: RecordBranchSummary, Timestamp: ts,
 		EntryID: id, ParentID: parent, Text: summary,
 	})
-	return id, err
+	if err != nil {
+		return id, err
+	}
+	s.insertLocked(id, e)
+	return id, nil
 }
 
 // Close implements [kit.SessionManager]. It does not close the journal, which

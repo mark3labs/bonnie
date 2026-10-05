@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -32,7 +33,7 @@ tool wiring, embed the instructions, skills, and workspace, and build the
 module. The output binary serves the agent on a host with no Go toolchain and
 no BONNIE install — the tree graduates into a binary it owns.
 
-The build machine needs Go. The host needs nothing. Binary output is ./<module>
+The build machine needs Go. The host needs nothing. Binary output is <tree>/<module>
 (or --output), where module is the base name from the tree's go.mod. The
 mark3labs modules are public, so the tree's go.mod resolves them from the proxy
 — no repository access needed.
@@ -50,7 +51,7 @@ embed set — without writing or building.`,
 	}
 	f := cmd.Flags()
 	f.BoolVar(&o.dryRun, "dry-run", false, "print the discovery plan without writing or building")
-	f.StringVar(&o.output, "output", "", "binary output path (default: ./<module>)")
+	f.StringVar(&o.output, "output", "", "binary output path, relative to the tree (default: ./<module>)")
 	return cmd
 }
 
@@ -85,17 +86,20 @@ func runBuild(root string, o buildOpts) error {
 		output = defaultBinaryName(plan.Module)
 	}
 
+	if !filepath.IsAbs(output) {
+		output = filepath.Join(root, output)
+	}
+
 	build := exec.Command("go", "build", "-o", output, ".")
 	build.Dir = root
-	build.Env = o.env
+	build.Env = staticBuildEnv(o.env)
 	build.Stdout = os.Stderr
 	build.Stderr = os.Stderr
 	if err := build.Run(); err != nil {
 		return fmt.Errorf("bonnie: go build: %w", err)
 	}
 
-	abs, _ := filepath.Abs(output)
-	fmt.Fprintf(os.Stderr, "bonnie: built %s\n", abs)
+	fmt.Fprintf(os.Stderr, "bonnie: built %s\n", output)
 	return nil
 }
 
@@ -124,4 +128,18 @@ func agentName(name string) string {
 		}
 	}
 	return string(b)
+}
+
+// staticBuildEnv disables CGO even when the caller enables it.
+func staticBuildEnv(env []string) []string {
+	if env == nil {
+		env = os.Environ()
+	}
+	out := make([]string, 0, len(env)+1)
+	for _, item := range env {
+		if !strings.HasPrefix(item, "CGO_ENABLED=") {
+			out = append(out, item)
+		}
+	}
+	return append(out, "CGO_ENABLED=0")
 }

@@ -188,21 +188,20 @@ func TestSafeNameIsInjective(t *testing.T) {
 
 // TestSafeNameIsStable matters for reattachment. The name is derived, not
 // stored, so a run finds its sandbox again only if the derivation never
-// changes. Golden values catch an algorithm change that would silently orphan
-// every live sandbox across a BONNIE upgrade.
+// changes without checked adoption. Encoded names use the reserved namespace;
+// Docker checks legacy identity before it can adopt an older name.
 func TestSafeNameIsStable(t *testing.T) {
 	t.Parallel()
 	golden := map[string]string{
 		"run-1":   "bonnie-run-1",
 		"ok_id.9": "bonnie-ok_id.9",
-		"a/b":     "bonnie-a-b-c14cddc0",
-		"a b":     "bonnie-a-b-c8687a08",
+		"a/b":     "bonnie-b--c14cddc033f64b9dea80ea675cf280a015e672516090a562",
+		"a b":     "bonnie-b--c8687a08aa5d6ed2044328fa6a697ab8e96dc34291e8c203",
 	}
 	for id, want := range golden {
 		if got := safeName("bonnie-", id); got != want {
 			t.Errorf("safeName(%q) = %q, want %q.\n"+
-				"If this change is deliberate, every sandbox created by an "+
-				"earlier version becomes unreachable.", id, got, want)
+				"Name changes require a checked migration path.", id, got, want)
 		}
 	}
 }

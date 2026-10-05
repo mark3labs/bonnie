@@ -13,41 +13,6 @@ import (
 // damaged, and rewriting history silently would hide the damage.
 var ErrCorruptConversation = errors.New("bonnie: replayed conversation is corrupt")
 
-// repairTrailingOrphan removes an incomplete trailing tool-calling step.
-//
-// It is the pure form of the repair, over a plain message slice. The
-// production path is [Session.repairTail], which does the same thing to a
-// restored conversation tree and journals a [RecordRepair]; this function
-// states the rule on its own, and the repair tests exercise it directly.
-//
-// Why the shape exists: a tool-calling step is an assistant message that
-// carries the call and a tool message that carries the result. Kit hands
-// both to [Session.AppendStep] in one call as of v0.106.0, and a
-// [StepJournal] commits them together — so current BONNIE cannot produce
-// the orphan. It is still on disk in journals BONNIE inherited: those
-// written before v0.106.0, when a step was two independent AppendMessage
-// calls, those imported from the original JSONL format, and those from any
-// [Journal] that does not implement [StepJournal] and still takes the
-// per-record fallback.
-//
-// An assistant tool_use with no tool_result is a conversation every provider
-// rejects, so leaving it would make the run permanently unresumable.
-// Dropping the step is the correct semantics: the step never finished, so
-// the model is free to run it again.
-//
-// It returns the messages unchanged when the conversation is whole, and
-// [ErrCorruptConversation] when the unanswered call is not at the tail.
-func repairTrailingOrphan(msgs []kit.LLMMessage) ([]kit.LLMMessage, error) {
-	cut, err := orphanCut(msgs)
-	if err != nil {
-		return nil, err
-	}
-	if cut < 0 {
-		return msgs, nil
-	}
-	return msgs[:cut], nil
-}
-
 // orphanCut returns the index of the first message of an incomplete trailing
 // tool-calling step, or -1 when every tool call has a result.
 func orphanCut(msgs []kit.LLMMessage) (int, error) {

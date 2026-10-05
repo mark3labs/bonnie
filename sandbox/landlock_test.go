@@ -187,7 +187,7 @@ func TestLandlockHidesItsOwnProtocol(t *testing.T) {
 // TestLandlockFileToolsRefuseEscape covers the tools that Landlock does NOT
 // cover. read_file and write_file run in the BONNIE process, which must stay
 // unrestricted because it owns the journal, so their containment is the path
-// jail in host(). Both halves are needed: neither one alone is enough.
+// jail in os.Root. Both halves are needed: neither one alone is enough.
 func TestLandlockFileToolsRefuseEscape(t *testing.T) {
 	t.Parallel()
 	p := landlockProvider(t)

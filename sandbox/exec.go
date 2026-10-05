@@ -8,7 +8,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -27,11 +29,14 @@ func runCLI(ctx context.Context, stdin []byte, name string, args ...string) (std
 	cmd.Stdout = &out
 	cmd.Stderr = &errb
 
+	configureProcess(cmd)
 	err = cmd.Run()
 	stdout, stderr = out.String(), errb.String()
 
 	var ee *exec.ExitError
 	switch {
+	case ctx.Err() != nil:
+		return stdout, stderr, -1, fmt.Errorf("bonnie: sandbox: run %s: %w", name, ctx.Err())
 	case err == nil:
 		return stdout, stderr, 0, nil
 	case errors.As(err, &ee):
@@ -57,10 +62,13 @@ func runCLIRaw(ctx context.Context, stdin []byte, name string, args ...string) (
 	cmd.Stdout = &out
 	cmd.Stderr = &errb
 
+	configureProcess(cmd)
 	err = cmd.Run()
 
 	var ee *exec.ExitError
 	switch {
+	case ctx.Err() != nil:
+		return nil, errb.String(), -1, fmt.Errorf("bonnie: sandbox: run %s: %w", name, ctx.Err())
 	case err == nil:
 		return out.Bytes(), errb.String(), 0, nil
 	case errors.As(err, &ee):
@@ -180,16 +188,19 @@ func envArgs(flag string, env []string) []string {
 	return out
 }
 
-// safeName turns a run ID into a container or sandbox name.
-//
-// The mapping must be injective. Replacing every unsafe character with a dash
-// is not: "a.b", "a/b", and "a b" all become "a-b", so two runs would share
-// one container and one run would see the other's files. A dot is a legal run
-// ID character in the file journal, so this is reachable, not theoretical.
-//
-// When the mapping loses information, a digest of the original run ID is
-// appended to make the name unique again.
+// safeName reserves a namespace for encoded names. Plain IDs cannot equal
+// the generated name of another ID. The digest uses 192 bits.
 func safeName(prefix, runID string) string {
+	legacy := legacySafeName(prefix, runID)
+	if legacy == prefix+runID && runID != "" && !strings.HasPrefix(runID, ".") && !strings.HasPrefix(runID, "b--") && !legacyDigestName(runID) {
+		return legacy
+	}
+	sum := sha256.Sum256([]byte(runID))
+	return prefix + "b--" + hex.EncodeToString(sum[:24])
+}
+
+// legacySafeName is used only for checked adoption of old container names.
+func legacySafeName(prefix, runID string) string {
 	var b strings.Builder
 	b.WriteString(prefix)
 
@@ -221,3 +232,31 @@ func safeName(prefix, runID string) string {
 
 // maxNameLen keeps a generated name inside the limits every backend accepts.
 const maxNameLen = 60
+
+// refuseUncheckedLegacy keeps an old lossy workspace from being assigned to
+// another run. Old host directories have no identity record, so adoption
+// cannot prove ownership. Plain IDs retain their existing directory names.
+func refuseUncheckedLegacy(root, runID string) error {
+	old := legacySafeName("", runID)
+	if old == safeName("", runID) || old == "" || old == "." || old == ".." || strings.HasPrefix(old, ".") {
+		return nil
+	}
+	_, err := os.Lstat(filepath.Join(root, old))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("bonnie: sandbox: inspect legacy workspace: %w", err)
+	}
+	return fmt.Errorf("%w: legacy workspace %s has no checked run identity; migrate or delete it", ErrPolicyMismatch, old)
+}
+
+// legacyDigestName reserves the old generated suffix too. An old generated
+// directory must not be adopted by a plain ID that happens to spell its name.
+func legacyDigestName(id string) bool {
+	if len(id) < 9 || id[len(id)-9] != '-' {
+		return false
+	}
+	_, err := hex.DecodeString(id[len(id)-8:])
+	return err == nil
+}

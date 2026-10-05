@@ -146,8 +146,8 @@ type SessionRef interface {
 	Respond(ctx context.Context, responses []runtime.InputResponse) (*runtime.Run, error)
 	// Cancel stops the active turn.
 	Cancel(ctx context.Context) error
-	// Reset retires the run for good and frees its address, so the next
-	// Send on the address starts a fresh run. A reference from Attach keeps
+	// Reset retires the run for good and frees its addresses in this
+	// channel, so the next Send on an address starts a fresh run. A reference from Attach keeps
 	// pointing at the retired run.
 	Reset(ctx context.Context, reason string) error
 	// Clear drops the conversation from the model's context and keeps

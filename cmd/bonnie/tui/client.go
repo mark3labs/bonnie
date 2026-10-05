@@ -28,6 +28,9 @@ import (
 // network round trip. [github.com/mark3labs/bonnie/client.Client] satisfies
 // it.
 type Client interface {
+	// Snapshot returns history, state, and a cursor from one durable replay.
+	Snapshot(ctx context.Context, runID string) (*client.Snapshot, error)
+
 	// Lookup returns the run and current journal cursor bound to an address
 	// without creating one.
 	Lookup(ctx context.Context, address string) (string, int, error)

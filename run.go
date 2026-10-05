@@ -63,16 +63,17 @@ func New(opts ...Option) *Agent {
 // rebuilding it. `bonnie dev` starts a tree's binary with -addr, which is the
 // whole contract between the dev loop and the child.
 func (a *Agent) Serve() {
-	addr := flag.String("addr", "", "address to listen on")
-	model := flag.String("model", "", "model to use, for example anthropic/claude-sonnet-4-5")
+	registerServeFlags(flag.CommandLine)
 	flag.Parse()
+	addr := flag.Lookup("addr").Value.String()
+	model := flag.Lookup("model").Value.String()
 
 	// The flags are applied after the author's options, so they win.
-	if *addr != "" {
-		WithAddr(*addr)(a.cfg)
+	if addr != "" {
+		WithAddr(addr)(a.cfg)
 	}
-	if *model != "" {
-		WithModel(*model)(a.cfg)
+	if model != "" {
+		WithModel(model)(a.cfg)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -81,6 +82,16 @@ func (a *Agent) Serve() {
 	if err := a.Run(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
+	}
+}
+
+// registerServeFlags preserves flags that the host has already registered.
+func registerServeFlags(fs *flag.FlagSet) {
+	if fs.Lookup("addr") == nil {
+		fs.String("addr", "", "address to listen on")
+	}
+	if fs.Lookup("model") == nil {
+		fs.String("model", "", "model to use, for example anthropic/claude-sonnet-4-5")
 	}
 }
 
@@ -102,15 +113,18 @@ func (a *Agent) Run(ctx context.Context) error {
 		return err
 	}
 
-	prompt, err := c.systemPrompt()
-	if err != nil {
-		return err
+	var prompt, skills string
+	if c.factory == nil {
+		prompt, err = c.systemPrompt()
+		if err != nil {
+			return err
+		}
+		skills, err = c.skillsDir()
+		if err != nil {
+			return err
+		}
 	}
 	workspace, err := c.workspaceDir()
-	if err != nil {
-		return err
-	}
-	skills, err := c.skillsDir()
 	if err != nil {
 		return err
 	}
@@ -272,9 +286,8 @@ func (c *config) systemPrompt() (string, error) {
 	return "", fmt.Errorf("bonnie: the instructions file could not be read: %w", err)
 }
 
-// workspaceDir is the agent's root for files, absolute. Empty means the
-// process's own directory stays the root, which is what a host with no tree
-// asks for with WithWorkspace("").
+// workspaceDir returns the absolute workspace seed directory. Empty means
+// no files are seeded into the sandbox, as requested by WithWorkspace("").
 func (c *config) workspaceDir() (string, error) {
 	if c.workspace == "" {
 		return "", nil

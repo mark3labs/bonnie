@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -175,6 +176,7 @@ func (d *devServer) servedURL() string {
 }
 
 func (d *devServer) run(ctx context.Context) error {
+	defer d.stopChild()
 	if err := d.restart(); err != nil {
 		return err
 	}
@@ -185,7 +187,6 @@ func (d *devServer) run(ctx context.Context) error {
 	}
 	defer func() { _ = w.Close() }()
 	if err := watchTree(d.root, workspaceDir(d.root), w); err != nil {
-		d.stopChild()
 		return err
 	}
 
@@ -198,7 +199,6 @@ func (d *devServer) run(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			d.stopChild()
 			return nil
 		case <-debounce.C:
 			fmt.Fprintln(os.Stderr, "bonnie: dev: change detected, rebuilding")
@@ -210,19 +210,23 @@ func (d *devServer) run(ctx context.Context) error {
 			}
 		case ev, ok := <-w.Events:
 			if !ok {
-				d.stopChild()
 				return nil
 			}
 			if !watched(ev.Name, workspaceDir(d.root)) {
 				continue
 			}
+			if ev.Op&fsnotify.Create != 0 {
+				if info, err := os.Stat(ev.Name); err == nil && info.IsDir() {
+					if err := watchTree(ev.Name, workspaceDir(d.root), w); err != nil {
+						return fmt.Errorf("bonnie: dev: watch new directory: %w", err)
+					}
+				}
+			}
 			debounce.Reset(300 * time.Millisecond)
 		case err, ok := <-w.Errors:
 			if !ok {
-				d.stopChild()
 				return nil
 			}
-			d.stopChild()
 			return fmt.Errorf("bonnie: dev: watch: %w", err)
 		}
 	}
@@ -247,6 +251,7 @@ func (d *devServer) restart() error {
 
 	d.mu.Lock()
 	old := d.child
+	d.child = nil
 	beforeStop := d.beforeStop
 	d.mu.Unlock()
 	if old != nil {
@@ -315,9 +320,13 @@ func (d *devServer) start() error {
 func (d *devServer) stopChild() {
 	d.mu.Lock()
 	child := d.child
+	beforeStop := d.beforeStop
 	d.child = nil
 	d.mu.Unlock()
 	if child != nil {
+		if beforeStop != nil {
+			beforeStop()
+		}
 		_ = stopGracefully(child, d.shutdown)
 	}
 }
@@ -328,13 +337,14 @@ func stopGracefully(cmd *exec.Cmd, shutdown time.Duration) error {
 	if cmd.Process == nil {
 		return nil
 	}
-	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
-		return err
-	}
+	signalErr := cmd.Process.Signal(syscall.SIGTERM)
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
 	select {
 	case <-done:
+		if signalErr != nil && !errors.Is(signalErr, os.ErrProcessDone) {
+			return signalErr
+		}
 		return nil
 	case <-time.After(shutdown):
 		_ = cmd.Process.Kill()
@@ -350,6 +360,9 @@ func stopGracefully(cmd *exec.Cmd, shutdown time.Duration) error {
 // own output rather than its input. See [watched].
 func watchTree(root, workspace string, w *fsnotify.Watcher) error {
 	return filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if os.IsNotExist(err) {
+			return nil // A newly created directory can disappear before registration.
+		}
 		if err != nil {
 			return err
 		}
@@ -358,7 +371,7 @@ func watchTree(root, workspace string, w *fsnotify.Watcher) error {
 		}
 		// The generated directory and the dev binary's home are the loop's
 		// own output, not input; watching them causes a restart-forever loop.
-		if entry.Name() == ".bonnie" || entry.Name() == ".git" {
+		if entry.Name() == ".bonnie" || entry.Name() == ".git" || entry.Name() == ".direnv" {
 			return filepath.SkipDir
 		}
 		if workspace != "" && path == workspace {
@@ -385,6 +398,11 @@ func watchTree(root, workspace string, w *fsnotify.Watcher) error {
 func watched(path, workspace string) bool {
 	if filepath.Base(path) == "bonnie_gen.go" {
 		return false
+	}
+	for part := range strings.SplitSeq(filepath.Clean(path), string(filepath.Separator)) {
+		if part == ".bonnie" || part == ".git" || part == ".direnv" {
+			return false
+		}
 	}
 	return !underDir(path, workspace)
 }
@@ -433,13 +451,26 @@ func runDev(root string, o devOpts) error {
 	// child over HTTP, so a hot reload of the child does not kill the
 	// conversation — the journal is what survives.
 	loopErr := make(chan error, 1)
-	go func() { loopErr <- d.run(ctx) }()
+	go func() {
+		defer close(loopErr)
+		// A loop failure must also release readiness waits and the TUI.
+		defer stop()
+		loopErr <- d.run(ctx)
+	}()
+	// Every exit cancels the loop and joins its child cleanup.
+	defer func() {
+		stop()
+		for range loopErr {
+		}
+	}()
 
 	if o.tui {
 		// Wait for the child to bind, then take over the foreground until
 		// the user leaves the TUI.
 		select {
 		case <-d.ready:
+		case err := <-loopErr:
+			return err
 		case <-ctx.Done():
 			return <-loopErr
 		}
@@ -454,9 +485,7 @@ func runDev(root string, o devOpts) error {
 		if err := runTUIClient(ctx, c, tuiAddress(d.root)); err != nil {
 			return err
 		}
-		// The TUI ended; stop the serve loop.
-		stop()
-		return <-loopErr
+		return nil
 	}
 
 	select {

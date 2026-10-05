@@ -116,8 +116,8 @@ func WithInstructions(path string) Option {
 }
 
 // WithSkills reads the tree's skills from dir instead of [DefaultSkills]. An
-// empty dir means the agent loads no skills at all, which is how a host with
-// no tree runs.
+// empty dir disables tree skills and automatic skill discovery. Explicit
+// skills passed through [WithKit] remain in use.
 //
 // A skill is a markdown file with YAML frontmatter: dir holds one *.md or
 // *.txt per skill, or one subdirectory per skill with a SKILL.md in it. Kit
@@ -135,12 +135,10 @@ func WithSkills(dir string) Option {
 	return func(c *config) { c.skillsPath = dir }
 }
 
-// WithWorkspace roots the agent's files at dir instead of
-// [DefaultWorkspace]. An empty dir means no workspace: the process's own
-// directory stays the root, which is how a host with no tree runs.
-//
-// The workspace is what keeps a model's write off the tree itself — the
-// instructions, the journal, and the source beside them.
+// WithWorkspace selects the workspace seed directory instead of
+// [DefaultWorkspace]. The directory supplies seed files for each run's
+// sandbox workspace. An empty dir disables seeding; it does not give tools
+// access to the process directory or disable the sandbox.
 func WithWorkspace(dir string) Option {
 	return func(c *config) { c.workspace = dir }
 }
@@ -218,7 +216,7 @@ func WithKit(opts ...kit.Option) Option {
 // the agent, so those settings would be accepted and ignored. [Agent.Run]
 // refuses instead, naming both.
 //
-// What the factory owns, it owns completely: the tree's instructions and the
+// What the factory owns, it owns completely: tree instructions, skills, and the
 // tools codegen discovered do not reach it either. They are available through
 // [Registered] for a host that wants them. The journal, the workspace, the
 // channels, and the shutdown behaviour are unaffected — those are BONNIE's
@@ -253,8 +251,8 @@ func WithListener(ln net.Listener) Option {
 // Quiet suppresses the startup banner.
 //
 // It no longer has to make an exception for a no-sandbox warning, because no
-// run is unsandboxed: the banner names the backend in force instead, and a
-// host that silences it has still chosen a confined run.
+// default run is unsandboxed: the banner names the backend in force instead.
+// [sandbox.Local] can still be selected without confinement.
 func Quiet() Option {
 	return func(c *config) { c.quiet = true }
 }

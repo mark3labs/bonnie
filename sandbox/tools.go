@@ -4,10 +4,10 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"sync"
+
+	kit "github.com/mark3labs/kit/pkg/kit"
 
 	"github.com/mark3labs/bonnie/runtime"
-	kit "github.com/mark3labs/kit/pkg/kit"
 )
 
 // maxToolOutput caps what a tool hands back to the model. A command that
@@ -22,25 +22,35 @@ const maxToolOutput = 32 * 1024
 // sandbox is what actually opens it.
 type Opener func(ctx context.Context) (Sandbox, error)
 
-// LazyOpener returns an [Opener] that opens the sandbox once, on first use,
-// and returns the same one afterwards. A run that never calls a sandbox tool
-// never starts a container.
+// LazyOpener returns an [Opener] that opens the sandbox on first use and
+// caches only a successful open. Failed opens can be retried. Concurrent calls
+// open one sandbox at a time; a caller can cancel while it waits. A run that
+// never calls a sandbox tool never starts a container.
 func LazyOpener(p Provider, s *runtime.Session) Opener {
 	var (
-		openOnce sync.Once
 		sb       Sandbox
-		err      error
-
-		recMu    sync.Mutex
 		recorded bool
 	)
+	// The gate protects both the cached handle and its journal record. Unlike
+	// a mutex, it lets a waiting caller stop when its context is canceled.
+	gate := make(chan struct{}, 1)
 	runID := s.RunID()
 	return func(ctx context.Context) (Sandbox, error) {
-		openOnce.Do(func() {
-			sb, err = p.Open(ctx, runID)
-		})
-		if err != nil {
+		select {
+		case gate <- struct{}{}:
+			defer func() { <-gate }()
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		if err := ctx.Err(); err != nil {
 			return nil, err
+		}
+		if sb == nil {
+			opened, err := p.Open(ctx, runID)
+			if err != nil {
+				return nil, err
+			}
+			sb = opened
 		}
 
 		// The record of the workspace's existence. Without it a resumed
@@ -52,8 +62,6 @@ func LazyOpener(p Provider, s *runtime.Session) Opener {
 		// error, retries the tool, and the record lands when the journal
 		// recovers. A bookkeeping failure must not be silent, and it must
 		// not be permanent.
-		recMu.Lock()
-		defer recMu.Unlock()
 		if !recorded {
 			if rerr := s.RecordSandboxOpen(ctx, p.Name(), sb.ID()); rerr != nil {
 				return nil, fmt.Errorf("bonnie: sandbox: record open: %w", rerr)
@@ -166,8 +174,13 @@ func listFilesTool(open Opener) kit.Tool {
 			if err != nil {
 				return unavailable(err), nil
 			}
-			dir := Resolve(in.Path)
-			res, err := sb.Exec(ctx, Command{Args: []string{"ls", "-la", "--", dir}})
+			// Backends map Dir into their command namespace. They do not map
+			// argv paths: /workspace in argv is not a host workspace path.
+			// Keep the path out of shell text and list the mapped directory.
+			res, err := sb.Exec(ctx, Command{
+				Args: []string{"ls", "-la", "--", "."},
+				Dir:  Resolve(in.Path),
+			})
 			if err != nil {
 				return kit.ErrorResult(fmt.Sprintf("sandbox error: %v", err)), nil
 			}

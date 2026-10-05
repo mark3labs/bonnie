@@ -18,6 +18,7 @@
 //	GET  /bonnie/v1/addresses/{address}  look up an address without creating a run
 //	POST /bonnie/v1/addresses/{address}  bind an address to a run, running no turn
 //	GET  /bonnie/v1/runs/{id}            report a run's durable state
+//	GET  /bonnie/v1/runs/{id}/snapshot   conversation, state, and matching cursor
 //	POST /bonnie/v1/runs/{id}            send a message to an existing run
 //	POST /bonnie/v1/runs/{id}/respond    answer a suspended run
 //	POST /bonnie/v1/runs/{id}/cancel     stop the turn a run is executing
@@ -67,6 +68,8 @@ import (
 	"os"
 	"runtime/debug"
 	"strconv"
+	"strings"
+	"sync"
 
 	"github.com/mark3labs/bonnie/channel"
 	"github.com/mark3labs/bonnie/channel/chat"
@@ -76,11 +79,12 @@ import (
 // Channel is the HTTP transport. It implements [channel.Channel] and
 // [channel.Inbound].
 type Channel struct {
-	core   *chat.Core
-	policy channel.TurnPolicy
-	idGen  []chat.CoreOption
-	info   Info
-	auth   Authenticator
+	core        *chat.Core
+	policy      channel.TurnPolicy
+	idGen       []chat.CoreOption
+	info        Info
+	auth        Authenticator
+	operationMu sync.Mutex
 }
 
 var (
@@ -244,6 +248,7 @@ func (c *Channel) Routes() []channel.Route {
 		{Method: http.MethodGet, Path: p + "/addresses/{address}", Handler: c.handleAddress},
 		{Method: http.MethodPost, Path: p + "/addresses/{address}", Handler: c.handleEnsureAddress},
 		{Method: http.MethodGet, Path: p + "/runs/{id}", Handler: c.handleGet},
+		{Method: http.MethodGet, Path: p + "/runs/{id}/snapshot", Handler: c.handleSnapshot},
 		{Method: http.MethodPost, Path: p + "/runs/{id}", Handler: c.handleSend},
 		{Method: http.MethodPost, Path: p + "/runs/{id}/respond", Handler: c.handleRespond},
 		{Method: http.MethodPost, Path: p + "/runs/{id}/cancel", Handler: c.handleCancel},
@@ -306,7 +311,29 @@ func (c *Channel) HandlerWithOutbound(out channel.Outbound) http.Handler {
 			handler(w, r, c, out)
 		})
 	}
-	return mux
+	// ServeMux supplies plain-text routing errors by default. Use its route
+	// match to keep unknown paths and wrong methods on the JSON contract.
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, pattern := mux.Handler(r)
+		if pattern == "" {
+			status, code := http.StatusNotFound, errNotFound
+			probe := r.Clone(r.Context())
+			var allow []string
+			for _, method := range []string{http.MethodGet, http.MethodHead, http.MethodPost} {
+				probe.Method = method
+				if _, matched := mux.Handler(probe); matched != "" {
+					allow = append(allow, method)
+				}
+			}
+			if len(allow) != 0 {
+				status, code = http.StatusMethodNotAllowed, errMethodNotAllowed
+				w.Header().Set("Allow", strings.Join(allow, ", "))
+			}
+			writeJSON(w, status, ErrorResponse{Error: http.StatusText(status), Code: code})
+			return
+		}
+		mux.ServeHTTP(w, r)
+	})
 }
 
 // principalKey carries the verified principal from the mux wrapper to the
@@ -394,7 +421,10 @@ type StartRequest struct {
 	// OperationID makes the start idempotent: the same operation ID from
 	// the same authenticated principal resolves to the run the first call
 	// created, instead of creating another. A client that times out and
-	// retries gets one run, not two. It needs an authenticated principal —
+	// retries gets one turn, not two. Do not combine it with Address.
+	// Retries read durable state, including pending, running, or failed,
+	// and never execute again. Use a new key for new work.
+	// It needs an authenticated principal —
 	// an idempotency key with no owner would let one caller read another's
 	// run by guessing the key.
 	OperationID string `json:"operation_id,omitempty"`
@@ -454,20 +484,24 @@ type usage struct {
 // wording between versions. A client switches on Code.
 type ErrorResponse struct {
 	Error string `json:"error"`
-	// Code is one of the Err* constants of this package, stable across
+	// Code is a stable string value across
 	// versions: "run_not_found", "invalid_run_id", "run_not_waiting",
-	// "run_active", "run_not_active", "run_retired",
+	// "run_active", "run_not_active", "run_retired", "run_waiting",
+	// "files_unsupported",
 	// "run_owned_elsewhere", "compaction_unsupported",
 	// "conversation_corrupt", "unknown_turn_policy", "client_closed",
-	// "bad_request", "too_large", "unauthenticated", "internal".
+	// "bad_request", "too_large", "unauthenticated", "method_not_allowed", "internal".
 	Code string `json:"code"`
 }
 
 // The codes writeError maps to. They are values, not an enum, so the JSON
 // body never carries a Go type name.
 const (
+	errMethodNotAllowed   = "method_not_allowed"
 	errNotFound           = "run_not_found"
 	errInvalidID          = "invalid_run_id"
+	errWaiting            = "run_waiting"
+	errFilesUnsupported   = "files_unsupported"
 	errNotWaiting         = "run_not_waiting"
 	errActive             = "run_active"
 	errNotActive          = "run_not_active"
@@ -542,16 +576,18 @@ func (c *Channel) handleStart(w http.ResponseWriter, r *http.Request, in channel
 		}
 	}
 
+	if req.OperationID != "" && req.Address != "" {
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "address and operation_id cannot be used together", Code: errBadRequest})
+		return
+	}
+	if req.OperationID != "" {
+		c.handleOperation(w, r, req, auth)
+		return
+	}
 	var sess channel.SessionRef
-	switch {
-	case req.Address != "":
+	if req.Address != "" {
 		sess = in.From(req.Address)
-	case req.OperationID != "":
-		// The address map is the idempotency store: a namespaced key the
-		// principal owns. Resolving through it is create-once by the same
-		// rule every address follows, and the binding survives a restart.
-		sess = in.From(operationAddress(auth, req.OperationID))
-	default:
+	} else {
 		sess = in.From(c.core.NewID())
 	}
 
@@ -824,6 +860,10 @@ func writeError(w http.ResponseWriter, err error) {
 		writeJSON(w, http.StatusNotFound, ErrorResponse{Error: err.Error(), Code: errNotFound})
 	case errors.Is(err, runtime.ErrInvalidRunID):
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error(), Code: errInvalidID})
+	case errors.Is(err, runtime.ErrRunWaiting):
+		writeJSON(w, http.StatusConflict, ErrorResponse{Error: err.Error(), Code: errWaiting})
+	case errors.Is(err, runtime.ErrFilesUnsupported):
+		writeJSON(w, http.StatusNotImplemented, ErrorResponse{Error: err.Error(), Code: errFilesUnsupported})
 	case errors.Is(err, runtime.ErrNotWaiting):
 		writeJSON(w, http.StatusConflict, ErrorResponse{Error: err.Error(), Code: errNotWaiting})
 	case errors.Is(err, runtime.ErrRunActive):
@@ -870,18 +910,53 @@ func logInternal(what string, err error) {
 	fmt.Fprintf(os.Stderr, "bonnie: channel/http: %s: %v\n", what, err)
 }
 
-// opPrefix namespaces idempotency keys inside the address map, so an
-// operation ID cannot collide with a channel-local address a client chose.
-const opPrefix = "operation/"
-
-// operationAddress is the address-map key of one idempotent start: the
-// principal's identity, the fixed prefix, and the caller's operation ID. A
-// key another principal chose cannot resolve to this one's run.
-//
-// That property holds only as far as the identity does. It is real when an
-// [Authenticator] proved the principal, which is why handleStart refuses an
-// operation ID without one: a self-asserted principal makes the namespace a
-// formality any caller can step into.
+// operationAddress uses a separate internal namespace, outside http/.
+// JSON array encoding preserves identity boundaries, also for slashes and
+// empty fields. Kind is part of identity; claims are not.
 func operationAddress(p *channel.Principal, operationID string) string {
-	return opPrefix + p.Authenticator + "/" + p.ID + "/" + operationID
+	payload, _ := json.Marshal([]string{p.Authenticator, p.Kind, p.ID, operationID})
+	return runtime.ReservedRunPrefix + "http.operations/" + string(payload)
+}
+
+// handleOperation admits one start per key. Admission is durable before
+// execution. A retry reads state and never calls the agent, also after a
+// failure, cancellation, or reset. In-flight retries return pending or
+// running. A crash before execution can leave pending: recovery is explicit
+// through the run API, not an automatic retry of possible side effects.
+// The first call reports execution errors normally; later calls report the
+// durable state (including failed) with 200. Changed bodies do not change
+// the admitted operation. Use a new key to request new work.
+func (c *Channel) handleOperation(w http.ResponseWriter, r *http.Request, req StartRequest, auth *channel.Principal) {
+	policy := req.TurnPolicy
+	if policy == "" {
+		policy = c.policy
+	}
+	if policy != channel.PolicyQueue && policy != channel.PolicySteer {
+		writeError(w, fmt.Errorf("%w: %q", channel.ErrUnknownTurnPolicy, policy))
+		return
+	}
+	key := operationAddress(auth, req.OperationID)
+	c.operationMu.Lock()
+	id, exists, err := c.core.Addresses().LookupContext(r.Context(), key)
+	if err == nil && !exists {
+		id, err = c.core.Addresses().Resolve(r.Context(), key, c.core.NewID)
+	}
+	c.operationMu.Unlock()
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	var run *runtime.Run
+	if exists {
+		run, err = c.core.Runner().Snapshot(r.Context(), id)
+	} else {
+		run, err = c.core.Attach(id).Send(r.Context(), req.Text, channel.SendOptions{
+			Auth: auth, TurnPolicy: req.TurnPolicy, Title: req.Title, Kind: req.Kind, Context: req.Context,
+		})
+	}
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, runResponse(run))
 }

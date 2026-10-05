@@ -2,7 +2,9 @@ package sandbox
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -26,8 +28,9 @@ type DockerProvider struct {
 	user   string
 	memory string
 
-	mu     sync.Mutex
-	opened map[string]*cliSandbox
+	policyMu sync.RWMutex
+	mu       sync.Mutex
+	opened   map[string]*cliSandbox
 }
 
 var (
@@ -106,6 +109,8 @@ func (p *DockerProvider) Available(ctx context.Context) error {
 // bridge. It cannot filter by domain, so an allow-list is refused rather than
 // silently downgraded to open egress.
 func (p *DockerProvider) SetNetworkPolicy(policy NetworkPolicy) error {
+	p.policyMu.Lock()
+	defer p.policyMu.Unlock()
 	switch policy.Mode {
 	case NetworkAllowAll, NetworkDenyAll:
 		p.policy = policy
@@ -141,13 +146,17 @@ func (p *DockerProvider) Open(ctx context.Context, runID string) (Sandbox, error
 			return append(args, argv...)
 		},
 		startFn: p.ensureRunning,
+		killFn: func(ctx context.Context, c *cliSandbox) error {
+			_, stderr, code, err := runCLI(ctx, nil, c.bin, "kill", c.name)
+			return cliError("kill container "+c.name, firstLine(stderr), code, err)
+		},
 		stopFn: func(ctx context.Context, c *cliSandbox) error {
-			_, _, _, err := runCLI(ctx, nil, c.bin, "stop", c.name)
-			return err
+			_, stderr, code, err := runCLI(ctx, nil, c.bin, "stop", c.name)
+			return cliError("stop container "+c.name, firstLine(stderr), code, err)
 		},
 		deleteFn: func(ctx context.Context, c *cliSandbox) error {
-			_, _, _, err := runCLI(ctx, nil, c.bin, "rm", "-f", c.name)
-			return err
+			_, stderr, code, err := runCLI(ctx, nil, c.bin, "rm", "-f", c.name)
+			return cliError("remove container "+c.name, firstLine(stderr), code, err)
 		},
 	}
 
@@ -162,11 +171,13 @@ func (p *DockerProvider) Open(ctx context.Context, runID string) (Sandbox, error
 // is merely stopped. This is what makes a parked run resumable: Stop releases
 // the compute, and the next tool call brings the same workspace back.
 func (p *DockerProvider) ensureRunning(ctx context.Context, sb *cliSandbox) error {
-	state, err := p.inspectState(ctx, sb.name)
+	p.policyMu.RLock()
+	defer p.policyMu.RUnlock()
+	name, state, err := p.locate(ctx, sb.id)
 	if err != nil {
 		return err
 	}
-
+	sb.name = name
 	switch state {
 	case "running":
 		return nil
@@ -180,12 +191,15 @@ func (p *DockerProvider) ensureRunning(ctx context.Context, sb *cliSandbox) erro
 
 // inspectState returns the container's state, or "" when it does not exist.
 func (p *DockerProvider) inspectState(ctx context.Context, name string) (string, error) {
-	stdout, _, code, err := runCLI(ctx, nil, p.bin, "inspect", "--format", "{{.State.Status}}", name)
+	stdout, stderr, code, err := runCLI(ctx, nil, p.bin, "inspect", "--format", "{{.State.Status}}", name)
 	if err != nil {
 		return "", fmt.Errorf("bonnie: sandbox: inspect %s: %w", name, err)
 	}
 	if code != 0 {
-		return "", nil // no such container
+		if strings.Contains(strings.ToLower(stderr), "no such object:") || strings.Contains(strings.ToLower(stderr), "no such container:") {
+			return "", nil
+		}
+		return "", cliError("inspect "+name, firstLine(stderr), code, nil)
 	}
 	return strings.TrimSpace(stdout), nil
 }
@@ -214,8 +228,9 @@ func (p *DockerProvider) create(ctx context.Context, sb *cliSandbox) error {
 	}
 	// A fresh image may not have the workspace yet, and the entrypoint runs
 	// in parallel with the first exec.
-	if _, _, _, err := runCLI(ctx, nil, p.bin, "exec", sb.name, "mkdir", "-p", Workspace); err != nil {
-		return fmt.Errorf("bonnie: sandbox: create workspace: %w", err)
+	_, stderr, code, err = runCLI(ctx, nil, p.bin, "exec", sb.name, "mkdir", "-p", Workspace)
+	if err := cliError("create workspace", firstLine(stderr), code, err); err != nil {
+		return err
 	}
 	return nil
 }
@@ -246,4 +261,90 @@ func firstLine(s string) string {
 		return s[:i]
 	}
 	return s
+}
+
+// checkContainer refuses adoption unless identity and host controls match.
+// Labels alone do not prove isolation: privileged mode, mounts, namespaces,
+// extra capabilities, and a changed network must also be checked.
+func (p *DockerProvider) checkContainer(ctx context.Context, name, runID string) error {
+	stdout, stderr, code, err := runCLI(ctx, nil, p.bin, "inspect", "--format", "{{json .}}", name)
+	if err := cliError("inspect controls "+name, firstLine(stderr), code, err); err != nil {
+		return err
+	}
+	var got struct {
+		Config struct {
+			Image, User string
+			Labels      map[string]string
+		}
+		HostConfig struct {
+			Privileged                                                       bool
+			NetworkMode, PidMode, IpcMode, UTSMode, UsernsMode, CgroupnsMode string
+			Binds, CapAdd, SecurityOpt                                       []string
+			Devices                                                          []json.RawMessage
+			Memory                                                           int64
+		}
+		Mounts []json.RawMessage
+	}
+	if err := json.Unmarshal([]byte(stdout), &got); err != nil {
+		return fmt.Errorf("bonnie: sandbox: inspect controls: %w", err)
+	}
+	h := got.HostConfig
+	networkOK := h.NetworkMode == "default" || h.NetworkMode == "bridge"
+	if p.policy.Mode == NetworkDenyAll {
+		networkOK = h.NetworkMode == "none"
+	}
+	var memoryOK bool
+	if p.memory != "" {
+		// Docker reports bytes. Compare against Docker's accepted binary suffixes.
+		v := strings.ToLower(p.memory)
+		multiplier := int64(1)
+		if len(v) > 0 {
+			switch v[len(v)-1] {
+			case 'k':
+				multiplier = 1024
+			case 'm':
+				multiplier = 1024 * 1024
+			case 'g':
+				multiplier = 1024 * 1024 * 1024
+			}
+			if multiplier != 1 {
+				v = v[:len(v)-1]
+			}
+		}
+		n, err := strconv.ParseInt(v, 10, 64)
+		memoryOK = err == nil && h.Memory == n*multiplier
+	} else {
+		memoryOK = h.Memory == 0
+	}
+	identity, labeled := got.Config.Labels["bonnie.run"]
+	if !labeled || identity != runID || got.Config.Image != p.image || got.Config.User != p.user || !networkOK || !memoryOK || h.Privileged || len(got.Mounts) > 0 || len(h.Binds) > 0 || len(h.CapAdd) > 0 || len(h.Devices) > 0 || len(h.SecurityOpt) > 0 || h.PidMode != "" || h.UTSMode != "" || h.UsernsMode != "" || (h.IpcMode != "" && h.IpcMode != "private" && h.IpcMode != "shareable") || (h.CgroupnsMode != "" && h.CgroupnsMode != "private") {
+		return fmt.Errorf("%w: container %s identity or isolation controls differ; refuse adoption", ErrPolicyMismatch, name)
+	}
+	return nil
+}
+
+// locate resolves current or legacy identity without creating a container.
+// The same checks apply before adoption and before destructive lifecycle work.
+func (p *DockerProvider) locate(ctx context.Context, runID string) (string, string, error) {
+	name := safeName("bonnie-", runID)
+	state, err := p.inspectState(ctx, name)
+	if err != nil {
+		return name, "", err
+	}
+	if state == "" && name != legacySafeName("bonnie-", runID) {
+		old := legacySafeName("bonnie-", runID)
+		oldState, err := p.inspectState(ctx, old)
+		if err != nil {
+			return name, "", err
+		}
+		if oldState != "" {
+			name, state = old, oldState
+		}
+	}
+	if state != "" {
+		if err := p.checkContainer(ctx, name, runID); err != nil {
+			return name, state, err
+		}
+	}
+	return name, state, nil
 }

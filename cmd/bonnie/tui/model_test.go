@@ -11,6 +11,7 @@ import (
 	"charm.land/bubbletea/v2"
 	kit "github.com/mark3labs/kit/pkg/kit"
 
+	"github.com/mark3labs/bonnie/client"
 	"github.com/mark3labs/bonnie/runtime"
 )
 
@@ -26,6 +27,8 @@ type fakeClient struct {
 	streamed    int
 	streamAfter []int
 	cancelled   int
+	snapshot    *client.Snapshot
+	answered    int
 	lookupRun   string
 	lookupAt    int
 	lookupErr   error
@@ -33,6 +36,13 @@ type fakeClient struct {
 	ensureRun   string
 	ensureAt    int
 	ensureErr   error
+}
+
+func (f *fakeClient) Snapshot(_ context.Context, runID string) (*client.Snapshot, error) {
+	if f.snapshot != nil {
+		return f.snapshot, nil
+	}
+	return &client.Snapshot{RunID: runID, Cursor: f.lookupAt}, nil
 }
 
 func (f *fakeClient) Lookup(_ context.Context, _ string) (string, int, error) {
@@ -74,6 +84,7 @@ func (f *fakeClient) Send(_ context.Context, runID, _ string) (*runtime.Run, err
 }
 
 func (f *fakeClient) Respond(_ context.Context, runID, _ string) (*runtime.Run, error) {
+	f.answered++
 	f.turns++
 	if len(f.errs) > 0 {
 		return nil, f.errs[0]
@@ -109,6 +120,7 @@ func keyEnter() tea.KeyPressMsg { return tea.KeyPressMsg{Code: tea.KeyEnter} }
 
 func newTestModel(c Client) Model {
 	m := New(c, context.Background(), "tui-test")
+	m.loading = false
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 	return next.(Model)
 }
@@ -639,5 +651,99 @@ func TestFirstTurnSendsWhenTheStreamFails(t *testing.T) {
 	}
 	if _ = cmd(); !f.started {
 		t.Fatal("the fallback did not start the run by address")
+	}
+}
+
+// A reopened waiting run must route the next message to Respond, not Send.
+func TestStartupRestoresWaitingSnapshot(t *testing.T) {
+	t.Parallel()
+	f := &fakeClient{}
+	m := New(f, context.Background(), "address")
+	next, _ := m.Update(lookupMsg{runID: "run-9", cursor: 8, run: &runtime.Run{
+		ID: "run-9", State: runtime.RunWaiting, Suspend: &runtime.SuspendRequest{Prompt: "approve?"},
+	}})
+	got := next.(Model)
+	if got.state != statusWaiting || got.label != "approve?" {
+		t.Fatalf("state = %v label = %q", got.state, got.label)
+	}
+	if len(got.entries) != 1 || got.entries[0].text != "approve?" {
+		t.Fatalf("snapshot = %+v", got.entries)
+	}
+}
+
+// Startup uses the snapshot cursor, not Lookup's later position. Repeated
+// messages stay separate, and the next input answers the restored suspension.
+func TestStartupHistoryAndWaitingResponse(t *testing.T) {
+	t.Parallel()
+	f := &fakeClient{lookupRun: "run-9", lookupAt: 100, snapshot: &client.Snapshot{
+		RunID: "run-9", Cursor: 8, State: runtime.RunWaiting,
+		Suspend: &runtime.SuspendRequest{Prompt: "region?"},
+		Messages: []kit.LLMMessage{
+			kit.NewLLMUserMessage("hello"),
+			{Role: "assistant", Content: []kit.LLMMessagePart{kit.LLMTextPart{Text: "answer"}}},
+			{Role: "assistant", Content: []kit.LLMMessagePart{kit.LLMTextPart{Text: "answer"}}},
+			{Role: "tool", Content: []kit.LLMMessagePart{kit.LLMTextPart{Text: "hidden"}}},
+		},
+	}}
+	m := New(f, context.Background(), "address")
+	next, _ := m.Update(m.lookup()())
+	m = next.(Model)
+	if m.cursor != 8 || m.state != statusWaiting || len(m.entries) != 4 {
+		t.Fatalf("restored model = %+v", m)
+	}
+	if m.entries[1].text != "answer" || m.entries[2].text != "answer" || strings.Contains(m.transcript(), "hidden") {
+		t.Fatalf("entries = %+v", m.entries)
+	}
+	_ = m.openStream()()
+	if len(f.streamAfter) != 1 || f.streamAfter[0] != 8 {
+		t.Fatalf("stream cursors = %v", f.streamAfter)
+	}
+	_, cmd := m.send("eu-west")
+	batch, ok := cmd().(tea.BatchMsg)
+	if !ok {
+		t.Fatal("send did not return a batch")
+	}
+	for _, step := range batch {
+		_ = step()
+	}
+	if f.answered != 1 || f.started {
+		t.Fatalf("answered = %d started = %v", f.answered, f.started)
+	}
+}
+
+func TestInputWaitsForStartupSnapshot(t *testing.T) {
+	t.Parallel()
+	f := &fakeClient{}
+	m := New(f, context.Background(), "address")
+	m.input.SetValue("hello")
+	next, cmd := m.Update(keyEnter())
+	if cmd != nil || next.(Model).pending != "" || next.(Model).input.Value() != "hello" {
+		t.Fatal("input raced the history read")
+	}
+}
+
+// A restored active run has no local turn command to clear its spinner.
+// Terminal stream events must release input even without a response event.
+func TestRestoredRunTerminalStateReleasesInput(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		state runtime.RunState
+		want  status
+		label string
+	}{
+		{runtime.RunCompleted, statusDone, "done"},
+		{runtime.RunFailed, statusError, "failed"},
+		{runtime.RunCancelled, statusIdle, "cancelled"},
+		{runtime.RunRetired, statusDone, "retired"},
+	} {
+		t.Run(string(tc.state), func(t *testing.T) {
+			t.Parallel()
+			m := newTestModel(&fakeClient{})
+			m.restoreSnapshot(&client.Snapshot{State: runtime.RunRunning})
+			m.apply(runtime.Event{Type: runtime.EventState, State: tc.state})
+			if m.spin || m.state != tc.want || m.label != tc.label {
+				t.Fatalf("terminal state = %v %q, spin = %v", m.state, m.label, m.spin)
+			}
+		})
 	}
 }

@@ -25,6 +25,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 
@@ -214,6 +215,30 @@ func (m *AddressMap) Unbind(ctx context.Context, address string) error {
 		return nil
 	}
 	return m.bindLocked(ctx, address, "")
+}
+
+// UnbindRun frees all addresses in a channel namespace that still point at
+// runID. Bindings changed to another run are not removed.
+func (m *AddressMap) UnbindRun(ctx context.Context, prefix, runID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.loadLocked(ctx); err != nil {
+		return err
+	}
+	var addresses []string
+	for address, bound := range m.byAddr {
+		if bound == runID && strings.HasPrefix(address, prefix) {
+			addresses = append(addresses, address)
+		}
+	}
+	sort.Strings(addresses)
+	for _, address := range addresses {
+		if err := m.bindLocked(ctx, address, ""); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // NotePrincipal records the identity that sent a message.
@@ -489,16 +514,6 @@ func (s *Ref) RunID(ctx context.Context) (string, error) {
 // guessed: the same misspelling must not mean "wait" on one transport and
 // "interrupt" on another.
 func (s *Ref) Send(ctx context.Context, text string, opts channel.SendOptions) (*runtime.Run, error) {
-	runID, err := s.RunID(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if opts.Auth != nil {
-		if err := s.core.addresses.NotePrincipal(ctx, runID, opts.Auth); err != nil {
-			return nil, err
-		}
-	}
-
 	policy := opts.TurnPolicy
 	if policy == "" {
 		policy = s.core.policy
@@ -507,6 +522,16 @@ func (s *Ref) Send(ctx context.Context, text string, opts channel.SendOptions) (
 	case channel.PolicySteer, channel.PolicyQueue:
 	default:
 		return nil, fmt.Errorf("%w: %q", channel.ErrUnknownTurnPolicy, policy)
+	}
+
+	runID, err := s.RunID(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if opts.Auth != nil {
+		if err := s.core.addresses.NotePrincipal(ctx, runID, opts.Auth); err != nil {
+			return nil, err
+		}
 	}
 
 	// A message that lands mid-turn is steered into the turn that is already
@@ -550,9 +575,9 @@ func (s *Ref) Cancel(ctx context.Context) error {
 }
 
 // Reset implements [channel.SessionRef]. The run is retired first and the
-// address freed second, so a message that lands between the two finds a
-// run that refuses it rather than one that answers. A fixed reference
-// retires its run and touches no address.
+// channel addresses freed second. A message between the two finds a run
+// that refuses it rather than one that answers. A fixed reference
+// retires its run and frees all addresses in this channel that point at it.
 func (s *Ref) Reset(ctx context.Context, reason string) error {
 	runID, ok, err := s.resolveExisting(ctx)
 	if err != nil || !ok {
@@ -566,10 +591,7 @@ func (s *Ref) Reset(ctx context.Context, reason string) error {
 	if err := s.core.runner.Retire(ctx, runID, reason); err != nil {
 		return err
 	}
-	if s.create {
-		return s.core.addresses.Unbind(ctx, s.address)
-	}
-	return nil
+	return s.core.addresses.UnbindRun(ctx, s.core.Address(""), runID)
 }
 
 // Clear implements [channel.SessionRef].

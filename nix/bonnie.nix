@@ -30,12 +30,14 @@ buildGoModule (finalAttrs: {
   # Refresh with:
   #   nix build .#bonnie.goModules --rebuild
   # or set this to lib.fakeHash and read the hash Nix prints.
-  vendorHash = "sha256-nlPVi8DXcEsjLV1rddjWBl3y6ZvTVeqZkHBmJEOt764=";
+  vendorHash = "sha256-9QhrTTa46y2XSCn+BK2BhG9OKd6QFSntqhSbXw6GY+Q=";
 
   subPackages = [ "cmd/bonnie" ];
 
+  # These tests build a separate agent module. Its dependencies are not in
+  # this package's vendor output, and the Nix build has no network access.
   checkFlags = [
-    "-skip=^(TestDevRestartCompletesParkedRun|TestBuildOutputServesEmbeddedInstructions)$"
+    "-skip=^(TestDevRestartCompletesParkedRun|TestBuildOutputServesEmbeddedInstructions|TestDevLoopCancellationReapsChild)$"
   ];
 
   env.CGO_ENABLED = 0;

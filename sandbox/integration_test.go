@@ -283,7 +283,11 @@ func TestLiveParkedRunHoldsNoCompute(t *testing.T) {
 				"the sandbox is not opening lazily", state)
 		}
 	case *MicrosandboxProvider:
-		if d.exists(ctx, name) {
+		exists, err := d.known(ctx, name)
+		if err != nil {
+			t.Fatalf("inspect: %v", err)
+		}
+		if exists {
 			t.Fatalf("a microVM exists (%s) for a run that never called a tool: "+
 				"the sandbox is not opening lazily", name)
 		}

@@ -80,18 +80,14 @@ func (r *Runner) Retire(ctx context.Context, runID, reason string) error {
 // next turn starts from an empty window. It refuses while a turn is
 // active with [ErrRunActive], and refuses a retired run.
 func (r *Runner) Clear(ctx context.Context, runID string) error {
-	state, err := r.journal.State(ctx, runID)
-	if err != nil {
-		return err
-	}
-	if state == RunRetired {
-		return fmt.Errorf("%w: %s", ErrRunRetired, runID)
-	}
 	turnCtx, _, err := r.acquire(ctx, runID)
 	if err != nil {
 		return err
 	}
 	defer r.release(runID)
+	if err := r.refuseRetired(turnCtx, runID); err != nil {
+		return err
+	}
 
 	s, err := Restore(turnCtx, runID, r.journal)
 	if err != nil {
@@ -106,18 +102,14 @@ func (r *Runner) Clear(ctx context.Context, runID string) error {
 // [ErrRunActive], refuses a retired run, and returns
 // [ErrCompactionUnsupported] when the agent cannot compact.
 func (r *Runner) Compact(ctx context.Context, runID string) error {
-	state, err := r.journal.State(ctx, runID)
-	if err != nil {
-		return err
-	}
-	if state == RunRetired {
-		return fmt.Errorf("%w: %s", ErrRunRetired, runID)
-	}
 	turnCtx, act, err := r.acquire(ctx, runID)
 	if err != nil {
 		return err
 	}
 	defer r.release(runID)
+	if err := r.refuseRetired(turnCtx, runID); err != nil {
+		return err
+	}
 
 	s, err := Restore(turnCtx, runID, r.journal)
 	if err != nil {
@@ -155,7 +147,7 @@ func (r *Runner) acquireWhenFree(ctx context.Context, runID string) (context.Con
 	}
 }
 
-// refuseRetired is the guard Start and Resume share.
+// refuseRetired checks retirement while the caller holds the run slot.
 func (r *Runner) refuseRetired(ctx context.Context, runID string) error {
 	state, err := r.journal.State(ctx, runID)
 	if errors.Is(err, ErrRunNotFound) {

@@ -2,9 +2,11 @@ package sandbox
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 )
 
 // cliSandbox is the shared body of every CLI-driven backend. Docker and
@@ -24,16 +26,19 @@ type cliSandbox struct {
 	stopFn func(ctx context.Context, c *cliSandbox) error
 	// deleteFn destroys the sandbox.
 	deleteFn func(ctx context.Context, c *cliSandbox) error
+	// killFn stops all guest processes after cancellation. Killing the host
+	// CLI alone does not stop guest work.
+	killFn func(context.Context, *cliSandbox) error
 	// readFn and writeFn move file bytes. When nil, the sandbox falls back
 	// to `cat` through exec, which every POSIX image supports.
 	readFn  func(ctx context.Context, c *cliSandbox, path string) ([]byte, error)
 	writeFn func(ctx context.Context, c *cliSandbox, path string, data []byte) error
 
+	opOnce sync.Once
+	opGate chan struct{}
+
 	mu     sync.RWMutex
 	closed bool
-	// stopped tracks whether compute was released, so the next command can
-	// bring the sandbox back without the caller having to know.
-	stopped bool
 }
 
 var (
@@ -50,36 +55,59 @@ func (c *cliSandbox) isClosed() bool {
 	return c.closed
 }
 
-// ensure restarts the sandbox when a previous Stop released it.
-func (c *cliSandbox) ensure(ctx context.Context) error {
-	if c.isClosed() {
-		return ErrClosed
+// operation prevents a restart while cancellation stops guest work. Waiting
+// callers can cancel without waiting for the active command to finish.
+func (c *cliSandbox) operation(ctx context.Context) (func(), error) {
+	c.opOnce.Do(func() { c.opGate = make(chan struct{}, 1) })
+	select {
+	case c.opGate <- struct{}{}:
+		if err := ctx.Err(); err != nil {
+			<-c.opGate
+			return nil, err
+		}
+		return func() { <-c.opGate }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	}
+}
+
+// ensure checks the live sandbox on each operation.
+func (c *cliSandbox) ensure(ctx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if !c.stopped && c.startFn == nil {
+	if c.closed {
+		return ErrClosed
+	}
+	if c.startFn == nil {
 		return nil
 	}
 	if err := c.startFn(ctx, c); err != nil {
 		return err
 	}
-	c.stopped = false
 	return nil
 }
 
 // Exec implements [Sandbox].
 func (c *cliSandbox) Exec(ctx context.Context, cmd Command) (*Result, error) {
-	if err := cmd.validate(); err != nil {
-		return nil, err
-	}
-	if err := c.ensure(ctx); err != nil {
-		return nil, err
-	}
-
 	if cmd.Timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, cmd.Timeout)
 		defer cancel()
+	}
+
+	release, err := c.operation(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	if err := cmd.validate(); err != nil {
+		return nil, err
+	}
+	if c.killFn == nil {
+		return nil, fmt.Errorf("%w: %s cannot stop guest work on cancellation", ErrUnavailable, c.backend)
+	}
+	if err := c.ensure(ctx); err != nil {
+		return nil, err
 	}
 
 	argv, nonce, err := execWithMarker(cmd)
@@ -88,6 +116,12 @@ func (c *cliSandbox) Exec(ctx context.Context, cmd Command) (*Result, error) {
 	}
 
 	stdout, stderr, code, err := runCLI(ctx, cmd.Stdin, c.bin, c.execArgs(c, argv, cmd)...)
+	if ctx.Err() != nil {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		killErr := c.killFn(cleanupCtx, c)
+		return nil, errors.Join(fmt.Errorf("bonnie: sandbox: command canceled: %w", ctx.Err()), killErr)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -105,6 +139,11 @@ func (c *cliSandbox) Exec(ctx context.Context, cmd Command) (*Result, error) {
 
 // ReadFile implements [Sandbox].
 func (c *cliSandbox) ReadFile(ctx context.Context, p string) ([]byte, error) {
+	release, err := c.operation(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	if err := c.ensure(ctx); err != nil {
 		return nil, err
 	}
@@ -130,6 +169,11 @@ func (c *cliSandbox) ReadFile(ctx context.Context, p string) ([]byte, error) {
 
 // WriteFile implements [Sandbox].
 func (c *cliSandbox) WriteFile(ctx context.Context, p string, data []byte) error {
+	release, err := c.operation(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
 	if err := c.ensure(ctx); err != nil {
 		return err
 	}
@@ -156,6 +200,11 @@ func (c *cliSandbox) WriteFile(ctx context.Context, p string, data []byte) error
 // Stop implements [Sandbox]. The workspace survives; the next command starts
 // the sandbox again.
 func (c *cliSandbox) Stop(ctx context.Context) error {
+	release, err := c.operation(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
 	if c.isClosed() {
 		return ErrClosed
 	}
@@ -165,15 +214,21 @@ func (c *cliSandbox) Stop(ctx context.Context) error {
 	if err := c.stopFn(ctx, c); err != nil {
 		return fmt.Errorf("bonnie: sandbox: stop %s: %w", c.name, err)
 	}
-	c.mu.Lock()
-	c.stopped = true
-	c.mu.Unlock()
 	return nil
 }
 
 // Close implements [Sandbox]. It drops the handle and leaves the sandbox
 // alone, so a later Open reattaches.
 func (c *cliSandbox) Close() error {
+	release, err := c.operation(context.Background())
+	if err != nil {
+		return err
+	}
+	defer release()
+	return c.closeHandle()
+}
+
+func (c *cliSandbox) closeHandle() error {
 	c.mu.Lock()
 	c.closed = true
 	c.mu.Unlock()
@@ -182,12 +237,17 @@ func (c *cliSandbox) Close() error {
 
 // Delete implements [Deleter].
 func (c *cliSandbox) Delete(ctx context.Context) error {
+	release, err := c.operation(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
 	if c.deleteFn != nil {
 		if err := c.deleteFn(ctx, c); err != nil {
 			return fmt.Errorf("bonnie: sandbox: delete %s: %w", c.name, err)
 		}
 	}
-	return c.Close()
+	return c.closeHandle()
 }
 
 // isMissingPath recognises the shapes a shell uses to report an absent file.

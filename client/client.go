@@ -40,6 +40,8 @@ import (
 	"strings"
 	"sync"
 
+	kit "github.com/mark3labs/kit/pkg/kit"
+
 	"github.com/mark3labs/bonnie/runtime"
 )
 
@@ -241,6 +243,29 @@ func (c *Client) Get(ctx context.Context, runID string) (*runtime.Run, error) {
 	return out.toRun(), nil
 }
 
+// Snapshot is a lossless conversation and state from one journal replay.
+// Cursor is the last record in that replay, not a later position read.
+// Messages contain the selected branch before model-context compaction.
+type Snapshot struct {
+	RunID    string                  `json:"run_id"`
+	Cursor   int                     `json:"cursor"`
+	State    runtime.RunState        `json:"state"`
+	Response string                  `json:"response,omitempty"`
+	Suspend  *runtime.SuspendRequest `json:"suspend,omitempty"`
+	Messages []kit.LLMMessage        `json:"messages"`
+}
+
+// Snapshot reads durable history and state without executing a turn.
+// Open Stream after the returned Cursor to receive subsequent events without
+// a gap between the history read and the subscription. Get is unchanged.
+func (c *Client) Snapshot(ctx context.Context, runID string) (*Snapshot, error) {
+	var out Snapshot
+	if err := c.get(ctx, apiPrefix+"/runs/"+url.PathEscape(runID)+"/snapshot", &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // Cancel stops the turn a run is executing. A run with no turn in flight
 // answers a conflict.
 func (c *Client) Cancel(ctx context.Context, runID string) error {
@@ -388,8 +413,11 @@ func (c *Client) do(req *http.Request, path string, out any) error {
 		return fmt.Errorf("bonnie: client: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		if err != nil {
+			return fmt.Errorf("bonnie: client: read error response: %w", err)
+		}
 		switch resp.StatusCode {
 		case http.StatusNotFound:
 			return fmt.Errorf("%w: %s", ErrNotFound, path)
@@ -399,7 +427,9 @@ func (c *Client) do(req *http.Request, path string, out any) error {
 		return fmt.Errorf("bonnie: client: %s: %s", resp.Status, strings.TrimSpace(string(raw)))
 	}
 	if out != nil {
-		if err := json.Unmarshal(raw, out); err != nil {
+		// A full conversation can exceed the error-body limit. Decode the
+		// complete success body so large snapshots are not truncated.
+		if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
 			return fmt.Errorf("bonnie: client: decode: %w", err)
 		}
 	}

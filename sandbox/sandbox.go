@@ -88,8 +88,11 @@ type Command struct {
 	Env []string
 	// Stdin is fed to the command.
 	Stdin []byte
-	// Timeout kills the command after this long. Zero means no limit beyond
-	// the context.
+	// Timeout cancels the command after this long. Zero means no limit beyond
+	// the context. Docker and microsandbox stop the whole sandbox on
+	// cancellation, including other commands. Local and Landlock kill the
+	// command's process group on Unix; a child that creates a new session
+	// can escape that group. They are not process-isolation backends.
 	Timeout time.Duration
 }
 

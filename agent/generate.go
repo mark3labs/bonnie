@@ -25,8 +25,8 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/mark3labs/bonnie"
@@ -34,7 +34,7 @@ import (
 
 // This file is BONNIE's L2 codegen: the build-time half of discovery. A tree's
 // code — its custom tools — resolves here, because Go compiles. The generator
-// walks tools/<name>/tool.go, requires each directory to export func Tool()
+// walks tools/<name>/*.go, requires each directory to export func Tool()
 // kit.Tool, and emits the one file BONNIE owns: bonnie_gen.go.
 //
 // The generator emits only imports it is allowed to (the tool packages,
@@ -227,12 +227,14 @@ func discoverTool(root, module, name string) (Tool, error) {
 		}
 		for _, decl := range astFile.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
-			if !ok || fn.Name.Name != "Tool" || fn.Type.Params.NumFields() != 0 || fn.Type.Results.NumFields() != 1 {
+			if !ok || fn.Recv != nil || fn.Name.Name != "Tool" || fn.Type.Params.NumFields() != 0 || fn.Type.Results.NumFields() != 1 {
 				continue
 			}
 			sawToolFunc = true
 		}
-		tool.DeclaredName = firstToolName(path)
+		if declared := declaredToolName(astFile); declared != "" && tool.DeclaredName == "" {
+			tool.DeclaredName = declared
+		}
 	}
 	if !sawToolFunc {
 		return tool, fmt.Errorf("%w: %s: want func Tool() kit.Tool", ErrToolMissingToolFunc, dir)
@@ -258,44 +260,114 @@ func readModule(root string) (string, error) {
 	return "", fmt.Errorf("bonnie: agent: go.mod carries no module path")
 }
 
-// hasRealFile reports whether path exists and is not a directory.
+// hasRealFile reports whether path is a regular file, not a symlink.
 func hasRealFile(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && !info.IsDir()
+	info, err := os.Lstat(path)
+	return err == nil && info.Mode().IsRegular()
 }
 
-// hasRealContent reports whether a directory holds at least one file that is
-// not the scaffolding marker .gitkeep. A bare .gitkeep must not trigger an
-// embed directive: the directory would still be compile-time empty for a
-// pattern that demands a match.
+// hasRealContent follows Go embed directory rules: hidden names, symlinks,
+// empty directories, and nested modules do not supply an eligible file.
 func hasRealContent(dir string) bool {
+	info, err := os.Lstat(dir)
+	if err != nil || !info.IsDir() {
+		return false
+	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return false
 	}
 	for _, e := range entries {
-		if e.Name() == gitkeep || strings.HasPrefix(e.Name(), "..") {
+		if e.Name() == "go.mod" {
+			return false
+		}
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".") || strings.HasPrefix(e.Name(), "_") {
 			continue
 		}
-		return true
+		path := filepath.Join(dir, e.Name())
+		if e.IsDir() {
+			if hasRealContent(path) {
+				return true
+			}
+		} else if hasRealFile(path) {
+			return true
+		}
 	}
 	return false
 }
 
-// toolNameRe matches the first string literal passed to kit.NewTool, which is
-// the runtime name a provider keys a tool by. It is a best-effort parse used
-// only for duplicate detection; a helper that builds a Tool is not matched and
-// reports no declared name, which is honest rather than a false positive.
-var toolNameRe = regexp.MustCompile(`NewTool\(\s*"([^"]+)"`)
-
-// firstToolName returns the first NewTool name in a source file, or "".
-func firstToolName(path string) string {
-	src, err := os.ReadFile(path)
-	if err != nil {
+// declaredToolName reads direct constructor returns from the exported Tool
+// function only. Helper-built, shadowed, or conditional names remain unknown:
+// duplicate detection must not reject a tree on an unrelated constructor.
+func declaredToolName(file *ast.File) string {
+	alias := ""
+	for _, spec := range file.Imports {
+		path, err := strconv.Unquote(spec.Path.Value)
+		if err == nil && path == "github.com/mark3labs/kit/pkg/kit" {
+			alias = "kit"
+			if spec.Name != nil {
+				alias = spec.Name.Name
+			}
+		}
+	}
+	if alias == "" || alias == "." || alias == "_" {
 		return ""
 	}
-	if m := toolNameRe.FindSubmatch(src); m != nil {
-		return string(m[1])
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Recv != nil || fn.Name.Name != "Tool" || fn.Body == nil {
+			continue
+		}
+		// Only an unconditional, final return establishes a name. Calls in
+		// helpers or other branches do not establish the returned tool.
+		if len(fn.Body.List) == 0 {
+			return ""
+		}
+		ret, ok := fn.Body.List[len(fn.Body.List)-1].(*ast.ReturnStmt)
+		if !ok || len(ret.Results) != 1 {
+			return ""
+		}
+		returns := 0
+		ast.Inspect(fn.Body, func(node ast.Node) bool {
+			if _, ok := node.(*ast.FuncLit); ok {
+				return false
+			}
+			if _, ok := node.(*ast.ReturnStmt); ok {
+				returns++
+			}
+			return true
+		})
+		if returns != 1 {
+			return ""
+		}
+		call, ok := ret.Results[0].(*ast.CallExpr)
+		if !ok || len(call.Args) == 0 {
+			return ""
+		}
+		fun := call.Fun
+		if indexed, ok := fun.(*ast.IndexExpr); ok {
+			fun = indexed.X
+		}
+		if indexed, ok := fun.(*ast.IndexListExpr); ok {
+			fun = indexed.X
+		}
+		sel, ok := fun.(*ast.SelectorExpr)
+		if !ok || sel.Sel.Name != "NewTool" {
+			return ""
+		}
+		pkg, ok := sel.X.(*ast.Ident)
+		if !ok || pkg.Name != alias || pkg.Obj != nil {
+			return ""
+		}
+		literal, ok := call.Args[0].(*ast.BasicLit)
+		if ok && literal.Kind == token.STRING {
+			name, err := strconv.Unquote(literal.Value)
+			if err == nil {
+				return name
+			}
+		}
 	}
 	return ""
 }

@@ -63,6 +63,8 @@ const (
 	RecordExtensionData RecordKind = "extension_data"
 	// RecordModelChange records a switch of provider or model mid-run.
 	RecordModelChange RecordKind = "model_change"
+	// RecordBranch records a branch selection. ParentID is its tip; empty means root.
+	RecordBranch RecordKind = "branch"
 	// RecordBranchSummary records a summary of an abandoned branch.
 	RecordBranchSummary RecordKind = "branch_summary"
 	// RecordState records a run-state transition.

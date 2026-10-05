@@ -30,7 +30,9 @@ type RunDeleter interface {
 
 // SandboxExists implements [ExistenceChecker].
 func (p *DockerProvider) SandboxExists(ctx context.Context, runID string) (bool, error) {
-	state, err := p.inspectState(ctx, safeName("bonnie-", runID))
+	p.policyMu.RLock()
+	defer p.policyMu.RUnlock()
+	_, state, err := p.locate(ctx, runID)
 	if err != nil {
 		return false, err
 	}
@@ -39,8 +41,9 @@ func (p *DockerProvider) SandboxExists(ctx context.Context, runID string) (bool,
 
 // DeleteRun implements [RunDeleter].
 func (p *DockerProvider) DeleteRun(ctx context.Context, runID string) (bool, error) {
-	name := safeName("bonnie-", runID)
-	state, err := p.inspectState(ctx, name)
+	p.policyMu.RLock()
+	defer p.policyMu.RUnlock()
+	name, state, err := p.locate(ctx, runID)
 	if err != nil {
 		return false, err
 	}
@@ -56,15 +59,18 @@ func (p *DockerProvider) DeleteRun(ctx context.Context, runID string) (bool, err
 
 // SandboxExists implements [ExistenceChecker].
 func (p *MicrosandboxProvider) SandboxExists(ctx context.Context, runID string) (bool, error) {
-	return p.exists(ctx, safeName("bonnie-", runID)), nil
+	return p.runKnown(ctx, runID)
 }
 
-// DeleteRun implements [RunDeleter]. exists() reports running and stopped
-// sandboxes alike (--all), so a stopped sandbox is reaped too, and --force
-// stops a running one first.
+// DeleteRun implements [RunDeleter]. An uncertain inspect result is an
+// error, not proof of absence. --force stops a running sandbox first.
 func (p *MicrosandboxProvider) DeleteRun(ctx context.Context, runID string) (bool, error) {
 	name := safeName("bonnie-", runID)
-	if !p.exists(ctx, name) {
+	exists, err := p.runKnown(ctx, runID)
+	if err != nil {
+		return false, err
+	}
+	if !exists {
 		return false, nil
 	}
 	_, stderr, code, err := runCLI(ctx, nil, p.bin, "rm", "--force", name)
@@ -77,6 +83,9 @@ func (p *MicrosandboxProvider) DeleteRun(ctx context.Context, runID string) (boo
 // SandboxExists implements [ExistenceChecker]. A Local workspace is a
 // directory under the provider root.
 func (p *LocalProvider) SandboxExists(_ context.Context, runID string) (bool, error) {
+	if err := refuseUncheckedLegacy(p.root, runID); err != nil {
+		return false, err
+	}
 	dir := filepath.Join(p.root, safeName("", runID))
 	_, err := os.Stat(dir)
 	switch {
@@ -91,9 +100,15 @@ func (p *LocalProvider) SandboxExists(_ context.Context, runID string) (bool, er
 
 // DeleteRun implements [RunDeleter].
 func (p *LocalProvider) DeleteRun(_ context.Context, runID string) (bool, error) {
+	if err := refuseUncheckedLegacy(p.root, runID); err != nil {
+		return false, err
+	}
 	dir := filepath.Join(p.root, safeName("", runID))
-	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		return false, nil
+	if _, err := os.Stat(dir); err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("bonnie: sandbox: stat workspace: %w", err)
 	}
 	if err := os.RemoveAll(dir); err != nil {
 		return true, fmt.Errorf("bonnie: sandbox: remove workspace: %w", err)

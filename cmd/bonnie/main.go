@@ -3,8 +3,8 @@
 // The framework is usable as a library without this binary; the CLI exists for
 // local development and for inspecting durable runs.
 //
-// The CLI renders its own help and errors with fang. It ships no
-// interactive interface; the framework packages below it render no terminal
+// The CLI renders its own help and errors with fang. It has an
+// interactive interface in dev and chat; the framework packages render no terminal
 // at all today. The hard boundary this repo enforces is the Kit one above.
 package main
 
@@ -51,7 +51,7 @@ binary at all. This CLI exists for local development and for inspecting
 durable runs.
 
 Commands:
-  serve    serve an agent tree or a hand-wired library over HTTP
+  serve    serve a generic agent over HTTP
   dev      run an agent tree with hot reload and the built-in TUI
   chat     interact with a running agent in a terminal
   build    compile an agent tree into one static binary

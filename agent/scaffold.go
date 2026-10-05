@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -30,7 +31,7 @@ type InitOptions struct {
 
 	// Version is the running bonnie release version. When it is a clean
 	// semver, the scaffold's go.mod pins `github.com/mark3labs/bonnie` to it
-	// and to the kit version it builds against, so `go mod tidy` resolves a
+	// so `go mod tidy` resolves a
 	// specific release instead of whatever @latest the proxy offers. When
 	// empty or a non-release (dev) build, no requires are written.
 	Version string
@@ -79,8 +80,21 @@ func Scaffold(dir string, opts InitOptions) ([]string, error) {
 	// Pre-flight: refuse naming every blocker, before touching anything.
 	var exists []string
 	for _, f := range files {
-		if _, err := os.Stat(filepath.Join(dir, f.path)); err == nil {
+		// Check parents before any writes. A symlink can redirect a new
+		// file outside the tree even when the file itself does not exist.
+		for parent := filepath.Dir(f.path); parent != "."; parent = filepath.Dir(parent) {
+			info, err := os.Lstat(filepath.Join(dir, parent))
+			if err == nil && !info.IsDir() {
+				return nil, fmt.Errorf("bonnie: agent: scaffold parent %s is not a directory", parent)
+			}
+			if err != nil && !os.IsNotExist(err) {
+				return nil, fmt.Errorf("bonnie: agent: check %s: %w", parent, err)
+			}
+		}
+		if _, err := os.Lstat(filepath.Join(dir, f.path)); err == nil {
 			exists = append(exists, f.path)
+		} else if !os.IsNotExist(err) {
+			return nil, fmt.Errorf("bonnie: agent: check %s: %w", f.path, err)
 		}
 	}
 	if len(exists) > 0 {
@@ -93,7 +107,13 @@ func Scaffold(dir string, opts InitOptions) ([]string, error) {
 		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 			return nil, fmt.Errorf("bonnie: agent: create directory: %w", err)
 		}
-		if err := os.WriteFile(p, []byte(f.content), f.mode); err != nil {
+		file, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL, f.mode)
+		if err != nil {
+			return nil, fmt.Errorf("bonnie: agent: create %s: %w", f.path, err)
+		}
+		_, writeErr := file.WriteString(f.content)
+		closeErr := file.Close()
+		if err := errors.Join(writeErr, closeErr); err != nil {
 			return nil, fmt.Errorf("bonnie: agent: write %s: %w", f.path, err)
 		}
 	}

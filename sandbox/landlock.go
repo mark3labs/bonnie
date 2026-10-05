@@ -159,23 +159,57 @@ func (p *LandlockProvider) Open(_ context.Context, runID string) (Sandbox, error
 		return sb, nil
 	}
 
+	if err := refuseUncheckedLegacy(p.root, runID); err != nil {
+		return nil, err
+	}
 	dir, err := filepath.Abs(filepath.Join(p.root, safeName("", runID)))
 	if err != nil {
 		return nil, fmt.Errorf("bonnie: sandbox: resolve workspace: %w", err)
 	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, fmt.Errorf("bonnie: sandbox: create workspace: %w", err)
+	if err := os.MkdirAll(filepath.Dir(dir), 0o700); err != nil {
+		return nil, fmt.Errorf("bonnie: sandbox: create provider root: %w", err)
 	}
-
-	// The temporary directory is a sibling of the workspace, not a child:
-	// a command needs somewhere to write scratch files, and the model must
-	// not have to look at them when it lists its own workspace.
-	tmp := dir + ".tmp"
-	if err := os.MkdirAll(tmp, 0o700); err != nil {
-		return nil, fmt.Errorf("bonnie: sandbox: create scratch directory: %w", err)
+	providerRoot, err := os.OpenRoot(filepath.Dir(dir))
+	if err != nil {
+		return nil, fmt.Errorf("bonnie: sandbox: open provider root: %w", err)
 	}
+	defer func() { _ = providerRoot.Close() }()
+	name := safeName("", runID)
+	if err := providerRoot.MkdirAll(name, 0o700); err != nil {
+		return nil, rootError(name, err)
+	}
+	if err := refuseRootLink(providerRoot, name); err != nil {
+		return nil, err
+	}
+	root, err := providerRoot.OpenRoot(name)
+	if err != nil {
+		return nil, rootError(name, err)
+	}
+	// Scratch has its own namespace. Run names cannot start with a dot.
+	tmpRel := filepath.Join(".scratch", name)
+	if err := providerRoot.MkdirAll(tmpRel, 0o700); err != nil {
+		_ = root.Close()
+		return nil, rootError(tmpRel, err)
+	}
+	// Refuse aliases to another run inside the provider root too.
+	if err := refuseRootLink(providerRoot, ".scratch"); err != nil {
+		_ = root.Close()
+		return nil, err
+	}
+	if err := refuseRootLink(providerRoot, tmpRel); err != nil {
+		_ = root.Close()
+		return nil, err
+	}
+	// Verify the scratch directory is under the same provider root too.
+	scratch, err := providerRoot.OpenRoot(tmpRel)
+	if err != nil {
+		_ = root.Close()
+		return nil, rootError(tmpRel, err)
+	}
+	// Keep both directory identities open for the child restriction.
+	tmp := filepath.Join(filepath.Dir(dir), tmpRel)
 
-	sb := &landlockSandbox{id: runID, dir: dir, tmp: tmp, cleanup: p.cleanup}
+	sb := &landlockSandbox{id: runID, dir: dir, tmp: tmp, root: root, scratch: scratch, cleanup: p.cleanup}
 	p.opened[runID] = sb
 	return sb, nil
 }
@@ -184,6 +218,8 @@ func (p *LandlockProvider) Open(_ context.Context, runID string) (Sandbox, error
 type landlockSandbox struct {
 	id      string
 	dir     string
+	root    *os.Root
+	scratch *os.Root
 	tmp     string
 	cleanup bool
 
@@ -205,64 +241,39 @@ func (s *landlockSandbox) isClosed() bool {
 	return s.closed
 }
 
-// host maps a sandbox path onto the host directory that backs it, refusing
-// anything that would leave the workspace.
-//
-// This is the jail for the file tools, which run in the BONNIE process and so
-// are not covered by the kernel restriction applied to a command's child.
-// [Exec] is confined by Landlock instead, because no amount of string
-// inspection can contain a shell.
-func (s *landlockSandbox) host(p string) (string, error) {
+// relative maps a file-tool path into os.Root. The root checks symlinks during
+// the operation, including missing targets and concurrent path changes.
+func (s *landlockSandbox) relative(p string) (string, error) {
 	resolved := Resolve(p)
-
-	var rel string
-	switch {
-	case resolved == Workspace:
-		rel = ""
-	case strings.HasPrefix(resolved, Workspace+"/"):
-		rel = resolved[len(Workspace)+1:]
-	default:
-		// Resolve has already cleaned the path, so a "../" escape arrives
-		// here as an absolute path outside the workspace.
-		return "", fmt.Errorf("%w: %s", ErrOutsideWorkspace, p)
+	if resolved == Workspace {
+		return ".", nil
 	}
-
-	target := filepath.Join(s.dir, filepath.FromSlash(rel))
-	if err := s.within(target); err != nil {
-		return "", err
+	if rel, ok := strings.CutPrefix(resolved, Workspace+"/"); ok {
+		return filepath.FromSlash(rel), nil
 	}
-	return target, nil
+	return "", fmt.Errorf("%w: %s", ErrOutsideWorkspace, p)
 }
 
-// within refuses a path that leaves the workspace once symlinks are resolved.
-//
-// The target itself usually does not exist yet — a write creates it — so the
-// nearest ancestor that does exist is the one resolved. That is the link that
-// could point outside; a component that does not exist cannot.
-func (s *landlockSandbox) within(target string) error {
-	root, err := filepath.EvalSymlinks(s.dir)
+// refuseRootLink prevents one run from adopting another run's directory.
+func refuseRootLink(root *os.Root, name string) error {
+	info, err := root.Lstat(name)
 	if err != nil {
-		return fmt.Errorf("bonnie: sandbox: resolve workspace: %w", err)
+		return rootError(name, err)
 	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("%w: workspace alias %s", ErrOutsideWorkspace, name)
+	}
+	return nil
+}
 
-	probe := target
-	for {
-		real, err := filepath.EvalSymlinks(probe)
-		if err == nil {
-			if real != root && !strings.HasPrefix(real, root+string(filepath.Separator)) {
-				return fmt.Errorf("%w: %s resolves outside the workspace", ErrOutsideWorkspace, target)
-			}
-			return nil
-		}
-		if !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("bonnie: sandbox: resolve %s: %w", target, err)
-		}
-		parent := filepath.Dir(probe)
-		if parent == probe {
-			return fmt.Errorf("%w: %s", ErrOutsideWorkspace, target)
-		}
-		probe = parent
+func rootError(p string, err error) error {
+	if err == nil {
+		return nil
 	}
+	if strings.Contains(err.Error(), "escapes from parent") || strings.Contains(err.Error(), "outside root") {
+		return fmt.Errorf("%w: %s: %v", ErrOutsideWorkspace, p, err)
+	}
+	return fmt.Errorf("bonnie: sandbox: file %s: %w", p, err)
 }
 
 // Exec implements [Sandbox]. The command runs in a child that confines itself
@@ -276,14 +287,18 @@ func (s *landlockSandbox) Exec(ctx context.Context, cmd Command) (*Result, error
 		return nil, err
 	}
 
-	dir, err := s.host(cmd.workdir())
+	rel, err := s.relative(cmd.workdir())
 	if err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, fmt.Errorf("bonnie: sandbox: create workdir: %w", err)
+	if err := s.root.MkdirAll(rel, 0o700); err != nil {
+		return nil, rootError(rel, err)
 	}
-
+	dir, err := s.root.Open(rel)
+	if err != nil {
+		return nil, rootError(rel, err)
+	}
+	defer func() { _ = dir.Close() }()
 	return s.execJailed(ctx, cmd, dir)
 }
 
@@ -354,18 +369,19 @@ func runChild(ctx context.Context, c *exec.Cmd, cmd Command) (*Result, error) {
 	var out, errb bytes.Buffer
 	c.Stdout, c.Stderr = &out, &errb
 
+	configureProcess(c)
 	err := c.Run()
 	res := &Result{Stdout: out.String(), Stderr: errb.String()}
 
 	var ee *exec.ExitError
 	switch {
+	case ctx.Err() != nil:
+		return nil, fmt.Errorf("bonnie: sandbox: command canceled: %w", ctx.Err())
 	case err == nil:
 		res.ExitCode = 0
 	case errors.As(err, &ee):
 		// The command ran and failed. That is a result, not an error.
 		res.ExitCode = ee.ExitCode()
-	case errors.Is(ctx.Err(), context.DeadlineExceeded):
-		return nil, fmt.Errorf("bonnie: sandbox: command timed out after %s: %w", cmd.Timeout, ctx.Err())
 	default:
 		return nil, fmt.Errorf("bonnie: sandbox: exec: %w", err)
 	}
@@ -377,16 +393,16 @@ func (s *landlockSandbox) ReadFile(_ context.Context, p string) ([]byte, error) 
 	if s.isClosed() {
 		return nil, ErrClosed
 	}
-	target, err := s.host(p)
+	target, err := s.relative(p)
 	if err != nil {
 		return nil, err
 	}
-	data, err := os.ReadFile(target)
+	data, err := s.root.ReadFile(target)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("%w: %s", ErrNotFound, p)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("bonnie: sandbox: read %s: %w", p, err)
+		return nil, rootError(p, err)
 	}
 	return data, nil
 }
@@ -396,15 +412,15 @@ func (s *landlockSandbox) WriteFile(_ context.Context, p string, data []byte) er
 	if s.isClosed() {
 		return ErrClosed
 	}
-	target, err := s.host(p)
+	target, err := s.relative(p)
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
-		return fmt.Errorf("bonnie: sandbox: create parent of %s: %w", p, err)
+	if err := s.root.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+		return rootError(p, err)
 	}
-	if err := os.WriteFile(target, data, 0o600); err != nil {
-		return fmt.Errorf("bonnie: sandbox: write %s: %w", p, err)
+	if err := s.root.WriteFile(target, data, 0o600); err != nil {
+		return rootError(p, err)
 	}
 	return nil
 }
@@ -417,9 +433,12 @@ func (s *landlockSandbox) Stop(context.Context) error { return nil }
 // Close implements [Sandbox].
 func (s *landlockSandbox) Close() error {
 	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return nil
+	}
 	s.closed = true
-	s.mu.Unlock()
-	return nil
+	return errors.Join(s.root.Close(), s.scratch.Close())
 }
 
 // Delete implements [Deleter]. It removes the workspace only when the
@@ -433,15 +452,34 @@ func (s *landlockSandbox) Delete(context.Context) error {
 	if err := os.RemoveAll(s.dir); err != nil {
 		return fmt.Errorf("bonnie: sandbox: delete workspace: %w", err)
 	}
-	if err := os.RemoveAll(s.tmp); err != nil {
+	if err := removeScratch(filepath.Dir(s.dir), safeName("", s.id)); err != nil {
 		return fmt.Errorf("bonnie: sandbox: delete scratch directory: %w", err)
 	}
 	return nil
 }
 
+// removeScratch must not follow a replaced .scratch link into host files.
+func removeScratch(providerDir, name string) error {
+	root, err := os.OpenRoot(providerDir)
+	if err != nil {
+		return fmt.Errorf("bonnie: sandbox: open provider root: %w", err)
+	}
+	defer func() { _ = root.Close() }()
+	if _, err := root.Lstat(".scratch"); errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err := refuseRootLink(root, ".scratch"); err != nil {
+		return err
+	}
+	return rootError(name, root.RemoveAll(filepath.Join(".scratch", name)))
+}
+
 // SandboxExists implements [ExistenceChecker]. A workspace is a directory
 // under the provider root.
 func (p *LandlockProvider) SandboxExists(_ context.Context, runID string) (bool, error) {
+	if err := refuseUncheckedLegacy(p.root, runID); err != nil {
+		return false, err
+	}
 	dir := filepath.Join(p.root, safeName("", runID))
 	_, err := os.Stat(dir)
 	switch {
@@ -456,14 +494,22 @@ func (p *LandlockProvider) SandboxExists(_ context.Context, runID string) (bool,
 
 // DeleteRun implements [RunDeleter].
 func (p *LandlockProvider) DeleteRun(_ context.Context, runID string) (bool, error) {
+	if err := refuseUncheckedLegacy(p.root, runID); err != nil {
+		return false, err
+	}
 	dir := filepath.Join(p.root, safeName("", runID))
-	if _, err := os.Stat(dir); os.IsNotExist(err) {
-		return false, nil
+	if _, err := os.Stat(dir); err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("bonnie: sandbox: stat workspace: %w", err)
 	}
 	if err := os.RemoveAll(dir); err != nil {
 		return true, fmt.Errorf("bonnie: sandbox: remove workspace: %w", err)
 	}
-	_ = os.RemoveAll(dir + ".tmp")
+	if err := removeScratch(p.root, safeName("", runID)); err != nil {
+		return true, fmt.Errorf("bonnie: sandbox: remove scratch: %w", err)
+	}
 	return true, nil
 }
 

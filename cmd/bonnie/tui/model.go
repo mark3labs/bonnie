@@ -20,6 +20,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	kit "github.com/mark3labs/kit/pkg/kit"
 
+	"github.com/mark3labs/bonnie/client"
 	"github.com/mark3labs/bonnie/runtime"
 )
 
@@ -32,7 +33,6 @@ const (
 	kindQuestion
 	kindTool
 	kindReasoning
-	kindStatus
 	kindError
 )
 
@@ -75,9 +75,11 @@ type runMsg struct {
 
 // lookupMsg reports whether this address already has a durable run.
 type lookupMsg struct {
-	runID  string
-	cursor int
-	err    error
+	snapshot *client.Snapshot
+	run      *runtime.Run
+	runID    string
+	cursor   int
+	err      error
 }
 
 // streamReadyMsg carries the event stream once it is open.
@@ -91,9 +93,10 @@ type streamReadyMsg struct {
 // It runs no turn; it only teaches the TUI its run ID early enough to
 // subscribe.
 type ensureMsg struct {
-	runID  string
-	cursor int
-	err    error
+	snapshot *client.Snapshot
+	runID    string
+	cursor   int
+	err      error
 }
 
 // streamMsg carries one event from the run's stream.
@@ -166,6 +169,8 @@ type Model struct {
 	height int
 
 	quitting bool
+	// loading prevents a send from racing the initial history read.
+	loading bool
 }
 
 // New returns a Model that drives one conversation at address over client.
@@ -187,6 +192,7 @@ func New(client Client, ctx context.Context, address string) Model {
 		label:   "ready",
 		input:   ta,
 		initCmd: focusCmd,
+		loading: true,
 	}
 	return m
 }
@@ -212,6 +218,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case lookupMsg:
+		m.loading = false
 		if msg.err != nil {
 			if errors.Is(msg.err, ErrNotFound) {
 				return m, nil
@@ -228,6 +235,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.runID = msg.runID
 		m.cursor = msg.cursor
+		if msg.snapshot != nil {
+			m.restoreSnapshot(msg.snapshot)
+			return m, tea.Batch(m.openStream(), func() tea.Msg { return spinnerMsg{} })
+		}
+		if msg.run != nil {
+			return m.finishTurn(runMsg{run: msg.run})
+		}
 		return m, m.openStream()
 
 	case ensureMsg:
@@ -240,6 +254,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.runID == "" {
 			m.runID = msg.runID
 			m.cursor = msg.cursor
+		}
+		if msg.snapshot != nil {
+			m.restoreSnapshot(msg.snapshot)
+			m.commitUser(m.pending)
+			m.spin = true
 		}
 		if m.streamCh != nil {
 			return m.sendPending()
@@ -369,8 +388,8 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return cancelMsg{err: m.client.Cancel(m.ctx, m.runID)}
 		}
 	case "enter":
-		if m.spin {
-			return m, nil // a turn is running; do not start another
+		if m.spin || m.loading {
+			return m, nil // a turn or history read is running; wait
 		}
 		value := m.input.Value()
 		if strings.TrimSpace(value) == "" {
@@ -434,7 +453,12 @@ func (m Model) sendPending() (Model, tea.Cmd) {
 	text := m.pending
 	m.pending = ""
 	address := m.address
+	respond := m.state == statusWaiting && m.runID != ""
+	m.state, m.label = statusRunning, "working"
 	return m, m.run(func() (*runtime.Run, error) {
+		if respond {
+			return m.client.Respond(m.ctx, m.runID, text)
+		}
 		return m.client.Start(m.ctx, address, text)
 	})
 }
@@ -502,10 +526,62 @@ func (m Model) finishTurn(msg runMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// restoreSnapshot projects text parts only. Tool calls, tool results, and
+// reasoning remain in the lossless wire snapshot, but are not display text.
+// Append each message directly so repeated text remains separate history.
+func (m *Model) restoreSnapshot(snapshot *client.Snapshot) {
+	m.cursor = snapshot.Cursor
+	m.entries = nil
+	for _, msg := range snapshot.Messages {
+		var kind entryKind
+		switch string(msg.Role) {
+		case "user":
+			kind = kindUser
+		case "assistant":
+			kind = kindAssistant
+		default:
+			continue
+		}
+		var text strings.Builder
+		for _, part := range msg.Content {
+			if p, ok := part.(kit.LLMTextPart); ok {
+				text.WriteString(p.Text)
+			}
+		}
+		if text.Len() > 0 {
+			m.entries = append(m.entries, entry{kind: kind, text: text.String()})
+		}
+	}
+	m.spin = false
+	switch snapshot.State {
+	case runtime.RunWaiting:
+		m.state, m.label = statusWaiting, "waiting"
+		if snapshot.Suspend != nil {
+			m.label = snapshot.Suspend.Prompt
+			m.commit(kindQuestion, snapshot.Suspend.Prompt)
+		}
+	case runtime.RunRunning:
+		m.state, m.label, m.spin = statusRunning, "working", true
+	case runtime.RunPending:
+		m.state, m.label = statusIdle, "ready"
+	case runtime.RunFailed:
+		m.state, m.label = statusError, "failed"
+	default:
+		m.state, m.label = statusDone, string(snapshot.State)
+	}
+}
+
 func (m Model) lookup() tea.Cmd {
 	return func() tea.Msg {
 		runID, cursor, err := m.client.Lookup(m.ctx, m.address)
-		return lookupMsg{runID: runID, cursor: cursor, err: err}
+		msg := lookupMsg{runID: runID, cursor: cursor, err: err}
+		if err == nil && runID != "" {
+			msg.snapshot, msg.err = m.client.Snapshot(m.ctx, runID)
+			if msg.snapshot != nil {
+				msg.cursor = msg.snapshot.Cursor
+			}
+		}
+		return msg
 	}
 }
 
@@ -515,7 +591,14 @@ func (m Model) ensure() tea.Cmd {
 	address := m.address
 	return func() tea.Msg {
 		runID, cursor, err := m.client.Ensure(m.ctx, address)
-		return ensureMsg{runID: runID, cursor: cursor, err: err}
+		msg := ensureMsg{runID: runID, cursor: cursor, err: err}
+		if err == nil && runID != "" {
+			msg.snapshot, msg.err = m.client.Snapshot(m.ctx, runID)
+			if msg.snapshot != nil {
+				msg.cursor = msg.snapshot.Cursor
+			}
+		}
+		return msg
 	}
 }
 
@@ -565,18 +648,21 @@ func (m *Model) apply(ev runtime.Event) {
 	case runtime.EventState:
 		switch ev.State {
 		case runtime.RunWaiting:
-			m.state = statusWaiting
+			m.state, m.spin = statusWaiting, false
 		case runtime.RunRunning:
-			m.state = statusRunning
-			m.label = "working"
+			m.state, m.label, m.spin = statusRunning, "working", true
 		case runtime.RunCompleted:
 			m.closeStreamEntry()
+			m.state, m.label, m.spin = statusDone, "done", false
 		case runtime.RunFailed:
 			m.closeStreamEntry()
+			m.state, m.label, m.spin = statusError, "failed", false
 		case runtime.RunCancelled:
 			m.closeStreamEntry()
-			m.state = statusIdle
-			m.label = "cancelled"
+			m.state, m.label, m.spin = statusIdle, "cancelled", false
+		case runtime.RunRetired:
+			m.closeStreamEntry()
+			m.state, m.label, m.spin = statusDone, "retired", false
 		}
 
 	case runtime.EventSuspend:
@@ -687,10 +773,6 @@ func (m *Model) openEntry() {
 	}
 	last := m.entries[len(m.entries)-1]
 	if last.streamed && (last.kind == kindAssistant || last.kind == kindReasoning) {
-		return
-	}
-	if last.kind == kindAssistant && last.text != "" && !last.streamed {
-		m.entries = append(m.entries, entry{kind: kindAssistant, streamed: true})
 		return
 	}
 	m.entries = append(m.entries, entry{kind: kindAssistant, streamed: true})

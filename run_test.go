@@ -52,13 +52,13 @@ func TestDefaultsAreTheScaffoldedLayout(t *testing.T) {
 		}
 	}
 	if c.sandbox != nil {
-		t.Error("the default must be no sandbox, loudly warned about, not a silent one")
+		t.Error("the default provider must remain unset so agentFactory selects Landlock")
 	}
 }
 
-// TestWorkspaceIsTheAgentRoot: the agent's files live in the workspace, so a
-// model's write cannot land on the instructions, the journal, or the source
-// beside them. The default is the directory bonnie init scaffolds.
+// TestWorkspaceIsTheAgentRoot checks the absolute seed path. Tool calls use
+// each run's sandbox workspace, not this directory. The default seed path is
+// the directory bonnie init scaffolds.
 func TestWorkspaceIsTheAgentRoot(t *testing.T) {
 	t.Parallel()
 
@@ -85,8 +85,7 @@ func TestWorkspaceIsTheAgentRoot(t *testing.T) {
 		}
 	})
 
-	// A host with no tree asks for no workspace, and its own directory stays
-	// the root — what `bonnie serve` does.
+	// A host with no tree disables workspace seeding, not the sandbox.
 	t.Run("no tree", func(t *testing.T) {
 		t.Parallel()
 		dir, err := resolve(WithWorkspace("")).workspaceDir()

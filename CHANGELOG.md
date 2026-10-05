@@ -5,6 +5,66 @@ All notable changes to BONNIE are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Update dependencies in the framework and both example modules. Kit moves to
+  v0.120.0 and SQLite to v1.60.1. Update the Nix input and vendor hash. The
+  examples keep their released BONNIE pin and contain no replace directives.
+- Sandbox names reserve an encoded namespace. Unsafe legacy workspace
+  adoption is refused when ownership cannot be proved. Docker adoption checks
+  identity, network policy, image, user, memory, and isolation controls.
+- Command cancellation stops Docker and microsandbox compute. On Unix, Local
+  and Landlock cancel the command process group. A child that starts a new
+  session can escape that group; these backends do not provide process isolation.
+
+### Added
+
+- A durable HTTP conversation snapshot and Go client method. The terminal UI
+  restores history, run state, and approval prompts before joining the stream.
+- Regression tests for sandbox containment, controls, cancellation, operation
+  retries, snapshots, journal ownership, state races, and second-Runner recovery.
+
+### Fixed
+
+- Shell fixtures wait for executable readiness before sandbox and installer
+  tests use them. A bounded probe retries only ETXTBSY and does not run the
+  fixture body. Production commands are not retried.
+- Landlock file operations use contained directory handles. Workspace and
+  scratch names cannot overlap, and command access uses pinned directories.
+- Sandbox stop and delete failures are reported. Microsandbox lookup failures
+  are not treated as proof of absence. Failed lazy opens remain retryable, and
+  file listing uses the backend's working-directory mapping.
+- Waiting runs require Resume. Run state checks occur under the local run
+  slot. Sandbox-loss metadata and notes commit together on atomic journals;
+  older interrupted notifications recover on restore.
+- Memory journals copy payload buffers and apply state records consistently.
+  Restored message anchors and branch selections remain durable. File input
+  reaches capable agents and is explicitly refused by agents without support.
+- Event replay joins live Kit events without dropping events with a shared
+  anchor. Session entries become visible only after their journal write succeeds.
+- Dev startup returns build failures, shutdown waits for child cleanup, and
+  new directories enter the watch set. Builds disable CGO and report the actual
+  output path. CLI sandbox workspaces follow the selected journal root.
+- Tool discovery examines the returned constructor across package files.
+  Embed discovery follows Go's file eligibility rules. Scaffold creation
+  refuses symlinks and uses exclusive file creation. Custom factories do not
+  require unused tree instructions or skills.
+- Correct sandbox, workspace, skills, SQLite, CLI, and example documentation.
+  Remove unused terminal state and move test-only runtime helpers into tests.
+
+- HTTP operation keys use a separate internal namespace and unambiguous
+  principal identity encoding. A retry reads durable state instead of
+  starting another turn, including after failure or a server restart.
+  `address` and `operation_id` cannot be used together. A pending operation
+  left by a crash needs explicit recovery through the run API.
+- Reset frees all ordinary address bindings for the run in the same channel,
+  including when reset uses a run ID. Internal HTTP operation bindings stay
+  bound, so reset cannot cause an operation retry to execute again.
+- The standalone HTTP handler returns stable JSON errors for unknown routes
+  and unsupported methods. Unknown turn policies fail before creating a run.
+
 ## [0.9.1] — 2026-09-29
 
 **A parked run on the docker sandbox no longer holds its caller for 10 s, and

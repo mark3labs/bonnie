@@ -5,6 +5,7 @@ package sandbox
 import (
 	"context"
 	"fmt"
+	"os"
 	"runtime"
 )
 
@@ -20,6 +21,6 @@ func landlockSupported() error {
 
 // execJailed refuses rather than running the command unconfined. A backend
 // that cannot enforce its promise must fail, never silently downgrade.
-func (s *landlockSandbox) execJailed(context.Context, Command, string) (*Result, error) {
+func (s *landlockSandbox) execJailed(context.Context, Command, *os.File) (*Result, error) {
 	return nil, landlockSupported()
 }

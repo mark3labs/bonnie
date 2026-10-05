@@ -42,8 +42,12 @@ func (j *MemoryJournal) Append(_ context.Context, rec Record) (int, error) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 
+	rec.Payload = slices.Clone(rec.Payload)
 	rec.Seq = len(j.records[rec.RunID]) + 1
 	j.records[rec.RunID] = append(j.records[rec.RunID], rec)
+	if rec.Kind == RecordState {
+		j.states[rec.RunID] = rec.State
+	}
 	if _, ok := j.states[rec.RunID]; !ok {
 		j.states[rec.RunID] = RunPending
 	}
@@ -72,9 +76,14 @@ func (j *MemoryJournal) AppendStep(_ context.Context, recs []Record) ([]int, err
 	seqs := make([]int, len(recs))
 	base := len(j.records[recs[0].RunID])
 	for i := range recs {
-		recs[i].Seq = base + i + 1
-		seqs[i] = recs[i].Seq
-		j.records[recs[i].RunID] = append(j.records[recs[i].RunID], recs[i])
+		rec := recs[i]
+		rec.Payload = slices.Clone(rec.Payload)
+		rec.Seq = base + i + 1
+		seqs[i] = rec.Seq
+		j.records[recs[i].RunID] = append(j.records[rec.RunID], rec)
+		if rec.Kind == RecordState {
+			j.states[rec.RunID] = rec.State
+		}
 	}
 	if _, ok := j.states[recs[0].RunID]; !ok {
 		j.states[recs[0].RunID] = RunPending
@@ -93,6 +102,9 @@ func (j *MemoryJournal) Replay(_ context.Context, runID string) ([]Record, error
 	}
 	out := make([]Record, len(recs))
 	copy(out, recs)
+	for i := range out {
+		out[i].Payload = slices.Clone(out[i].Payload)
+	}
 	return out, nil
 }
 

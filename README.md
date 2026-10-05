@@ -181,9 +181,8 @@ Files under `skills/` are the agent's skills: one `*.md` per skill, or one
 subdirectory per skill with a `SKILL.md` in it, each with YAML frontmatter
 that gives a `name` and a `description`. Those two fields go in the system
 prompt; the body arrives only when the model calls `activate_skill`, so a
-large skill set costs few tokens until it is used. The tree's `skills/` is the
-whole set — an agent never inherits a skill from a `.agents/skills` directory
-it happens to run beside.
+large skill set costs few tokens until it is used. The tree's `skills/` is the authored set. Workspace-local skills can also be
+discovered in the sandbox; skills beside the host process are not inherited.
 
 There is no configuration file. A setting is a file at a known path
 (`instructions.md`, `workspace/`, `skills/`, `tools/`) or an option in
@@ -683,7 +682,7 @@ The journal is the durability seam. Two implementations are in the box:
 
 ```go
 runtime.NewMemoryJournal()            // tests and ephemeral runs
-runtime.OpenSQLiteJournal(".bonnie")  // SQLite, one database for each run
+runtime.OpenSQLiteJournal(".bonnie")  // SQLite, one database for the journal root
 ```
 
 `SQLiteJournal` writes `<root>/journal.db` through a **pure-Go** driver

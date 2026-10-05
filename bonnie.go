@@ -49,8 +49,7 @@ const (
 	DefaultInstructions = "instructions.md"
 
 	// DefaultWorkspace is the directory the agent's files live in: the
-	// working directory of the host's file tools without a sandbox, and the
-	// seed mirrored into the sandbox with one.
+	// seed directory mirrored into each run's sandbox workspace.
 	DefaultWorkspace = "workspace"
 
 	// DefaultSkills is the tree's skills directory.

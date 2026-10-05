@@ -130,7 +130,9 @@ func attachCheckpoints(k *kit.Kit, s *Session) {
 type Input struct {
 	// Text is the user's message: the one thing that enters the
 	// conversation as a user turn.
-	Text  string
+	Text string
+	// Files carries file parts through FileAgent. An agent that does not
+	// implement FileAgent refuses non-empty files with ErrFilesUnsupported.
 	Files []kit.LLMFilePart
 	// Context is what the model should know for this turn and this turn
 	// only: the event that fired, the diff a comment refers to, who is
@@ -202,6 +204,19 @@ var ErrRunActive = errors.New("bonnie: run already active")
 // ErrRunNotActive is returned when Cancel or Steer targets a run that this
 // Runner is not currently executing.
 var ErrRunNotActive = errors.New("bonnie: run is not active")
+
+// ErrRunWaiting is returned when Start targets a suspended run. Use Resume instead.
+var ErrRunWaiting = errors.New("bonnie: run is waiting for input")
+
+// ErrFilesUnsupported is returned when an agent cannot accept file input.
+var ErrFilesUnsupported = errors.New("bonnie: the agent cannot accept files")
+
+// FileAgent is the optional public Kit interface for file input.
+type FileAgent interface {
+	PromptResultWithFiles(context.Context, string, []kit.LLMFilePart) (*kit.TurnResult, error)
+}
+
+var _ FileAgent = (*kit.Kit)(nil)
 
 // ErrNotWaiting is returned when Resume targets a run that is not suspended.
 var ErrNotWaiting = errors.New("bonnie: run is not waiting for input")
@@ -326,8 +341,11 @@ func (r *Runner) StreamEvents(runID string, after int) (<-chan Event, func()) {
 		// would hide every later event at that anchor (usually tool calls).
 		// A replay still filters everything it covered because those live-only
 		// events cannot be placed correctly in the replayed history.
+		// Only the replay watermark suppresses live events. Several live
+		// events, including the response, can share a later anchor.
+		replayCovered := emitted
 		for ev := range live {
-			if needReplay && ev.Seq <= emitted {
+			if needReplay && ev.Seq <= replayCovered {
 				continue
 			}
 			if !needReplay && ev.Seq != 0 && ev.Seq <= after {
@@ -452,14 +470,22 @@ func (r *Runner) replayEvents(runID string, after int, out chan<- Event, done <-
 // are seen; its context is journalled and handed to the model for this turn
 // only.
 func (r *Runner) Start(ctx context.Context, runID string, in Input) (*Run, error) {
-	if err := r.refuseRetired(ctx, runID); err != nil {
-		return nil, err
-	}
 	turnCtx, act, err := r.acquire(ctx, runID)
 	if err != nil {
 		return nil, err
 	}
 	defer r.release(runID)
+
+	state, err := r.journal.State(turnCtx, runID)
+	if err != nil && !errors.Is(err, ErrRunNotFound) {
+		return nil, err
+	}
+	if state == RunRetired {
+		return nil, fmt.Errorf("%w: %s", ErrRunRetired, runID)
+	}
+	if state == RunWaiting {
+		return nil, fmt.Errorf("%w: %s", ErrRunWaiting, runID)
+	}
 
 	s, err := r.session(turnCtx, runID)
 	if err != nil {
@@ -475,13 +501,18 @@ func (r *Runner) Start(ctx context.Context, runID string, in Input) (*Run, error
 		return nil, err
 	}
 	s.SetTurnContext(in.Context)
-	return r.turn(turnCtx, act, s, in.Text)
+	return r.turn(turnCtx, act, s, in.Text, in.Files)
 }
 
 // Resume delivers input to a suspended run and continues it. The run may have
 // been suspended by a different process.
 func (r *Runner) Resume(ctx context.Context, runID string, responses []InputResponse) (*Run, error) {
-	state, err := r.journal.State(ctx, runID)
+	turnCtx, act, err := r.acquire(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer r.release(runID)
+	state, err := r.journal.State(turnCtx, runID)
 	if err != nil {
 		return nil, err
 	}
@@ -491,11 +522,6 @@ func (r *Runner) Resume(ctx context.Context, runID string, responses []InputResp
 	if state != RunWaiting {
 		return nil, fmt.Errorf("%w: %s is %s", ErrNotWaiting, runID, state)
 	}
-	turnCtx, act, err := r.acquire(ctx, runID)
-	if err != nil {
-		return nil, err
-	}
-	defer r.release(runID)
 
 	s, err := Restore(turnCtx, runID, r.journal)
 	if err != nil {
@@ -510,7 +536,7 @@ func (r *Runner) Resume(ctx context.Context, runID string, responses []InputResp
 		return nil, err
 	}
 	r.bus.Publish(Event{RunID: runID, Type: EventResume, Seq: seq, Text: answer})
-	return r.turn(turnCtx, act, s, answer)
+	return r.turn(turnCtx, act, s, answer, nil)
 }
 
 // Cancel stops the turn a run is executing now. Completed steps stay in the
@@ -561,15 +587,19 @@ func (r *Runner) IsActive(runID string) bool {
 //
 // It returns [ErrRunNotFound] when the run is unknown.
 func (r *Runner) Snapshot(ctx context.Context, runID string) (*Run, error) {
-	state, err := r.journal.State(ctx, runID)
-	if err != nil {
-		return nil, err
-	}
 	recs, err := r.journal.Replay(ctx, runID)
 	if err != nil {
 		return nil, err
 	}
 
+	// State and result must come from the same replay. A separate State
+	// read can describe the previous turn while these records describe the next.
+	state := RunPending
+	for _, rec := range recs {
+		if rec.Kind == RecordState {
+			state = rec.State
+		}
+	}
 	run := &Run{ID: runID, State: state}
 	for _, rec := range slices.Backward(recs) {
 		if run.Response == "" && rec.Kind == RecordMessage && rec.Role == "assistant" {
@@ -589,7 +619,7 @@ func (r *Runner) Snapshot(ctx context.Context, runID string) (*Run, error) {
 }
 
 // turn runs one agent turn and classifies the outcome.
-func (r *Runner) turn(ctx context.Context, act *activeTurn, s *Session, prompt string) (*Run, error) {
+func (r *Runner) turn(ctx context.Context, act *activeTurn, s *Session, prompt string, files []kit.LLMFilePart) (*Run, error) {
 	runID := s.runID
 	// Terminal bookkeeping must outlive a cancelled turn, or a cancel would
 	// leave the run stuck in "running" for ever.
@@ -610,7 +640,19 @@ func (r *Runner) turn(ctx context.Context, act *activeTurn, s *Session, prompt s
 	stop := forwardAgentEvents(agent, r.bus, runID)
 	defer stop()
 
-	res, err := agent.PromptResult(ctx, prompt)
+	var res *kit.TurnResult
+	if len(files) > 0 {
+		capable, ok := agent.(FileAgent)
+		if !ok {
+			if cerr := r.checkpoint(book, runID, RunFailed); cerr != nil {
+				return nil, cerr
+			}
+			return nil, fmt.Errorf("%w: %T", ErrFilesUnsupported, agent)
+		}
+		res, err = capable.PromptResultWithFiles(ctx, prompt, files)
+	} else {
+		res, err = agent.PromptResult(ctx, prompt)
+	}
 	if err != nil {
 		if cerr := ctx.Err(); cerr != nil {
 			if cerr := r.checkpoint(book, runID, RunCancelled); cerr != nil {
