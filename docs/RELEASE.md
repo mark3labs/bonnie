@@ -95,6 +95,37 @@ edited to the required form.
 | `v0.8.0` | `c03de52` | 2026-09-23 |
 | `v0.9.0` | `fb23879` | 2026-09-25 |
 | `v0.9.1` | `779289a` | 2026-09-29 |
+| `v0.10.0` | `4540d6f` | 2026-10-05 |
+
+### `v0.10.0`, 2026-10-05 — every box confirmed
+
+- [x] `task release-check` — 1 config validated
+- [x] `task release-snapshot` — linux amd64 and arm64, archives and checksums;
+      the amd64 binary prints `bonnie 0.9.1-SNAPSHOT-4540d6f`, not `dev`
+- [x] No `replace` directive in the framework or example modules; Kit is
+      `v0.120.0` and SQLite is `v1.60.1`
+- [x] All CI jobs green on `master` at the tagged commit `4540d6f`:
+      `test`, `examples`, and `lint` (run `37321446620`)
+- [x] `CHANGELOG.md` has a dated `[0.10.0]` section in Keep-a-Changelog shape
+- [x] Published notes state the three claims and the current README limits,
+      with no human edit; they also state the experimental status and do not
+      promise exactly-once external side effects
+- [x] Annotated tag pushed; `release.yml` run `37322130456` succeeded
+- [x] Three artifacts published; both archive checksums verify. The downloaded
+      linux amd64 binary prints `bonnie 0.10.0` and is statically linked
+- [x] Both examples pin `v0.10.0`; `task examples` and `task check` pass.
+      The pin is committed after the tag as `6a983b0`
+
+**Version choice.** MINOR despite the `fix:` prefix: the release adds the HTTP
+snapshot endpoint, `http.SnapshotResponse`, `client.Snapshot` and
+`Client.Snapshot`, `runtime.FileAgent` and two public errors, and
+`channel.AddressMap.UnbindRun`. The notes name these public additions.
+
+**Verified from the artifact.** The downloaded CLI refuses `--sandbox none`
+by name and identifies Landlock and Local as the alternatives. The published
+notes match the changelog section except for trailing blank lines. Snapshot
+and recovery behaviour is covered by the automated tests; this release did
+not use a live model to prove those behaviours from the downloaded CLI.
 
 ### `v0.9.1`, 2026-09-29 — every box confirmed
 
