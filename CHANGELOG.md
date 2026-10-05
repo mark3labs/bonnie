@@ -5,7 +5,29 @@ All notable changes to BONNIE are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.10.0] — 2026-10-05
+
+**Durable conversation snapshots, stronger sandbox checks, and recovery fixes.**
+This is a MINOR release because it adds public APIs, despite the `fix:` commit
+prefix. BONNIE remains early and experimental. No release is proven in
+production. Do not use it for work whose loss would hurt.
+
+### The claims
+
+- **A run survives process death.** Another process can restore the full
+  journalled conversation, including typed tool calls and results. SQLite
+  commits a tool-calling step as one transaction. Restore does not repeat a
+  side effect recorded in a completed step. This is not exactly-once execution
+  of external effects: an effect that occurs before its step commits can be
+  repeated after a crash.
+- **A run parks indefinitely.** A run waiting for a human needs no live agent
+  process or running sandbox compute. Resume supplies the answer, including
+  after a restart. Start now refuses a waiting run with `ErrRunWaiting`.
+  Approval stops the next step, not another tool call in the same step.
+- **A run is reachable over HTTP.** Routes under `/bonnie/v1` expose durable
+  runs and an NDJSON event stream. The new snapshot endpoint restores history,
+  state, and approval prompts before a client joins the stream. Slack,
+  Discord, Telegram, and GitHub adapters use the same durable runs.
 
 ### Changed
 
@@ -21,8 +43,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- A durable HTTP conversation snapshot and Go client method. The terminal UI
-  restores history, run state, and approval prompts before joining the stream.
+- `GET /bonnie/v1/runs/{id}/snapshot`, `http.SnapshotResponse`,
+  `client.Snapshot`, and `Client.Snapshot`. The snapshot preserves typed
+  message parts and returns a cursor from the same journal replay. The
+  terminal UI restores history, run state, and approval prompts before joining
+  the stream. Successful client responses are no longer limited to 1 MiB.
+- `runtime.FileAgent` and `runtime.ErrFilesUnsupported` make file input an
+  explicit optional agent capability. `runtime.ErrRunWaiting` identifies a
+  Start call that must use Resume instead.
+- `channel.AddressMap.UnbindRun` removes ordinary address bindings for a run
+  within a channel prefix.
 - Regression tests for sandbox containment, controls, cancellation, operation
   retries, snapshots, journal ownership, state races, and second-Runner recovery.
 
@@ -64,6 +94,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bound, so reset cannot cause an operation retry to execute again.
 - The standalone HTTP handler returns stable JSON errors for unknown routes
   and unsupported methods. Unknown turn policies fail before creating a run.
+
+### Known limits
+
+These limits come from the current `README.md`. The cancellation and HTTP
+operation limits are also stated here because they affect the changes above.
+
+- **Linux only.** Releases support linux/amd64 and linux/arm64, not macOS or
+  Windows. The default needs kernel 5.13 or newer with Landlock enabled.
+  Without Landlock, BONNIE refuses to start; select `--sandbox docker` instead.
+- **The default sandbox is containment, not isolation.** Landlock confines
+  filesystem access, not the network, and shares the host kernel.
+- **Do not run BONNIE as a user in the `docker` group.** Landlock does not
+  prevent a connection to `/var/run/docker.sock`. Access to that socket permits
+  a full host escape. Use an unprivileged user, or microsandbox.
+- **Docker is namespaces, not a kernel.** Use microsandbox for hostile code.
+  microsandbox is verified on Linux with KVM. Its network policy is fixed at
+  creation; a different policy on reattachment returns `ErrPolicyMismatch`.
+- **Sandbox egress is open** until a policy is set. The default backend cannot
+  enforce one and refuses it instead of ignoring it.
+- **A halt stops the turn, not the step.** A tool called in the same step as
+  `request_approval` or another halting tool still runs before the run parks.
+  Approval gates the next step, not a sibling call.
+- **A skill's bundled files stay on the host.** Activation names `scripts/`,
+  `references/`, and `assets/` through host paths that sandbox tools cannot
+  open. Put required text in the skill body and required files in `workspace/`.
+- **The HTTP channel verifies a caller only when configured.**
+  `http.WithAuthenticator` or `bonnie.WithHTTPAuthenticator` checks every
+  route except health. Without it, authenticate in front of BONNIE;
+  `operation_id` is refused. Chat webhooks verify the platform, not the person,
+  and each adapter refuses to serve without its verification credential.
+- **Run ownership is per host.** The journal does not refuse a second writer.
+  SQLite protects transaction integrity, not turn coordination. Two servers
+  executing one run can interleave the conversation. Network filesystems are
+  unsafe because SQLite needs working POSIX locks.
+- **Events are journal-anchored.** Reconnects can replay durable events after a
+  restart. Live-only deltas are marked and are not replayed.
+- **Sandbox lifecycle is journalled, and reclamation is manual.**
+  `bonnie sandbox prune` deletes sandboxes of finished runs. `serve` does not
+  sweep them.
+- **Agent authoring needs Go and public module access.** Scaffolds resolve
+  BONNIE and Kit from the public proxy without `GOPRIVATE`. The static agent
+  binary needs neither Go nor BONNIE installed on its destination host, but
+  the selected sandbox backend can need its own runtime.
+- **Cancellation is not process isolation.** Local and Landlock stop a Unix
+  process group. A child that starts a new session can escape that group.
+- **An interrupted HTTP operation needs explicit recovery.** A pending
+  operation left by a crash does not automatically execute again; recover it
+  through the run API. `address` and `operation_id` cannot be combined.
 
 ## [0.9.1] — 2026-09-29
 
