@@ -5,6 +5,129 @@ All notable changes to BONNIE are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] — 2026-10-06
+
+**NATS authentication with user NKey seeds, bearer tokens, and user/password.**
+This is a MINOR release because it adds public NATS channel configuration fields.
+BONNIE remains early and experimental. No release is proven in production.
+Do not use it for work whose loss would hurt.
+
+### The claims
+
+- **A run survives process death.** Another process can restore the full
+  journalled conversation, including typed tool calls and results. SQLite
+  commits a tool-calling step as one transaction. Restore does not repeat an
+  external effect recorded in a completed step. An effect that occurs before
+  its step commits can repeat after a crash; execution is not exactly once.
+- **A run parks indefinitely.** A waiting run needs no live agent process or
+  running sandbox compute. Resume supplies the answer, also after a restart.
+  Keep its journal and sandbox data. A waiting JetStream run needs its original
+  worker and stored state; lost worker state requires a new task.
+- **A run is reachable over HTTP.** Routes under `/bonnie/v1` expose durable
+  runs, conversation snapshots, and an NDJSON event stream. The optional NATS
+  transport uses the same run executor.
+
+### Added
+
+- Add user NKey seed authentication through `channel/nats.Config.NKeySeed`
+  and the `NATS_NKEY_SEED` fallback in `bonnie.WithNATS`. The seed is a value,
+  not a file path. Validate malformed and non-user seeds without exposing them
+  in errors. Support both Core NATS and JetStream connections.
+- Add bearer token and user/password authentication through
+  `channel/nats.Config.Token`, `Username`, and `Password`, with `NATS_TOKEN`,
+  `NATS_USERNAME`, and `NATS_PASSWORD` fallbacks in `bonnie.WithNATS`.
+  A username is required when a password is set; an empty password is permitted.
+- Add real-broker authentication tests and tests for environment fallbacks,
+  conflicting methods, invalid seeds, and credential-safe errors.
+
+### Changed
+
+- Reject mixed authentication methods and conflicts between URL credentials
+  and authentication fields. Explicit nonempty fields override their related
+  environment fallbacks. When `Config.Conn` is supplied, reject URL and
+  authentication fields, skip all connection environment fallbacks, and leave
+  the connection lifetime with the caller.
+- Make `github.com/nats-io/nkeys` a direct dependency. The Kit minimum stays
+  at v0.120.0.
+
+### Fixed
+
+- Restore the published 0.11.0 changelog section. The new authentication
+  entries belong to 0.12.0, not to the earlier release.
+
+### Known limits
+
+These limits were checked against the current `README.md`, including its NATS
+section. Authentication does not change the delivery or sandbox guarantees.
+
+- **Linux only.** Releases support linux/amd64 and linux/arm64, not macOS or
+  Windows. The default needs kernel 5.13 or newer with Landlock enabled.
+  Without Landlock, BONNIE refuses to start; select `--sandbox docker` instead.
+- **The default sandbox is containment, not isolation.** Landlock confines
+  filesystem access, not the network, and shares the host kernel.
+- **Do not run BONNIE as a user in the `docker` group.** Landlock does not
+  prevent a connection to `/var/run/docker.sock`. Access to that socket permits
+  a full host escape. Use an unprivileged user, or microsandbox.
+- **Docker is namespaces, not a kernel.** Use microsandbox for hostile code.
+  microsandbox is verified on Linux with KVM. Its network policy is fixed at
+  creation; a different policy on reattachment returns `ErrPolicyMismatch`.
+- **Sandbox egress is open** until a policy is set. The default backend cannot
+  enforce one and refuses it instead of ignoring it.
+- **A halt stops the turn, not the step.** A tool called in the same step as
+  `request_approval` or another halting tool still runs before the run parks.
+  Approval gates the next step, not a sibling call.
+- **A skill's bundled files stay on the host.** Activation names `scripts/`,
+  `references/`, and `assets/` through host paths that sandbox tools cannot
+  open. Put required text in the skill body and required files in `workspace/`.
+- **The HTTP channel verifies a caller only when configured.**
+  `http.WithAuthenticator` or `bonnie.WithHTTPAuthenticator` checks every
+  route except health. Without it, authenticate in front of BONNIE;
+  `operation_id` is refused. Chat webhooks verify the platform, not the person,
+  and each adapter refuses to serve without its verification credential.
+- **Run ownership is per host.** The journal does not refuse a second writer.
+  SQLite protects transaction integrity, not turn coordination. Two servers
+  executing one run can interleave the conversation. Network filesystems are
+  unsafe because SQLite needs working POSIX locks.
+- **Events are journal-anchored.** Reconnects can replay durable events after a
+  restart. Live-only deltas are marked and are not replayed.
+- **Sandbox lifecycle is journalled, and reclamation is manual.**
+  `bonnie sandbox prune` deletes sandboxes of finished runs. `serve` does not
+  sweep them.
+- **Agent authoring needs Go and public module access.** Scaffolds resolve
+  BONNIE and Kit from the public proxy without `GOPRIVATE`. The static agent
+  binary needs neither Go nor BONNIE installed on its destination host, but
+  the selected sandbox backend can need its own runtime.
+- **Cancellation is not process isolation.** Local and Landlock stop a Unix
+  process group. A child that starts a new session can escape that group.
+- **An interrupted HTTP operation needs explicit recovery.** A pending
+  operation left by a crash does not automatically execute again; recover it
+  through the run API. `address` and `operation_id` cannot be combined.
+- **NATS credentials need protection.** Use TLS to protect tokens and passwords
+  in transit. Keep seeds and other credentials out of source code, logs, and
+  the agent sandbox environment. Use only one authentication method, including
+  environment fallbacks. JWT credentials and other connection options need a
+  caller-supplied authenticated `Config.Conn`.
+- **Core NATS can lose tasks and results.** Offline subscribers, buffer overflow,
+  and process failure can lose delivery. There is no automatic retry of
+  interrupted tasks or result publication. Use one owner per task namespace;
+  ordinary subscribers each receive a copy and can repeat the work.
+- **NATS payloads do not verify identity.** Connection authentication does not
+  replace broker permissions. Restrict publishers, subscribers, and stream
+  administration. Answer route validation does not authenticate a worker.
+- **JetStream delivery is at least once, not exactly once.** Redelivery to
+  another worker can execute a task again. Interrupted tasks start fresh
+  attempts. Broker deduplication has a bounded window. Make external effects
+  and result handlers safe to repeat, and track task, attempt, and run IDs.
+- **JetStream workers do not share run state.** Each needs a unique, stable
+  WorkerID and its own journal and sandbox data. A waiting run needs its
+  original worker to answer. Changing consumer names can replay retained
+  tasks or results. Shared consumers divide work; separate consumers are
+  required for applications that each need all outcomes.
+- **A publish receipt confirms broker storage, not execution.** Provision the
+  required streams, or explicitly permit their creation. Existing streams
+  and consumers are not changed. The result handler must select its task IDs
+  and respect cancellation. Invalid messages need operator correction.
+
 ## [0.11.0] — 2026-10-06
 
 **Asynchronous NATS tasks, JetStream delivery, and a typed NATS client.**
@@ -29,12 +152,6 @@ Do not use it for work whose loss would hurt.
 
 ### Added
 
-- Add NATS bearer token and user/password authentication through configuration
-  fields and `NATS_TOKEN`, `NATS_USERNAME`, and `NATS_PASSWORD` fallbacks. Reject
-  mixed methods and URL credential conflicts without exposing credentials.
-- Add user NKey seed authentication to the NATS channel through `Config.NKeySeed`
-  and the `NATS_NKEY_SEED` fallback in `WithNATS`. Validate seeds without exposing
-  them in errors, and support both Core NATS and JetStream connections.
 - Default the NATS client's result stream and consumer to stable names derived
   from ResultSubject, with explicit overrides and opt-in stream creation.
 - Default the JetStream task consumer to a stable subject-derived name. Keep
