@@ -909,9 +909,21 @@ value takes precedence over `NATS_NKEY_SEED`. Malformed seeds and non-user
 seeds fail validation without including the seed in the error. This works
 with both Core NATS and JetStream.
 
+For bearer token authentication, set `NATS_TOKEN` or `Config.Token`. For
+user/password authentication, set `NATS_USERNAME` and `NATS_PASSWORD`, or
+`Config.Username` and `Config.Password`. A username is required when a password
+is set; an empty password is permitted. Each explicit nonempty field takes
+precedence over its environment fallback. Use TLS to protect credentials in
+transit.
+
+Configure only one method: NKey seed, token, or user/password. This includes
+environment fallbacks; unset variables for methods you do not use. Do not
+combine URL credentials with authentication fields. Conflicts fail validation
+without including credential values in the error.
+
 For JWT credentials or other connection options, supply an authenticated
-`Config.Conn` instead. Do not combine `Conn` with `URL` or `NKeySeed`.
-When `Conn` is supplied, BONNIE ignores both connection environment variables
+`Config.Conn` instead. Do not combine `Conn` with `URL` or authentication fields.
+When `Conn` is supplied, BONNIE ignores all connection environment variables
 and does not close the connection; the caller owns its lifetime.
 
 Start a result subscriber before publishing a task:

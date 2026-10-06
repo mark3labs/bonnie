@@ -45,12 +45,21 @@ type Config struct {
 	// URL is one NATS server URL. It is required unless Conn is supplied.
 	URL string
 	// Conn is optional. The caller owns it; Shutdown never closes it. Do not
-	// supply URL or NKeySeed with Conn. This channel does not change its handlers.
+	// supply URL or authentication fields with Conn. This channel does not
+	// change its handlers.
 	Conn *gonats.Conn
 	// NKeySeed is a user NKey seed, not a file path. It authenticates the
 	// connection opened by this channel. Keep it secret. For JWT credentials
 	// or other authentication options, supply an authenticated Conn instead.
 	NKeySeed string
+	// Token is a bearer token for NATS token authentication. Use only one of
+	// Token, NKeySeed, or Username/Password. Keep credentials secret.
+	Token string
+	// Username and Password select user/password authentication. Username is
+	// required when Password is set; an empty password is permitted.
+	Username string
+	// Password is the password for Username. Keep it secret.
+	Password string
 	// Subject receives Task JSON. AnswerSubject receives Answer JSON in Core
 	// mode. In JetStream it is a base; answers use base+"."+WorkerID.
 	// ResultSubject receives Result JSON. These must be distinct literal subjects.
@@ -150,8 +159,20 @@ func New(r *runtime.Runner, cfg Config) (*Channel, error) {
 	if r == nil {
 		return nil, errors.New("bonnie: channel/nats: runner is required")
 	}
-	if cfg.Conn != nil && (cfg.URL != "" || cfg.NKeySeed != "") {
-		return nil, errors.New("bonnie: channel/nats: use URL and optional NKeySeed or Conn, not both")
+	if cfg.Conn != nil && (cfg.URL != "" || cfg.NKeySeed != "" || cfg.Token != "" || cfg.Username != "" || cfg.Password != "") {
+		return nil, errors.New("bonnie: channel/nats: use URL and authentication fields or Conn, not both")
+	}
+	methods := 0
+	for _, selected := range []bool{cfg.NKeySeed != "", cfg.Token != "", cfg.Username != "" || cfg.Password != ""} {
+		if selected {
+			methods++
+		}
+	}
+	if methods > 1 {
+		return nil, errors.New("bonnie: channel/nats: use only one authentication method")
+	}
+	if cfg.Password != "" && cfg.Username == "" {
+		return nil, errors.New("bonnie: channel/nats: password requires username")
 	}
 	if cfg.NKeySeed != "" {
 		if _, err := nkeyOption(cfg.NKeySeed); err != nil {
@@ -162,6 +183,9 @@ func New(r *runtime.Runner, cfg Config) (*Channel, error) {
 		u, err := url.Parse(cfg.URL)
 		if err != nil || u.Host == "" || (u.Scheme != "nats" && u.Scheme != "tls" && u.Scheme != "ws" && u.Scheme != "wss") || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
 			return nil, errors.New("bonnie: channel/nats: invalid URL")
+		}
+		if u.User != nil && methods > 0 {
+			return nil, errors.New("bonnie: channel/nats: use URL credentials or authentication fields, not both")
 		}
 	}
 	for _, s := range []string{cfg.Subject, cfg.AnswerSubject, cfg.ResultSubject} {
@@ -260,6 +284,12 @@ func (c *Channel) Start(ctx context.Context) error {
 				return authErr
 			}
 			opts = append(opts, auth)
+		}
+		if c.cfg.Token != "" {
+			opts = append(opts, gonats.Token(c.cfg.Token))
+		}
+		if c.cfg.Username != "" {
+			opts = append(opts, gonats.UserInfo(c.cfg.Username, c.cfg.Password))
 		}
 		nc, err = gonats.Connect(c.cfg.URL, opts...)
 		if err != nil {

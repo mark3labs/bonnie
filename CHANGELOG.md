@@ -29,6 +29,9 @@ Do not use it for work whose loss would hurt.
 
 ### Added
 
+- Add NATS bearer token and user/password authentication through configuration
+  fields and `NATS_TOKEN`, `NATS_USERNAME`, and `NATS_PASSWORD` fallbacks. Reject
+  mixed methods and URL credential conflicts without exposing credentials.
 - Add user NKey seed authentication to the NATS channel through `Config.NKeySeed`
   and the `NATS_NKEY_SEED` fallback in `WithNATS`. Validate seeds without exposing
   them in errors, and support both Core NATS and JetStream connections.

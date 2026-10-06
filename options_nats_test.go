@@ -12,6 +12,7 @@ import (
 
 // Environment fallback is resolved for each build, not when the option is made.
 func TestWithNATS(t *testing.T) {
+	clearNATSAuthEnv(t)
 	t.Setenv("NATS_URL", "nats://127.0.0.1:4222")
 	t.Setenv("NATS_NKEY_SEED", "")
 	c := defaults()
@@ -33,6 +34,7 @@ func TestWithNATS(t *testing.T) {
 // Seed fallback is resolved for each build. Explicit settings win, and a
 // caller-owned connection must not receive environment authentication settings.
 func TestWithNATSSeedFallback(t *testing.T) {
+	clearNATSAuthEnv(t)
 	t.Setenv("NATS_URL", "nats://127.0.0.1:4222")
 	t.Setenv("NATS_NKEY_SEED", "invalid-secret")
 	key, err := nkeys.CreateUser()
@@ -64,6 +66,48 @@ func TestWithNATSSeedFallback(t *testing.T) {
 	}
 	cfg.NKeySeed = ""
 	cfg.Conn = &gonats.Conn{}
+	c = defaults()
+	WithNATS(cfg)(c)
+	if _, err := c.channels[0](r); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func clearNATSAuthEnv(t *testing.T) {
+	t.Helper()
+	for _, name := range []string{"NATS_NKEY_SEED", "NATS_TOKEN", "NATS_USERNAME", "NATS_PASSWORD"} {
+		t.Setenv(name, "")
+	}
+}
+
+// Authentication fallbacks must be applied at build time, without silently
+// selecting one method when multiple methods are configured.
+func TestWithNATSTokenAndUserFallback(t *testing.T) {
+	clearNATSAuthEnv(t)
+	t.Setenv("NATS_URL", "nats://127.0.0.1:4222")
+	r := runtime.NewRunner(runtime.NewMemoryJournal(), nil)
+	cfg := natschannel.Config{Subject: "tasks", AnswerSubject: "answers", ResultSubject: "results"}
+	c := defaults()
+	WithNATS(cfg)(c)
+	t.Setenv("NATS_PASSWORD", "secret")
+	if _, err := c.channels[0](r); err == nil {
+		t.Fatal("password fallback must require username")
+	}
+	t.Setenv("NATS_USERNAME", "user")
+	if _, err := c.channels[0](r); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("NATS_TOKEN", "token")
+	if _, err := c.channels[0](r); err == nil {
+		t.Fatal("mixed environment methods must fail")
+	}
+	t.Setenv("NATS_USERNAME", "")
+	t.Setenv("NATS_PASSWORD", "")
+	if _, err := c.channels[0](r); err != nil {
+		t.Fatal(err)
+	}
+	cfg.Conn = &gonats.Conn{}
+	t.Setenv("NATS_PASSWORD", "secret")
 	c = defaults()
 	WithNATS(cfg)(c)
 	if _, err := c.channels[0](r); err != nil {
