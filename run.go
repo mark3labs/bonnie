@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -99,10 +100,22 @@ func registerServeFlags(fs *flag.FlagSet) {
 // returns. It is [Agent.Serve] without the process: no flags, no signal
 // handler, no exit — for a host that already owns those.
 //
+// Optional [channel.Lifecycle] channels start after the listener is bound.
+// All constructed lifecycle channels shut down before the journal closes,
+// including when startup fails. Each shutdown phase uses WithShutdownTimeout.
+//
 // A run that parks holds no compute and lives in the journal, so stopping
 // here is never destructive.
-func (a *Agent) Run(ctx context.Context) error {
+func (a *Agent) Run(ctx context.Context) (runErr error) {
 	c := a.cfg
+	ln := c.listener
+	defer func() {
+		if ln != nil {
+			if err := ln.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+				runErr = errors.Join(runErr, fmt.Errorf("bonnie: close listener: %w", err))
+			}
+		}
+	}()
 
 	// Load a .env before anything reads the environment: the provider key the
 	// agent factory needs and the channel credentials resolved below both come
@@ -150,7 +163,11 @@ func (a *Agent) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = journal.Close() }()
+	defer func() {
+		if err := journal.Close(); err != nil {
+			runErr = errors.Join(runErr, fmt.Errorf("bonnie: close journal: %w", err))
+		}
+	}()
 
 	runner := runtime.NewRunner(journal, factory)
 
@@ -159,15 +176,30 @@ func (a *Agent) Run(ctx context.Context) error {
 	// channel's info route can name them, and each is refused a route in
 	// the framework's namespace before anything is served.
 	var channels []Channel
+	// Register cleanup before construction. A channel can own resources even
+	// when it has not started, or when a later channel cannot be built.
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), c.shutdown)
+		defer cancel()
+		for _, ch := range slices.Backward(channels) {
+			if lifecycle, ok := ch.(channel.Lifecycle); ok {
+				if err := lifecycle.Shutdown(shutdownCtx); err != nil {
+					runErr = errors.Join(runErr, fmt.Errorf("bonnie: shutdown channel %q: %w", ch.Name(), err))
+				}
+			}
+		}
+	}()
 	for _, build := range c.channels {
 		ch, err := build(runner)
+		if ch != nil {
+			channels = append(channels, ch)
+		}
 		if err != nil {
 			return err
 		}
 		if err := refuseReserved(ch); err != nil {
 			return err
 		}
-		channels = append(channels, ch)
 	}
 	info := bonniehttp.Info{Agent: c.name, Channels: []string{"http"}}
 	for _, ch := range channels {
@@ -196,12 +228,19 @@ func (a *Agent) Run(ctx context.Context) error {
 	// Bind before the banner, so the banner reports the address the process
 	// actually listens on. A configured ":0" is a request for any free port,
 	// and printing it back would tell an operator nothing.
-	ln := c.listener
 	if ln == nil {
 		var err error
 		ln, err = net.Listen("tcp", c.addr)
 		if err != nil {
 			return fmt.Errorf("bonnie: listen on %s: %w", c.addr, err)
+		}
+	}
+
+	for _, ch := range channels {
+		if lifecycle, ok := ch.(channel.Lifecycle); ok {
+			if err := lifecycle.Start(ctx); err != nil {
+				return fmt.Errorf("bonnie: start channel %q: %w", ch.Name(), err)
+			}
 		}
 	}
 
@@ -623,9 +662,11 @@ func (c *config) serve(ctx context.Context, mux http.Handler, ln net.Listener) e
 		errs <- nil
 	}()
 
+	var serveErr error
+	var stopped bool
 	select {
-	case err := <-errs:
-		return err
+	case serveErr = <-errs:
+		stopped = true
 	case <-ctx.Done():
 		fmt.Fprintln(os.Stderr, "bonnie: shutting down, letting in-flight turns checkpoint")
 	}
@@ -633,9 +674,15 @@ func (c *config) serve(ctx context.Context, mux http.Handler, ln net.Listener) e
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), c.shutdown)
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
-		return fmt.Errorf("bonnie: shutdown: %w", err)
+		// Shutdown does not close active connections when its deadline ends.
+		// Do not leave HTTP handlers attached to a journal that will close.
+		closeErr := srv.Close()
+		return errors.Join(serveErr, fmt.Errorf("bonnie: shutdown: %w", err), closeErr)
 	}
-	return <-errs
+	if !stopped {
+		serveErr = <-errs
+	}
+	return serveErr
 }
 
 // closeStreamsOnShutdown closes long-lived event streams when server shutdown

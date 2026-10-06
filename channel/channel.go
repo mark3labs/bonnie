@@ -228,7 +228,25 @@ type Receiver interface {
 	Receive(ctx context.Context, target any, text string, opts SendOptions) error
 }
 
-// Channel is an inbound transport.
+// Lifecycle is optional for a channel that owns a connection or receives
+// messages without HTTP routes. A host calls Start after it binds the HTTP
+// listener and before it serves requests.
+//
+// Start returns when the channel is ready. It must use ctx to stop startup
+// when the host cancels it. Shutdown stops new input and drains work already
+// accepted. It must return when ctx ends, even if the drain is not complete.
+//
+// The host calls Shutdown before it closes the journal, in reverse construction
+// order, with a fresh, bounded context. Shutdown must also be safe before Start
+// and after a failed Start: a later construction or listener failure can stop
+// startup after this channel has acquired resources.
+type Lifecycle interface {
+	Start(ctx context.Context) error
+	Shutdown(ctx context.Context) error
+}
+
+// Channel is an inbound transport. A channel with no HTTP surface returns no
+// routes. It can implement [Lifecycle] to receive messages on another transport.
 type Channel interface {
 	// Name identifies the channel in logs and configuration.
 	Name() string

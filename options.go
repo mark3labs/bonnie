@@ -12,6 +12,7 @@ import (
 	"github.com/mark3labs/bonnie/channel/discord"
 	"github.com/mark3labs/bonnie/channel/github"
 	bonniehttp "github.com/mark3labs/bonnie/channel/http"
+	natschannel "github.com/mark3labs/bonnie/channel/nats"
 	"github.com/mark3labs/bonnie/channel/slack"
 	"github.com/mark3labs/bonnie/channel/telegram"
 	"github.com/mark3labs/bonnie/runtime"
@@ -277,6 +278,19 @@ func Quiet() Option {
 // for how it refuses one.
 func WithHTTPAuthenticator(fn bonniehttp.Authenticator) Option {
 	return func(c *config) { c.auth = fn }
+}
+
+// WithNATS mounts an asynchronous Core NATS task channel. NATS_URL fills an
+// empty URL unless Conn is supplied. Subjects must be configured explicitly.
+// Core NATS does not retain tasks or retry results; see channel/nats.
+func WithNATS(cfg natschannel.Config) Option {
+	return WithChannel(func(r *runtime.Runner) (Channel, error) {
+		c := cfg
+		if c.Conn == nil {
+			fill(&c.URL, "NATS_URL")
+		}
+		return natschannel.New(r, c)
+	})
 }
 
 // WithSlack mounts the Slack channel. Credentials come from the environment

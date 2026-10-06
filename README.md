@@ -879,6 +879,52 @@ Stated plainly, because the failure modes are not obvious:
   To author an agent needs Go on your machine. The binary that `bonnie build`
   makes needs nothing on the host.
 
+## NATS tasks
+
+A deployed agent can subscribe to Core NATS and publish outcomes asynchronously:
+
+```go
+// Import natschannel "github.com/mark3labs/bonnie/channel/nats".
+bonnie.New(
+    bonnie.WithModel("opencode/kimi-k3"),
+    bonnie.WithNATS(natschannel.Config{
+        Subject:       "agents.review.tasks",
+        AnswerSubject: "agents.review.answers",
+        ResultSubject: "agents.review.results",
+    }),
+).Serve()
+```
+
+Set `NATS_URL` to the broker URL and configure the model's provider key. Each
+subject must be a distinct literal subject. Start a result subscriber before
+publishing a task:
+
+```bash
+nats sub agents.review.results
+# In another terminal:
+nats pub agents.review.tasks '{"task_id":"review-42","text":"Review the supplied code."}'
+```
+
+Each task ID starts an independent durable run. The result contains `task_id`,
+`run_id`, `state`, and `response`, or an `error`. A waiting result contains
+`suspend`, including its `tool_call_id`. Publish an explicit answer to resume it:
+
+```bash
+nats pub agents.review.answers '{"task_id":"review-42","tool_call_id":"CALL_ID_FROM_RESULT","responses":[{"text":"Use staging."}]}'
+```
+
+A repeated task is rejected, not interpreted as an answer. Answers must match
+the current suspension. Workers and buffers are bounded; `Concurrency` defaults
+to 4 and `Buffer` to 64. Shutdown cancels active turns and waits for workers.
+
+**This adapter follows the asynchronous GitHub pattern, not a durable broker
+queue.** It uses Core NATS, not JetStream. Offline subscribers, buffer overflow,
+and process failure can lose tasks or result delivery. The journal preserves run
+state, but the adapter does not automatically retry interrupted tasks or result
+publication. Use broker permissions to restrict publishers and subscribers;
+message payloads do not verify identity. Run one owner for each task namespace;
+multiple ordinary subscribers each receive a copy and can repeat the work.
+
 ## Examples
 
 Each example is an agent tree made with `bonnie init`, run with `bonnie dev`,

@@ -5,6 +5,19 @@ All notable changes to BONNIE are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Add a Core NATS task channel and `WithNATS`. Each task ID starts an
+  independent run. Results and input requests are published to a configured
+  subject; explicit answers resume waiting runs. Tasks are not retained by
+  Core NATS, and result publication has no durable retry queue.
+- Add optional channel lifecycle support for non-HTTP transports, with startup
+  failure cleanup and bounded shutdown before the journal closes.
+- Add local NATS end-to-end tests and an integration-tag live test with
+  `opencode/kimi-k3` and Landlock.
+
 ## [0.10.0] — 2026-10-05
 
 **Durable conversation snapshots, stronger sandbox checks, and recovery fixes.**
