@@ -5,7 +5,28 @@ All notable changes to BONNIE are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.13.0] — 2026-10-06
+
+**Managed completion checks, image reads, workspace policies, and activity logs.**
+This is a MINOR release because it adds public root, runtime, and sandbox APIs.
+BONNIE remains early and experimental. No release is proven in production.
+Do not use it for work whose loss would hurt.
+
+### The claims
+
+- **A run survives process death.** Another process can restore the full
+  journalled conversation, including typed tool calls, image results, and
+  completion state. SQLite commits a tool-calling step as one transaction.
+  Restore does not repeat an external effect recorded in a completed step.
+  An effect before its step commits can repeat after a crash; execution is not
+  exactly once. Completion callbacks can also run again after interruption.
+- **A run parks indefinitely.** A waiting run needs no live agent process or
+  running sandbox compute. Resume supplies the answer, also after a restart.
+  Keep its journal and sandbox data. Automatic cleanup skips waiting runs.
+  A waiting JetStream run needs its original worker and stored state.
+- **A run is reachable over HTTP.** Routes under `/bonnie/v1` expose durable
+  runs, conversation snapshots, and an NDJSON event stream. The optional NATS
+  transport uses the same run executor.
 
 ### Added
 
@@ -16,13 +37,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   checks that share the agent's sandbox. Completion checks can request bounded
   additional model turns before the final outcome. Add root API tests and
   [completion API documentation](docs/completion.md), including recovery limits.
+  Expose `RunScope`, `KitSetup`, `CompletionPolicy`, `CompletionHookFactory`,
+  `CompletionCandidate`, `CompletionFeedback`, `CompletionHook`, and
+  `ErrContinuationLimit`. Low-level hosts can use `runtime.CompletionAgent`,
+  `runtime.WithCompletionHook`, `runtime.WithCompletionLimit`,
+  `runtime.KitSetup`, `runtime.KitAgentWithSetup`, and `sandbox.AgentWithSetup`.
 - Add `WithRunWorkspaceCleanup` for automatic retention-based cleanup in compiled
   agents. Keep shared persistent workspaces protected, preserve run history, and
   record deletion for restart recovery. Cleanup shares the runner's turn lock.
+  Expose `WorkspaceCleanupPolicy`, `runtime.Runner.CleanupWorkspaces`,
+  `runtime.RecordWorkspaceDeleted`, and `sandbox.RunCleanupValidator`.
 - Add `WithPersistentWorkspace` for one shared development directory with
   Landlock or Local. Keep Landlock confinement by default, reject overlapping
   opens through one provider, and preserve shared files during run pruning.
-  Isolated per-run workspaces remain the default.
+  Isolated per-run workspaces remain the default. Low-level hosts can use
+  `sandbox.WithLocalSharedWorkspace` and the Local and Landlock providers'
+  `UseSharedWorkspace` methods.
 - Add `WithoutHumanInput` to omit the built-in `ask_human` and
   `request_approval` tools. Both remain enabled by default. Sandbox permissions
   and caller-supplied tools do not change. Low-level hosts can use
@@ -32,14 +62,113 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   output. Info logs report run states, tool calls, and responses; Debug logs
   include raw lifecycle payloads. Hosts can supply a `runtime.ActivityLogger`.
 
+### Changed
+
+- Make `github.com/charmbracelet/log` a direct dependency. The Kit minimum
+  stays at v0.120.0.
+
 ### Fixed
 
+- Correct the README's manual-only cleanup limit: compiled agents now support
+  opt-in retention-based cleanup. CLI `serve` still does not sweep workspaces.
 - Forward file prompts and Kit event subscriptions through the sandbox agent
   wrapper, including managed completion checks.
 - Use the journal's workspace root for Local and Landlock CLI pruning. Share
   cleanup receipts with the automatic cleanup service.
 - Keep sandbox tools available when `WithTools` adds caller-supplied tools.
   The extra tools now append to the sandbox tool set instead of replacing it.
+
+### Known limits
+
+These limits were checked against the current `README.md` and completion
+API documentation. New options do not provide exactly-once external effects.
+
+- **Linux only.** Releases support linux/amd64 and linux/arm64, not macOS or
+  Windows. The default needs kernel 5.13 or newer with Landlock enabled.
+  Without Landlock, BONNIE refuses to start; select `--sandbox docker` instead.
+- **The default sandbox is containment, not isolation.** Landlock confines
+  filesystem access, not the network, and shares the host kernel.
+- **Do not run BONNIE as a user in the `docker` group.** Landlock does not
+  prevent a connection to `/var/run/docker.sock`. Access permits a full host
+  escape. Use an unprivileged user, or microsandbox.
+- **Docker is namespaces, not a kernel.** Use microsandbox for hostile code.
+  microsandbox is verified on Linux with KVM. Its network policy is fixed at
+  creation; a different policy on reattachment returns `ErrPolicyMismatch`.
+- **Sandbox egress is open** until a policy is set. The default backend cannot
+  enforce one and refuses it instead of ignoring it. Local provides no host
+  filesystem or network isolation.
+- **A halt stops the turn, not the step.** A tool called in the same step as
+  `request_approval` or another halting tool still runs before the run parks.
+  Approval gates the next step, not a sibling call. `WithoutHumanInput` omits
+  built-in human-input tools; it does not change permissions or custom tools.
+- **A skill's bundled files stay on the host.** Activation names `scripts/`,
+  `references/`, and `assets/` through host paths that sandbox tools cannot
+  open. Put required text in the skill body and required files in `workspace/`.
+- **The HTTP channel verifies a caller only when configured.**
+  `http.WithAuthenticator` or `bonnie.WithHTTPAuthenticator` checks every
+  route except health. Without it, authenticate in front of BONNIE;
+  `operation_id` is refused. Chat webhooks verify the platform, not the person,
+  and each adapter refuses to serve without its verification credential.
+- **Run ownership is per host.** The journal does not refuse a second writer.
+  SQLite protects transaction integrity, not turn coordination. Two servers
+  executing one run can interleave the conversation. Network filesystems are
+  unsafe because SQLite needs working POSIX locks.
+- **Events are journal-anchored.** Reconnects can replay durable events after a
+  restart. Live-only deltas are marked and are not replayed.
+- **Cleanup is opt-in and deletes files, not history.** Compiled agents can use
+  retention-based cleanup; CLI `serve` does not sweep workspaces. Waiting runs
+  are kept. A later turn on a cleaned-up run starts without its earlier files;
+  publish output before completion. Cleanup locks are local to one Runner.
+  Deletion callbacks must be safe to repeat after a crash. Shared workspaces
+  and custom agent factories cannot use automatic cleanup.
+- **A persistent workspace shares files across runs.** Only Landlock and Local
+  support it. Overlapping opens are rejected through one provider, but separate
+  processes and provider instances are not coordinated. Use one server.
+  Do not combine it with `WithWorkspace`. Pruning preserves the shared directory.
+- **Completion callbacks are trusted host code.** Use `RunScope.Exec` for sandbox
+  commands. Closure state is not durable; interrupted checks can run again.
+  Keep the same policy and limit after restart. Usage can be undercounted after
+  interruption; unsaved initial attachments cannot be restored, and accepted
+  response events can repeat. Checks skip suspension and model failure. Live
+  events and snapshots can show a draft before acceptance. Managed setup and
+  completion options cannot be combined with `WithAgentFactory`.
+- **Activity logs can contain sensitive data.** Info includes final responses;
+  Debug includes prompts, tool arguments, results, and reasoning. Logging is
+  synchronous, so a slow writer delays runs. Replay does not log events again.
+- **Agent authoring needs Go and public module access.** Scaffolds resolve
+  BONNIE and Kit from the public proxy without `GOPRIVATE`. The static agent
+  binary needs neither Go nor BONNIE installed on its destination host, but
+  the selected sandbox backend can need its own runtime.
+- **Cancellation is not process isolation.** Local and Landlock stop a Unix
+  process group. A child that starts a new session can escape that group.
+- **An interrupted HTTP operation needs explicit recovery.** A pending
+  operation left by a crash does not automatically execute again; recover it
+  through the run API. `address` and `operation_id` cannot be combined.
+- **NATS credentials need protection.** Use TLS to protect tokens and passwords
+  in transit. Keep credentials out of source code, logs, and the sandbox
+  environment. Use one authentication method, including environment fallbacks.
+  JWT credentials and other connection options need a caller-supplied
+  authenticated `Config.Conn`.
+- **Core NATS can lose tasks and results.** Offline subscribers, buffer overflow,
+  and process failure can lose delivery. There is no automatic retry of
+  interrupted tasks or result publication. Use one owner per task namespace;
+  ordinary subscribers each receive a copy and can repeat the work.
+- **NATS payloads do not verify identity.** Connection authentication does not
+  replace broker permissions. Restrict publishers, subscribers, and stream
+  administration. Answer route validation does not authenticate a worker.
+- **JetStream delivery is at least once, not exactly once.** Redelivery to
+  another worker can execute a task again. Interrupted tasks start fresh
+  attempts. Broker deduplication has a bounded window. Make external effects
+  and result handlers safe to repeat, and track task, attempt, and run IDs.
+- **JetStream workers do not share run state.** Each needs a unique, stable
+  WorkerID and its own journal and sandbox data. A waiting run needs its
+  original worker to answer. Changing consumer names can replay retained
+  tasks or results. Shared consumers divide work; separate consumers are
+  required for applications that each need all outcomes.
+- **A publish receipt confirms broker storage, not execution.** Provision the
+  required streams, or explicitly permit their creation. Existing streams
+  and consumers are not changed. The result handler must select its task IDs
+  and respect cancellation. Invalid messages need operator correction.
 
 ## [0.12.0] — 2026-10-06
 

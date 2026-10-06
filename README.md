@@ -927,9 +927,12 @@ Stated plainly, because the failure modes are not obvious:
 - **Events are journal-anchored.** The stream replays the journal after the
   in-memory backlog, thus a reconnect — also after a restart — has no gap.
   Live-only deltas are the exception, and they are marked.
-- **Sandbox lifecycle is journalled, and reclamation is manual.**
-  `bonnie sandbox prune` deletes the sandboxes of finished runs. `serve` does
-  not sweep them yet.
+- **Sandbox lifecycle is journalled; cleanup is opt-in.**
+  `bonnie sandbox prune` deletes the sandboxes of finished runs. Compiled agents
+  can use `WithRunWorkspaceCleanup` for retention-based cleanup; the CLI `serve`
+  command does not sweep them. Cleanup keeps waiting runs and history, but deletes
+  earlier files of eligible finished runs. Publish output before completion.
+  Cleanup locks do not coordinate separate processes or Runner instances.
 - **The mark3labs modules are publicly fetchable.** A scaffolded module runs
   `go mod tidy` and resolves `bonnie` and `kit` from the proxy; no `GOPRIVATE`.
   To author an agent needs Go on your machine. The binary that `bonnie build`
