@@ -61,6 +61,7 @@ const DefaultEventBuffer = 1024
 // bus leaves events unstamped, and they then behave as live-only.
 type EventBus struct {
 	capacity int
+	logger   ActivityLogger
 
 	// anchor reports the current journal position for a run. Nil means
 	// events publish unstamped.
@@ -121,7 +122,6 @@ func (b *EventBus) Publish(ev Event) Event {
 	}
 
 	b.mu.Lock()
-	defer b.mu.Unlock()
 
 	if ev.Time.IsZero() {
 		ev.Time = now()
@@ -135,6 +135,13 @@ func (b *EventBus) Publish(ev Event) Event {
 
 	for _, s := range b.subs[ev.RunID] {
 		s.push(ev)
+	}
+	logger := b.logger
+	b.mu.Unlock()
+
+	// Host logging must not hold the bus lock or block subscribers.
+	if logger != nil {
+		logger.LogActivity(ev)
 	}
 	return ev
 }

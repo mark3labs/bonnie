@@ -165,9 +165,10 @@ type Run struct {
 // by one Runner is resumed by another through the journal, which is the whole
 // point of L1.
 type Runner struct {
-	journal Journal
-	factory AgentFactory
-	bus     *EventBus
+	journal        Journal
+	factory        AgentFactory
+	bus            *EventBus
+	activityLogger ActivityLogger
 
 	mu     sync.Mutex
 	active map[string]*activeTurn
@@ -242,6 +243,7 @@ func NewRunner(j Journal, f AgentFactory, opts ...RunnerOption) *Runner {
 	for _, opt := range opts {
 		opt(r)
 	}
+	r.bus.logger = r.activityLogger
 	r.bus.Anchor(r.durableSeq)
 	return r
 }

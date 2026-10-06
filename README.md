@@ -898,6 +898,41 @@ bonnie.New(
 Set `NATS_URL` to the broker URL and configure the model's provider key. Each
 subject must be a distinct literal subject.
 
+### Activity logging
+
+Add this option to `bonnie.New(...)` to log agent activity to stdout:
+
+```go
+bonnie.WithActivityLogger(bonnie.NewActivityLogger(nil)),
+```
+
+Activity logging works with every channel, including NATS. It is off by
+default. The default logger uses `charmbracelet/log` with timestamps. Info
+output includes run states, suspensions, resumes, tool names and call IDs,
+and final response text. Failures use Error level. Warnings and retries use
+Warn level. Other lifecycle events and raw payloads use Debug level.
+
+To select JSON output or Debug level, supply a Charm logger:
+
+```go
+// Import "os" and "github.com/charmbracelet/log".
+logger := log.NewWithOptions(os.Stdout, log.Options{
+    Formatter:       log.JSONFormatter,
+    Level:           log.DebugLevel,
+    ReportTimestamp: true,
+})
+// Add this option to bonnie.New(...):
+bonnie.WithActivityLogger(bonnie.NewActivityLogger(logger)),
+```
+
+Logs can contain sensitive data. Info output includes final responses;
+Debug output also includes prompts, tool arguments, results, and reasoning.
+Only live events are logged; journal replay does not log them again. Logging
+is synchronous, so a slow output writer delays the run. A host can also
+supply its own `runtime.ActivityLogger` through the same option.
+
+### NATS authentication
+
 For NKey authentication, set `NATS_NKEY_SEED` to the **user seed value**, not
 its file path. BONNIE reads it when it builds the channel; the `WithNATS`
 setup above does not need to change. Load the value from your secret store.

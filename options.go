@@ -35,25 +35,26 @@ type ChannelFunc func(*runtime.Runner) (Channel, error)
 // config is the resolved configuration of one [Agent]. Every field has a
 // default from the scaffolded layout; an [Option] replaces one.
 type config struct {
-	addr       string
-	name       string
-	journal    string
-	model      string
-	prompt     string
-	instrPath  string
-	skillsPath string
-	workspace  string
-	sandbox    sandbox.Provider
-	sandboxEnv map[string]string
-	network    *sandbox.NetworkPolicy
-	tools      []kit.Tool
-	kitOpts    []kit.Option
-	channels   []ChannelFunc
-	factory    runtime.AgentFactory
-	shutdown   time.Duration
-	listener   net.Listener
-	quiet      bool
-	auth       bonniehttp.Authenticator
+	addr           string
+	name           string
+	journal        string
+	model          string
+	prompt         string
+	instrPath      string
+	skillsPath     string
+	workspace      string
+	sandbox        sandbox.Provider
+	sandboxEnv     map[string]string
+	network        *sandbox.NetworkPolicy
+	tools          []kit.Tool
+	kitOpts        []kit.Option
+	channels       []ChannelFunc
+	factory        runtime.AgentFactory
+	shutdown       time.Duration
+	listener       net.Listener
+	activityLogger runtime.ActivityLogger
+	quiet          bool
+	auth           bonniehttp.Authenticator
 }
 
 // Option configures [New]. This is where a setting that is not a

@@ -169,7 +169,7 @@ func (a *Agent) Run(ctx context.Context) (runErr error) {
 		}
 	}()
 
-	runner := runtime.NewRunner(journal, factory)
+	runner := runtime.NewRunner(journal, factory, runtime.WithActivityLogger(c.activityLogger))
 
 	// One mux carries every channel: the HTTP transport always, then
 	// whatever an option added. The others are built first so the HTTP
