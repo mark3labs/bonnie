@@ -97,6 +97,42 @@ edited to the required form.
 | `v0.9.1` | `779289a` | 2026-09-29 |
 | `v0.10.0` | `4540d6f` | 2026-10-05 |
 | `v0.11.0` | `6ec5953` | 2026-10-06 |
+| `v0.12.0` | `dc1ee27` | 2026-10-06 |
+
+### `v0.12.0`, 2026-10-06 — every box confirmed
+
+- [x] `task release-check` — 1 config validated
+- [x] `task release-snapshot` — linux amd64 and arm64, archives and checksums;
+      both checksums verify, and the statically linked amd64 binary prints
+      `bonnie 0.11.0-SNAPSHOT-dc1ee27`, not `dev`
+- [x] No `replace` directive in the framework or example modules; Kit stays
+      at `v0.120.0`
+- [x] All CI jobs green on `master` at the tagged commit `dc1ee27`:
+      `test`, `examples`, and `lint` (run `37451169148`)
+- [x] `CHANGELOG.md` has a dated `[0.12.0]` section in Keep-a-Changelog shape;
+      release-note extraction passes. The published 0.11.0 section matches
+      its tagged text; the later authentication entries belong to 0.12.0
+- [x] Published notes state the three claims and the current README limits,
+      including authentication, NATS delivery, and worker-state limits.
+      The notes match the changelog section except for trailing blank lines
+- [x] Annotated tag pushed after human confirmation; `release.yml` run
+      `37451844000` succeeded
+- [x] Three artifacts published; both downloaded archive checksums verify.
+      The downloaded linux amd64 binary prints `bonnie 0.12.0` and is
+      statically linked
+- [x] Both examples pin `v0.12.0`; `task examples` and `task check` pass.
+      The pin is committed after the tag as `8cf6eb3`
+
+**Version choice.** MINOR: two `feat:` commits add the public NATS configuration
+fields `NKeySeed`, `Token`, `Username`, and `Password`, with environment
+fallbacks in `bonnie.WithNATS`.
+
+**Verified from the artifact.** The downloaded CLI refuses `--sandbox none`
+by name and identifies Landlock and Local as the alternatives. Authentication
+is covered by automated real-broker tests, not a live-model run from the
+artifact. This release did not run the integration-tag live-model tests or
+execute the arm64 binary. Authentication does not make Core NATS durable or
+JetStream execution exactly once, and workers still do not share run state.
 
 ### `v0.11.0`, 2026-10-06 — every box confirmed
 
