@@ -96,6 +96,39 @@ edited to the required form.
 | `v0.9.0` | `fb23879` | 2026-09-25 |
 | `v0.9.1` | `779289a` | 2026-09-29 |
 | `v0.10.0` | `4540d6f` | 2026-10-05 |
+| `v0.11.0` | `6ec5953` | 2026-10-06 |
+
+### `v0.11.0`, 2026-10-06 — every box confirmed
+
+- [x] `task release-check` — 1 config validated
+- [x] `task release-snapshot` — linux amd64 and arm64, archives and checksums;
+      the amd64 binary prints `bonnie 0.10.0-SNAPSHOT-6ec5953`, not `dev`
+- [x] No `replace` directive in the framework or example modules; Kit stays
+      at `v0.120.0`
+- [x] All CI jobs green on `master` at the tagged commit `6ec5953`:
+      `test`, `examples`, and `lint` (run `37444905068`)
+- [x] `CHANGELOG.md` has a dated `[0.11.0]` section in Keep-a-Changelog shape;
+      `task release-notes TAG=v0.11.0` passes
+- [x] Published notes state the three claims and the current README limits,
+      including NATS delivery and worker-state limits. The notes match the
+      changelog section except for trailing blank lines
+- [x] Annotated tag pushed; `release.yml` run `37445426894` succeeded
+- [x] Three artifacts published; both downloaded archive checksums verify.
+      The downloaded linux amd64 binary prints `bonnie 0.11.0` and is
+      statically linked
+- [x] Both examples pin `v0.11.0`; `task examples` and `task check` pass.
+      The pin is committed after the tag as `38b6ebb`
+
+**Version choice.** MINOR: two `feat:` commits add Core NATS and JetStream
+channels, `bonnie.WithNATS`, `channel.Lifecycle`, public task and result
+wire types, a typed `client/nats`, and stable consumer-name helpers.
+
+**Verified from the artifact.** The downloaded CLI refuses `--sandbox none`
+by name and identifies Landlock and Local as the alternatives. The real-broker
+NATS tests ran in the local quality checks. This release did not run the
+integration-tag live-model tests or prove NATS execution from the downloaded
+CLI. JetStream delivery is at least once, not exactly once; another worker
+can execute a task again, and a waiting run needs its original worker state.
 
 ### `v0.10.0`, 2026-10-05 — every box confirmed
 
