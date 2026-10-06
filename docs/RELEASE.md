@@ -99,6 +99,43 @@ edited to the required form.
 | `v0.11.0` | `6ec5953` | 2026-10-06 |
 | `v0.12.0` | `dc1ee27` | 2026-10-06 |
 | `v0.13.0` | `a5eaa8a` | 2026-10-06 |
+| `v0.14.0` | `98b9620` | 2026-10-06 |
+
+### `v0.14.0`, 2026-10-06 — every box confirmed
+
+- [x] `task release-check` — 1 config validated
+- [x] `task release-snapshot` — linux amd64 and arm64, archives and checksums;
+      both checksums verify. The statically linked amd64 binary prints
+      `bonnie 0.13.0-SNAPSHOT-98b9620`, not `dev`
+- [x] No `replace` directive in the framework or example modules; Kit stays
+      at `v0.120.0`
+- [x] All CI jobs green on `master` at the tagged commit `98b9620`:
+      `test`, `examples`, and `lint` (run `37491892717`)
+- [x] `CHANGELOG.md` has a dated `[0.14.0]` section in Keep-a-Changelog shape;
+      release-note extraction passes, and the `[Unreleased]` heading is removed
+- [x] Published notes state the three claims and the current README limits,
+      including status delivery, worker controls, and independent stream ordering.
+      The notes match the changelog section except for trailing blank lines
+- [x] Annotated tag pushed after human confirmation; `release.yml` run
+      `37492722109` succeeded
+- [x] Three artifacts published; both downloaded archive checksums verify.
+      The downloaded linux amd64 binary prints `bonnie 0.14.0` and is
+      statically linked
+- [x] Both examples pin `v0.14.0`; `task examples` and `task check` pass.
+      The pin is committed after the tag as `bb92c30`
+
+**Version choice.** MINOR: the `feat:` commit adds public NATS channel and
+client configuration fields, status and control types, subject and stream
+helpers, and client methods for durable statuses, queries, and cancellation.
+Existing explicit-subject configurations remain supported.
+
+**Verified from the artifact.** The downloaded CLI refuses `--sandbox none`
+by name and identifies Landlock and Local as the alternatives. NATS status and
+control behaviour has automated tests; this release did not prove it with a
+live model from the artifact. It did not run integration-tag live-model tests
+or execute the arm64 binary. Status delivery is at least once. Queries and
+cancellation are request/reply, not durable queued commands. Workers do not
+share run state, and cancellation does not undo external effects.
 
 ### `v0.13.0`, 2026-10-06 — every box confirmed
 
