@@ -78,11 +78,15 @@ func TestKitDiscoversNothingOnTheHost(t *testing.T) {
 		if err != nil {
 			t.Fatalf("build agent: %v", err)
 		}
-		k, ok := ag.(*kit.Kit)
+		wrapped, ok := ag.(*agentWithSandboxClose)
 		if !ok {
-			t.Fatalf("agent is %T, want *kit.Kit", ag)
+			t.Fatalf("agent is %T, want sandbox lifecycle wrapper", ag)
 		}
-		t.Cleanup(func() { _ = k.Close() })
+		k, ok := wrapped.Agent.(*kit.Kit)
+		if !ok {
+			t.Fatalf("wrapped agent is %T, want *kit.Kit", wrapped.Agent)
+		}
+		t.Cleanup(func() { _ = wrapped.Close() })
 		if _, err := k.PromptResult(ctx, "hi"); err != nil {
 			t.Fatalf("PromptResult: %v", err)
 		}

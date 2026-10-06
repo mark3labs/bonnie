@@ -141,6 +141,9 @@ func (a *Agent) Run(ctx context.Context) (runErr error) {
 	if err != nil {
 		return err
 	}
+	if c.persistentSet {
+		workspace = ""
+	}
 
 	// A built binary has no tree beside it, so the workspace seed files come
 	// from the copies codegen embedded. Seeding never overwrites: a file the
@@ -438,7 +441,8 @@ func unpackSkills(files fs.FS, dest string) (string, error) {
 // jail.
 //
 // workspace, when set, is the seed mirrored into [sandbox.Workspace] — never
-// a working directory for host tools, which no longer exist.
+// a working directory for host tools, which no longer exist. An explicitly
+// selected persistent workspace instead configures a Landlock or Local provider.
 func (c *config) agentFactory(ctx context.Context, workspace string, opts []kit.Option) (runtime.AgentFactory, error) {
 	if c.factory != nil {
 		if conflict := c.agentConflicts(); conflict != "" {
@@ -448,6 +452,37 @@ func (c *config) agentFactory(ctx context.Context, workspace string, opts []kit.
 	}
 
 	provider := c.sandbox
+	if c.persistentSet {
+		if c.persistentWorkspace == "" {
+			return nil, fmt.Errorf("bonnie: WithPersistentWorkspace requires a non-empty directory")
+		}
+		if c.workspaceSet {
+			return nil, fmt.Errorf("bonnie: WithPersistentWorkspace cannot be combined with WithWorkspace")
+		}
+		if provider == nil {
+			provider = c.defaultSandbox()
+		}
+		switch p := provider.(type) {
+		case *sandbox.LocalProvider:
+			abs, err := filepath.Abs(c.persistentWorkspace)
+			if err != nil {
+				return nil, fmt.Errorf("bonnie: persistent workspace path: %w", err)
+			}
+			if err := p.UseSharedWorkspace(abs); err != nil {
+				return nil, err
+			}
+		case *sandbox.LandlockProvider:
+			abs, err := filepath.Abs(c.persistentWorkspace)
+			if err != nil {
+				return nil, fmt.Errorf("bonnie: persistent workspace path: %w", err)
+			}
+			if err := p.UseSharedWorkspace(abs); err != nil {
+				return nil, err
+			}
+		default:
+			return nil, fmt.Errorf("bonnie: WithPersistentWorkspace supports sandbox.Landlock and sandbox.Local, not %s", provider.Name())
+		}
+	}
 	if provider == nil {
 		provider = c.defaultSandbox()
 	}
@@ -507,6 +542,8 @@ func (c *config) agentConflicts() string {
 		return "WithKit"
 	case c.noHumanInput:
 		return "WithoutHumanInput"
+	case c.persistentSet:
+		return "WithPersistentWorkspace"
 	}
 	return ""
 }
@@ -634,7 +671,9 @@ func (c *config) banner(addr, workspace, skills string, dotenv bool) {
 		line("sandbox", c.defaultSandbox().Name()+" (default)")
 	}
 	line("network", networkLabel(c.network))
-	if workspace != "" {
+	if c.persistentSet {
+		line("workspace", c.persistentWorkspace+" (shared)")
+	} else if workspace != "" {
 		line("workspace", workspace)
 	}
 	if skills != "" {

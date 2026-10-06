@@ -7,6 +7,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/mark3labs/bonnie/internal/fakemodel"
 	"github.com/mark3labs/bonnie/runtime"
 
 	kit "github.com/mark3labs/kit/pkg/kit"
@@ -86,6 +87,37 @@ func (s *stubSandbox) Close() error {
 }
 
 var _ Sandbox = (*stubSandbox)(nil)
+
+// TestSharedLocalWorkspaceReleasedAtEndOfRunnerTurn checks that closing the
+// per-turn agent releases the shared workspace for the next run.
+func TestSharedLocalWorkspaceReleasedAtEndOfRunnerTurn(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	p := Local(WithLocalRoot(root), WithLocalSharedWorkspace(), WithLocalCleanup())
+	model := fakemodel.New(
+		fakemodel.Call("write_file", `{"path":"memory.txt","content":"remember me"}`),
+		fakemodel.Say("written"),
+		fakemodel.Call("read_file", `{"path":"memory.txt"}`),
+		fakemodel.Say("read"),
+	)
+	factory := Agent(p, model.Option(), func(o *kit.Options) {
+		o.SkipConfig, o.NoContextFiles, o.NoSkills, o.NoExtensions, o.NoAgents, o.Quiet = true, true, true, true, true, true
+	})
+	journal := runtime.NewMemoryJournal()
+	runner := runtime.NewRunner(journal, factory)
+	for i, id := range []string{"shared-first", "shared-second"} {
+		run, err := runner.Start(ctx, id, runtime.Input{Text: "do it"})
+		if err != nil {
+			t.Fatalf("run %d: %v", i+1, err)
+		}
+		if run.State != runtime.RunCompleted {
+			t.Fatalf("run %d state = %s", i+1, run.State)
+		}
+	}
+	if reqs := model.Requests(); len(reqs) != 4 {
+		t.Fatalf("model requests = %d, want 4", len(reqs))
+	}
+}
 
 // TestLazyOpenerJournalsTheOpen covers the record that makes a run's
 // workspace findable: the first open writes one sandbox record, and the

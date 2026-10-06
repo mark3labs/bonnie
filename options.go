@@ -35,27 +35,30 @@ type ChannelFunc func(*runtime.Runner) (Channel, error)
 // config is the resolved configuration of one [Agent]. Every field has a
 // default from the scaffolded layout; an [Option] replaces one.
 type config struct {
-	addr           string
-	name           string
-	journal        string
-	model          string
-	prompt         string
-	instrPath      string
-	skillsPath     string
-	workspace      string
-	sandbox        sandbox.Provider
-	sandboxEnv     map[string]string
-	network        *sandbox.NetworkPolicy
-	tools          []kit.Tool
-	kitOpts        []kit.Option
-	channels       []ChannelFunc
-	factory        runtime.AgentFactory
-	shutdown       time.Duration
-	listener       net.Listener
-	activityLogger runtime.ActivityLogger
-	quiet          bool
-	noHumanInput   bool
-	auth           bonniehttp.Authenticator
+	addr                string
+	name                string
+	journal             string
+	model               string
+	prompt              string
+	instrPath           string
+	skillsPath          string
+	workspace           string
+	workspaceSet        bool
+	persistentWorkspace string
+	persistentSet       bool
+	sandbox             sandbox.Provider
+	sandboxEnv          map[string]string
+	network             *sandbox.NetworkPolicy
+	tools               []kit.Tool
+	kitOpts             []kit.Option
+	channels            []ChannelFunc
+	factory             runtime.AgentFactory
+	shutdown            time.Duration
+	listener            net.Listener
+	activityLogger      runtime.ActivityLogger
+	quiet               bool
+	noHumanInput        bool
+	auth                bonniehttp.Authenticator
 }
 
 // Option configures [New]. This is where a setting that is not a
@@ -143,7 +146,18 @@ func WithSkills(dir string) Option {
 // sandbox workspace. An empty dir disables seeding; it does not give tools
 // access to the process directory or disable the sandbox.
 func WithWorkspace(dir string) Option {
-	return func(c *config) { c.workspace = dir }
+	return func(c *config) { c.workspace, c.workspaceSet = dir, true }
+}
+
+// WithPersistentWorkspace selects one host directory for every run instead of
+// creating an isolated workspace per run. The default Landlock provider keeps
+// filesystem confinement. Explicit Landlock and Local providers are supported;
+// Local provides no filesystem isolation. Other providers are rejected.
+// Overlapping opens through one provider are rejected. Separate processes and
+// provider instances are not coordinated. The directory is never removed by
+// run pruning. This option cannot be combined with [WithWorkspace].
+func WithPersistentWorkspace(dir string) Option {
+	return func(c *config) { c.persistentWorkspace, c.persistentSet = dir, true }
 }
 
 // WithSandbox selects the backend every tool call runs in.

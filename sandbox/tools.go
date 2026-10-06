@@ -27,6 +27,13 @@ type Opener func(ctx context.Context) (Sandbox, error)
 // open one sandbox at a time; a caller can cancel while it waits. A run that
 // never calls a sandbox tool never starts a container.
 func LazyOpener(p Provider, s *runtime.Session) Opener {
+	open, _ := lazyOpener(p, s)
+	return open
+}
+
+// lazyOpener also returns a cleanup hook for the per-turn agent. Cleanup only
+// closes a handle that was actually opened; it never forces lazy startup.
+func lazyOpener(p Provider, s *runtime.Session) (Opener, func() error) {
 	var (
 		sb       Sandbox
 		recorded bool
@@ -35,7 +42,7 @@ func LazyOpener(p Provider, s *runtime.Session) Opener {
 	// a mutex, it lets a waiting caller stop when its context is canceled.
 	gate := make(chan struct{}, 1)
 	runID := s.RunID()
-	return func(ctx context.Context) (Sandbox, error) {
+	open := func(ctx context.Context) (Sandbox, error) {
 		select {
 		case gate <- struct{}{}:
 			defer func() { <-gate }()
@@ -70,6 +77,15 @@ func LazyOpener(p Provider, s *runtime.Session) Opener {
 		}
 		return sb, nil
 	}
+	close := func() error {
+		gate <- struct{}{}
+		defer func() { <-gate }()
+		if sb == nil {
+			return nil
+		}
+		return sb.Close()
+	}
+	return open, close
 }
 
 // Tools returns the model-facing tools that work inside a sandbox: bash,

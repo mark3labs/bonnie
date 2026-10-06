@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add `WithPersistentWorkspace` for one shared development directory with
+  Landlock or Local. Keep Landlock confinement by default, reject overlapping
+  opens through one provider, and preserve shared files during run pruning.
+  Isolated per-run workspaces remain the default.
 - Add `WithoutHumanInput` to omit the built-in `ask_human` and
   `request_approval` tools. Both remain enabled by default. Sandbox permissions
   and caller-supplied tools do not change. Low-level hosts can use

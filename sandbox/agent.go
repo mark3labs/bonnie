@@ -8,6 +8,22 @@ import (
 	kit "github.com/mark3labs/kit/pkg/kit"
 )
 
+// agentWithSandboxClose lets Runner's per-turn Agent.Close release a lazily
+// opened sandbox. Embedding forwards other runtime.Agent methods unchanged.
+type agentWithSandboxClose struct {
+	runtime.Agent
+	closeSandbox func() error
+}
+
+func (a *agentWithSandboxClose) Close() error {
+	agentErr := a.Agent.Close()
+	sandboxErr := a.closeSandbox()
+	if agentErr != nil {
+		return agentErr
+	}
+	return sandboxErr
+}
+
 // Agent returns a [runtime.AgentFactory] whose tools run inside a sandbox.
 //
 // It replaces Kit's core tools with the sandboxed set, so the model gets a
@@ -46,8 +62,12 @@ func agent(p Provider, build func(...kit.Option) runtime.AgentFactory, opts ...k
 			return nil, err
 		}
 
-		open := LazyOpener(p, s)
-		return build(append(sandboxedKitOptions(open, promptWorkingDir(p, s.RunID())), opts...)...)(ctx, s)
+		open, closeSandbox := lazyOpener(p, s)
+		a, err := build(append(sandboxedKitOptions(open, promptWorkingDir(p, s.RunID())), opts...)...)(ctx, s)
+		if err != nil {
+			return nil, err
+		}
+		return &agentWithSandboxClose{Agent: a, closeSandbox: closeSandbox}, nil
 	}
 }
 

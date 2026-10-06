@@ -98,7 +98,9 @@ var deviceFiles = []string{
 // survives that exec and is inherited by every descendant, so a subshell
 // cannot escape what its parent accepted.
 type LandlockProvider struct {
-	root string
+	root         string
+	shared       bool
+	sharedActive bool
 
 	mu      sync.Mutex
 	opened  map[string]*landlockSandbox
@@ -114,6 +116,21 @@ type LandlockOption func(*LandlockProvider)
 // default is ".bonnie/workspaces".
 func WithLandlockRoot(dir string) LandlockOption {
 	return func(p *LandlockProvider) { p.root = dir }
+}
+
+// UseSharedWorkspace configures one exact host directory as the shared workspace.
+// Shared runs cannot overlap and shared data is never removed by sandbox cleanup.
+func (p *LandlockProvider) UseSharedWorkspace(dir string) error {
+	if dir == "" {
+		return fmt.Errorf("bonnie: sandbox: shared workspace path is empty")
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.opened) != 0 {
+		return fmt.Errorf("bonnie: sandbox: cannot enable shared workspace after opening a run")
+	}
+	p.root, p.shared, p.cleanup = dir, true, false
+	return nil
 }
 
 // WithLandlockCleanup removes a run's workspace when its sandbox is deleted.
@@ -159,10 +176,21 @@ func (p *LandlockProvider) Open(_ context.Context, runID string) (Sandbox, error
 		return sb, nil
 	}
 
-	if err := refuseUncheckedLegacy(p.root, runID); err != nil {
-		return nil, err
+	if p.shared && p.sharedActive {
+		return nil, fmt.Errorf("bonnie: sandbox: shared workspace is already in use")
 	}
-	dir, err := filepath.Abs(filepath.Join(p.root, safeName("", runID)))
+	if !p.shared {
+		if err := refuseUncheckedLegacy(p.root, runID); err != nil {
+			return nil, err
+		}
+	}
+	path := filepath.Join(p.root, safeName("", runID))
+	name := safeName("", runID)
+	if p.shared {
+		path = p.root
+		name = filepath.Base(filepath.Clean(p.root))
+	}
+	dir, err := filepath.Abs(path)
 	if err != nil {
 		return nil, fmt.Errorf("bonnie: sandbox: resolve workspace: %w", err)
 	}
@@ -174,7 +202,6 @@ func (p *LandlockProvider) Open(_ context.Context, runID string) (Sandbox, error
 		return nil, fmt.Errorf("bonnie: sandbox: open provider root: %w", err)
 	}
 	defer func() { _ = providerRoot.Close() }()
-	name := safeName("", runID)
 	if err := providerRoot.MkdirAll(name, 0o700); err != nil {
 		return nil, rootError(name, err)
 	}
@@ -186,7 +213,7 @@ func (p *LandlockProvider) Open(_ context.Context, runID string) (Sandbox, error
 		return nil, rootError(name, err)
 	}
 	// Scratch has its own namespace. Run names cannot start with a dot.
-	tmpRel := filepath.Join(".scratch", name)
+	tmpRel := filepath.Join(".scratch", safeName("", runID))
 	if err := providerRoot.MkdirAll(tmpRel, 0o700); err != nil {
 		_ = root.Close()
 		return nil, rootError(tmpRel, err)
@@ -209,19 +236,24 @@ func (p *LandlockProvider) Open(_ context.Context, runID string) (Sandbox, error
 	// Keep both directory identities open for the child restriction.
 	tmp := filepath.Join(filepath.Dir(dir), tmpRel)
 
-	sb := &landlockSandbox{id: runID, dir: dir, tmp: tmp, root: root, scratch: scratch, cleanup: p.cleanup}
+	sb := &landlockSandbox{id: runID, dir: dir, tmp: tmp, root: root, scratch: scratch, cleanup: p.cleanup, release: func() { p.mu.Lock(); p.sharedActive = false; p.mu.Unlock() }}
+	if p.shared {
+		p.sharedActive = true
+	}
 	p.opened[runID] = sb
 	return sb, nil
 }
 
 // landlockSandbox is one confined host directory.
 type landlockSandbox struct {
-	id      string
-	dir     string
-	root    *os.Root
-	scratch *os.Root
-	tmp     string
-	cleanup bool
+	id       string
+	dir      string
+	root     *os.Root
+	scratch  *os.Root
+	tmp      string
+	cleanup  bool
+	release  func()
+	released bool
 
 	mu     sync.RWMutex
 	closed bool
@@ -433,11 +465,19 @@ func (s *landlockSandbox) Stop(context.Context) error { return nil }
 // Close implements [Sandbox].
 func (s *landlockSandbox) Close() error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.closed {
+		s.mu.Unlock()
 		return nil
 	}
 	s.closed = true
+	release := s.release
+	if release != nil && !s.released {
+		s.released = true
+	}
+	s.mu.Unlock()
+	if release != nil {
+		release()
+	}
 	return errors.Join(s.root.Close(), s.scratch.Close())
 }
 
@@ -477,10 +517,24 @@ func removeScratch(providerDir, name string) error {
 // SandboxExists implements [ExistenceChecker]. A workspace is a directory
 // under the provider root.
 func (p *LandlockProvider) SandboxExists(_ context.Context, runID string) (bool, error) {
-	if err := refuseUncheckedLegacy(p.root, runID); err != nil {
+	p.mu.Lock()
+	shared := p.shared
+	root := p.root
+	p.mu.Unlock()
+	if shared {
+		_, err := os.Stat(root)
+		if err == nil {
+			return true, nil
+		}
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("bonnie: sandbox: stat workspace: %w", err)
+	}
+	if err := refuseUncheckedLegacy(root, runID); err != nil {
 		return false, err
 	}
-	dir := filepath.Join(p.root, safeName("", runID))
+	dir := filepath.Join(root, safeName("", runID))
 	_, err := os.Stat(dir)
 	switch {
 	case err == nil:
@@ -494,6 +548,12 @@ func (p *LandlockProvider) SandboxExists(_ context.Context, runID string) (bool,
 
 // DeleteRun implements [RunDeleter].
 func (p *LandlockProvider) DeleteRun(_ context.Context, runID string) (bool, error) {
+	p.mu.Lock()
+	shared := p.shared
+	p.mu.Unlock()
+	if shared {
+		return false, nil
+	}
 	if err := refuseUncheckedLegacy(p.root, runID); err != nil {
 		return false, err
 	}
@@ -522,9 +582,16 @@ var (
 // directory, so that path — not [Workspace] — is what `pwd` reports and what
 // the system prompt must name.
 func (p *LandlockProvider) WorkingDir(runID string) string {
-	dir, err := filepath.Abs(filepath.Join(p.root, safeName("", runID)))
+	p.mu.Lock()
+	shared, root := p.shared, p.root
+	p.mu.Unlock()
+	path := filepath.Join(root, safeName("", runID))
+	if shared {
+		path = root
+	}
+	dir, err := filepath.Abs(path)
 	if err != nil {
-		return filepath.Join(p.root, safeName("", runID))
+		return path
 	}
 	return dir
 }

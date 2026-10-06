@@ -174,8 +174,28 @@ curl -s localhost:8080/bonnie/v1/runs -d '{"text":"What are you?"}'
 bonnie chat --addr 127.0.0.1:8080
 ```
 
-Files under `workspace/` are copied into each run's sandbox. A file that the
+Files under `workspace/` are copied into each run's isolated sandbox by default. A file that the
 model already wrote is never replaced.
+
+For a deliberate single-user development workflow, a host can opt into one
+persistent directory shared by all runs:
+
+```go
+bonnie.New(
+    bonnie.WithPersistentWorkspace("./workspace"),
+)
+```
+
+This uses the directory directly instead of copying seed files. It keeps the
+default Landlock filesystem confinement: runs share this directory, but do not
+get unrestricted host access. Explicit Landlock and Local providers are also
+supported; Local provides no isolation. Other backends are rejected.
+
+Do not combine this option with `WithWorkspace`. Overlapping workspace opens
+through the same provider are rejected, not queued. The guard does not coordinate
+separate processes or provider instances: use one server for this development
+workspace. Run pruning does not remove the shared directory. Without this option,
+the default remains isolated per-run workspaces.
 
 Files under `skills/` are the agent's skills: one `*.md` per skill, or one
 subdirectory per skill with a `SKILL.md` in it, each with YAML frontmatter

@@ -23,7 +23,9 @@ import (
 // theoretical: BONNIE's own live-model test once ran with host tools and the
 // model wrote Terraform files into the repository.
 type LocalProvider struct {
-	root string
+	root         string
+	shared       bool
+	sharedActive bool
 
 	mu      sync.Mutex
 	opened  map[string]*localSandbox
@@ -41,6 +43,28 @@ func WithLocalRoot(dir string) LocalOption {
 	return func(p *LocalProvider) { p.root = dir }
 }
 
+// WithLocalSharedWorkspace makes every run use root as the same workspace.
+// It rejects overlapping opens within this provider. Use only for development;
+// it provides no isolation and cleanup is disabled.
+func WithLocalSharedWorkspace() LocalOption {
+	return func(p *LocalProvider) { p.shared = true; p.cleanup = false }
+}
+
+// UseSharedWorkspace changes this local provider to use dir as one shared
+// workspace. It rejects an empty path. Shared runs cannot overlap.
+func (p *LocalProvider) UseSharedWorkspace(dir string) error {
+	if dir == "" {
+		return fmt.Errorf("bonnie: sandbox: shared workspace path is empty")
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.opened) != 0 {
+		return fmt.Errorf("bonnie: sandbox: cannot enable shared workspace after opening a run")
+	}
+	p.root, p.shared, p.cleanup = dir, true, false
+	return nil
+}
+
 // WithLocalCleanup removes a run's workspace when its sandbox is deleted.
 // Tests use it; a real run wants its files to survive.
 func WithLocalCleanup() LocalOption {
@@ -56,6 +80,9 @@ func Local(opts ...LocalOption) *LocalProvider {
 	}
 	for _, opt := range opts {
 		opt(p)
+	}
+	if p.shared {
+		p.cleanup = false
 	}
 	return p
 }
@@ -75,10 +102,19 @@ func (p *LocalProvider) Open(_ context.Context, runID string) (Sandbox, error) {
 		return sb, nil
 	}
 
-	if err := refuseUncheckedLegacy(p.root, runID); err != nil {
-		return nil, err
+	if p.shared && p.sharedActive {
+		return nil, fmt.Errorf("bonnie: sandbox: shared workspace is already in use")
 	}
-	dir, err := filepath.Abs(filepath.Join(p.root, safeName("", runID)))
+	if !p.shared {
+		if err := refuseUncheckedLegacy(p.root, runID); err != nil {
+			return nil, err
+		}
+	}
+	path := filepath.Join(p.root, safeName("", runID))
+	if p.shared {
+		path = p.root
+	}
+	dir, err := filepath.Abs(path)
 	if err != nil {
 		return nil, fmt.Errorf("bonnie: sandbox: resolve workspace: %w", err)
 	}
@@ -86,16 +122,21 @@ func (p *LocalProvider) Open(_ context.Context, runID string) (Sandbox, error) {
 		return nil, fmt.Errorf("bonnie: sandbox: create workspace: %w", err)
 	}
 
-	sb := &localSandbox{id: runID, dir: dir, cleanup: p.cleanup}
+	if p.shared {
+		p.sharedActive = true
+	}
+	sb := &localSandbox{id: runID, dir: dir, cleanup: p.cleanup, release: func() { p.mu.Lock(); p.sharedActive = false; p.mu.Unlock() }}
 	p.opened[runID] = sb
 	return sb, nil
 }
 
 // localSandbox is one host directory standing in for a sandbox.
 type localSandbox struct {
-	id      string
-	dir     string
-	cleanup bool
+	id       string
+	dir      string
+	cleanup  bool
+	release  func()
+	released bool
 
 	mu     sync.RWMutex
 	closed bool
@@ -194,6 +235,13 @@ func (s *localSandbox) Stop(context.Context) error { return nil }
 func (s *localSandbox) Close() error {
 	s.mu.Lock()
 	s.closed = true
+	release := s.release
+	if release != nil && !s.released {
+		s.released = true
+		s.mu.Unlock()
+		release()
+		return nil
+	}
 	s.mu.Unlock()
 	return nil
 }
@@ -216,9 +264,16 @@ func (s *localSandbox) Delete(context.Context) error {
 // directory, so that path — not [Workspace] — is what `pwd` reports and what
 // the system prompt must name.
 func (p *LocalProvider) WorkingDir(runID string) string {
-	dir, err := filepath.Abs(filepath.Join(p.root, safeName("", runID)))
+	path := filepath.Join(p.root, safeName("", runID))
+	p.mu.Lock()
+	shared := p.shared
+	p.mu.Unlock()
+	if shared {
+		path = p.root
+	}
+	dir, err := filepath.Abs(path)
 	if err != nil {
-		return filepath.Join(p.root, safeName("", runID))
+		return path
 	}
 	return dir
 }

@@ -24,9 +24,10 @@
 //
 // # One path namespace
 //
-// Every backend roots the agent's files at [Workspace]. A path means the same
-// thing whether the backend is local, Docker, or microsandbox, so a
-// conversation that resumes on a different backend still finds its files.
+// Backends normally give each run its own files at [Workspace]. The explicit
+// shared workspace mode on the local development provider is an exception: it
+// reuses one directory and must not be used for concurrent runs. A path has
+// the same meaning whether a backend is local, Docker, or microsandbox.
 package sandbox
 
 import (

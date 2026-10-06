@@ -11,7 +11,7 @@
 //
 // That is the whole default agent. Every slot in the tree has a framework
 // default, and authoring the slot replaces it: instructions.md is the system
-// prompt, workspace/ is the directory the agent's files live in, tools/ holds
+// prompt, workspace/ is the default seed copied into each isolated run, tools/ holds
 // one directory per tool, and .bonnie holds the journal. Configuration that
 // is not a file is code — an [Option] on [New]:
 //
@@ -48,8 +48,9 @@ const (
 	// DefaultInstructions is the system prompt file, relative to the tree.
 	DefaultInstructions = "instructions.md"
 
-	// DefaultWorkspace is the directory the agent's files live in: the
-	// seed directory mirrored into each run's sandbox workspace.
+	// DefaultWorkspace is the seed directory mirrored into each run's isolated
+	// sandbox workspace. Use [WithPersistentWorkspace] for explicit shared
+	// local development storage.
 	DefaultWorkspace = "workspace"
 
 	// DefaultSkills is the tree's skills directory.
