@@ -286,7 +286,19 @@ BONNIE has two tools for this. The model can call them:
 | `request_approval` | get approval before a dangerous action |
 
 `runtime.KitAgent` registers both, thus `sandbox.Agent` and `bonnie.New()`
-register them too.
+register them too by default. To omit both built-in human-input tools:
+
+```go
+bonnie.New(bonnie.WithoutHumanInput()).Serve()
+```
+
+The model decides when to call these tools; there is no automatic approval
+policy for external actions. `WithoutHumanInput` does not change sandbox
+permissions, remove caller-supplied tools, or prevent a custom tool from
+parking a run. The model can still ask questions in response text. This option
+cannot be combined with `WithAgentFactory`, which owns the agent's tools.
+Low-level hosts can use `sandbox.AgentWithoutHumanInput` or
+`runtime.KitAgentWithoutHumanInput`.
 
 ```go
 runner := runtime.NewRunner(journal, sandbox.Agent(

@@ -73,6 +73,18 @@ type AgentFactory func(ctx context.Context, s *Session) (Agent, error)
 // later replacement would leave a stray Kit session file behind on every run.
 // Passing SessionManager up front means Kit never creates one.
 func KitAgent(opts ...kit.Option) AgentFactory {
+	return kitAgent(true, opts...)
+}
+
+// KitAgentWithoutHumanInput is [KitAgent] without BONNIE's ask_human and
+// request_approval tools. It does not remove caller-supplied tools or prevent
+// a custom tool from suspending a run. The host must provide isolation, as
+// described by [KitAgent].
+func KitAgentWithoutHumanInput(opts ...kit.Option) AgentFactory {
+	return kitAgent(false, opts...)
+}
+
+func kitAgent(humanInput bool, opts ...kit.Option) AgentFactory {
 	return func(ctx context.Context, s *Session) (Agent, error) {
 		streaming := true
 		o := &kit.Options{Streaming: &streaming}
@@ -82,7 +94,9 @@ func KitAgent(opts ...kit.Option) AgentFactory {
 
 		// BONNIE owns persistence. Kit must not open a session of its own.
 		o.SessionManager = s
-		o.ExtraTools = append(o.ExtraTools, AskTool(), ApprovalTool())
+		if humanInput {
+			o.ExtraTools = append(o.ExtraTools, AskTool(), ApprovalTool())
+		}
 
 		k, err := kit.New(ctx, o)
 		if err != nil {

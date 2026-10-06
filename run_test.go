@@ -273,6 +273,7 @@ func TestAgentFactoryRefusesConflictingOptions(t *testing.T) {
 			return kit.TextResult(""), nil
 		}))},
 		{"WithKit", WithKit(kit.WithModel("anthropic/claude-sonnet-4-5"))},
+		{"WithoutHumanInput", WithoutHumanInput()},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

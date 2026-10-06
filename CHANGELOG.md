@@ -9,10 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add `WithoutHumanInput` to omit the built-in `ask_human` and
+  `request_approval` tools. Both remain enabled by default. Sandbox permissions
+  and caller-supplied tools do not change. Low-level hosts can use
+  `sandbox.AgentWithoutHumanInput` or `runtime.KitAgentWithoutHumanInput`.
 - Add opt-in activity logging for all channels through `WithActivityLogger`.
   `NewActivityLogger` uses `charmbracelet/log`, with stdout as the default
   output. Info logs report run states, tool calls, and responses; Debug logs
   include raw lifecycle payloads. Hosts can supply a `runtime.ActivityLogger`.
+
+### Fixed
+
+- Keep sandbox tools available when `WithTools` adds caller-supplied tools.
+  The extra tools now append to the sandbox tool set instead of replacing it.
 
 ## [0.12.0] — 2026-10-06
 

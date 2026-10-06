@@ -54,6 +54,7 @@ type config struct {
 	listener       net.Listener
 	activityLogger runtime.ActivityLogger
 	quiet          bool
+	noHumanInput   bool
 	auth           bonniehttp.Authenticator
 }
 
@@ -201,6 +202,15 @@ func WithTools(tools ...kit.Tool) Option {
 	return func(c *config) { c.tools = append(c.tools, tools...) }
 }
 
+// WithoutHumanInput omits BONNIE's built-in ask_human and request_approval
+// tools. Both tools are enabled by default. Sandbox permissions do not change.
+// Caller-supplied tools remain available and can still suspend a run. This
+// option does not prevent the model from asking questions in its response text.
+// It cannot be combined with [WithAgentFactory], which owns the agent's tools.
+func WithoutHumanInput() Option {
+	return func(c *config) { c.noHumanInput = true }
+}
+
 // WithKit passes Kit options through to the agent, for settings BONNIE does
 // not name itself.
 func WithKit(opts ...kit.Option) Option {
@@ -214,7 +224,7 @@ func WithKit(opts ...kit.Option) Option {
 //
 // It cannot be combined with the options that configure the agent BONNIE
 // would have built ([WithModel], [WithSystemPrompt], [WithSandbox],
-// [WithSandboxEnv], [WithNetwork], [WithTools], [WithKit]): the factory owns
+// [WithSandboxEnv], [WithNetwork], [WithTools], [WithKit], [WithoutHumanInput]): the factory owns
 // the agent, so those settings would be accepted and ignored. [Agent.Run]
 // refuses instead, naming both.
 //

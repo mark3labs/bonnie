@@ -12,8 +12,8 @@ import (
 //
 // It replaces Kit's core tools with the sandboxed set, so the model gets a
 // shell and a filesystem that are not the host's. BONNIE's own
-// human-in-the-loop tools stay, because they run in the BONNIE process and
-// never touch the sandbox.
+// human-in-the-loop tools stay by default, because they run in the BONNIE
+// process and never touch the sandbox. Use [AgentWithoutHumanInput] to omit them.
 //
 // Use it wherever [runtime.KitAgent] would go:
 //
@@ -26,6 +26,17 @@ import (
 // starts. A run that parks for human input holds no sandbox compute, and a run
 // whose model never calls a tool never starts a container.
 func Agent(p Provider, opts ...kit.Option) runtime.AgentFactory {
+	return agent(p, runtime.KitAgent, opts...)
+}
+
+// AgentWithoutHumanInput is [Agent] without BONNIE's ask_human and
+// request_approval tools. Sandbox permissions do not change. Caller-supplied
+// tools remain available and can still suspend a run.
+func AgentWithoutHumanInput(p Provider, opts ...kit.Option) runtime.AgentFactory {
+	return agent(p, runtime.KitAgentWithoutHumanInput, opts...)
+}
+
+func agent(p Provider, build func(...kit.Option) runtime.AgentFactory, opts ...kit.Option) runtime.AgentFactory {
 	return func(ctx context.Context, s *runtime.Session) (runtime.Agent, error) {
 		// A resumed run whose workspace vanished must hear it from BONNIE,
 		// not discover an empty directory mid-work. This check runs once
@@ -36,7 +47,7 @@ func Agent(p Provider, opts ...kit.Option) runtime.AgentFactory {
 		}
 
 		open := LazyOpener(p, s)
-		return runtime.KitAgent(append(sandboxedKitOptions(open, promptWorkingDir(p, s.RunID())), opts...)...)(ctx, s)
+		return build(append(sandboxedKitOptions(open, promptWorkingDir(p, s.RunID())), opts...)...)(ctx, s)
 	}
 }
 

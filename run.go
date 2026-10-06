@@ -296,7 +296,9 @@ func (c *config) kitOptions(prompt, skills string) []kit.Option {
 		o.SkillsDir, o.Skills, o.NoSkills = skills, nil, false
 	})
 	if extra := append(append([]kit.Tool{}, Registered().Tools...), c.tools...); len(extra) > 0 {
-		opts = append(opts, kit.WithExtraTools(extra...))
+		opts = append(opts, func(o *kit.Options) {
+			o.ExtraTools = append(o.ExtraTools, extra...)
+		})
 	}
 	return opts
 }
@@ -479,6 +481,9 @@ func (c *config) agentFactory(ctx context.Context, workspace string, opts []kit.
 	if workspace != "" {
 		provider = sandbox.Seeded(provider, workspace)
 	}
+	if c.noHumanInput {
+		return sandbox.AgentWithoutHumanInput(provider, opts...), nil
+	}
 	return sandbox.Agent(provider, opts...), nil
 }
 
@@ -500,6 +505,8 @@ func (c *config) agentConflicts() string {
 		return "WithTools"
 	case len(c.kitOpts) > 0:
 		return "WithKit"
+	case c.noHumanInput:
+		return "WithoutHumanInput"
 	}
 	return ""
 }
