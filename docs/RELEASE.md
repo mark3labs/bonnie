@@ -36,7 +36,7 @@ indefinitely**, **reachable over HTTP**. State the limits from the current
 - [ ] `goreleaser check` passes; the snapshot builds on every target and the
       binary prints the injected version
 - [ ] No `replace` directive is committed in `go.mod`
-- [ ] `test` and `lint` green on `master` at the tagged commit
+- [ ] `test`, `examples`, and `lint` green on `master` at the tagged commit
 - [ ] `CHANGELOG.md` carries the version's section in Keep-a-Changelog shape
 - [ ] The release notes state both the claims and the limits
 - [ ] Tag pushed and artifacts published
@@ -98,6 +98,44 @@ edited to the required form.
 | `v0.10.0` | `4540d6f` | 2026-10-05 |
 | `v0.11.0` | `6ec5953` | 2026-10-06 |
 | `v0.12.0` | `dc1ee27` | 2026-10-06 |
+| `v0.13.0` | `a5eaa8a` | 2026-10-06 |
+
+### `v0.13.0`, 2026-10-06 — every box confirmed
+
+- [x] `task release-check` — 1 config validated
+- [x] `task release-snapshot` — linux amd64 and arm64, archives and checksums;
+      both checksums verify. The statically linked amd64 binary prints
+      `bonnie 0.12.0-SNAPSHOT-a5eaa8a`, not `dev`
+- [x] No `replace` directive in the framework or example modules; Kit stays
+      at `v0.120.0`
+- [x] All CI jobs green on `master` at the tagged commit `a5eaa8a`:
+      `test`, `examples`, and `lint` (run `37472122552`)
+- [x] `CHANGELOG.md` has a dated `[0.13.0]` section in Keep-a-Changelog shape;
+      release-note extraction passes, and the `[Unreleased]` heading is removed
+- [x] Published notes state the three claims and the current README limits,
+      including cleanup, shared workspaces, completion recovery, and logging.
+      The notes match the changelog section except for trailing blank lines
+- [x] Annotated tag pushed after human confirmation; `release.yml` run
+      `37472846758` succeeded
+- [x] Three artifacts published; both downloaded archive checksums verify.
+      The downloaded linux amd64 binary prints `bonnie 0.13.0` and is
+      statically linked
+- [x] Both examples pin `v0.13.0`; `task examples` and `task check` pass.
+      The pin is committed after the tag as `2d43f5a`
+
+**Version choice.** MINOR: five `feat:` commits add managed Kit setup and
+completion checks, image reads, workspace policies, optional human-input tools,
+and activity logging. Public additions reach the root, runtime, and sandbox
+packages. The README's manual-only cleanup limit was corrected before the tag.
+
+**Verified from the artifact.** The downloaded CLI refuses `--sandbox none`
+by name and identifies Landlock and Local as the alternatives. Image replay,
+completion recovery, workspace cleanup, and shared workspace behaviour have
+automated tests; this release did not prove them with a live model from the
+artifact. It did not run integration-tag live-model tests or execute the arm64
+binary. Completion checks can repeat after interruption, and cleanup and shared
+workspace locks do not coordinate separate processes. External effects are not
+exactly once.
 
 ### `v0.12.0`, 2026-10-06 — every box confirmed
 
