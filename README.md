@@ -925,6 +925,76 @@ publication. Use broker permissions to restrict publishers and subscribers;
 message payloads do not verify identity. Run one owner for each task namespace;
 multiple ordinary subscribers each receive a copy and can repeat the work.
 
+### JetStream and the typed client
+
+Set `Stream` to enable JetStream. Leave `Consumer` empty to share tasks through
+a stable consumer derived from the task subject. Each worker must have a unique,
+stable `WorkerID` and its own journal and sandbox data. Workers do not exchange
+run state. Set `Consumer` explicitly for separate processing groups or to bind
+an existing consumer. Changing its name can replay retained tasks.
+`natschannel.DefaultConsumerName(subject)` gives the derived name for operators.
+
+```go
+bonnie.WithNATS(natschannel.Config{
+    Subject: "agents.review.tasks", AnswerSubject: "agents.review.answers",
+    ResultSubject: "agents.review.results",
+    Stream: "REVIEW-TASKS", WorkerID: "review-1",
+    CreateStream: true,
+})
+```
+
+`CreateStream` explicitly permits input stream creation. Provision a result
+stream before workers start, or use the typed client's `CreateStream` option.
+Existing streams and consumers are validated, not changed. Input streams must
+retain the task subject and `agents.review.answers.*` with limits retention.
+The worker creates or binds durable pull consumers. Answers use a separate
+consumer for each worker.
+
+The main service can use [`client/nats`](client/nats/README.md) instead of raw JSON:
+
+```go
+// nc is a caller-owned *nats.Conn.
+c, err := natsclient.New(nc, natsclient.Config{
+    TaskSubject: "agents.review.tasks", AnswerSubject: "agents.review.answers",
+    ResultSubject: "agents.review.results",
+    CreateStream: true,
+})
+if err != nil { return err }
+_, err = c.Submit(ctx, natsclient.Task{TaskID: "review-42", Text: "Review the code."})
+if err != nil { return err }
+return c.Consume(ctx, func(ctx context.Context, outcome natsclient.Outcome) error {
+    // Store the result or input request. Return an error if storage fails.
+    return storeOutcome(ctx, outcome)
+})
+```
+
+The client derives stable result stream and consumer names from `ResultSubject`.
+Override `ResultStream` for an existing stream or `ResultConsumer` for independent
+readers. The default consumer shares processing across main-service instances.
+Stream creation still requires `CreateStream: true`.
+
+Import `natsclient "github.com/mark3labs/bonnie/client/nats"`. `Submit` confirms
+broker storage, not execution. `Consume` acknowledges only after handler success.
+Call `c.Answer(ctx, outcome, responses)` for a waiting outcome; the client checks
+and selects its worker route. The service does not construct subjects or JSON.
+Raw publishers use protocol version 1; the typed client supplies it for tasks.
+
+Workers send acknowledgement progress while executing and publish a confirmed
+result before acknowledging each input. A waiting result also releases the
+input. Outcomes are saved locally so redelivery to the same worker can retry
+publication without repeating completed execution. An admitted answer can
+recover a completed or new-waiting outcome after restart. An interrupted answer
+that cannot be safely continued returns an explicit failure instead of guessing.
+Oversized outcomes return a bounded error; full run data stays in the journal.
+
+**Delivery is at least once, not exactly once.** Redelivery to another worker
+can execute the task again. Interrupted tasks start fresh attempts. Track
+`task_id`, `attempt_id`, and `run_id`, and make external effects and result
+handlers safe to repeat. Broker deduplication has a bounded window. A waiting
+run needs its original worker and stored state to answer; lost worker state
+requires a new task. Use separate task consumers for intentional agent fan-out,
+and separate result consumers for applications that each need all outcomes.
+
 ## Examples
 
 Each example is an agent tree made with `bonnie init`, run with `bonnie dev`,

@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Default the NATS client's result stream and consumer to stable names derived
+  from ResultSubject, with explicit overrides and opt-in stream creation.
+- Default the JetStream task consumer to a stable subject-derived name. Keep
+  explicit Consumer overrides for existing consumers and separate worker groups.
+- Add optional JetStream delivery with shared durable task consumers,
+  worker-specific answer routes, acknowledgement progress, and confirmed result
+  publication before input acknowledgement. Save local outcomes for publication
+  retry, and record answer admission before resume. Delivery is at least once;
+  another worker can start a new attempt with its own journal.
+- Add `client/nats` with typed Submit, Consume, and Answer operations. Confirm
+  input storage and acknowledge results only after handler success. Share the
+  versioned wire types with the channel, and validate worker answer routes.
+- Add real-broker JetStream tests and a typed-client live test with
+  `opencode/kimi-k3` and Landlock.
 - Add a Core NATS task channel and `WithNATS`. Each task ID starts an
   independent run. Results and input requests are published to a configured
   subject; explicit answers resume waiting runs. Tasks are not retained by

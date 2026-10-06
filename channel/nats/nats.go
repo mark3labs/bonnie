@@ -1,23 +1,22 @@
-// Package nats carries asynchronous tasks over Core NATS.
+// Package nats carries asynchronous tasks over Core NATS or JetStream.
 //
-// Like the GitHub adapter, this adapter has no durable delivery queue. It does
-// not use JetStream, acknowledge tasks, retry results, or promise exactly-once
-// execution. A disconnect, a full subscription buffer, or shutdown can lose a
-// message. Runs and address bindings remain in the BONNIE journal. Task IDs
-// are independent addresses. A task never answers a suspended run: only an
-// explicit Answer with the current tool-call ID can do that.
+// Core delivery and deduplication are process-local and can lose messages.
+// JetStream delivery is at least once. A completed outcome is saved in the
+// local journal before publication; input is acknowledged only after the
+// result broker acknowledges publication. An interrupted task starts a new
+// independent attempt. Redelivery to another worker with a separate journal
+// can execute again. This is not an exactly-once execution guarantee.
 //
-// Deduplication is bounded and process-local. A restart or eviction forgets
-// it. An existing durable address still rejects a repeated task. Do not reset
-// task addresses when retries must remain duplicates. Use NATS permissions to
-// restrict task and answer publishers and result subscribers; payloads do not
-// authenticate a person. All results use the configured subject, never Msg.Reply
-// or a subject supplied by a publisher.
+// Only explicit answers with the current run and tool-call IDs can resume a
+// waiting run. Use NATS permissions to restrict publishers and subscribers.
+// All results use the configured subject, never Msg.Reply or publisher input.
 package nats
 
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -47,7 +46,8 @@ type Config struct {
 	// Conn is optional. The caller owns it; Shutdown never closes it. Do not
 	// supply URL and Conn together. This channel does not change its handlers.
 	Conn *gonats.Conn
-	// Subject receives Task JSON. AnswerSubject receives Answer JSON.
+	// Subject receives Task JSON. AnswerSubject receives Answer JSON in Core
+	// mode. In JetStream it is a base; answers use base+"."+WorkerID.
 	// ResultSubject receives Result JSON. These must be distinct literal subjects.
 	Subject       string
 	AnswerSubject string
@@ -57,10 +57,25 @@ type Config struct {
 	// Buffer is the pending message limit per subscription and work queue
 	// (default 64, maximum 65536). Core NATS drops excess messages.
 	Buffer int
+	// Stream enables JetStream when nonempty. There is no separate mode flag.
+	Stream string
+	// Consumer is the shared durable task pull consumer. When empty in
+	// JetStream mode, DefaultConsumerName(Subject) supplies a stable name.
+	// Set it explicitly for separate processing groups or existing consumers.
+	// WorkerID identifies this worker and its local journal. Both must be
+	// single safe tokens.
+	Consumer string
+	WorkerID string
+	// CreateStream permits creation of the input stream, with Subject and
+	// AnswerSubject+".*". Existing streams and consumers are never changed.
+	// The operator or client must provision a stream for ResultSubject.
+	CreateStream bool
 }
 
 // Task starts one independent run. Context is journalled separately from Text.
 type Task struct {
+	// Version is 1 in JetStream. Core also accepts legacy version 0.
+	Version int      `json:"version,omitempty"`
 	TaskID  string   `json:"task_id"`
 	Text    string   `json:"text"`
 	Context []string `json:"context,omitempty"`
@@ -68,6 +83,12 @@ type Task struct {
 
 // Answer resumes a waiting task at the specified suspension.
 type Answer struct {
+	// Version is 1 in JetStream. MessageID is a stable answer identity.
+	Version   int    `json:"version,omitempty"`
+	MessageID string `json:"message_id,omitempty"`
+	// RunID and WorkerID select the waiting attempt in JetStream.
+	RunID      string                  `json:"run_id,omitempty"`
+	WorkerID   string                  `json:"worker_id,omitempty"`
 	TaskID     string                  `json:"task_id"`
 	ToolCallID string                  `json:"tool_call_id"`
 	Responses  []runtime.InputResponse `json:"responses"`
@@ -76,12 +97,20 @@ type Answer struct {
 // Result is one task outcome or a rejected message. Error is set on failure.
 // Malformed JSON can produce a result with no task_id or run_id.
 type Result struct {
-	TaskID   string                  `json:"task_id"`
-	RunID    string                  `json:"run_id,omitempty"`
-	State    runtime.RunState        `json:"state,omitempty"`
-	Response string                  `json:"response,omitempty"`
-	Suspend  *runtime.SuspendRequest `json:"suspend,omitempty"`
-	Error    string                  `json:"error,omitempty"`
+	// Version is 1 in JetStream. AttemptID identifies the independent task
+	// attempt and stays the same when an answer resumes that attempt.
+	Version   int    `json:"version,omitempty"`
+	AttemptID string `json:"attempt_id,omitempty"`
+	WorkerID  string `json:"worker_id,omitempty"`
+	// AnswerSubject is the worker route. Clients must check it against their
+	// configured answer base before publishing an answer.
+	AnswerSubject string                  `json:"answer_subject,omitempty"`
+	TaskID        string                  `json:"task_id"`
+	RunID         string                  `json:"run_id,omitempty"`
+	State         runtime.RunState        `json:"state,omitempty"`
+	Response      string                  `json:"response,omitempty"`
+	Suspend       *runtime.SuspendRequest `json:"suspend,omitempty"`
+	Error         string                  `json:"error,omitempty"`
 }
 
 // Channel implements the channel and lifecycle contracts. It can start once.
@@ -103,6 +132,8 @@ type Channel struct {
 	seen    map[string]bool
 	order   []string
 	locks   [256]sync.Mutex
+	js      gonats.JetStreamContext
+	ackWait time.Duration
 }
 
 var _ channel.Channel = (*Channel)(nil)
@@ -140,7 +171,22 @@ func New(r *runtime.Runner, cfg Config) (*Channel, error) {
 	if cfg.Concurrency < 1 || cfg.Concurrency > 1024 || cfg.Buffer < 1 || cfg.Buffer > 65536 {
 		return nil, errors.New("bonnie: channel/nats: invalid concurrency or buffer limit")
 	}
+	if cfg.Stream != "" && cfg.Consumer == "" {
+		cfg.Consumer = DefaultConsumerName(cfg.Subject)
+	}
+	if err := validateJetStream(cfg); err != nil {
+		return nil, err
+	}
 	return &Channel{core: chat.NewCore(r, "nats", channel.PolicyQueue), cfg: cfg, seen: make(map[string]bool)}, nil
+}
+
+// DefaultConsumerName returns the stable task consumer name for a subject.
+// It uses "bonnie-" and the full SHA-256 digest of the exact subject. Workers
+// on the same stream and subject share this consumer unless Consumer is set.
+// It does not validate the subject; New performs that check.
+func DefaultConsumerName(subject string) string {
+	sum := sha256.Sum256([]byte(subject))
+	return "bonnie-" + hex.EncodeToString(sum[:])
 }
 
 func validSubject(s string) bool {
@@ -190,6 +236,13 @@ func (c *Channel) Start(ctx context.Context) error {
 		if c.cfg.Conn == nil {
 			nc.Close()
 		}
+	}
+	if c.cfg.Stream != "" {
+		if err := c.startJetStream(ctx, nc); err != nil {
+			cleanup()
+			return err
+		}
+		return nil
 	}
 	for _, subject := range []string{c.cfg.Subject, c.cfg.AnswerSubject} {
 		sub, err := nc.SubscribeSync(subject)
@@ -345,6 +398,9 @@ func (c *Channel) handle(ctx context.Context, msg *gonats.Msg) {
 		task.TaskID = answer.TaskID
 	} else {
 		err = decode(msg.Data, &task)
+	}
+	if err == nil && ((!isAnswer && task.Version != 0 && task.Version != 1) || (isAnswer && answer.Version != 0 && answer.Version != 1)) {
+		err = errors.New("unsupported version")
 	}
 	if err == nil && !validID(task.TaskID) {
 		err = errors.New("invalid task_id")

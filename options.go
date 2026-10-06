@@ -280,9 +280,10 @@ func WithHTTPAuthenticator(fn bonniehttp.Authenticator) Option {
 	return func(c *config) { c.auth = fn }
 }
 
-// WithNATS mounts an asynchronous Core NATS task channel. NATS_URL fills an
+// WithNATS mounts an asynchronous NATS task channel. NATS_URL fills an
 // empty URL unless Conn is supplied. Subjects must be configured explicitly.
-// Core NATS does not retain tasks or retry results; see channel/nats.
+// Config.Stream enables at-least-once JetStream delivery. Core NATS does not
+// retain tasks or retry results; see channel/nats.
 func WithNATS(cfg natschannel.Config) Option {
 	return WithChannel(func(r *runtime.Runner) (Channel, error) {
 		c := cfg
