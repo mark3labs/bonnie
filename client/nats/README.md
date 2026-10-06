@@ -38,11 +38,48 @@ func work(ctx context.Context, nc *gonats.Conn) error {
 }
 ```
 
+## Root subjects and statuses
+
+Set `RootSubject: "agents.review"` in both client and channel configuration to
+use the standard task, result, answer, event, command, and query subjects.
+Explicit fields override derived subjects. With a root, `CreateStream` permits
+creation of input, result, and event streams; the server must enable JetStream.
+Stream names can be overridden with InputStream (channel: Stream), ResultStream,
+and EventStream. Existing resources are never changed.
+
+```go
+c, err := bonnienats.New(nc, bonnienats.Config{
+    RootSubject: "agents.review", CreateStream: true,
+    EventConsumer: "board", // Independent application status reader.
+})
+if err != nil { return err }
+return c.ConsumeEvents(ctx, func(ctx context.Context, event bonnienats.StatusEvent) error {
+    // Save event.EventID, event.Target, event.Seq, and event.State.
+    // The handler can call c.Status(ctx, event.Target) for a snapshot.
+    return storeStatus(ctx, event)
+})
+```
+
+Status events contain acceptance and run-state changes only, not agent activity.
+Delivery is at least once. Discard duplicate EventID values and order each run by
+Seq. The worker recovers unpublished state records after restart. Events and
+results have no cross-stream ordering. Status returns the durable state, cursor,
+Active flag, and waiting suspension. A running state with Active false is not
+proof of execution. Keep worker identities and journals stable, with one live
+owner per identity. Task lookup across workers is not provided.
+
+`Cancel(ctx, target)` requests cancellation of an active turn. Check the reply's
+Error and CancelRequested fields; the cancelled state is a separate event. Idle
+and waiting runs return not-active. External effects are not undone. Status and
+Cancel use NATS request/reply, not durable command queues. A timeout does not
+prove failure. Standard `_INBOX.*` reply routes are required. Protect control
+subjects and reply inboxes with NATS permissions.
+
 ## Resources and delivery
 
-The operator or channel must create an input stream that covers `tasks` and
-`answers.*`. `CreateStream` permits creation of the result stream only. Without
-it, the result stream must exist. New creates the durable result pull consumer
+Without RootSubject, the operator or channel must create an input stream that
+covers `tasks` and `answers.*`. `CreateStream` permits creation of result and
+configured event streams. Without it, those streams must exist. New creates the durable result pull consumer
 if it does not exist. It does not change existing streams or consumers.
 
 ResultStream and ResultConsumer are optional. Their defaults are stable names

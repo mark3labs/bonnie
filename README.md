@@ -1048,6 +1048,63 @@ publication. Use broker permissions to restrict publishers and subscribers;
 message payloads do not verify identity. Run one owner for each task namespace;
 multiple ordinary subscribers each receive a copy and can repeat the work.
 
+### Root subjects and task statuses
+
+Use a root subject to enable JetStream and derive all protocol subjects:
+
+```go
+bonnie.WithNATS(natschannel.Config{
+    RootSubject: "agents.review",
+    WorkerID: "review-1",
+    CreateStream: true,
+})
+```
+
+The defaults are `<root>.tasks`, `.results`, `.events`, `.answers`, `.commands`,
+and `.queries`. Answers, commands, and queries append `.<worker_id>`. Explicit
+subject fields override individual defaults. Any literal root is valid, including
+`tasks` or `company.team.agents.review`; no wildcard or empty token is permitted.
+Root configuration creates stable input, result, and event stream names.
+`CreateStream` permits creation of all three. JetStream must be enabled on the
+server, and the connection needs stream administration permissions. Existing
+resources are validated, never changed. Without `CreateStream`, provision them
+first. Stream names can be overridden.
+
+The client uses the same root:
+
+```go
+c, err := natsclient.New(nc, natsclient.Config{
+    RootSubject: "agents.review",
+    CreateStream: true,
+})
+```
+
+`ConsumeEvents(ctx, handler)` delivers durable `task_accepted` and `run_state`
+events. State values include pending, running, waiting, completed, failed, and
+cancelled. Acceptance confirms a saved task/attempt/run mapping, not execution.
+Events contain IDs, timestamps, and journal cursors, not agent text or tool
+activity. The worker recovers unpublished states from its journal after restart.
+Delivery is at least once: discard duplicate `event_id` values and order each
+run by `seq`. Results remain on `.results` and retain responses and input requests.
+Events and results are independent streams; do not assume cross-stream ordering.
+Separate applications need separate `EventConsumer` and `ResultConsumer` names
+when each needs all messages. Stream retention limits can remove old events.
+
+Use `c.Status(ctx, event.Target)` to query an exact attempt and
+`c.Cancel(ctx, event.Target)` to request cancellation. These are worker-routed
+NATS request/reply calls, not durable queued commands. A reply's `Error` reports
+rejection; a Go error reports transport or decoding failure. `CancelRequested`
+confirms the request only. The final state arrives separately. Cancellation stops
+an active turn; waiting and finished runs return not-active. External effects
+are not undone. A timeout does not prove task failure. Keep each worker's identity
+and journal stable, and run only one live owner of that identity.
+
+Status queries include `Active`: a saved running state with `Active: false`
+indicates interruption, not current execution. Querying an unknown attempt returns
+an error. There is no global task lookup across separate worker journals. Protect
+worker routes and reply inboxes with NATS permissions. Replies use `_INBOX.*`
+subjects; custom inbox prefixes are not supported.
+
 ### JetStream and the typed client
 
 Set `Stream` to enable JetStream. Leave `Consumer` empty to share tasks through

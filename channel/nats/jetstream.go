@@ -60,6 +60,16 @@ func (c *Channel) startJetStream(ctx context.Context, nc *gonats.Conn) error {
 	if err != nil {
 		return fmt.Errorf("bonnie: channel/nats: JetStream: %w", err)
 	}
+	if c.cfg.RootSubject != "" {
+		if err := EnsureStream(ready, js, c.cfg.ResultStream, []string{c.cfg.ResultSubject}, c.cfg.CreateStream); err != nil {
+			return err
+		}
+	}
+	if c.cfg.EventSubject != "" {
+		if err := EnsureStream(ready, js, c.cfg.EventStream, []string{c.cfg.EventSubject}, c.cfg.CreateStream); err != nil {
+			return err
+		}
+	}
 	info, err := js.StreamInfo(c.cfg.Stream, gonats.Context(ready))
 	if errors.Is(err, gonats.ErrStreamNotFound) && c.cfg.CreateStream {
 		info, err = js.AddStream(&gonats.StreamConfig{Name: c.cfg.Stream, Subjects: []string{c.cfg.Subject, c.cfg.AnswerSubject + ".*"}, Storage: gonats.FileStorage}, gonats.Context(ready))
@@ -107,10 +117,31 @@ func (c *Channel) startJetStream(ctx context.Context, nc *gonats.Conn) error {
 		c.subs = append(c.subs, sub)
 	}
 	workCtx, stop := context.WithCancel(ctx)
-	c.started, c.cancel, c.conn, c.done, c.js, c.ackWait = true, stop, nc, make(chan struct{}), js, ackWait
+	c.js, c.conn = js, nc
+	if err := c.startStatusControls(workCtx, nc); err != nil {
+		stop()
+		return err
+	}
+	c.started, c.cancel, c.done, c.ackWait = true, stop, make(chan struct{}), ackWait
 	// Each worker requests one message only when it has a free execution slot.
 	// Alternate consumers so waiting answers cannot be starved by a task backlog.
 	var wg sync.WaitGroup
+	if c.cfg.EventSubject != "" {
+		wg.Go(func() {
+			ticker := time.NewTicker(100 * time.Millisecond)
+			defer ticker.Stop()
+			for {
+				if err := c.flushStatuses(workCtx); err != nil && workCtx.Err() == nil {
+					c.report("status publication failed")
+				}
+				select {
+				case <-workCtx.Done():
+					return
+				case <-ticker.C:
+				}
+			}
+		})
+	}
 	for worker := range c.cfg.Concurrency {
 		wg.Go(func() {
 			index := worker % 2
@@ -426,6 +457,12 @@ func (c *Channel) handleJetStream(ctx context.Context, msg *gonats.Msg) {
 			ref := c.core.From("js/" + result.AttemptID)
 			var runID string
 			runID, err = ref.RunID(ctx)
+			if err == nil {
+				if err := c.admitTask(ctx, result, runID); err != nil {
+					c.report("task admission save failed")
+					return
+				}
+			}
 			if err == nil {
 				run, err = c.turn(ctx, runID, func() (*runtime.Run, error) {
 					return ref.Send(ctx, task.Text, channel.SendOptions{Context: task.Context, Kind: "task", TurnPolicy: channel.PolicyQueue})

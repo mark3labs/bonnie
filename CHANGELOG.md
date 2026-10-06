@@ -5,6 +5,18 @@ All notable changes to BONNIE are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Add NATS root-subject defaults with optional subject and stream overrides.
+  Root-based stream creation provisions input, result, and status streams.
+- Add journal-backed acceptance and run-state events over JetStream, with stable
+  event identities and restart recovery. No internal agent activity is sent.
+- Add worker-routed status queries and active-turn cancellation, with typed
+  client methods and durable status consumers. Existing explicit-subject
+  configurations remain supported.
+
 ## [0.13.0] — 2026-10-06
 
 **Managed completion checks, image reads, workspace policies, and activity logs.**

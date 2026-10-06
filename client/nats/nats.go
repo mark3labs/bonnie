@@ -43,6 +43,20 @@ type Outcome = Result
 
 // Config selects literal subjects and the durable result consumer.
 type Config struct {
+	// RootSubject derives empty subjects. Explicit subjects override defaults.
+	RootSubject string
+	// EventSubject receives status-only events. Empty disables status consumption.
+	EventSubject string
+	// CommandSubject and QuerySubject select worker-routed request/reply bases.
+	CommandSubject string
+	QuerySubject   string
+	// InputStream selects the input stream for root-based provisioning.
+	InputStream string
+	// EventStream and EventConsumer select durable status resources.
+	// Empty names use stable subject-derived defaults. Separate applications
+	// need separate consumers when each must receive all statuses.
+	EventStream   string
+	EventConsumer string
 	TaskSubject   string
 	ResultSubject string
 	// AnswerSubject is a base. Answers go only to base+"."+WorkerID.
@@ -54,9 +68,8 @@ type Config struct {
 	// Clients using the same stream and consumer share result processing.
 	// Set separate consumers when applications must each receive every result.
 	ResultConsumer string
-	// CreateStream permits creation of the result stream only. The operator
-	// must provision the input stream for tasks and AnswerSubject+".*".
-	// Existing streams and consumers are never changed.
+	// CreateStream permits creation of result and event streams. With a root,
+	// it also provisions the input stream. Existing resources are never changed.
 	CreateStream bool
 }
 
@@ -70,19 +83,36 @@ type Receipt struct {
 
 // Client publishes inputs and reads durable results. It owns no connection.
 type Client struct {
-	js      gonats.JetStreamContext
-	cfg     Config
-	ackWait time.Duration
+	js           gonats.JetStreamContext
+	cfg          Config
+	ackWait      time.Duration
+	eventAckWait time.Duration
+	nc           *gonats.Conn
 }
 
 const maxMessageBytes = 1 << 20
 
 // New validates configuration and binds to JetStream. It creates a durable
-// pull consumer if absent, but creates a result stream only with CreateStream.
-// Existing resources must retain all results and use explicit acknowledgements.
+// pull consumer if absent. CreateStream permits stream creation; a root also
+// provisions inputs and statuses. Existing resources are never changed.
 func New(nc *gonats.Conn, cfg Config) (*Client, error) {
 	if nc == nil {
 		return nil, errors.New("bonnie: client/nats: connection is required")
+	}
+	s, err := protocol.ResolveSubjects(cfg.RootSubject, protocol.Subjects{Tasks: cfg.TaskSubject, Results: cfg.ResultSubject, Answers: cfg.AnswerSubject, Events: cfg.EventSubject, Commands: cfg.CommandSubject, Queries: cfg.QuerySubject})
+	if err != nil {
+		return nil, err
+	}
+	cfg.TaskSubject, cfg.ResultSubject, cfg.AnswerSubject = s.Tasks, s.Results, s.Answers
+	cfg.EventSubject, cfg.CommandSubject, cfg.QuerySubject = s.Events, s.Commands, s.Queries
+	if cfg.InputStream == "" {
+		cfg.InputStream = protocol.DefaultInputStreamName(cfg.TaskSubject)
+	}
+	if cfg.EventStream == "" && cfg.EventSubject != "" {
+		cfg.EventStream = protocol.DefaultEventStreamName(cfg.EventSubject)
+	}
+	if cfg.EventConsumer == "" && cfg.EventSubject != "" {
+		cfg.EventConsumer = DefaultEventConsumerName(cfg.EventSubject)
 	}
 	for _, s := range []string{cfg.TaskSubject, cfg.ResultSubject, cfg.AnswerSubject} {
 		if !literalSubject(s) {
@@ -98,7 +128,7 @@ func New(nc *gonats.Conn, cfg Config) (*Client, error) {
 	if cfg.ResultConsumer == "" {
 		cfg.ResultConsumer = DefaultResultConsumerName(cfg.ResultSubject)
 	}
-	if !safeToken(cfg.ResultStream) || !safeToken(cfg.ResultConsumer) {
+	if !safeToken(cfg.ResultStream) || !safeToken(cfg.ResultConsumer) || !safeToken(cfg.InputStream) || (cfg.EventSubject != "" && (!safeToken(cfg.EventStream) || !safeToken(cfg.EventConsumer))) {
 		return nil, errors.New("bonnie: client/nats: invalid stream or consumer name")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -106,6 +136,15 @@ func New(nc *gonats.Conn, cfg Config) (*Client, error) {
 	js, err := nc.JetStream()
 	if err != nil {
 		return nil, fmt.Errorf("bonnie: client/nats: JetStream: %w", err)
+	}
+	if cfg.RootSubject != "" {
+		if err := protocol.EnsureStream(ctx, js, cfg.InputStream, []string{cfg.TaskSubject, cfg.AnswerSubject + ".*"}, cfg.CreateStream); err != nil {
+			return nil, err
+		}
+	}
+	eventAckWait, err := bindEvents(ctx, js, cfg)
+	if err != nil {
+		return nil, err
 	}
 	si, err := js.StreamInfo(cfg.ResultStream, gonats.Context(ctx))
 	if errors.Is(err, gonats.ErrStreamNotFound) && cfg.CreateStream {
@@ -134,7 +173,7 @@ func New(nc *gonats.Conn, cfg Config) (*Client, error) {
 	if cc.Durable != cfg.ResultConsumer || cc.DeliverSubject != "" || cc.DeliverGroup != "" || cc.AckPolicy != gonats.AckExplicitPolicy || cc.FilterSubject != cfg.ResultSubject || len(cc.FilterSubjects) != 0 || cc.DeliverPolicy != gonats.DeliverAllPolicy || cc.ReplayPolicy != gonats.ReplayInstantPolicy || cc.AckWait < 3*time.Millisecond || cc.MaxDeliver > 0 || len(cc.BackOff) != 0 || cc.MaxAckPending < 1 || cc.HeadersOnly || cc.InactiveThreshold != 0 || (cc.MaxRequestExpires > 0 && cc.MaxRequestExpires < 250*time.Millisecond) || (cc.MaxRequestMaxBytes > 0 && cc.MaxRequestMaxBytes < maxMessageBytes) {
 		return nil, errors.New("bonnie: client/nats: incompatible result pull consumer")
 	}
-	return &Client{js: js, cfg: cfg, ackWait: cc.AckWait}, nil
+	return &Client{js: js, nc: nc, cfg: cfg, ackWait: cc.AckWait, eventAckWait: eventAckWait}, nil
 }
 
 // DefaultResultStreamName returns a stable stream name for the exact result
@@ -240,7 +279,20 @@ func (c *Client) Consume(ctx context.Context, handler func(context.Context, Outc
 	if handler == nil {
 		return errors.New("bonnie: client/nats: handler is required")
 	}
-	sub, err := c.js.PullSubscribe(c.cfg.ResultSubject, c.cfg.ResultConsumer, gonats.Bind(c.cfg.ResultStream, c.cfg.ResultConsumer))
+	return c.consume(ctx, c.cfg.ResultSubject, c.cfg.ResultStream, c.cfg.ResultConsumer, c.ackWait, func(data []byte) error {
+		var outcome Outcome
+		if err := json.Unmarshal(data, &outcome); err != nil {
+			return fmt.Errorf("bonnie: client/nats: decode result: %w", err)
+		}
+		if outcome.Version != 1 {
+			return errors.New("bonnie: client/nats: invalid result version")
+		}
+		return handler(ctx, outcome)
+	})
+}
+
+func (c *Client) consume(ctx context.Context, subject, stream, consumer string, ackWait time.Duration, handler func([]byte) error) (err error) {
+	sub, err := c.js.PullSubscribe(subject, consumer, gonats.Bind(stream, consumer))
 	if err != nil {
 		return fmt.Errorf("bonnie: client/nats: bind results: %w", err)
 	}
@@ -266,18 +318,18 @@ func (c *Client) Consume(ctx context.Context, handler func(context.Context, Outc
 			return fmt.Errorf("bonnie: client/nats: fetch results: %w", err)
 		}
 		for _, msg := range msgs {
-			if err := c.handle(ctx, msg, handler); err != nil {
+			if err := c.handleData(ctx, msg, ackWait, handler); err != nil {
 				return err
 			}
 		}
 	}
 }
 
-func (c *Client) handle(ctx context.Context, msg *gonats.Msg, handler func(context.Context, Outcome) error) error {
+func (c *Client) handleData(ctx context.Context, msg *gonats.Msg, ackWait time.Duration, handler func([]byte) error) error {
 	done := make(chan struct{})
 	heartbeat := make(chan error, 1)
 	go func() {
-		ticker := time.NewTicker(c.ackWait / 3)
+		ticker := time.NewTicker(ackWait / 3)
 		defer ticker.Stop()
 		var err error
 		defer func() { heartbeat <- err }()
@@ -295,16 +347,11 @@ func (c *Client) handle(ctx context.Context, msg *gonats.Msg, handler func(conte
 			}
 		}
 	}()
-	var outcome Outcome
 	var err error
 	if len(msg.Data) > maxMessageBytes {
-		err = errors.New("bonnie: client/nats: result exceeds message limit")
-	} else if e := json.Unmarshal(msg.Data, &outcome); e != nil {
-		err = fmt.Errorf("bonnie: client/nats: decode result: %w", e)
-	} else if outcome.Version != 1 {
-		err = errors.New("bonnie: client/nats: invalid result version")
+		err = errors.New("bonnie: client/nats: message exceeds limit")
 	} else {
-		err = handler(ctx, outcome)
+		err = handler(msg.Data)
 	}
 	close(done)
 	err = errors.Join(err, <-heartbeat, ctx.Err())

@@ -42,6 +42,17 @@ const dedupeLimit = 4096
 
 // Config sets the connection, subjects, and resource limits.
 type Config struct {
+	// RootSubject derives empty protocol subjects and enables JetStream.
+	RootSubject string
+	// EventSubject receives durable status-only events. Empty disables events.
+	EventSubject string
+	// ResultStream and EventStream override root-derived output stream names.
+	// They select provisioned streams; existing resources are never changed.
+	ResultStream string
+	EventStream  string
+	// CommandSubject and QuerySubject are worker-routed control bases.
+	CommandSubject string
+	QuerySubject   string
 	// URL is one NATS server URL. It is required unless Conn is supplied.
 	URL string
 	// Conn is optional. The caller owns it; Shutdown never closes it. Do not
@@ -80,9 +91,9 @@ type Config struct {
 	// single safe tokens.
 	Consumer string
 	WorkerID string
-	// CreateStream permits creation of the input stream, with Subject and
-	// AnswerSubject+".*". Existing streams and consumers are never changed.
-	// The operator or client must provision a stream for ResultSubject.
+	// CreateStream permits creation of the input stream. With RootSubject it
+	// also provisions result and status streams. Existing resources are never
+	// changed. Without a root, the result stream remains operator-owned.
 	CreateStream bool
 }
 
@@ -132,22 +143,23 @@ type Result struct {
 // wait; a later Shutdown can wait again. Publish failures are reported on
 // stderr without connection details and returned by Shutdown.
 type Channel struct {
-	core    *chat.Core
-	cfg     Config
-	mu      sync.Mutex
-	started bool
-	stopped bool
-	cancel  context.CancelFunc
-	done    chan struct{}
-	conn    *gonats.Conn
-	subs    []*gonats.Subscription
-	failure error
-	seenMu  sync.Mutex
-	seen    map[string]bool
-	order   []string
-	locks   [256]sync.Mutex
-	js      gonats.JetStreamContext
-	ackWait time.Duration
+	core     *chat.Core
+	cfg      Config
+	mu       sync.Mutex
+	started  bool
+	stopped  bool
+	cancel   context.CancelFunc
+	done     chan struct{}
+	conn     *gonats.Conn
+	subs     []*gonats.Subscription
+	failure  error
+	seenMu   sync.Mutex
+	seen     map[string]bool
+	order    []string
+	locks    [256]sync.Mutex
+	js       gonats.JetStreamContext
+	ackWait  time.Duration
+	statusMu sync.Mutex
 }
 
 var _ channel.Channel = (*Channel)(nil)
@@ -156,6 +168,27 @@ var _ channel.Lifecycle = (*Channel)(nil)
 
 // New validates config without connecting. Start establishes subscriptions.
 func New(r *runtime.Runner, cfg Config) (*Channel, error) {
+	s, err := ResolveSubjects(cfg.RootSubject, Subjects{Tasks: cfg.Subject, Results: cfg.ResultSubject, Answers: cfg.AnswerSubject, Events: cfg.EventSubject, Commands: cfg.CommandSubject, Queries: cfg.QuerySubject})
+	if err != nil {
+		return nil, err
+	}
+	cfg.Subject, cfg.ResultSubject, cfg.AnswerSubject = s.Tasks, s.Results, s.Answers
+	cfg.EventSubject, cfg.CommandSubject, cfg.QuerySubject = s.Events, s.Commands, s.Queries
+	if cfg.RootSubject != "" && cfg.Stream == "" {
+		cfg.Stream = DefaultInputStreamName(cfg.Subject)
+	}
+	if cfg.ResultStream == "" {
+		cfg.ResultStream = DefaultResultStreamName(cfg.ResultSubject)
+	}
+	if cfg.EventStream == "" && cfg.EventSubject != "" {
+		cfg.EventStream = DefaultEventStreamName(cfg.EventSubject)
+	}
+	if !safeToken(cfg.ResultStream) || (cfg.EventSubject != "" && !safeToken(cfg.EventStream)) {
+		return nil, errors.New("bonnie: channel/nats: invalid output stream name")
+	}
+	if cfg.Stream == "" && (cfg.EventSubject != "" || cfg.CommandSubject != "" || cfg.QuerySubject != "") {
+		return nil, errors.New("bonnie: channel/nats: status and control require JetStream")
+	}
 	if r == nil {
 		return nil, errors.New("bonnie: channel/nats: runner is required")
 	}

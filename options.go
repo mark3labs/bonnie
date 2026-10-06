@@ -333,8 +333,8 @@ func WithHTTPAuthenticator(fn bonniehttp.Authenticator) Option {
 // empty URL. NATS_NKEY_SEED, NATS_TOKEN, NATS_USERNAME, and NATS_PASSWORD fill
 // empty authentication fields. All fallbacks are skipped when Conn is supplied.
 // Set only one authentication method, including in the environment. Subjects
-// must be configured explicitly. Seeds are values, not paths.
-// Config.Stream enables at-least-once JetStream delivery. Core NATS does not
+// can be configured explicitly or derived from RootSubject. Seeds are values,
+// not paths. Config.Stream or RootSubject enables JetStream. Core NATS does not
 // retain tasks or retry results; see channel/nats.
 func WithNATS(cfg natschannel.Config) Option {
 	return WithChannel(func(r *runtime.Runner) (Channel, error) {
