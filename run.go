@@ -172,7 +172,11 @@ func (a *Agent) Run(ctx context.Context) (runErr error) {
 		}
 	}()
 
-	runner := runtime.NewRunner(journal, factory, runtime.WithActivityLogger(c.activityLogger))
+	runnerOpts := []runtime.RunnerOption{runtime.WithActivityLogger(c.activityLogger)}
+	if c.completion != nil {
+		runnerOpts = append(runnerOpts, runtime.WithCompletionLimit(c.completion.MaxContinuations))
+	}
+	runner := runtime.NewRunner(journal, factory, runnerOpts...)
 
 	// One mux carries every channel: the HTTP transport always, then
 	// whatever an option added. The others are built first so the HTTP
@@ -532,10 +536,13 @@ func (c *config) agentFactory(ctx context.Context, workspace string, opts []kit.
 	if workspace != "" {
 		provider = sandbox.Seeded(provider, workspace)
 	}
-	if c.noHumanInput {
-		return sandbox.AgentWithoutHumanInput(provider, opts...), nil
+	if c.completionDuplicate {
+		return nil, fmt.Errorf("bonnie: WithCompletionHook may only be set once")
 	}
-	return sandbox.Agent(provider, opts...), nil
+	if c.completion != nil && (c.completion.NewHook == nil || c.completion.MaxContinuations < 0) {
+		return nil, fmt.Errorf("bonnie: WithCompletionHook needs a factory and a non-negative limit")
+	}
+	return c.managedFactory(provider, opts), nil
 }
 
 // agentConflicts names the option that cannot apply beside a host-supplied
@@ -556,6 +563,10 @@ func (c *config) agentConflicts() string {
 		return "WithTools"
 	case len(c.kitOpts) > 0:
 		return "WithKit"
+	case len(c.kitSetup) > 0:
+		return "WithKitSetup"
+	case c.completion != nil:
+		return "WithCompletionHook"
 	case c.noHumanInput:
 		return "WithoutHumanInput"
 	case c.persistentSet:

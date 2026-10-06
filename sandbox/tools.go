@@ -143,7 +143,8 @@ func readFileTool(open Opener) kit.Tool {
 		Path string `json:"path" description:"File path. Relative paths resolve from /workspace."`
 	}
 	return kit.NewTool("read_file",
-		"Read a text file from the sandbox.",
+		"Read a text file or image (PNG, JPEG, GIF, WebP) from the sandbox. "+
+			"Images are returned as viewable images and resized to fit model limits.",
 		func(ctx context.Context, in input) (kit.ToolOutput, error) {
 			sb, err := open(ctx)
 			if err != nil {
@@ -152,6 +153,9 @@ func readFileTool(open Opener) kit.Tool {
 			data, err := sb.ReadFile(ctx, in.Path)
 			if err != nil {
 				return kit.ErrorResult(err.Error()), nil
+			}
+			if isImageFile(data, in.Path) {
+				return readSandboxImage(ctx, data, in.Path)
 			}
 			return kit.TextResult(truncate(string(data))), nil
 		})

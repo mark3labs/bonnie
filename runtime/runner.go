@@ -84,7 +84,18 @@ func KitAgentWithoutHumanInput(opts ...kit.Option) AgentFactory {
 	return kitAgent(false, opts...)
 }
 
-func kitAgent(humanInput bool, opts ...kit.Option) AgentFactory {
+// KitSetup configures a Kit instance after BONNIE installs its session, human
+// input tools (if enabled), and checkpoint hooks, but before the first prompt.
+// The factory calls it once per agent build. It must finish its work before it
+// returns. On error, the factory closes Kit and returns no agent.
+// On success, the caller owns the agent and must close it.
+type KitSetup func(context.Context, *kit.Kit, *Session) error
+
+// KitAgentWithSetup is [KitAgent] with a managed setup callback. humanInput
+// selects BONNIE's ask_human and request_approval tools. A nil setup does
+// nothing. Setup runs with the factory's context and restored session.
+// The host must provide isolation, as described by [KitAgent].
+func KitAgentWithSetup(humanInput bool, setup KitSetup, opts ...kit.Option) AgentFactory {
 	return func(ctx context.Context, s *Session) (Agent, error) {
 		streaming := true
 		o := &kit.Options{Streaming: &streaming}
@@ -103,8 +114,21 @@ func kitAgent(humanInput bool, opts ...kit.Option) AgentFactory {
 			return nil, fmt.Errorf("bonnie: build agent: %w", err)
 		}
 		attachCheckpoints(k, s)
+		if setup != nil {
+			if err := setup(ctx, k, s); err != nil {
+				setupErr := fmt.Errorf("bonnie: setup agent: %w", err)
+				if closeErr := k.Close(); closeErr != nil {
+					return nil, errors.Join(setupErr, fmt.Errorf("bonnie: close agent after setup failure: %w", closeErr))
+				}
+				return nil, setupErr
+			}
+		}
 		return k, nil
 	}
+}
+
+func kitAgent(humanInput bool, opts ...kit.Option) AgentFactory {
+	return KitAgentWithSetup(humanInput, nil, opts...)
 }
 
 // attachCheckpoints wires Kit's hooks to the journal. This is where durability
@@ -179,10 +203,12 @@ type Run struct {
 // by one Runner is resumed by another through the journal, which is the whole
 // point of L1.
 type Runner struct {
-	journal        Journal
-	factory        AgentFactory
-	bus            *EventBus
-	activityLogger ActivityLogger
+	journal         Journal
+	factory         AgentFactory
+	bus             *EventBus
+	activityLogger  ActivityLogger
+	completionHook  CompletionHook
+	completionLimit int
 
 	mu     sync.Mutex
 	active map[string]*activeTurn
@@ -517,7 +543,7 @@ func (r *Runner) Start(ctx context.Context, runID string, in Input) (*Run, error
 		return nil, err
 	}
 	s.SetTurnContext(in.Context)
-	return r.turn(turnCtx, act, s, in.Text, in.Files)
+	return r.turn(turnCtx, act, s, in.Text, in.Files, false)
 }
 
 // Resume delivers input to a suspended run and continues it. The run may have
@@ -552,7 +578,7 @@ func (r *Runner) Resume(ctx context.Context, runID string, responses []InputResp
 		return nil, err
 	}
 	r.bus.Publish(Event{RunID: runID, Type: EventResume, Seq: seq, Text: answer})
-	return r.turn(turnCtx, act, s, answer, nil)
+	return r.turn(turnCtx, act, s, answer, nil, true)
 }
 
 // Cancel stops the turn a run is executing now. Completed steps stay in the
@@ -635,12 +661,16 @@ func (r *Runner) Snapshot(ctx context.Context, runID string) (*Run, error) {
 }
 
 // turn runs one agent turn and classifies the outcome.
-func (r *Runner) turn(ctx context.Context, act *activeTurn, s *Session, prompt string, files []kit.LLMFilePart) (*Run, error) {
+func (r *Runner) turn(ctx context.Context, act *activeTurn, s *Session, prompt string, files []kit.LLMFilePart, resumed bool) (*Run, error) {
 	runID := s.runID
 	// Terminal bookkeeping must outlive a cancelled turn, or a cancel would
 	// leave the run stuck in "running" for ever.
 	book := context.WithoutCancel(ctx)
 
+	completion, err := r.restoreCompletion(book, s)
+	if err != nil {
+		return nil, err
+	}
 	if err := r.checkpoint(book, runID, RunRunning); err != nil {
 		return nil, err
 	}
@@ -656,18 +686,12 @@ func (r *Runner) turn(ctx context.Context, act *activeTurn, s *Session, prompt s
 	stop := forwardAgentEvents(agent, r.bus, runID)
 	defer stop()
 
-	var res *kit.TurnResult
-	if len(files) > 0 {
-		capable, ok := agent.(FileAgent)
-		if !ok {
-			if cerr := r.checkpoint(book, runID, RunFailed); cerr != nil {
-				return nil, cerr
-			}
-			return nil, fmt.Errorf("%w: %T", ErrFilesUnsupported, agent)
+	res, err := r.completionTurn(ctx, s, agent, prompt, files, completion, resumed)
+	if err == nil {
+		err = ctx.Err()
+		if err == nil && res == nil {
+			err = errors.New("bonnie: agent returned no turn result")
 		}
-		res, err = capable.PromptResultWithFiles(ctx, prompt, files)
-	} else {
-		res, err = agent.PromptResult(ctx, prompt)
 	}
 	if err != nil {
 		if cerr := ctx.Err(); cerr != nil {
@@ -676,7 +700,12 @@ func (r *Runner) turn(ctx context.Context, act *activeTurn, s *Session, prompt s
 			}
 			return &Run{ID: runID, State: RunCancelled}, nil
 		}
-		_ = r.checkpoint(book, runID, RunFailed)
+		if _, ok := errors.AsType[*completionWriteError](err); ok {
+			return &Run{ID: runID, State: RunRunning, Err: err}, err
+		}
+		if cerr := r.checkpoint(book, runID, RunFailed); cerr != nil {
+			return nil, errors.Join(err, cerr)
+		}
 		return &Run{ID: runID, State: RunFailed, Err: err}, err
 	}
 

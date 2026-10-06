@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Let sandbox `read_file` return PNG, JPEG, GIF, and WebP images to vision-capable
+  models. Use Kit's image validation and automatic resize limits. Text reads and
+  tool inputs stay unchanged. Image payloads survive journal replay.
+- Add `WithKitSetup` and `WithCompletionHook` for managed setup and completion
+  checks that share the agent's sandbox. Completion checks can request bounded
+  additional model turns before the final outcome. Add root API tests and
+  [completion API documentation](docs/completion.md), including recovery limits.
 - Add `WithRunWorkspaceCleanup` for automatic retention-based cleanup in compiled
   agents. Keep shared persistent workspaces protected, preserve run history, and
   record deletion for restart recovery. Cleanup shares the runner's turn lock.
@@ -27,6 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Forward file prompts and Kit event subscriptions through the sandbox agent
+  wrapper, including managed completion checks.
 - Use the journal's workspace root for Local and Landlock CLI pruning. Share
   cleanup receipts with the automatic cleanup service.
 - Keep sandbox tools available when `WithTools` adds caller-supplied tools.

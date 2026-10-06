@@ -53,6 +53,9 @@ type config struct {
 	network             *sandbox.NetworkPolicy
 	tools               []kit.Tool
 	kitOpts             []kit.Option
+	kitSetup            []KitSetup
+	completion          *CompletionPolicy
+	completionDuplicate bool
 	channels            []ChannelFunc
 	factory             runtime.AgentFactory
 	shutdown            time.Duration

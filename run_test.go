@@ -133,7 +133,7 @@ func TestSandboxedWorkspaceBecomesASeed(t *testing.T) {
 // its own tombstone comment teaches the next person to delete the comment.
 func TestNoHostToolsReachTheAgent(t *testing.T) {
 	t.Parallel()
-	body := sourceWithoutComments(t, "run.go")
+	body := sourceWithoutComments(t, "run.go") + sourceWithoutComments(t, "completion.go")
 
 	if strings.Contains(body, "kit.AllTools(") {
 		t.Fatal("run.go builds Kit's host core tools again: " +
@@ -148,7 +148,7 @@ func TestNoHostToolsReachTheAgent(t *testing.T) {
 		t.Fatal("run.go builds a bare Kit agent again: that is the unsandboxed " +
 			"path this change removed")
 	}
-	if !strings.Contains(body, "sandbox.Agent(provider") {
+	if !strings.Contains(body, "sandbox.AgentWithSetup(provider") || !strings.Contains(body, "c.managedFactory(provider") {
 		t.Fatal("run.go no longer wraps the agent in a sandbox: this guard reads " +
 			"a shape that is gone, so it is no longer guarding anything")
 	}

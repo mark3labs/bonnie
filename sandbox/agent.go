@@ -2,17 +2,39 @@ package sandbox
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
-	"github.com/mark3labs/bonnie/runtime"
 	kit "github.com/mark3labs/kit/pkg/kit"
+
+	"github.com/mark3labs/bonnie/runtime"
 )
 
 // agentWithSandboxClose lets Runner's per-turn Agent.Close release a lazily
-// opened sandbox. Embedding forwards other runtime.Agent methods unchanged.
+// opened sandbox. Embedding forwards runtime.Agent methods unchanged; explicit
+// methods forward the optional file and event interfaces.
 type agentWithSandboxClose struct {
 	runtime.Agent
 	closeSandbox func() error
+}
+
+var _ runtime.FileAgent = (*agentWithSandboxClose)(nil)
+
+func (a *agentWithSandboxClose) PromptResultWithFiles(ctx context.Context, prompt string, files []kit.LLMFilePart) (*kit.TurnResult, error) {
+	capable, ok := a.Agent.(runtime.FileAgent)
+	if !ok {
+		return nil, runtime.ErrFilesUnsupported
+	}
+	return capable.PromptResultWithFiles(ctx, prompt, files)
+}
+
+func (a *agentWithSandboxClose) Subscribe(listener kit.EventListener) func() {
+	if capable, ok := a.Agent.(interface {
+		Subscribe(kit.EventListener) func()
+	}); ok {
+		return capable.Subscribe(listener)
+	}
+	return func() {}
 }
 
 func (a *agentWithSandboxClose) Close() error {
@@ -42,17 +64,30 @@ func (a *agentWithSandboxClose) Close() error {
 // starts. A run that parks for human input holds no sandbox compute, and a run
 // whose model never calls a tool never starts a container.
 func Agent(p Provider, opts ...kit.Option) runtime.AgentFactory {
-	return agent(p, runtime.KitAgent, opts...)
+	return AgentWithSetup(p, true, nil, opts...)
 }
 
 // AgentWithoutHumanInput is [Agent] without BONNIE's ask_human and
 // request_approval tools. Sandbox permissions do not change. Caller-supplied
 // tools remain available and can still suspend a run.
 func AgentWithoutHumanInput(p Provider, opts ...kit.Option) runtime.AgentFactory {
-	return agent(p, runtime.KitAgentWithoutHumanInput, opts...)
+	return AgentWithSetup(p, false, nil, opts...)
 }
 
-func agent(p Provider, build func(...kit.Option) runtime.AgentFactory, opts ...kit.Option) runtime.AgentFactory {
+// AgentWithSetup is [Agent] with a managed Kit setup callback. humanInput
+// selects BONNIE's ask_human and request_approval tools. A nil setup does nothing.
+//
+// Setup runs once per agent build, after BONNIE installs the session and
+// checkpoint hooks, and before the first prompt. It receives the same lazy
+// [Opener] as the sandbox tools. Use that opener for custom execution so setup
+// and tools share one sandbox handle and one journal record. Setup does not
+// open a sandbox unless it calls the opener.
+//
+// If construction or setup fails, the factory closes any opened sandbox.
+// [runtime.KitAgentWithSetup] also closes Kit if setup fails. On success,
+// closing the returned agent closes Kit and any opened sandbox. The opener
+// must not be used after the agent is closed or setup fails.
+func AgentWithSetup(p Provider, humanInput bool, setup func(context.Context, *kit.Kit, *runtime.Session, Opener) error, opts ...kit.Option) runtime.AgentFactory {
 	return func(ctx context.Context, s *runtime.Session) (runtime.Agent, error) {
 		// A resumed run whose workspace vanished must hear it from BONNIE,
 		// not discover an empty directory mid-work. This check runs once
@@ -63,8 +98,17 @@ func agent(p Provider, build func(...kit.Option) runtime.AgentFactory, opts ...k
 		}
 
 		open, closeSandbox := lazyOpener(p, s)
-		a, err := build(append(sandboxedKitOptions(open, promptWorkingDir(p, s.RunID())), opts...)...)(ctx, s)
+		var configure runtime.KitSetup
+		if setup != nil {
+			configure = func(ctx context.Context, k *kit.Kit, s *runtime.Session) error {
+				return setup(ctx, k, s, open)
+			}
+		}
+		a, err := runtime.KitAgentWithSetup(humanInput, configure, append(sandboxedKitOptions(open, promptWorkingDir(p, s.RunID())), opts...)...)(ctx, s)
 		if err != nil {
+			if closeErr := closeSandbox(); closeErr != nil {
+				return nil, errors.Join(err, fmt.Errorf("bonnie: sandbox: close after agent construction failure: %w", closeErr))
+			}
 			return nil, err
 		}
 		return &agentWithSandboxClose{Agent: a, closeSandbox: closeSandbox}, nil
