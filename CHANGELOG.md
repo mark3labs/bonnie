@@ -5,7 +5,27 @@ All notable changes to BONNIE are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.11.0] — 2026-10-06
+
+**Asynchronous NATS tasks, JetStream delivery, and a typed NATS client.**
+This is a MINOR release because it adds public channel and client APIs.
+BONNIE remains early and experimental. No release is proven in production.
+Do not use it for work whose loss would hurt.
+
+### The claims
+
+- **A run survives process death.** Another process can restore the full
+  journalled conversation, including typed tool calls and results. SQLite
+  commits a tool-calling step as one transaction. Restore does not repeat an
+  external effect recorded in a completed step. An effect that occurs before
+  its step commits can repeat after a crash; execution is not exactly once.
+- **A run parks indefinitely.** A waiting run needs no live agent process or
+  running sandbox compute. Resume supplies the answer, also after a restart.
+  Keep its journal and sandbox data. A waiting JetStream run needs its original
+  worker and stored state; lost worker state requires a new task.
+- **A run is reachable over HTTP.** Routes under `/bonnie/v1` expose durable
+  runs, conversation snapshots, and an NDJSON event stream. The new NATS
+  transport is optional and uses the same run executor.
 
 ### Added
 
@@ -27,10 +47,90 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   independent run. Results and input requests are published to a configured
   subject; explicit answers resume waiting runs. Tasks are not retained by
   Core NATS, and result publication has no durable retry queue.
-- Add optional channel lifecycle support for non-HTTP transports, with startup
-  failure cleanup and bounded shutdown before the journal closes.
+- Add `channel.Lifecycle` with Start and Shutdown for non-HTTP transports.
+  Start channels after binding the HTTP listener. Clean up constructed channels
+  on startup failure and use bounded shutdown before the journal closes.
 - Add local NATS end-to-end tests and an integration-tag live test with
   `opencode/kimi-k3` and Landlock.
+- Export `channel/nats` configuration, task, answer, result, and channel APIs,
+  `DefaultConsumerName`, and `bonnie.WithNATS`. `NATS_URL` supplies an unset URL.
+- Export the JetStream-only `client/nats` configuration and client APIs,
+  shared wire type aliases, and default result stream and consumer name helpers.
+
+### Changed
+
+- Add NATS Go client v1.47.0 and the test broker v2.12.0 as module dependencies.
+  The Kit minimum stays at v0.120.0.
+- Report journal and channel shutdown errors from `Agent.Run`. Close the
+  listener on startup failure and close active HTTP connections if graceful
+  shutdown reaches its deadline.
+
+### Known limits
+
+These limits come from the current `README.md`, including its NATS section.
+
+- **Linux only.** Releases support linux/amd64 and linux/arm64, not macOS or
+  Windows. The default needs kernel 5.13 or newer with Landlock enabled.
+  Without Landlock, BONNIE refuses to start; select `--sandbox docker` instead.
+- **The default sandbox is containment, not isolation.** Landlock confines
+  filesystem access, not the network, and shares the host kernel.
+- **Do not run BONNIE as a user in the `docker` group.** Landlock does not
+  prevent a connection to `/var/run/docker.sock`. Access to that socket permits
+  a full host escape. Use an unprivileged user, or microsandbox.
+- **Docker is namespaces, not a kernel.** Use microsandbox for hostile code.
+  microsandbox is verified on Linux with KVM. Its network policy is fixed at
+  creation; a different policy on reattachment returns `ErrPolicyMismatch`.
+- **Sandbox egress is open** until a policy is set. The default backend cannot
+  enforce one and refuses it instead of ignoring it.
+- **A halt stops the turn, not the step.** A tool called in the same step as
+  `request_approval` or another halting tool still runs before the run parks.
+  Approval gates the next step, not a sibling call.
+- **A skill's bundled files stay on the host.** Activation names `scripts/`,
+  `references/`, and `assets/` through host paths that sandbox tools cannot
+  open. Put required text in the skill body and required files in `workspace/`.
+- **The HTTP channel verifies a caller only when configured.**
+  `http.WithAuthenticator` or `bonnie.WithHTTPAuthenticator` checks every
+  route except health. Without it, authenticate in front of BONNIE;
+  `operation_id` is refused. Chat webhooks verify the platform, not the person,
+  and each adapter refuses to serve without its verification credential.
+- **Run ownership is per host.** The journal does not refuse a second writer.
+  SQLite protects transaction integrity, not turn coordination. Two servers
+  executing one run can interleave the conversation. Network filesystems are
+  unsafe because SQLite needs working POSIX locks.
+- **Events are journal-anchored.** Reconnects can replay durable events after a
+  restart. Live-only deltas are marked and are not replayed.
+- **Sandbox lifecycle is journalled, and reclamation is manual.**
+  `bonnie sandbox prune` deletes sandboxes of finished runs. `serve` does not
+  sweep them.
+- **Agent authoring needs Go and public module access.** Scaffolds resolve
+  BONNIE and Kit from the public proxy without `GOPRIVATE`. The static agent
+  binary needs neither Go nor BONNIE installed on its destination host, but
+  the selected sandbox backend can need its own runtime.
+- **Cancellation is not process isolation.** Local and Landlock stop a Unix
+  process group. A child that starts a new session can escape that group.
+- **An interrupted HTTP operation needs explicit recovery.** A pending
+  operation left by a crash does not automatically execute again; recover it
+  through the run API. `address` and `operation_id` cannot be combined.
+- **Core NATS can lose tasks and results.** Offline subscribers, buffer overflow,
+  and process failure can lose delivery. There is no automatic retry of
+  interrupted tasks or result publication. Use one owner per task namespace;
+  ordinary subscribers each receive a copy and can repeat the work.
+- **NATS payloads do not verify identity.** Use broker permissions to restrict
+  publishers, subscribers, and stream administration. Answer route validation
+  does not authenticate a worker.
+- **JetStream delivery is at least once, not exactly once.** Redelivery to
+  another worker can execute a task again. Interrupted tasks start fresh
+  attempts. Broker deduplication has a bounded window. Make external effects
+  and result handlers safe to repeat, and track task, attempt, and run IDs.
+- **JetStream workers do not share run state.** Each needs a unique, stable
+  WorkerID and its own journal and sandbox data. A waiting run needs its
+  original worker to answer. Changing consumer names can replay retained
+  tasks or results. Shared consumers divide work; separate consumers are
+  required for applications that each need all outcomes.
+- **A publish receipt confirms broker storage, not execution.** Provision the
+  required streams, or explicitly permit their creation. Existing streams
+  and consumers are not changed. The result handler must select its task IDs
+  and respect cancellation. Invalid messages need operator correction.
 
 ## [0.10.0] — 2026-10-05
 
