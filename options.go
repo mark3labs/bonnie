@@ -46,6 +46,8 @@ type config struct {
 	workspaceSet        bool
 	persistentWorkspace string
 	persistentSet       bool
+	workspaceCleanup    *WorkspaceCleanupPolicy
+	cleanupProvider     sandbox.RunDeleter
 	sandbox             sandbox.Provider
 	sandboxEnv          map[string]string
 	network             *sandbox.NetworkPolicy
@@ -147,6 +149,25 @@ func WithSkills(dir string) Option {
 // access to the process directory or disable the sandbox.
 func WithWorkspace(dir string) Option {
 	return func(c *config) { c.workspace, c.workspaceSet = dir, true }
+}
+
+// WorkspaceCleanupPolicy sets retention periods for run-owned workspaces.
+// Zero keeps files for that state; positive durations permit deletion after the
+// latest terminal checkpoint. Negative durations are rejected at startup.
+// Completed runs can receive later turns; those turns start with an empty workspace
+// if cleanup has removed it. The journal and channel addresses are kept.
+//
+// Cleanup runs at startup and once per minute. One process must own the journal
+// and workspaces: separate processes are not coordinated.
+type WorkspaceCleanupPolicy = runtime.WorkspaceCleanupPolicy
+
+// WithRunWorkspaceCleanup enables automatic cleanup of run-owned workspaces.
+// It cannot be combined with WithPersistentWorkspace or WithAgentFactory.
+// The provider must implement sandbox.RunDeleter. Shared workspace modes are
+// rejected. Each deletion has a 30-second timeout; errors are logged and retried.
+// Without this option, workspaces are kept.
+func WithRunWorkspaceCleanup(policy WorkspaceCleanupPolicy) Option {
+	return func(c *config) { c.workspaceCleanup = &policy }
 }
 
 // WithPersistentWorkspace selects one host directory for every run instead of

@@ -247,6 +247,15 @@ func (a *Agent) Run(ctx context.Context) (runErr error) {
 		}
 	}
 
+	if c.workspaceCleanup != nil {
+		cleanupCtx, cancel := context.WithCancel(ctx)
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			c.cleanupLoop(cleanupCtx, runner, time.Minute)
+		}()
+		defer func() { cancel(); <-done }()
+	}
 	c.banner(ln.Addr().String(), workspace, skills, dotenv)
 	return c.serve(ctx, mux, ln)
 }
@@ -453,6 +462,9 @@ func (c *config) agentFactory(ctx context.Context, workspace string, opts []kit.
 
 	provider := c.sandbox
 	if c.persistentSet {
+		if c.workspaceCleanup != nil {
+			return nil, fmt.Errorf("bonnie: WithRunWorkspaceCleanup cannot be combined with WithPersistentWorkspace")
+		}
 		if c.persistentWorkspace == "" {
 			return nil, fmt.Errorf("bonnie: WithPersistentWorkspace requires a non-empty directory")
 		}
@@ -496,6 +508,10 @@ func (c *config) agentFactory(ctx context.Context, workspace string, opts []kit.
 		if err := net.SetNetworkPolicy(*c.network); err != nil {
 			return nil, err
 		}
+	}
+
+	if err := c.configureWorkspaceCleanup(provider); err != nil {
+		return nil, err
 	}
 
 	availCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -544,6 +560,8 @@ func (c *config) agentConflicts() string {
 		return "WithoutHumanInput"
 	case c.persistentSet:
 		return "WithPersistentWorkspace"
+	case c.workspaceCleanup != nil:
+		return "WithRunWorkspaceCleanup"
 	}
 	return ""
 }

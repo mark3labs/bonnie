@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add `WithRunWorkspaceCleanup` for automatic retention-based cleanup in compiled
+  agents. Keep shared persistent workspaces protected, preserve run history, and
+  record deletion for restart recovery. Cleanup shares the runner's turn lock.
 - Add `WithPersistentWorkspace` for one shared development directory with
   Landlock or Local. Keep Landlock confinement by default, reject overlapping
   opens through one provider, and preserve shared files during run pruning.
@@ -24,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Use the journal's workspace root for Local and Landlock CLI pruning. Share
+  cleanup receipts with the automatic cleanup service.
 - Keep sandbox tools available when `WithTools` adds caller-supplied tools.
   The extra tools now append to the sandbox tool set instead of replacing it.
 

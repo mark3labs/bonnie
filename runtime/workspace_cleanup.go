@@ -1,0 +1,135 @@
+package runtime
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"slices"
+	"time"
+)
+
+// WorkspaceCleanupPolicy sets how long to keep a workspace after the latest
+// terminal checkpoint. A zero duration keeps the workspace for that state.
+// Durations must not be negative.
+type WorkspaceCleanupPolicy struct {
+	// CompletedAfter is the retention period for completed runs.
+	CompletedAfter time.Duration
+	// FailedAfter is the retention period for failed runs.
+	FailedAfter time.Duration
+	// CancelledAfter is the retention period for cancelled runs.
+	CancelledAfter time.Duration
+	// RetiredAfter is the retention period for retired runs.
+	RetiredAfter time.Duration
+}
+
+func (p WorkspaceCleanupPolicy) retention(state RunState) time.Duration {
+	switch state {
+	case RunCompleted:
+		return p.CompletedAfter
+	case RunFailed:
+		return p.FailedAfter
+	case RunCancelled:
+		return p.CancelledAfter
+	case RunRetired:
+		return p.RetiredAfter
+	default:
+		return 0
+	}
+}
+
+// CleanupWorkspaces deletes workspaces of terminal runs whose retention period
+// has passed. It skips reserved runs and runs active on this Runner. Waiting,
+// running, and pending runs keep their workspaces.
+//
+// The delete callback receives the run ID and the caller's context. The caller
+// supplies any timeout. The callback must be safe to repeat: a crash or a failed
+// journal write after deletion can cause another call. Its bool reports whether
+// the workspace existed; either bool with a nil error means it is now absent.
+// A successful call writes RecordWorkspaceDeleted, even for an absent workspace.
+// No further deletion is attempted until a new terminal checkpoint is written.
+// History and run state do not change.
+//
+// One Runner must own all turns and cleanup for these runs. The run lock is local
+// to this Runner; it does not exclude turns on another Runner or in another
+// process. A new Runner can take ownership after the previous owner stops.
+//
+// Cleanup continues after per-run errors and returns errors.Join of those errors.
+// Failed deletions and failed journal writes are retried on the next call.
+func (r *Runner) CleanupWorkspaces(ctx context.Context, policy WorkspaceCleanupPolicy, delete func(context.Context, string) (bool, error)) error {
+	for _, d := range []time.Duration{policy.CompletedAfter, policy.FailedAfter, policy.CancelledAfter, policy.RetiredAfter} {
+		if d < 0 {
+			return errors.New("bonnie: workspace cleanup retention must not be negative")
+		}
+	}
+	if delete == nil {
+		return errors.New("bonnie: cleanup workspaces: nil delete callback")
+	}
+	runs, err := r.journal.Runs(ctx, "")
+	if err != nil {
+		return fmt.Errorf("bonnie: list runs for workspace cleanup: %w", err)
+	}
+	var errs []error
+	for _, runID := range runs {
+		if IsReservedRun(runID) {
+			continue
+		}
+		if err := ctx.Err(); err != nil {
+			errs = append(errs, err)
+			break
+		}
+		if err := r.cleanupWorkspace(ctx, runID, policy, delete); err != nil {
+			errs = append(errs, fmt.Errorf("bonnie: cleanup workspace %s: %w", runID, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (r *Runner) cleanupWorkspace(ctx context.Context, runID string, policy WorkspaceCleanupPolicy, delete func(context.Context, string) (bool, error)) error {
+	// acquire detaches the turn context from caller cancellation. Cleanup must
+	// use ctx instead, so the host can stop or bound a cleanup pass.
+	if _, _, err := r.acquire(ctx, runID); err != nil {
+		if errors.Is(err, ErrRunActive) {
+			return nil
+		}
+		return err
+	}
+	defer r.release(runID)
+
+	state, err := r.journal.State(ctx, runID)
+	if err != nil {
+		return err
+	}
+	retention := policy.retention(state)
+	if retention <= 0 {
+		return nil
+	}
+	recs, err := r.journal.Replay(ctx, runID)
+	if err != nil {
+		return err
+	}
+	// Journal order, not timestamp order, identifies the latest checkpoint.
+	// Later metadata must not extend the retention period.
+	for _, rec := range slices.Backward(recs) {
+		if rec.Kind == RecordWorkspaceDeleted {
+			return nil
+		}
+		if rec.Kind != RecordState || !rec.State.IsTerminal() {
+			continue
+		}
+		if rec.State != state || rec.Timestamp.IsZero() || now().Sub(rec.Timestamp) < retention {
+			return nil
+		}
+		if _, err := delete(ctx, runID); err != nil {
+			return err
+		}
+		// Once deletion succeeds, persist its receipt even if the caller's
+		// deadline expired. This is metadata, not a conversation tree entry.
+		receiptCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		_, err := r.journal.Append(receiptCtx, Record{
+			RunID: runID, Kind: RecordWorkspaceDeleted, Timestamp: now(),
+		})
+		return err
+	}
+	return nil
+}

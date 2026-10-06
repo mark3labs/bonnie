@@ -28,6 +28,51 @@ type RunDeleter interface {
 	DeleteRun(ctx context.Context, runID string) (existed bool, err error)
 }
 
+// RunCleanupValidator checks whether a provider's current mode supports
+// per-run cleanup. Call it before cleanup starts, even when no runs exist.
+// Shared workspaces cannot be deleted for one run without affecting others.
+type RunCleanupValidator interface {
+	ValidateRunCleanup() error
+}
+
+// ValidateRunCleanup implements [RunCleanupValidator].
+func (p *DockerProvider) ValidateRunCleanup() error { return nil }
+
+// ValidateRunCleanup implements [RunCleanupValidator].
+func (p *MicrosandboxProvider) ValidateRunCleanup() error { return nil }
+
+// ValidateRunCleanup implements [RunCleanupValidator].
+func (p *LocalProvider) ValidateRunCleanup() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.shared {
+		return fmt.Errorf("bonnie: sandbox: shared workspace does not support per-run cleanup")
+	}
+	return nil
+}
+
+// ValidateRunCleanup implements [RunCleanupValidator].
+func (p *LandlockProvider) ValidateRunCleanup() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.shared {
+		return fmt.Errorf("bonnie: sandbox: shared workspace does not support per-run cleanup")
+	}
+	return nil
+}
+
+// validateRunCleanup checks the backend capability before forwarding its mode
+// check. Wrappers expose DeleteRun even when their backend cannot delete.
+func validateRunCleanup(p Provider) error {
+	if _, ok := p.(RunDeleter); !ok {
+		return fmt.Errorf("bonnie: sandbox: the %s backend cannot delete sandboxes", p.Name())
+	}
+	if v, ok := p.(RunCleanupValidator); ok {
+		return v.ValidateRunCleanup()
+	}
+	return nil
+}
+
 // SandboxExists implements [ExistenceChecker].
 func (p *DockerProvider) SandboxExists(ctx context.Context, runID string) (bool, error) {
 	p.policyMu.RLock()

@@ -30,7 +30,7 @@ import (
 // dropped; a value may be anything, including the empty string.
 //
 // Like [Seeded], the wrapper forwards the optional provider interfaces
-// [Networked], [ExistenceChecker], [RunDeleter], [WorkingDirReporter], and
+// [Networked], [ExistenceChecker], [RunDeleter], [RunCleanupValidator], [WorkingDirReporter], and
 // [Imaged], and forwards the [Sandbox]-level [Deleter] when the backend
 // supports it, so wrapping never narrows what a caller can do with the
 // provider.
@@ -109,6 +109,12 @@ func (e *envProvider) DeleteRun(ctx context.Context, runID string) (bool, error)
 		return false, fmt.Errorf("bonnie: sandbox: the %s backend cannot delete sandboxes", e.p.Name())
 	}
 	return rd.DeleteRun(ctx, runID)
+}
+
+// ValidateRunCleanup implements [RunCleanupValidator]. It checks the wrapped
+// backend's deletion capability and forwards its mode check when present.
+func (e *envProvider) ValidateRunCleanup() error {
+	return validateRunCleanup(e.p)
 }
 
 // WorkingDir forwards to the wrapped provider so the system prompt still names

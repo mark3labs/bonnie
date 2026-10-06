@@ -77,6 +77,10 @@ const (
 	// resumed run can tell a vanished workspace from a live one, and a
 	// reconciler can find the sandboxes of terminal runs.
 	RecordSandbox RecordKind = "sandbox"
+	// RecordWorkspaceDeleted records successful workspace cleanup. It has no
+	// entry ID and does not change run state or conversation history. It
+	// prevents repeated cleanup until a later terminal RecordState.
+	RecordWorkspaceDeleted RecordKind = "workspace_deleted"
 	// RecordContext records the per-turn context a channel handed the
 	// runner with one input: facts for the model that are not conversation
 	// history — the pull-request diff a comment refers to, who sent a

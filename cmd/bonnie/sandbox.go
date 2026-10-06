@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"text/tabwriter"
 	"time"
 
@@ -31,11 +32,12 @@ func newSandboxPruneCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "prune",
 		Short: "Delete the sandboxes of runs that reached a terminal state",
+		Long:  "Delete terminal-run sandboxes. Stop the server first; cleanup does not coordinate with another process.",
 		RunE:  func(*cobra.Command, []string) error { return runSandboxPrune(o) },
 	}
 	f := cmd.Flags()
 	addJournalFlag(f, &o.journal)
-	f.StringVar(&o.kind, "sandbox", "docker", "sandbox backend the runs used: docker, microsandbox, msb, or local")
+	f.StringVar(&o.kind, "sandbox", "docker", "sandbox backend the runs used: landlock, docker, microsandbox, msb, or local")
 	f.StringVar(&o.image, "sandbox-image", "", "sandbox image, only needed to construct the backend")
 	f.BoolVar(&o.dryRun, "dry-run", false, "report what would be deleted, delete nothing")
 	return cmd
@@ -49,22 +51,26 @@ type pruneOpts struct {
 	dryRun  bool
 }
 
-// runSandboxPrune reclaims the sandboxes of terminal runs.
-//
-// Without it a long-lived `bonnie serve` accumulates containers and
-// microVMs until the disk fills: a finished run's conversation is durable,
-// but nothing recorded that its sandbox existed, so nothing deleted it.
-// The sandbox records T-012 added make this command possible — it walks the
-// journal, finds terminal runs, and asks the provider to delete each one's
-// sandbox without opening it, because opening would create.
-//
-// This is the cheap answer. The complete one is a background sweep in
-// `serve`; a command an operator can run from cron is a deliberate first
-// step, and it is the same code either way.
+// runSandboxPrune deletes terminal-run workspaces through the runtime cleanup
+// API. The runtime records successful cleanup so a later pass skips it.
+// Run this command only after the server that owns these runs has stopped:
+// the runtime run lock does not exclude another process.
 func runSandboxPrune(o pruneOpts) error {
 	provider, err := sandboxProvider(context.Background(), o.kind, o.image)
 	if err != nil {
 		return err
+	}
+	// Use the same workspace root as serving with this journal directory.
+	switch provider.Name() {
+	case "landlock":
+		provider = sandbox.Landlock(sandbox.WithLandlockRoot(filepath.Join(o.journal, "workspaces")))
+	case "local":
+		provider = sandbox.Local(sandbox.WithLocalRoot(filepath.Join(o.journal, "workspaces")))
+	}
+	if v, ok := provider.(sandbox.RunCleanupValidator); ok {
+		if err := v.ValidateRunCleanup(); err != nil {
+			return fmt.Errorf("bonnie: validate sandbox cleanup: %w", err)
+		}
 	}
 	reaper, ok := provider.(sandbox.RunDeleter)
 	if !ok {
@@ -90,6 +96,33 @@ func runSandboxPrune(o pruneOpts) error {
 	_, _ = fmt.Fprintln(tw, "RUN\tSTATE\tACTION")
 
 	reaped := 0
+	actions := make(map[string]string)
+	var cleanupErr error
+	if !o.dryRun {
+		runner := runtime.NewRunner(journal, nil)
+		// A positive retention enables every terminal state. One nanosecond
+		// makes this an immediate operator-requested cleanup pass.
+		policy := runtime.WorkspaceCleanupPolicy{
+			CompletedAfter: time.Nanosecond,
+			FailedAfter:    time.Nanosecond,
+			CancelledAfter: time.Nanosecond,
+			RetiredAfter:   time.Nanosecond,
+		}
+		cleanupErr = runner.CleanupWorkspaces(ctx, policy, func(ctx context.Context, runID string) (bool, error) {
+			existed, err := reaper.DeleteRun(ctx, runID)
+			if err != nil {
+				actions[runID] = "cleanup failed"
+				return existed, err
+			}
+			if existed {
+				reaped++
+				actions[runID] = "deleted sandbox"
+			} else {
+				actions[runID] = "no sandbox (already gone, or never opened)"
+			}
+			return existed, nil
+		})
+	}
 	for _, runID := range runIDs {
 		// BONNIE's own bookkeeping runs are not agent runs: they hold the
 		// address map, never a sandbox, and they stay out of operator
@@ -109,16 +142,11 @@ func runSandboxPrune(o pruneOpts) error {
 			_, _ = fmt.Fprintf(tw, "%s\t%s\twould delete sandbox\n", runID, state)
 			continue
 		}
-		existed, err := reaper.DeleteRun(ctx, runID)
-		if err != nil {
-			return fmt.Errorf("bonnie: delete sandbox of %s: %w", runID, err)
+		action := actions[runID]
+		if action == "" {
+			action = "kept (cleanup already recorded or not eligible)"
 		}
-		if existed {
-			reaped++
-			_, _ = fmt.Fprintf(tw, "%s\t%s\tdeleted sandbox\n", runID, state)
-		} else {
-			_, _ = fmt.Fprintf(tw, "%s\t%s\tno sandbox (already gone, or never opened)\n", runID, state)
-		}
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\n", runID, state, action)
 	}
 
 	if o.dryRun {
@@ -126,5 +154,5 @@ func runSandboxPrune(o pruneOpts) error {
 	} else {
 		fmt.Fprintf(os.Stderr, "deleted %d sandbox(es)\n", reaped)
 	}
-	return nil
+	return cleanupErr
 }

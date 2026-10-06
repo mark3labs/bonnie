@@ -197,6 +197,30 @@ separate processes or provider instances: use one server for this development
 workspace. Run pruning does not remove the shared directory. Without this option,
 the default remains isolated per-run workspaces.
 
+For one-off tasks, enable automatic cleanup of run-owned workspaces:
+
+```go
+bonnie.New(
+    bonnie.WithRunWorkspaceCleanup(bonnie.WorkspaceCleanupPolicy{
+        CompletedAfter: time.Hour,
+        RetiredAfter:   time.Hour,
+    }),
+).Serve()
+```
+
+Import `time` for these durations. This works in the compiled agent; it does not
+need the BONNIE CLI. Cleanup runs at startup and once per minute. Zero keeps the
+workspace for that state. `FailedAfter` and `CancelledAfter` can also be set.
+Pending, running, and waiting runs are never cleaned up. The journal and channel
+addresses remain. A later turn on a cleaned-up run starts without its earlier
+files, so publish task output before the run completes.
+
+Cleanup cannot be combined with `WithPersistentWorkspace`, shared provider modes,
+or `WithAgentFactory`. Negative durations and providers without deletion support
+are rejected at startup. Use one server for the journal and workspaces; cleanup
+locks do not coordinate separate processes. Each deletion has a 30-second timeout.
+Failures are logged and retried on the next sweep.
+
 Files under `skills/` are the agent's skills: one `*.md` per skill, or one
 subdirectory per skill with a `SKILL.md` in it, each with YAML frontmatter
 that gives a `name` and a `description`. Those two fields go in the system

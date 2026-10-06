@@ -25,7 +25,7 @@ const gitkeep = ".gitkeep"
 // seed and stated here so nobody mistakes it for a bug.
 //
 // The wrapper forwards the optional provider interfaces: [Networked],
-// [ExistenceChecker], [RunDeleter], [WorkingDirReporter], and [Imaged]. A
+// [ExistenceChecker], [RunDeleter], [RunCleanupValidator], [WorkingDirReporter], and [Imaged]. A
 // backend that cannot enforce a network policy still refuses one — the
 // wrapper refuses on its behalf — so wrapping never widens what a caller
 // can request.
@@ -97,6 +97,12 @@ func (s *seeded) DeleteRun(ctx context.Context, runID string) (bool, error) {
 		return false, fmt.Errorf("bonnie: sandbox: the %s backend cannot delete sandboxes", s.p.Name())
 	}
 	return rd.DeleteRun(ctx, runID)
+}
+
+// ValidateRunCleanup implements [RunCleanupValidator]. It checks the wrapped
+// backend's deletion capability and forwards its mode check when present.
+func (s *seeded) ValidateRunCleanup() error {
+	return validateRunCleanup(s.p)
 }
 
 // WorkingDir forwards to the wrapped provider, so the system prompt still
