@@ -896,8 +896,25 @@ bonnie.New(
 ```
 
 Set `NATS_URL` to the broker URL and configure the model's provider key. Each
-subject must be a distinct literal subject. Start a result subscriber before
-publishing a task:
+subject must be a distinct literal subject.
+
+For NKey authentication, set `NATS_NKEY_SEED` to the **user seed value**, not
+its file path. BONNIE reads it when it builds the channel; the `WithNATS`
+setup above does not need to change. Load the value from your secret store.
+Do not put it in source code, logs, or the agent sandbox environment.
+The server must authorize the corresponding public user NKey.
+
+You can also set `NKeySeed` in `natschannel.Config` explicitly. An explicit
+value takes precedence over `NATS_NKEY_SEED`. Malformed seeds and non-user
+seeds fail validation without including the seed in the error. This works
+with both Core NATS and JetStream.
+
+For JWT credentials or other connection options, supply an authenticated
+`Config.Conn` instead. Do not combine `Conn` with `URL` or `NKeySeed`.
+When `Conn` is supplied, BONNIE ignores both connection environment variables
+and does not close the connection; the caller owns its lifetime.
+
+Start a result subscriber before publishing a task:
 
 ```bash
 nats sub agents.review.results

@@ -30,6 +30,7 @@ import (
 	"unicode"
 
 	gonats "github.com/nats-io/nats.go"
+	"github.com/nats-io/nkeys"
 
 	"github.com/mark3labs/bonnie/channel"
 	"github.com/mark3labs/bonnie/channel/chat"
@@ -44,8 +45,12 @@ type Config struct {
 	// URL is one NATS server URL. It is required unless Conn is supplied.
 	URL string
 	// Conn is optional. The caller owns it; Shutdown never closes it. Do not
-	// supply URL and Conn together. This channel does not change its handlers.
+	// supply URL or NKeySeed with Conn. This channel does not change its handlers.
 	Conn *gonats.Conn
+	// NKeySeed is a user NKey seed, not a file path. It authenticates the
+	// connection opened by this channel. Keep it secret. For JWT credentials
+	// or other authentication options, supply an authenticated Conn instead.
+	NKeySeed string
 	// Subject receives Task JSON. AnswerSubject receives Answer JSON in Core
 	// mode. In JetStream it is a base; answers use base+"."+WorkerID.
 	// ResultSubject receives Result JSON. These must be distinct literal subjects.
@@ -145,8 +150,13 @@ func New(r *runtime.Runner, cfg Config) (*Channel, error) {
 	if r == nil {
 		return nil, errors.New("bonnie: channel/nats: runner is required")
 	}
-	if cfg.Conn != nil && cfg.URL != "" {
-		return nil, errors.New("bonnie: channel/nats: use URL or Conn, not both")
+	if cfg.Conn != nil && (cfg.URL != "" || cfg.NKeySeed != "") {
+		return nil, errors.New("bonnie: channel/nats: use URL and optional NKeySeed or Conn, not both")
+	}
+	if cfg.NKeySeed != "" {
+		if _, err := nkeyOption(cfg.NKeySeed); err != nil {
+			return nil, err
+		}
 	}
 	if cfg.Conn == nil {
 		u, err := url.Parse(cfg.URL)
@@ -189,6 +199,28 @@ func DefaultConsumerName(subject string) string {
 	return "bonnie-" + hex.EncodeToString(sum[:])
 }
 
+// nkeyOption validates without exposing the seed in an error. Recreate the
+// key for each signature so reconnects work without retaining a decoded key.
+func nkeyOption(seed string) (gonats.Option, error) {
+	kp, err := nkeys.FromSeed([]byte(seed))
+	if err != nil {
+		return nil, errors.New("bonnie: channel/nats: invalid user NKey seed")
+	}
+	pub, err := kp.PublicKey()
+	kp.Wipe()
+	if err != nil || !nkeys.IsValidPublicUserKey(pub) {
+		return nil, errors.New("bonnie: channel/nats: invalid user NKey seed")
+	}
+	return gonats.Nkey(pub, func(nonce []byte) ([]byte, error) {
+		key, err := nkeys.FromSeed([]byte(seed))
+		if err != nil {
+			return nil, errors.New("bonnie: channel/nats: invalid user NKey seed")
+		}
+		defer key.Wipe()
+		return key.Sign(nonce)
+	}), nil
+}
+
 func validSubject(s string) bool {
 	if s == "" || strings.ContainsAny(s, "*>\\") || strings.IndexFunc(s, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) >= 0 {
 		return false
@@ -221,7 +253,15 @@ func (c *Channel) Start(ctx context.Context) error {
 	nc := c.cfg.Conn
 	if nc == nil {
 		var err error
-		nc, err = gonats.Connect(c.cfg.URL, gonats.Timeout(5*time.Second))
+		opts := []gonats.Option{gonats.Timeout(5 * time.Second)}
+		if c.cfg.NKeySeed != "" {
+			auth, authErr := nkeyOption(c.cfg.NKeySeed)
+			if authErr != nil {
+				return authErr
+			}
+			opts = append(opts, auth)
+		}
+		nc, err = gonats.Connect(c.cfg.URL, opts...)
 		if err != nil {
 			return errors.New("bonnie: channel/nats: connection failed")
 		}

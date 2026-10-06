@@ -281,7 +281,8 @@ func WithHTTPAuthenticator(fn bonniehttp.Authenticator) Option {
 }
 
 // WithNATS mounts an asynchronous NATS task channel. NATS_URL fills an
-// empty URL unless Conn is supplied. Subjects must be configured explicitly.
+// empty URL and NATS_NKEY_SEED fills an empty user NKey seed unless Conn is
+// supplied. Subjects must be configured explicitly. Seeds are values, not paths.
 // Config.Stream enables at-least-once JetStream delivery. Core NATS does not
 // retain tasks or retry results; see channel/nats.
 func WithNATS(cfg natschannel.Config) Option {
@@ -289,6 +290,7 @@ func WithNATS(cfg natschannel.Config) Option {
 		c := cfg
 		if c.Conn == nil {
 			fill(&c.URL, "NATS_URL")
+			fill(&c.NKeySeed, "NATS_NKEY_SEED")
 		}
 		return natschannel.New(r, c)
 	})

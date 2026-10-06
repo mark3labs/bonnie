@@ -29,6 +29,9 @@ Do not use it for work whose loss would hurt.
 
 ### Added
 
+- Add user NKey seed authentication to the NATS channel through `Config.NKeySeed`
+  and the `NATS_NKEY_SEED` fallback in `WithNATS`. Validate seeds without exposing
+  them in errors, and support both Core NATS and JetStream connections.
 - Default the NATS client's result stream and consumer to stable names derived
   from ResultSubject, with explicit overrides and opt-in stream creation.
 - Default the JetStream task consumer to a stable subject-derived name. Keep

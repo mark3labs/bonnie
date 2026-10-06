@@ -15,6 +15,7 @@ require (
 	github.com/mark3labs/kit v0.120.0
 	github.com/nats-io/nats-server/v2 v2.12.0
 	github.com/nats-io/nats.go v1.47.0
+	github.com/nats-io/nkeys v0.4.11
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
 	github.com/subosito/gotenv v1.6.0
@@ -102,7 +103,6 @@ require (
 	github.com/muesli/roff v0.1.0 // indirect
 	github.com/muesli/termenv v0.16.0 // indirect
 	github.com/nats-io/jwt/v2 v2.8.0 // indirect
-	github.com/nats-io/nkeys v0.4.11 // indirect
 	github.com/nats-io/nuid v1.0.1 // indirect
 	github.com/ncruces/go-strftime v1.1.0 // indirect
 	github.com/pb33f/go-yaml v0.1.1 // indirect
