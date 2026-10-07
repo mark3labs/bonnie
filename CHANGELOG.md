@@ -5,6 +5,18 @@ All notable changes to BONNIE are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Add code-defined cron schedules with durable occurrences, time zones,
+  overlap and catch-up policies, authorized HTTP triggers, and CLI commands.
+- Add tracked Slack, Telegram, Discord, and GitHub dispatch with saved-result
+  delivery retries. Keep schedule provenance separate from conversation origin.
+- Test restart recovery and human approval with real Kit and a scripted model.
+  State the at-least-once delivery limits in
+  [`docs/SCHEDULES.md`](docs/SCHEDULES.md).
+
 ## [0.15.0] — 2026-10-07
 
 **Targeted NATS tasks, responsive chat, and the sandbox shell tool.**

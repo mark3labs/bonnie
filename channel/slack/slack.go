@@ -124,13 +124,14 @@ type Config struct {
 // Channel is the Slack transport. It implements [channel.Channel] and
 // [channel.Inbound].
 type Channel struct {
-	core   *chat.Core
-	cfg    Config
-	api    string
-	http   *http.Client
-	post   chat.Delivery
-	seenMu sync.Mutex
-	seen   map[string]bool
+	core       *chat.Core
+	cfg        Config
+	api        string
+	http       *http.Client
+	post       chat.Delivery
+	dispatchMu sync.Mutex // Serialises scheduled thread reservation in this process.
+	seenMu     sync.Mutex
+	seen       map[string]bool
 
 	// active holds the activity placeholder for each address that carries a
 	// turn in flight. The core guarantees one writer per address.

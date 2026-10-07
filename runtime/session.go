@@ -46,6 +46,7 @@ type Session struct {
 	// turnContext is the context for the turn being run. It lives on the
 	// session only for the duration of the turn; see [Session.SetTurnContext].
 	turnContext []string
+	trigger     *Trigger
 }
 
 type sessionEntry struct {
@@ -112,6 +113,14 @@ func Restore(ctx context.Context, runID string, j Journal) (*Session, error) {
 	s := NewSession(runID, j)
 	maxSeq := 0
 	for _, rec := range recs {
+		if rec.Kind == RecordTrigger {
+			var trigger *Trigger
+			if err := json.Unmarshal(rec.Payload, &trigger); err != nil {
+				return nil, fmt.Errorf("bonnie: decode trigger: %w", err)
+			}
+			s.trigger = trigger
+			continue
+		}
 		// A sandbox record is run metadata, not a tree entry: the latest one
 		// decides what LastSandbox reports. Noted confirms that the note
 		// was committed. Older marker-only losses are repaired below.

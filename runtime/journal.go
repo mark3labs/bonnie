@@ -81,6 +81,8 @@ const (
 	// entry ID and does not change run state or conversation history. It
 	// prevents repeated cleanup until a later terminal RecordState.
 	RecordWorkspaceDeleted RecordKind = "workspace_deleted"
+	// RecordTrigger records structured provenance for one turn. A trigger and the following state record identify whether a dispatch completed before a crash.
+	RecordTrigger RecordKind = "trigger"
 	// RecordContext records the per-turn context a channel handed the
 	// runner with one input: facts for the model that are not conversation
 	// history — the pull-request diff a comment refers to, who sent a

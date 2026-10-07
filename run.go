@@ -193,11 +193,23 @@ func (a *Agent) Run(ctx context.Context) (runErr error) {
 	}
 
 	mux := http.NewServeMux()
+	schedules, err := newScheduleService(c, runner, channels)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), c.shutdown)
+		defer cancel()
+		if err := schedules.shutdown(shutdownCtx); err != nil {
+			runErr = errors.Join(runErr, fmt.Errorf("bonnie: shutdown schedules: %w", err))
+		}
+	}()
 	httpOpts := []bonniehttp.Option{bonniehttp.WithInfo(info)}
 	if c.auth != nil {
 		httpOpts = append(httpOpts, bonniehttp.WithAuthenticator(c.auth))
 	}
 	mount(mux, bonniehttp.New(runner, httpOpts...), out)
+	schedules.mount(mux, c)
 	for _, ch := range channels {
 		mount(mux, ch, out)
 	}
@@ -221,6 +233,11 @@ func (a *Agent) Run(ctx context.Context) (runErr error) {
 		}
 	}
 
+	if schedules != nil {
+		clock := !c.scheduleClockSet || c.scheduleClock
+		schedules.start(ctx, clock)
+	}
+
 	if c.workspaceCleanup != nil {
 		cleanupCtx, cancel := context.WithCancel(ctx)
 		done := make(chan struct{})
@@ -231,7 +248,25 @@ func (a *Agent) Run(ctx context.Context) (runErr error) {
 		defer func() { cancel(); <-done }()
 	}
 	c.banner(ln.Addr().String(), workspace, skills, dotenv)
-	return c.serve(ctx, mux, ln)
+	if schedules == nil {
+		return c.serve(ctx, mux, ln)
+	}
+	serveCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	served := make(chan error, 1)
+	go func() { served <- c.serve(serveCtx, mux, ln) }()
+	select {
+	case err := <-served:
+		return err
+	case err := <-schedules.done:
+		schedules.done = nil
+		cancel()
+		serverErr := <-served
+		if errors.Is(err, context.Canceled) {
+			err = nil
+		}
+		return errors.Join(serverErr, err)
+	}
 }
 
 // kitOptions is the Kit configuration one run resolved to, with prompt and

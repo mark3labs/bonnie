@@ -46,6 +46,9 @@ func (a *Agent) serveCommand(fs *flag.FlagSet) *cobra.Command {
 			if model := fs.Lookup("model").Value.String(); model != "" {
 				WithModel(model)(a.cfg)
 			}
+			if fs.Lookup("schedule-clock") != nil {
+				WithScheduleClock(fs.Lookup("schedule-clock").Value.String() == "true")(a.cfg)
+			}
 			a.cfg.sandboxName = fs.Lookup("sandbox").Value.String()
 			return a.Run(cmd.Context())
 		},
@@ -71,6 +74,9 @@ func registerServeFlags(fs *flag.FlagSet) {
 	}
 	if fs.Lookup("model") == nil {
 		fs.String("model", "", "model to use, for example anthropic/claude-sonnet-4-5")
+	}
+	if fs.Lookup("schedule-clock") == nil {
+		fs.Bool("schedule-clock", true, "run schedule clock")
 	}
 }
 

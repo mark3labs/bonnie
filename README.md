@@ -1290,6 +1290,7 @@ See [`examples/README.md`](examples/README.md) for commands you can copy.
 |---|---|
 | [godoc](https://pkg.go.dev/github.com/mark3labs/bonnie) | The specification. Each exported symbol has its contract and, often, the defect that shaped it |
 | [`CHANGELOG.md`](CHANGELOG.md) | What each release changed, and the limits it recorded |
+| [`docs/SCHEDULES.md`](docs/SCHEDULES.md) | Define cron schedules in code, trigger them over HTTP, and understand their delivery limits |
 | [`docs/RELEASE.md`](docs/RELEASE.md) | The release checklist, and what each tag confirmed |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Boundary rule, workspace setup, commands |
 | [`AGENTS.md`](AGENTS.md) | The same rules, for a coding agent |

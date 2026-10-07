@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -25,9 +26,10 @@ import (
 
 // devOpts carries the parsed flags of `bonnie dev`.
 type devOpts struct {
-	dryRun   bool
-	shutdown time.Duration
-	tui      bool
+	dryRun        bool
+	shutdown      time.Duration
+	tui           bool
+	scheduleClock bool
 	// addr is the explicit address to bind. Empty starts at :8080 and
 	// walks 8081, 8082, … until one is free.
 	addr string
@@ -69,6 +71,7 @@ non-interactive hosts.
 	f := cmd.Flags()
 	f.BoolVar(&o.dryRun, "dry-run", false, "print the discovery plan without watching or building")
 	f.BoolVar(&o.tui, "tui", true, "open the built-in terminal interface against the child")
+	f.BoolVar(&o.scheduleClock, "schedule-clock", false, "enable schedule clock in the child")
 	f.StringVar(&o.addr, "addr", "", "address to bind (empty = :8080, then :8081, …)")
 	f.DurationVar(&o.shutdown, "shutdown-timeout", 30*time.Second, "how long to wait for in-flight turns on restart")
 	return cmd
@@ -86,7 +89,8 @@ type devServer struct {
 	// addr is the loopback address the child is told to bind. Empty means
 	// walk 8080, 8081, 8082, … until one is free. An explicit --addr is
 	// bound verbatim.
-	addr string
+	addr          string
+	scheduleClock bool
 
 	// served is the address the child bound. It is set once at first start
 	// and reused on every restart, so the TUI stays connected.
@@ -120,12 +124,13 @@ func newDevServer(root string, o devOpts) *devServer {
 		log = io.MultiWriter(os.Stderr)
 	}
 	return &devServer{
-		root:     root,
-		bin:      filepath.Join(root, ".bonnie", "dev-agent"),
-		shutdown: o.shutdown,
-		addr:     o.addr,
-		log:      log,
-		ready:    make(chan struct{}),
+		root:          root,
+		bin:           filepath.Join(root, ".bonnie", "dev-agent"),
+		shutdown:      o.shutdown,
+		addr:          o.addr,
+		scheduleClock: o.scheduleClock,
+		log:           log,
+		ready:         make(chan struct{}),
 	}
 }
 
@@ -301,7 +306,7 @@ func (d *devServer) start() error {
 		d.mu.Unlock()
 	}
 
-	cmd := exec.Command(d.bin, "-addr", addr)
+	cmd := exec.Command(d.bin, "-addr", addr, "-schedule-clock="+strconv.FormatBool(d.scheduleClock))
 	cmd.Dir = d.root
 	cmd.Stdout = d.log
 	cmd.Stderr = d.log

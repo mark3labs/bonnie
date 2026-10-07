@@ -24,6 +24,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	kit "github.com/mark3labs/kit/pkg/kit"
 )
@@ -164,6 +165,15 @@ func attachCheckpoints(k *kit.Kit, s *Session) {
 		})
 }
 
+// Trigger identifies the event that started a turn.
+type Trigger struct {
+	ScheduleName string    `json:"schedule_name,omitempty"`
+	OccurrenceID string    `json:"occurrence_id,omitempty"`
+	DispatchID   string    `json:"dispatch_id,omitempty"`
+	ScheduledAt  time.Time `json:"scheduled_at"`
+	Kind         string    `json:"kind,omitempty"`
+}
+
 // Input starts or continues a run.
 type Input struct {
 	// Text is the user's message: the one thing that enters the
@@ -183,6 +193,8 @@ type Input struct {
 	// Origin says where the conversation lives. It is recorded on the
 	// first turn that carries one and ignored after that.
 	Origin Origin
+	// Trigger is structured provenance for this turn.
+	Trigger *Trigger
 }
 
 // Run is a snapshot of a durable run after a turn boundary.
@@ -539,6 +551,18 @@ func (r *Runner) Start(ctx context.Context, runID string, in Input) (*Run, error
 	if err := s.recordOrigin(in.Origin); err != nil {
 		return nil, err
 	}
+	if in.Trigger != nil || s.CurrentTrigger() != nil {
+		payload, err := json.Marshal(in.Trigger)
+		if err != nil {
+			return nil, fmt.Errorf("bonnie: encode trigger: %w", err)
+		}
+		if _, err := s.journal.Append(turnCtx, Record{RunID: runID, Kind: RecordTrigger, Timestamp: now(), Payload: payload}); err != nil {
+			return nil, err
+		}
+	}
+	s.mu.Lock()
+	s.trigger = in.Trigger
+	s.mu.Unlock()
 	if err := s.journalContext(turnCtx, in.Context); err != nil {
 		return nil, err
 	}

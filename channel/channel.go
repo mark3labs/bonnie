@@ -17,6 +17,7 @@ package channel
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -126,7 +127,8 @@ type SendOptions struct {
 	// issue. It is recorded on the run's first turn so instructions and
 	// tools can tell where the conversation lives. The chat package owns
 	// the vocabulary.
-	Kind string
+	Kind    string
+	Trigger *runtime.Trigger
 }
 
 // SessionRef is a handle to the run that serves an address.
@@ -226,6 +228,21 @@ type Outbound interface {
 // own fire-and-log business — the journal keeps the result either way.
 type Receiver interface {
 	Receive(ctx context.Context, target any, text string, opts SendOptions) error
+}
+
+// DispatchReceipt binds a tracked dispatch to its destination before execution.
+type DispatchReceipt struct {
+	DispatchID string          `json:"dispatch_id"`
+	RunID      string          `json:"run_id"`
+	Address    string          `json:"address"`
+	Target     json.RawMessage `json:"target,omitempty"`
+}
+
+// TrackedReceiver separates durable execution from delivery for scheduler outboxes.
+type TrackedReceiver interface {
+	PrepareDispatch(ctx context.Context, dispatchID string, target any) (DispatchReceipt, error)
+	RunDispatch(ctx context.Context, receipt DispatchReceipt, text string, opts SendOptions) (*runtime.Run, error)
+	DeliverDispatch(ctx context.Context, receipt DispatchReceipt, run *runtime.Run) error
 }
 
 // Lifecycle is optional for a channel that owns a connection or receives

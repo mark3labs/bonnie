@@ -551,6 +551,7 @@ func (s *Ref) Send(ctx context.Context, text string, opts channel.SendOptions) (
 		Context: opts.Context,
 		Title:   opts.Title,
 		Origin:  runtime.Origin{Channel: s.core.name, Kind: opts.Kind},
+		Trigger: opts.Trigger,
 	})
 }
 

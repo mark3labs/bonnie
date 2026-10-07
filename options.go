@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"maps"
 	"net"
+	"net/http"
 	"os"
 	"strconv"
 	"time"
@@ -17,6 +18,7 @@ import (
 	"github.com/mark3labs/bonnie/channel/telegram"
 	"github.com/mark3labs/bonnie/runtime"
 	"github.com/mark3labs/bonnie/sandbox"
+	"github.com/mark3labs/bonnie/schedule"
 	kit "github.com/mark3labs/kit/pkg/kit"
 )
 
@@ -69,6 +71,10 @@ type config struct {
 	quiet               bool
 	noHumanInput        bool
 	auth                bonniehttp.Authenticator
+	schedules           []schedule.Definition
+	scheduleClock       bool
+	scheduleClockSet    bool
+	scheduleAuthorizer  func(*http.Request) error
 }
 
 // Option configures [New]. This is where a setting that is not a
@@ -338,6 +344,22 @@ func WithListener(ln net.Listener) Option {
 // [sandbox.Local] can still be selected without confinement.
 func Quiet() Option {
 	return func(c *config) { c.quiet = true }
+}
+
+// WithSchedule adds durable time-based dispatch definitions.
+func WithSchedule(definitions ...schedule.Definition) Option {
+	definitions = append([]schedule.Definition(nil), definitions...)
+	return func(c *config) { c.schedules = append(c.schedules, definitions...) }
+}
+
+// WithScheduleClock enables or disables cron schedule evaluation. It is enabled by default.
+func WithScheduleClock(enabled bool) Option {
+	return func(c *config) { c.scheduleClock, c.scheduleClockSet = enabled, true }
+}
+
+// WithScheduleTriggerAuthorizer enables external schedule triggers after authorization.
+func WithScheduleTriggerAuthorizer(fn func(*http.Request) error) Option {
+	return func(c *config) { c.scheduleAuthorizer = fn }
 }
 
 // WithHTTPAuthenticator verifies who is calling the framework's own HTTP

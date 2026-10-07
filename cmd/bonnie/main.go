@@ -67,7 +67,7 @@ Planned:
 			return cmd.Help()
 		},
 	}
-	root.AddCommand(newServeCmd(), newRunsCmd(), newSandboxCmd(), newInitCmd(), newBuildCmd(), newDevCmd(), newChatCmd(), newVersionCmd())
+	root.AddCommand(newServeCmd(), newRunsCmd(), newSchedulesCmd(), newSandboxCmd(), newInitCmd(), newBuildCmd(), newDevCmd(), newChatCmd(), newVersionCmd())
 	return root
 }
 
