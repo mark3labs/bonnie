@@ -101,6 +101,49 @@ edited to the required form.
 | `v0.13.0` | `a5eaa8a` | 2026-10-06 |
 | `v0.14.0` | `98b9620` | 2026-10-06 |
 | `v0.15.0` | `cd37924` | 2026-10-07 |
+| `v0.16.0` | `eac5456` | 2026-10-07 |
+
+### `v0.16.0`, 2026-10-07 — every box confirmed
+
+- [x] `task release-check` — 1 config validated
+- [x] `task release-snapshot` — linux amd64 and arm64, archives and checksums;
+      both checksums verify. The statically linked amd64 binary prints
+      `bonnie 0.15.0-SNAPSHOT-eac5456`, not `dev`
+- [x] No `replace` directive in the framework or example modules
+- [x] All CI jobs green on `master` at the tagged commit `eac5456`:
+      `test`, `examples`, and `lint` (run `37644593184`)
+- [x] `CHANGELOG.md` has a dated `[0.16.0]` section in Keep-a-Changelog shape;
+      release-note extraction passes, and the `[Unreleased]` heading is removed
+- [x] Published notes state the three claims and current README limits, plus
+      schedule delivery and cooperative cancellation limits. The notes match
+      the changelog section except for trailing blank lines
+- [x] Annotated tag pushed after human confirmation; `release.yml` run
+      `37645611447` succeeded
+- [x] Three artifacts published; both downloaded archive checksums verify.
+      The downloaded linux amd64 binary prints `bonnie 0.16.0` and is
+      statically linked
+- [x] Both examples pin `v0.16.0`; `task examples` and `task check` pass.
+      The pin is committed after the tag as `43458ab`
+
+**Version choice.** MINOR: new public schedule and cancellation APIs, the
+`channel.SessionRef.RequestCancel` interface addition, and changed HTTP
+cancellation responses. Compiled-agent sandbox selection was already released
+in v0.15.0; the notes identify its later documentation, not a new API.
+
+**CI blocked the first candidate.** Run `37642674467` failed the schedule HTTP
+restart test. Newly idle keep-alive connections can delay Go HTTP shutdown for
+five seconds, which raced the test's five-second deadline. The test now closes
+its client's idle connections before shutdown and cleans up the restarted
+context on assertion failure. Thirty consecutive race-enabled runs pass. No
+runtime shutdown change was needed.
+
+**Verified from the artifact.** The downloaded CLI exposes `schedules` with
+`list`, `show`, `history`, and `trigger`, and refuses `--sandbox none` by name,
+with Landlock and Local as the alternatives. Schedule recovery and turn-scoped
+cancellation have automated tests; this release did not prove them with a live
+model from the artifact. It did not run integration-tag live-model tests or
+execute the arm64 binary. Delivery and external effects are not exactly once;
+cancellation is cooperative, not a rollback or distributed coordination.
 
 ### `v0.15.0`, 2026-10-07 — every box confirmed
 
