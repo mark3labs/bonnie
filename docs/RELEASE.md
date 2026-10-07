@@ -100,6 +100,41 @@ edited to the required form.
 | `v0.12.0` | `dc1ee27` | 2026-10-06 |
 | `v0.13.0` | `a5eaa8a` | 2026-10-06 |
 | `v0.14.0` | `98b9620` | 2026-10-06 |
+| `v0.15.0` | `cd37924` | 2026-10-07 |
+
+### `v0.15.0`, 2026-10-07 — every box confirmed
+
+- [x] `task release-check` — 1 config validated
+- [x] `task release-snapshot` — linux amd64 and arm64, archives and checksums;
+      both checksums verify. The statically linked amd64 binary prints
+      `bonnie 0.14.0-SNAPSHOT-cd37924`, not `dev`
+- [x] No `replace` directive in the framework or example modules
+- [x] All CI jobs green on `master` at the tagged commit `cd37924`:
+      `test`, `examples`, and `lint` (run `37617863724`)
+- [x] `CHANGELOG.md` has a dated `[0.15.0]` section in Keep-a-Changelog shape;
+      release-note extraction passes, and the `[Unreleased]` heading is removed
+- [x] Published notes state the three claims and the current README limits,
+      including targeted delivery and chat retry. The notes match the changelog
+      section except for trailing blank lines
+- [x] Annotated tag pushed after human confirmation; `release.yml` run
+      `37618809204` succeeded
+- [x] Three artifacts published; both downloaded archive checksums verify.
+      The downloaded linux amd64 binary prints `bonnie 0.15.0` and is
+      statically linked
+- [x] Both examples pin `v0.15.0`; `task examples` and `task check` pass.
+      The pin is committed after the tag as `e8c8f21`
+
+**Version choice.** MINOR: new public NATS configuration fields, `SubmitTo`,
+route validation, and chat features. The model-facing sandbox tool changes
+from `bash` to `shell`; prompts and scripted calls must use the new name.
+
+**Verified from the artifact.** The downloaded CLI refuses `--sandbox none`
+by name and identifies Landlock and Local as the alternatives. Targeted task
+routing, cache keys, shell selection, and chat behaviour have automated tests;
+this release did not prove them with a live model from the artifact. It did
+not run integration-tag live-model tests or execute the arm64 binary. Targeted
+tasks have no fallback and remain only within stream retention limits.
+External effects are not exactly once, and chat retry can repeat them.
 
 ### `v0.14.0`, 2026-10-06 — every box confirmed
 
