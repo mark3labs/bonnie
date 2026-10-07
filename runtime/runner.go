@@ -18,6 +18,7 @@ package runtime
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -199,7 +200,9 @@ type Input struct {
 
 // Run is a snapshot of a durable run after a turn boundary.
 type Run struct {
-	ID       string
+	ID string
+	// TurnID identifies the latest turn for scoped controls.
+	TurnID   string
 	State    RunState
 	Response string
 	// Suspend is non-nil when State is [RunWaiting].
@@ -229,7 +232,12 @@ type Runner struct {
 // activeTurn is the handle a Runner keeps on a turn it is executing, so an
 // operator can steer or stop it from another goroutine.
 type activeTurn struct {
-	cancel context.CancelFunc
+	cancel    context.CancelFunc
+	control   sync.Mutex
+	turnID    string
+	finished  bool
+	ready     chan struct{}
+	readyOnce sync.Once
 
 	mu    sync.Mutex
 	agent Agent
@@ -453,10 +461,23 @@ func (r *Runner) replayEvents(runID string, after int, out chan<- Event, done <-
 	var (
 		lastMsgSeq   int
 		lastResponse string
+		turnID       string
 	)
 	for i := range recs {
 		rec := recs[i]
 		switch rec.Kind {
+		case RecordTurn, RecordCancel:
+			typ := EventCancelRequested
+			if rec.Kind == RecordTurn {
+				turnID = rec.Text
+				typ = EventTurn
+			}
+			if rec.Seq > *emitted {
+				if !sendEvent(out, done, Event{RunID: runID, TurnID: rec.Text, Type: typ, Seq: rec.Seq}) {
+					return errStreamClosed
+				}
+				*emitted = rec.Seq
+			}
 		case RecordMessage:
 			if rec.Seq > *emitted {
 				lastMsgSeq = rec.Seq
@@ -474,7 +495,7 @@ func (r *Runner) replayEvents(runID string, after int, out chan<- Event, done <-
 				continue
 			}
 			ev := Event{
-				RunID: runID, Type: EventSuspend, Seq: rec.Seq,
+				RunID: runID, TurnID: turnID, Type: EventSuspend, Seq: rec.Seq,
 				Text: rec.Text, Data: rec.Payload,
 			}
 			if !sendEvent(out, done, ev) {
@@ -497,14 +518,14 @@ func (r *Runner) replayEvents(runID string, after int, out chan<- Event, done <-
 			// its closing state, anchored to the last message record —
 			// replay reproduces that order and those Seqs exactly.
 			if rec.State == RunCompleted && lastResponse != "" && lastMsgSeq > *emitted {
-				ev := Event{RunID: runID, Type: EventResponse, Seq: lastMsgSeq, Text: lastResponse}
+				ev := Event{RunID: runID, TurnID: turnID, Type: EventResponse, Seq: lastMsgSeq, Text: lastResponse}
 				if !sendEvent(out, done, ev) {
 					return errStreamClosed
 				}
 				*emitted = lastMsgSeq
 			}
 			if rec.Seq > *emitted {
-				ev := Event{RunID: runID, Type: EventState, Seq: rec.Seq, State: rec.State}
+				ev := Event{RunID: runID, TurnID: turnID, Type: EventState, Seq: rec.Seq, State: rec.State}
 				if !sendEvent(out, done, ev) {
 					return errStreamClosed
 				}
@@ -530,6 +551,9 @@ func (r *Runner) Start(ctx context.Context, runID string, in Input) (*Run, error
 	}
 	defer r.release(runID)
 
+	if err := r.recoverCancellation(turnCtx, runID); err != nil {
+		return nil, err
+	}
 	state, err := r.journal.State(turnCtx, runID)
 	if err != nil && !errors.Is(err, ErrRunNotFound) {
 		return nil, err
@@ -578,6 +602,9 @@ func (r *Runner) Resume(ctx context.Context, runID string, responses []InputResp
 		return nil, err
 	}
 	defer r.release(runID)
+	if err := r.recoverCancellation(turnCtx, runID); err != nil {
+		return nil, err
+	}
 	state, err := r.journal.State(turnCtx, runID)
 	if err != nil {
 		return nil, err
@@ -594,6 +621,16 @@ func (r *Runner) Resume(ctx context.Context, runID string, responses []InputResp
 		return nil, err
 	}
 
+	recs, err := r.journal.Replay(turnCtx, runID)
+	if err != nil {
+		return nil, err
+	}
+	turnID, _, _ := cancellationState(recs)
+	for _, response := range responses {
+		if response.TurnID != "" && response.TurnID != turnID {
+			return nil, fmt.Errorf("%w: stale input for %s", ErrNotWaiting, runID)
+		}
+	}
 	answer := renderResponses(responses)
 	seq, err := r.journal.Append(turnCtx, Record{
 		RunID: runID, Kind: RecordResume, Timestamp: now(), Text: answer,
@@ -617,6 +654,11 @@ func (r *Runner) Cancel(runID string) error {
 	r.mu.Unlock()
 
 	if !ok {
+		return fmt.Errorf("%w: %s", ErrRunNotActive, runID)
+	}
+	act.control.Lock()
+	defer act.control.Unlock()
+	if act.finished {
 		return fmt.Errorf("%w: %s", ErrRunNotActive, runID)
 	}
 	act.cancel()
@@ -666,7 +708,11 @@ func (r *Runner) Snapshot(ctx context.Context, runID string) (*Run, error) {
 			state = rec.State
 		}
 	}
-	run := &Run{ID: runID, State: state}
+	turnID, _, requested := cancellationState(recs)
+	if requested {
+		state = RunCancelled
+	}
+	run := &Run{ID: runID, TurnID: turnID, State: state}
 	for _, rec := range slices.Backward(recs) {
 		if run.Response == "" && rec.Kind == RecordMessage && rec.Role == "assistant" {
 			run.Response = rec.Text
@@ -690,6 +736,17 @@ func (r *Runner) turn(ctx context.Context, act *activeTurn, s *Session, prompt s
 	// Terminal bookkeeping must outlive a cancelled turn, or a cancel would
 	// leave the run stuck in "running" for ever.
 	book := context.WithoutCancel(ctx)
+	act.control.Lock()
+	act.turnID = rand.Text()
+	seq, turnErr := r.journal.Append(book, Record{RunID: runID, Text: act.turnID, Kind: RecordTurn, Timestamp: now()})
+	if turnErr == nil {
+		r.bus.Publish(Event{RunID: runID, TurnID: act.turnID, Type: EventTurn, Seq: seq})
+	}
+	act.readyOnce.Do(func() { close(act.ready) })
+	act.control.Unlock()
+	if turnErr != nil {
+		return nil, turnErr
+	}
 
 	completion, err := r.restoreCompletion(book, s)
 	if err != nil {
@@ -701,16 +758,25 @@ func (r *Runner) turn(ctx context.Context, act *activeTurn, s *Session, prompt s
 
 	agent, err := r.factory(ctx, s)
 	if err != nil {
+		if ctx.Err() != nil {
+			if cerr := r.checkpoint(book, runID, RunCancelled); cerr != nil {
+				return nil, cerr
+			}
+			return &Run{ID: runID, TurnID: act.turnID, State: RunCancelled}, nil
+		}
 		_ = r.checkpoint(book, runID, RunFailed)
 		return nil, err
 	}
 	defer func() { _ = agent.Close() }()
 	act.setAgent(agent)
 
-	stop := forwardAgentEvents(agent, r.bus, runID)
+	stop := forwardAgentEvents(agent, r.bus, runID, act.turnID)
 	defer stop()
 
 	res, err := r.completionTurn(ctx, s, agent, prompt, files, completion, resumed)
+	act.control.Lock()
+	defer act.control.Unlock()
+	defer func() { act.finished = true }()
 	if err == nil {
 		err = ctx.Err()
 		if err == nil && res == nil {
@@ -722,7 +788,7 @@ func (r *Runner) turn(ctx context.Context, act *activeTurn, s *Session, prompt s
 			if cerr := r.checkpoint(book, runID, RunCancelled); cerr != nil {
 				return nil, cerr
 			}
-			return &Run{ID: runID, State: RunCancelled}, nil
+			return &Run{ID: runID, TurnID: act.turnID, State: RunCancelled}, nil
 		}
 		if _, ok := errors.AsType[*completionWriteError](err); ok {
 			return &Run{ID: runID, State: RunRunning, Err: err}, err
@@ -734,6 +800,7 @@ func (r *Runner) turn(ctx context.Context, act *activeTurn, s *Session, prompt s
 	}
 
 	if sus, ok := suspensionFrom(res); ok {
+		sus.TurnID = act.turnID
 		sseq, aerr := r.journal.Append(book, Record{
 			RunID: runID, Kind: RecordSuspend, Timestamp: now(),
 			Text: sus.Prompt, Payload: encodeSuspend(sus),
@@ -743,14 +810,14 @@ func (r *Runner) turn(ctx context.Context, act *activeTurn, s *Session, prompt s
 		}
 		susData, _ := json.Marshal(sus)
 		r.bus.Publish(Event{
-			RunID: runID, Type: EventSuspend, Seq: sseq,
+			RunID: runID, TurnID: act.turnID, Type: EventSuspend, Seq: sseq,
 			Text: sus.Prompt, Data: susData,
 		})
 		if cerr := r.checkpoint(book, runID, RunWaiting); cerr != nil {
 			return nil, cerr
 		}
 		return &Run{
-			ID: runID, State: RunWaiting,
+			ID: runID, TurnID: act.turnID, State: RunWaiting,
 			Response: res.Response, Suspend: &sus, Usage: res.TotalUsage,
 		}, nil
 	}
@@ -760,14 +827,14 @@ func (r *Runner) turn(ctx context.Context, act *activeTurn, s *Session, prompt s
 	// record, so a reconnecting client sees the same response at the same
 	// Seq whichever path served it.
 	r.bus.Publish(Event{
-		RunID: runID, Type: EventResponse,
+		RunID: runID, TurnID: act.turnID, Type: EventResponse,
 		Seq: s.LastMessageSeq(), Text: res.Response,
 	})
 	if err := r.checkpoint(book, runID, RunCompleted); err != nil {
 		return nil, err
 	}
 	return &Run{
-		ID: runID, State: RunCompleted,
+		ID: runID, TurnID: act.turnID, State: RunCompleted,
 		Response: res.Response, Usage: res.TotalUsage,
 	}, nil
 }
@@ -778,7 +845,12 @@ func (r *Runner) checkpoint(ctx context.Context, runID string, state RunState) e
 	if err := r.journal.Checkpoint(ctx, runID, state); err != nil {
 		return err
 	}
-	r.bus.Publish(Event{RunID: runID, Type: EventState, Seq: r.durableSeq(runID), State: state})
+	recs, err := r.journal.Replay(ctx, runID)
+	if err != nil {
+		return err
+	}
+	turnID, _, _ := cancellationState(recs)
+	r.bus.Publish(Event{RunID: runID, TurnID: turnID, Type: EventState, Seq: r.durableSeq(runID), State: state})
 	return nil
 }
 
@@ -809,12 +881,15 @@ func (r *Runner) session(ctx context.Context, runID string) (*Session, error) {
 func (r *Runner) acquire(ctx context.Context, runID string) (context.Context, *activeTurn, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	return r.acquireLocked(ctx, runID)
+}
 
+func (r *Runner) acquireLocked(ctx context.Context, runID string) (context.Context, *activeTurn, error) {
 	if _, busy := r.active[runID]; busy {
 		return nil, nil, fmt.Errorf("%w: %s", ErrRunActive, runID)
 	}
 	turnCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	act := &activeTurn{cancel: cancel}
+	act := &activeTurn{cancel: cancel, ready: make(chan struct{})}
 	r.active[runID] = act
 	return turnCtx, act, nil
 }
@@ -826,6 +901,7 @@ func (r *Runner) release(runID string) {
 	r.mu.Unlock()
 
 	if ok {
+		act.readyOnce.Do(func() { close(act.ready) })
 		act.cancel() // release the context's resources
 	}
 }

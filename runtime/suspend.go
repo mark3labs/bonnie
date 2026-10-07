@@ -11,6 +11,8 @@ import (
 // external system answers. It rides out of the agent loop on
 // [kit.TurnResult.FinalValue] via a tool that sets ToolOutput.Halt.
 type SuspendRequest struct {
+	// TurnID identifies the turn that owns this request.
+	TurnID string `json:"turn_id,omitempty"`
 	// Kind distinguishes question, approval, or a host-defined reason.
 	Kind string `json:"kind"`
 	// Prompt is the question or approval text shown to the responder.
@@ -23,6 +25,9 @@ type SuspendRequest struct {
 
 // InputResponse is a reply to a [SuspendRequest].
 type InputResponse struct {
+	// TurnID identifies the suspension being answered. A stale answer cannot
+	// authorize a request raised by a later turn.
+	TurnID string `json:"turn_id,omitempty"`
 	// Text is the freeform or selected answer.
 	Text string `json:"text"`
 	// Approved answers an approval-kind suspension. Nil means the responder

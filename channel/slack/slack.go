@@ -113,6 +113,10 @@ type Config struct {
 
 	// Path overrides the webhook route. The default is [DefaultPath].
 	Path string
+	// CancelPath receives a registered Slack slash command. It defaults to
+	// Path + "/cancel". The command text must be the target thread timestamp;
+	// an empty target is allowed only in a direct message.
+	CancelPath string
 
 	// Activity chooses how the channel shows that the agent is working.
 	// The empty value is [ActivityMessage]: one placeholder message in the
@@ -188,6 +192,7 @@ func (c *Channel) Routes() []channel.Route {
 	}
 	return []channel.Route{
 		{Method: http.MethodPost, Path: path, Handler: c.handleEvent},
+		{Method: http.MethodPost, Path: c.cancelPath(path), Handler: c.handleCancelCommand},
 	}
 }
 

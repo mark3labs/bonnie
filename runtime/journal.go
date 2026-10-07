@@ -48,6 +48,10 @@ func (s RunState) IsTerminal() bool {
 type RecordKind string
 
 const (
+	// RecordTurn starts a turn and assigns its durable control identity.
+	RecordTurn RecordKind = "turn"
+	// RecordCancel durably requests cancellation of one turn and its pending input.
+	RecordCancel RecordKind = "cancel"
 	// RecordMessage is a conversation message appended to the session tree.
 	RecordMessage RecordKind = "message"
 	// RecordStep marks the end of one agent step. It is the checkpoint

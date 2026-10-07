@@ -64,7 +64,7 @@ func TestOperationRetryNeverRepeatsTool(t *testing.T) {
 	}
 	streamServer := httptest.NewServer(New(second.runner).Handler())
 	t.Cleanup(streamServer.Close)
-	events := readStream(t, &testServer{Server: streamServer}, "/bonnie/v1/runs/"+run.RunID+"/stream", 4)
+	events := readStream(t, &testServer{Server: streamServer}, "/bonnie/v1/runs/"+run.RunID+"/stream", 5)
 	if events[len(events)-1].State != runtime.RunCompleted {
 		t.Fatalf("recovered events = %+v", events)
 	}

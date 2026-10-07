@@ -146,10 +146,10 @@ func TestCancelStopsATurnInFlight(t *testing.T) {
 	if err != nil {
 		t.Fatalf("/cancel: %v", err)
 	}
-	if run.State != runtime.RunCancelled {
-		t.Fatalf("state = %q, want cancelled", run.State)
+	if run.State != "" {
+		t.Fatalf("acknowledgement claimed state %q", run.State)
 	}
-	if text != "(cancelled)" {
+	if text != "Cancellation requested." {
 		t.Fatalf("delivered %q, want the cancellation acknowledgement", text)
 	}
 	release()

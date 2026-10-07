@@ -76,7 +76,7 @@ func TestRootStatusesAndQueries(t *testing.T) {
 		t.Fatalf("status %+v: %v", status, err)
 	}
 	cancelled, err := c.Cancel(ctx, target)
-	if err != nil || cancelled.Error == "" || cancelled.CancelRequested {
+	if err != nil || cancelled.Error != "" || cancelled.CancelRequested {
 		t.Fatalf("cancel %+v: %v", cancelled, err)
 	}
 	wrong := target

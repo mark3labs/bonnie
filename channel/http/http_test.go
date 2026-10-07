@@ -385,8 +385,8 @@ func TestCancelRoute(t *testing.T) {
 
 	<-started
 	resp, _ := s.post(t, "/bonnie/v1/runs/cancel-me/cancel", nil)
-	if resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("status = %d, want 204", resp.StatusCode)
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status = %d, want 202", resp.StatusCode)
 	}
 
 	select {
@@ -399,14 +399,14 @@ func TestCancelRoute(t *testing.T) {
 	}
 }
 
-func TestCancelIdleRunConflicts(t *testing.T) {
+func TestCancelIdleRunIsNoOp(t *testing.T) {
 	t.Parallel()
 	s := newTestServer(t, &stubAgent{turns: []*kit.TurnResult{{Response: "ok"}}})
 
 	_, run := s.post(t, "/bonnie/v1/runs", StartRequest{Text: "hi"})
 	resp, _ := s.post(t, "/bonnie/v1/runs/"+run.RunID+"/cancel", nil)
-	if resp.StatusCode != http.StatusConflict {
-		t.Fatalf("status = %d, want 409", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
 }
 
@@ -500,19 +500,19 @@ func TestStreamResumesFromCursor(t *testing.T) {
 
 	s.post(t, "/bonnie/v1/runs", StartRequest{Text: "hi"}) //nolint:errcheck // state asserted below
 
-	first := readStream(t, s, "/bonnie/v1/runs/cursor-me/stream?cursor=0", 3)
-	if first[0].Seq != 1 || first[1].Seq != 3 || first[2].Seq != 5 {
-		t.Fatalf("first read = %v, want [1 3 5] — pending, running, then the response anchored to the assistant message", seqs(first))
+	first := readStream(t, s, "/bonnie/v1/runs/cursor-me/stream?cursor=0", 4)
+	if first[0].Seq != 1 || first[1].Seq != 3 || first[2].Seq != 4 || first[3].Seq != 6 {
+		t.Fatalf("first read = %v, want [1 3 4 6] — pending, turn identity, running, then the response anchored to the assistant message", seqs(first))
 	}
 	if first[0].State != runtime.RunPending {
 		t.Fatalf("first event = %q, want the run's pending birth record", first[0].State)
 	}
 
-	// A client that dropped after event 5 comes back with its cursor: the
+	// A client that dropped after event 6 comes back with its cursor: the
 	// closing state of the turn is the next durable event.
-	second := readStream(t, s, "/bonnie/v1/runs/cursor-me/stream?cursor=5", 1)
-	if second[0].Seq != 6 || second[0].State != runtime.RunCompleted {
-		t.Fatalf("reconnect delivered %v, want the completed state at seq 6 — a gap or a duplicate", seqs(second))
+	second := readStream(t, s, "/bonnie/v1/runs/cursor-me/stream?cursor=6", 1)
+	if second[0].Seq != 7 || second[0].State != runtime.RunCompleted {
+		t.Fatalf("reconnect delivered %v, want the completed state at seq 7 — a gap or a duplicate", seqs(second))
 	}
 }
 
@@ -817,19 +817,19 @@ func TestStreamCatchUpPastTheBacklog(t *testing.T) {
 		}
 	}
 
-	events := readStream(t, ts, "/bonnie/v1/runs/catch-up/stream?cursor=0", 18)
-	if len(events) != 18 {
-		t.Fatalf("read %d events, want the full 18-event history (6 turns × running, response, completed)", len(events))
+	events := readStream(t, ts, "/bonnie/v1/runs/catch-up/stream?cursor=0", 24)
+	if len(events) != 24 {
+		t.Fatalf("read %d events, want the full 24-event history (6 turns × identity, running, response, completed)", len(events))
 	}
 	for i, ev := range events {
 		if i > 0 && ev.Seq <= events[i-1].Seq {
 			t.Fatalf("event %d has seq %d, not above %d", i, ev.Seq, events[i-1].Seq)
 		}
 	}
-	if events[16].Type != runtime.EventResponse || events[16].Text != "turn 6" {
-		t.Fatalf("second-to-last event = %+v, want the turn 6 response", events[16])
+	if events[22].Type != runtime.EventResponse || events[22].Text != "turn 6" {
+		t.Fatalf("second-to-last event = %+v, want the turn 6 response", events[22])
 	}
-	if last := events[17]; last.State != runtime.RunCompleted {
+	if last := events[23]; last.State != runtime.RunCompleted {
 		t.Fatalf("last event = %+v, want the closing completed state", last)
 	}
 }

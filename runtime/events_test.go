@@ -46,7 +46,7 @@ func TestStreamEventsReplaysPastTheBacklog(t *testing.T) {
 	defer stop()
 
 	var got []Event
-	for len(got) < 12*3 { // per turn: a running state, a response, a completed state
+	for len(got) < 12*4 { // per turn: identity, running, response, completed
 		select {
 		case ev, open := <-events:
 			if !open {
@@ -58,8 +58,8 @@ func TestStreamEventsReplaysPastTheBacklog(t *testing.T) {
 		}
 		break
 	}
-	if len(got) != 36 {
-		t.Fatalf("replayed %d events, want the full 36-event history (12 × running, response, completed)", len(got))
+	if len(got) != 48 {
+		t.Fatalf("replayed %d events, want the full 48-event history (12 × identity, running, response, completed)", len(got))
 	}
 	// Seqs must rise, never repeat, and never skip backwards.
 	for i, ev := range got {
@@ -111,7 +111,7 @@ func TestStreamEventsSurvivesRestart(t *testing.T) {
 	defer stop()
 
 	var sawResponse, sawState bool
-	for range 3 { // the replayed history: running, response, completed
+	for range 4 { // identity, running, response, completed
 		select {
 		case ev, open := <-events:
 			if !open {
@@ -197,7 +197,7 @@ func TestStreamEventsHandoffHasNoGapOrDuplicate(t *testing.T) {
 	defer stop()
 
 	seen := map[string]int{}
-	for range 3 { // the whole history: running, response, completed
+	for range 4 { // identity, running, response, completed
 		select {
 		case ev, open := <-events:
 			if !open {

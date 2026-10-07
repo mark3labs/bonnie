@@ -146,8 +146,11 @@ type SessionRef interface {
 	Send(ctx context.Context, text string, opts SendOptions) (*runtime.Run, error)
 	// Respond answers a suspended run.
 	Respond(ctx context.Context, responses []runtime.InputResponse) (*runtime.Run, error)
-	// Cancel stops the active turn.
+	// Cancel requests cancellation of an active or parked turn.
 	Cancel(ctx context.Context) error
+	// RequestCancel returns a durable acknowledgement. expectedTurnID, when
+	// non-empty, prevents a delayed control from stopping a later turn.
+	RequestCancel(ctx context.Context, expectedTurnID string) (runtime.CancelResult, error)
 	// Reset retires the run for good and frees its addresses in this
 	// channel, so the next Send on an address starts a fresh run. A reference from Attach keeps
 	// pointing at the retired run.

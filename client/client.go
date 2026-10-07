@@ -130,6 +130,7 @@ type Health struct {
 
 // runResponse is the wire form of a run at a turn boundary.
 type runResponse struct {
+	TurnID   string                  `json:"turn_id,omitempty"`
 	RunID    string                  `json:"run_id"`
 	Cursor   int                     `json:"cursor,omitempty"`
 	State    runtime.RunState        `json:"state"`
@@ -138,7 +139,7 @@ type runResponse struct {
 }
 
 func (r runResponse) toRun() *runtime.Run {
-	return &runtime.Run{ID: r.RunID, State: r.State, Response: r.Response, Suspend: r.Suspend}
+	return &runtime.Run{ID: r.RunID, TurnID: r.TurnID, State: r.State, Response: r.Response, Suspend: r.Suspend}
 }
 
 // Health reports whether the server is up and routing. It needs no
@@ -247,6 +248,7 @@ func (c *Client) Get(ctx context.Context, runID string) (*runtime.Run, error) {
 // Cursor is the last record in that replay, not a later position read.
 // Messages contain the selected branch before model-context compaction.
 type Snapshot struct {
+	TurnID   string                  `json:"turn_id,omitempty"`
 	RunID    string                  `json:"run_id"`
 	Cursor   int                     `json:"cursor"`
 	State    runtime.RunState        `json:"state"`
@@ -266,10 +268,18 @@ func (c *Client) Snapshot(ctx context.Context, runID string) (*Snapshot, error) 
 	return &out, nil
 }
 
-// Cancel stops the turn a run is executing. A run with no turn in flight
-// answers a conflict.
+// Cancel requests cancellation of an active or parked turn. Idle runs are
+// harmless no-ops. Confirm completion with the cancelled stream state.
 func (c *Client) Cancel(ctx context.Context, runID string) error {
 	return c.post(ctx, apiPrefix+"/runs/"+url.PathEscape(runID)+"/cancel", nil, nil)
+}
+
+// RequestCancel scopes a durable cancellation command to the observed turn.
+// An empty expectedTurnID targets the current turn.
+func (c *Client) RequestCancel(ctx context.Context, runID, expectedTurnID string) (runtime.CancelResult, error) {
+	var out runtime.CancelResult
+	err := c.post(ctx, apiPrefix+"/runs/"+url.PathEscape(runID)+"/cancel", map[string]string{"turn_id": expectedTurnID}, &out)
+	return out, err
 }
 
 // Reset retires the run for good and frees the address that pointed at it,

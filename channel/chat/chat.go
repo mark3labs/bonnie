@@ -572,7 +572,17 @@ func (s *Ref) Cancel(ctx context.Context) error {
 	if err != nil || !ok {
 		return err
 	}
-	return s.core.runner.Cancel(runID)
+	_, err = s.core.runner.RequestCancel(ctx, runID, "")
+	return err
+}
+
+// RequestCancel implements channel.SessionRef.
+func (s *Ref) RequestCancel(ctx context.Context, expectedTurnID string) (runtime.CancelResult, error) {
+	runID, ok, err := s.resolveExisting(ctx)
+	if err != nil || !ok {
+		return runtime.CancelResult{Status: runtime.CancelNotActive}, err
+	}
+	return s.core.runner.RequestCancel(ctx, runID, expectedTurnID)
 }
 
 // Reset implements [channel.SessionRef]. The run is retired first and the
@@ -775,17 +785,17 @@ func doCancel(ctx context.Context, ref *Ref) (*runtime.Run, error) {
 	if !ok {
 		return note("", emptyNote), nil
 	}
-	switch err := ref.Cancel(ctx); {
-	case errors.Is(err, runtime.ErrRunNotActive):
+	result, err := ref.RequestCancel(ctx, "")
+	switch {
+	case err == nil && result.Status != runtime.CancelRequested:
 		// Nothing to stop is not a failure. Someone who types "/cancel" a
 		// second after the turn ended asked for a state they already have.
 		return note(runID, idleNote), nil
 	case err != nil:
 		return nil, err
 	}
-	// Here the state is the acknowledgement: DeliveryText renders a
-	// cancelled run as "(cancelled)", which is what was asked for.
-	return &runtime.Run{ID: runID, State: runtime.RunCancelled}, nil
+	// Execution can still be stopping. Do not claim completion here.
+	return note(runID, "Cancellation requested."), nil
 }
 
 func doClear(ctx context.Context, ref *Ref) (*runtime.Run, error) {

@@ -41,8 +41,8 @@
 //     inject Telegram's HTML formatting.
 //   - A reply longer than 4096 characters is split, with a cap of five
 //     parts and a truncation notice on the last.
-//   - Cancel is not exposed: there is no Telegram UI gesture for it. A turn
-//     that must be stopped ends through the HTTP channel or the journal.
+//   - /cancel and /cancel@bot stop the current turn or withdraw pending input.
+//     The bot target must match this deployment.
 //   - Attachments are ignored.
 package telegram
 
@@ -262,6 +262,15 @@ func (c *Channel) handleUpdate(w http.ResponseWriter, r *http.Request, _ channel
 // forUs reports whether a message reaches the agent, and returns the text
 // with the invocation stripped.
 func (c *Channel) forUs(m *tgMessage) (string, bool) {
+	// Recognize controls before the normal invocation is stripped.
+	token, _, _ := strings.Cut(strings.TrimSpace(m.Text), " ")
+	if strings.HasPrefix(token, "/cancel") {
+		text, ok := stripCommand(strings.TrimSpace(m.Text), "cancel", c.cfg.Username)
+		if ok && text == "" {
+			return chat.CancelCommand, m.Chat.Type == "private" || m.Chat.Type == "group" || m.Chat.Type == "supergroup"
+		}
+		return "", false
+	}
 	switch m.Chat.Type {
 	case "private":
 		// A DM is always for the bot; a command token may still prefix the

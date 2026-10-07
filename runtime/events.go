@@ -12,6 +12,11 @@ import (
 // [Event] comes verbatim from a Kit lifecycle event, so a consumer sees the
 // same vocabulary Kit uses.
 const (
+	// EventTurn reports the durable identity of a new turn.
+	EventTurn = "run_turn"
+	// EventCancelRequested reports a durable cancellation command. A cancelled
+	// state confirms completion and withdraws all pending input for that turn.
+	EventCancelRequested = "run_cancel_requested"
 	// EventState reports a run-state transition.
 	EventState = "run_state"
 	// EventSuspend reports that the run parked for input.
@@ -37,13 +42,14 @@ const (
 // past it — from the backlog when it still reaches, from the journal when it
 // does not.
 type Event struct {
-	RunID string          `json:"run_id"`
-	Seq   int             `json:"seq"`
-	Type  string          `json:"type"`
-	Time  time.Time       `json:"time"`
-	Text  string          `json:"text,omitempty"`
-	State RunState        `json:"state,omitempty"`
-	Data  json.RawMessage `json:"data,omitempty"`
+	RunID  string          `json:"run_id"`
+	TurnID string          `json:"turn_id,omitempty"`
+	Seq    int             `json:"seq"`
+	Type   string          `json:"type"`
+	Time   time.Time       `json:"time"`
+	Text   string          `json:"text,omitempty"`
+	State  RunState        `json:"state,omitempty"`
+	Data   json.RawMessage `json:"data,omitempty"`
 }
 
 // DefaultEventBuffer is how many recent events a run keeps for reconnecting
@@ -308,12 +314,20 @@ type eventSource interface {
 // forwardAgentEvents mirrors an agent's Kit lifecycle events onto the bus,
 // under the same run ID. It returns a no-op stop function for an agent that
 // emits nothing.
-func forwardAgentEvents(agent Agent, bus *EventBus, runID string) func() {
+func forwardAgentEvents(agent Agent, bus *EventBus, runID string, turnIDs ...string) func() {
 	src, ok := agent.(eventSource)
 	if !ok {
 		return func() {}
 	}
 	return src.Subscribe(func(ev kit.Event) {
-		bus.PublishData(runID, string(ev.EventType()), "", ev)
+		turnID := ""
+		if len(turnIDs) > 0 {
+			turnID = turnIDs[0]
+		}
+		data, err := json.Marshal(ev)
+		if err != nil {
+			return
+		}
+		bus.Publish(Event{RunID: runID, TurnID: turnID, Type: string(ev.EventType()), Data: data})
 	})
 }

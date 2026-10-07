@@ -10,9 +10,10 @@
 // turn runs in a goroutine the handler does not outlive, and the reply goes
 // back through `POST /channels/{id}/messages` with the bot token.
 //
-// Setup on the Discord side: create an application and a bot, register one
-// slash command (default name `ask`, with a required string option named
-// `message`), set this route as the Interactions Endpoint URL, and copy the
+// Setup on the Discord side: create an application and a bot, register the
+// ask command (default name `ask`, with a required string option named
+// `message`) and the cancel command (default `cancel`, no options). Set this
+// route as the Interactions Endpoint URL, and copy the
 // public key, bot token, and application ID into configuration.
 //
 // # Which messages are for the bot
@@ -53,6 +54,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mark3labs/bonnie/channel"
@@ -118,6 +120,9 @@ type Config struct {
 	// Command is the slash command this adapter answers. The default is
 	// "ask".
 	Command string
+	// CancelCommand is the registered command that stops the current turn.
+	// It defaults to "cancel" and must differ from Command.
+	CancelCommand string
 
 	// APIURL overrides the Discord API base URL. Tests point it at a fake;
 	// leave it empty in production.
@@ -130,12 +135,14 @@ type Config struct {
 // Channel is the Discord transport. It implements [channel.Channel] and
 // [channel.Inbound].
 type Channel struct {
-	core *chat.Core
-	cfg  Config
-	api  string
-	key  ed25519.PublicKey
-	http *http.Client
-	post chat.Delivery
+	core   *chat.Core
+	cfg    Config
+	api    string
+	key    ed25519.PublicKey
+	http   *http.Client
+	post   chat.Delivery
+	seenMu sync.Mutex
+	seen   map[string]bool
 }
 
 var (
@@ -164,6 +171,12 @@ func New(r *runtime.Runner, cfg Config, opts ...chat.CoreOption) (*Channel, erro
 	}
 	if cfg.Command == "" {
 		cfg.Command = "ask"
+	}
+	if cfg.CancelCommand == "" {
+		cfg.CancelCommand = "cancel"
+	}
+	if cfg.CancelCommand == cfg.Command {
+		return nil, fmt.Errorf("bonnie: discord: cancel command must differ from ask command")
 	}
 	api := cfg.APIURL
 	if api == "" {
@@ -273,14 +286,19 @@ func (c *Channel) handleInteraction(w http.ResponseWriter, r *http.Request, _ ch
 	}
 
 	switch {
-	case in.Type != typeAppCommand || in.Data == nil || in.Data.Name != c.cfg.Command:
+	case in.Type != typeAppCommand || in.Data == nil || (in.Data.Name != c.cfg.Command && in.Data.Name != c.cfg.CancelCommand):
 		respond(w, typeMessageWithSource, fmt.Sprintf("Use /%s to talk to the agent.", c.cfg.Command))
 		return
-	case commandText(in.Data) == "":
+	case in.Data.Name == c.cfg.Command && commandText(in.Data) == "":
 		respond(w, typeMessageWithSource, fmt.Sprintf("Tell me what to do: /%s <message>", c.cfg.Command))
 		return
 	}
 
+	// A repeated interaction must not cancel a later turn.
+	if in.ID != "" && !c.claimInteraction(in.ID) {
+		respond(w, typeMessageWithSource, "Control already received.")
+		return
+	}
 	// Acknowledge inside the deadline, then work. The deferred response is
 	// edited by nobody — delivery is a plain channel message, which also
 	// survives turns that outlive the interaction token's 15 minutes.
@@ -292,7 +310,7 @@ func (c *Channel) handleInteraction(w http.ResponseWriter, r *http.Request, _ ch
 	}
 	chat.Dispatch(r.Context(), c.core, chat.Turn{
 		Address: in.ChannelID,
-		Text:    commandText(in.Data),
+		Text:    c.inputText(in.Data),
 		// Discord's webhook does not say whether the channel is a thread;
 		// the interaction carries only its ID. One channel is one
 		// conversation either way.
@@ -542,4 +560,26 @@ func respondUpdate(w http.ResponseWriter, content string) {
 			"components": []any{},
 		},
 	})
+}
+
+// inputText routes native controls through the shared dispatcher.
+func (c *Channel) inputText(d *discordData) string {
+	if d.Name == c.cfg.CancelCommand {
+		return chat.CancelCommand
+	}
+	return commandText(d)
+}
+
+// claimInteraction bounds duplicate admission in this process.
+func (c *Channel) claimInteraction(id string) bool {
+	c.seenMu.Lock()
+	defer c.seenMu.Unlock()
+	if c.seen[id] {
+		return false
+	}
+	if c.seen == nil || len(c.seen) >= 4096 {
+		c.seen = make(map[string]bool)
+	}
+	c.seen[id] = true
+	return true
 }

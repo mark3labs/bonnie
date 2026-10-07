@@ -59,10 +59,6 @@ func TestRootWaitingStatusAndResume(t *testing.T) {
 			if err != nil || status.Error != "" || status.State != runtime.RunWaiting || status.Suspend == nil {
 				t.Fatalf("snapshot %+v %v", status, err)
 			}
-			cancel, err := c.Cancel(ctx, target)
-			if err != nil || cancel.Error == "" || cancel.CancelRequested {
-				t.Fatalf("cancel %+v %v", cancel, err)
-			}
 			_, err = c.Answer(ctx, out, []runtime.InputResponse{{Text: "London"}})
 			return err
 		}

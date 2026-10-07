@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add durable, turn-scoped cancellation and withdrawal of pending human input.
+  Add native Telegram and Discord controls and a signed Slack command route.
+  Document controls and recovery in [`docs/CANCELLATION.md`](docs/CANCELLATION.md).
+
+### Changed
+
+- Cancellation acknowledges a request, not completion. HTTP now returns 202
+  for a durable request and 200 for idle or stale targets, instead of 204/409.
+  SessionRef adds RequestCancel; custom implementations must add this method.
+
+### Added
+
 - Add code-defined cron schedules with durable occurrences, time zones,
   overlap and catch-up policies, authorized HTTP triggers, and CLI commands.
 - Add tracked Slack, Telegram, Discord, and GitHub dispatch with saved-result

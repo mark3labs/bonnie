@@ -39,10 +39,12 @@ type StatusEvent struct {
 type StatusRequest struct {
 	Version int `json:"version"`
 	Target
+	// TurnID optionally scopes cancellation to the observed turn.
+	TurnID string `json:"turn_id,omitempty"`
 }
 
-// CancelRequest requests cancellation of an executing turn. It cannot undo
-// external effects. Waiting and finished runs are not executing turns.
+// CancelRequest requests cancellation of an active or parked turn. It cannot
+// undo external effects. Finished runs are harmless no-ops.
 type CancelRequest = StatusRequest
 
 // Status is a current attempt snapshot. Active means this process is executing
@@ -55,6 +57,8 @@ type Status struct {
 	Active          bool                    `json:"active"`
 	Seq             int                     `json:"seq"`
 	Suspend         *runtime.SuspendRequest `json:"suspend,omitempty"`
+	CancelStatus    string                  `json:"cancel_status,omitempty"`
+	TurnID          string                  `json:"turn_id,omitempty"`
 	CancelRequested bool                    `json:"cancel_requested,omitempty"`
 	Error           string                  `json:"error,omitempty"`
 }
@@ -206,10 +210,12 @@ func (c *Channel) inspect(ctx context.Context, req StatusRequest, cancel bool) S
 		return out
 	}
 	if cancel {
-		if err := c.core.Runner().Cancel(req.RunID); err != nil {
+		result, err := c.core.Runner().RequestCancel(ctx, req.RunID, req.TurnID)
+		if err != nil {
 			out.Error = err.Error()
 		} else {
-			out.CancelRequested = true
+			out.CancelStatus, out.TurnID = result.Status, result.TurnID
+			out.CancelRequested = result.Status == runtime.CancelRequested
 		}
 	}
 	recs, err := c.core.Runner().Journal().Replay(ctx, req.RunID)
@@ -224,6 +230,9 @@ func (c *Channel) inspect(ctx context.Context, req StatusRequest, cancel bool) S
 	out.State = runtime.RunPending
 	for _, rec := range recs {
 		out.Seq = rec.Seq
+		if rec.Kind == runtime.RecordTurn {
+			out.TurnID = rec.Text
+		}
 		if rec.Kind == runtime.RecordState {
 			out.State = rec.State
 		}

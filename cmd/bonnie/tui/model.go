@@ -146,7 +146,8 @@ type Model struct {
 	// first turn is sent, not after it returns: a turn's reasoning and tool
 	// events are live-only, so a stream opened after the turn has already
 	// missed them.
-	runID string
+	runID  string
+	turnID string
 
 	// pending holds the first message while the run is resolved and the
 	// stream opens. It is sent once the stream is live, so the turn cannot
@@ -439,11 +440,17 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.streamCh = nil
 		return m, tea.Quit
 	case "ctrl+w":
-		if !m.spin || m.runID == "" {
+		if (!m.spin && m.state != statusWaiting) || m.runID == "" {
 			return m, nil
 		}
 		m.label = "cancelling"
 		return m, func() tea.Msg {
+			if scoped, ok := m.client.(interface {
+				RequestCancel(context.Context, string, string) (runtime.CancelResult, error)
+			}); ok {
+				_, err := scoped.RequestCancel(m.ctx, m.runID, m.turnID)
+				return cancelMsg{generation: m.generation, err: err}
+			}
 			return cancelMsg{generation: m.generation, err: m.client.Cancel(m.ctx, m.runID)}
 		}
 	case "enter":
@@ -619,6 +626,7 @@ func (m *Model) restoreSnapshot(snapshot *client.Snapshot) {
 		}
 	}
 	m.spin = false
+	m.turnID = snapshot.TurnID
 	switch snapshot.State {
 	case runtime.RunWaiting:
 		m.state, m.label = statusWaiting, "waiting"
@@ -707,6 +715,9 @@ func (m Model) stopStream() {
 // Kit deltas are folded into the current assistant entry so the transcript does
 // not grow a line per token.
 func (m *Model) apply(ev runtime.Event) {
+	if ev.TurnID != "" {
+		m.turnID = ev.TurnID
+	}
 	if ev.Seq > m.cursor {
 		m.cursor = ev.Seq
 	}

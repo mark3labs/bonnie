@@ -464,6 +464,7 @@ type ResetRequest struct {
 
 // RunResponse is the JSON form of a run at a turn boundary.
 type RunResponse struct {
+	TurnID   string                  `json:"turn_id,omitempty"`
 	RunID    string                  `json:"run_id"`
 	Cursor   int                     `json:"cursor,omitempty"`
 	State    runtime.RunState        `json:"state"`
@@ -520,6 +521,7 @@ const (
 func runResponse(run *runtime.Run) RunResponse {
 	out := RunResponse{
 		RunID:    run.ID,
+		TurnID:   run.TurnID,
 		State:    run.State,
 		Response: run.Response,
 		Suspend:  run.Suspend,
@@ -711,11 +713,26 @@ func (c *Channel) handleRespond(w http.ResponseWriter, r *http.Request, in chann
 }
 
 func (c *Channel) handleCancel(w http.ResponseWriter, r *http.Request, in channel.Inbound, _ channel.Outbound) {
-	if err := in.Attach(r.PathValue("id")).Cancel(r.Context()); err != nil {
+	var req struct {
+		TurnID string `json:"turn_id,omitempty"`
+	}
+	if r.ContentLength != 0 && !decode(w, r, &req) {
+		return
+	}
+	result, err := in.Attach(r.PathValue("id")).RequestCancel(r.Context(), req.TurnID)
+	if errors.Is(err, runtime.ErrRunNotFound) {
+		result = runtime.CancelResult{Status: runtime.CancelNotActive}
+		err = nil
+	}
+	if err != nil {
 		writeError(w, err)
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	status := http.StatusOK
+	if result.Status == runtime.CancelRequested {
+		status = http.StatusAccepted
+	}
+	writeJSON(w, status, result)
 }
 
 // handleReset retires the run. The route is ID-addressed, so it retires

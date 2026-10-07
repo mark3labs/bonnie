@@ -39,8 +39,18 @@ func (c *Channel) handleSnapshot(w http.ResponseWriter, r *http.Request, in chan
 	// copy, but a read request must not change the durable source journal.
 	copyJournal := runtime.NewMemoryJournal()
 	defer func() { _ = copyJournal.Close() }()
+	cancelPending := false
 	for _, rec := range recs {
 		out.Cursor = max(out.Cursor, rec.Seq)
+		if rec.Kind == runtime.RecordTurn {
+			out.TurnID = rec.Text
+			cancelPending = false
+		}
+		if rec.Kind == runtime.RecordCancel && rec.Text == out.TurnID {
+			cancelPending = true
+			out.State = runtime.RunCancelled
+			out.Suspend = nil
+		}
 		if rec.Kind == runtime.RecordState {
 			out.State = rec.State
 		}
@@ -59,6 +69,10 @@ func (c *Channel) handleSnapshot(w http.ResponseWriter, r *http.Request, in chan
 			writeError(w, err)
 			return
 		}
+	}
+	if cancelPending {
+		out.State = runtime.RunCancelled
+		out.Suspend = nil
 	}
 	session, err := runtime.Restore(r.Context(), runID, copyJournal)
 	if err != nil {

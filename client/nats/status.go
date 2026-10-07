@@ -76,8 +76,8 @@ func (c *Client) Status(ctx context.Context, target Target) (Status, error) {
 }
 
 // Cancel requests cancellation of an active turn. The reply confirms only the
-// request; the cancelled state is reported separately. Idle runs return an
-// error reply. Retrying a lost request is safe, but can return not-active.
+// request; the cancelled state is reported separately. Idle runs are no-ops.
+// Use CancelTurn to protect a later turn from a delayed request.
 func (c *Client) Cancel(ctx context.Context, target Target) (Status, error) {
 	return c.requestStatus(ctx, c.cfg.CommandSubject, target)
 }
@@ -86,11 +86,20 @@ func validTarget(t Target) bool {
 	return validID(t.TaskID) && validID(t.RunID) && validID(t.AttemptID) && safeToken(t.WorkerID)
 }
 
+// CancelTurn requests cancellation of one observed turn, including pending input.
+func (c *Client) CancelTurn(ctx context.Context, target Target, turnID string) (Status, error) {
+	return c.requestTurnStatus(ctx, c.cfg.CommandSubject, target, turnID)
+}
+
 func (c *Client) requestStatus(ctx context.Context, base string, target Target) (Status, error) {
+	return c.requestTurnStatus(ctx, base, target, "")
+}
+
+func (c *Client) requestTurnStatus(ctx context.Context, base string, target Target, turnID string) (Status, error) {
 	if base == "" || !validTarget(target) {
 		return Status{}, errors.New("bonnie: client/nats: control subject and exact target are required")
 	}
-	data, err := json.Marshal(protocol.StatusRequest{Version: 1, Target: target})
+	data, err := json.Marshal(protocol.StatusRequest{Version: 1, Target: target, TurnID: turnID})
 	if err != nil {
 		return Status{}, fmt.Errorf("bonnie: client/nats: encode request: %w", err)
 	}
