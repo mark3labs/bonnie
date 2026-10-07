@@ -49,6 +49,11 @@ type config struct {
 	workspaceCleanup    *WorkspaceCleanupPolicy
 	cleanupProvider     sandbox.RunDeleter
 	sandbox             sandbox.Provider
+	sandboxSet          bool
+	sandboxes           []sandbox.Provider
+	sandboxesSet        bool
+	sandboxesDuplicate  bool
+	sandboxName         string
 	sandboxEnv          map[string]string
 	network             *sandbox.NetworkPolicy
 	tools               []kit.Tool
@@ -194,12 +199,40 @@ func WithPersistentWorkspace(dir string) Option {
 // Pass this to choose something stronger — [sandbox.Docker] for namespaces,
 // [sandbox.Microsandbox] for a microVM with its own kernel — or to widen the
 // confinement deliberately with [sandbox.Local], which provides no isolation
-// at all and is for development only.
+// at all and is for development only. The operator may select only this
+// provider with --sandbox. Use [WithSandboxes] to permit more than one backend.
+// These two options cannot be combined.
 //
 // The godoc on each provider in package [sandbox] states what that backend
 // does and does not contain.
 func WithSandbox(p sandbox.Provider) Option {
-	return func(c *config) { c.sandbox = p }
+	return func(c *config) {
+		c.sandbox = p
+		c.sandboxSet = true
+	}
+}
+
+// WithSandboxes declares the sandbox backends the operator may select with
+// --sandbox in [Agent.Serve]. The first provider is the default. Selection
+// keeps the provider's configured options; it does not build a new provider.
+// Only the selected provider is checked for availability. An unavailable
+// provider returns an error, never a fallback to another backend.
+//
+// The list must be non-empty, with non-nil providers and unique, non-empty
+// names from [sandbox.Provider.Name]. This option may be set only once and
+// cannot be combined with [WithSandbox] or [WithAgentFactory]. Invalid
+// configuration is refused when serving starts. [Agent.Run] uses the first
+// provider without reading process flags.
+func WithSandboxes(providers ...sandbox.Provider) Option {
+	// Copy the list so changes by the caller cannot change the allowed backends.
+	providers = append([]sandbox.Provider(nil), providers...)
+	return func(c *config) {
+		if c.sandboxesSet {
+			c.sandboxesDuplicate = true
+		}
+		c.sandboxesSet = true
+		c.sandboxes = providers
+	}
 }
 
 // WithSandboxEnv injects environment variables into every command the sandbox
@@ -261,7 +294,7 @@ func WithKit(opts ...kit.Option) Option {
 // BONNIE only for durability and transport.
 //
 // It cannot be combined with the options that configure the agent BONNIE
-// would have built ([WithModel], [WithSystemPrompt], [WithSandbox],
+// would have built ([WithModel], [WithSystemPrompt], [WithSandbox], [WithSandboxes],
 // [WithSandboxEnv], [WithNetwork], [WithTools], [WithKit], [WithoutHumanInput]): the factory owns
 // the agent, so those settings would be accepted and ignored. [Agent.Run]
 // refuses instead, naming both.

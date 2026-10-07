@@ -467,6 +467,45 @@ bonnie.New(
 ).Serve()
 ```
 
+To let an operator select a backend without rebuilding the agent, declare
+its permitted providers with `WithSandboxes`:
+
+```go
+bonnie.New(
+	bonnie.WithSandboxes(
+		sandbox.Microsandbox(
+			sandbox.WithMicrosandboxImage("python:3.12-slim"),
+			sandbox.WithMicrosandboxMemory(2048),
+			sandbox.WithMicrosandboxCPUs(2),
+		),
+		sandbox.Local(), // No isolation; select explicitly for development only.
+	),
+).Serve()
+```
+
+```sh
+./my-agent                        # First provider: microsandbox.
+./my-agent --sandbox microsandbox # Keeps the configured image, memory, and CPUs.
+./my-agent --sandbox local        # Explicit host execution for development.
+```
+
+Compiled agents use Cobra and Fang for styled help and startup errors. Run
+`./my-agent --help` to see the permitted sandbox names and the default. This
+adds no separate executable; Microsandbox still requires `msb`. Host-registered
+Go flags remain supported, as do single-dash long flags such as `-addr`.
+`Agent.Run(ctx)` does not parse flags or render command help.
+
+The first provider is the default. Only the selected provider must be available;
+a failure never selects another backend. An unknown name returns an error with
+the permitted names. The list must be non-empty, with non-nil providers and
+unique, non-empty names. Do not combine `WithSandboxes` with `WithSandbox` or
+`WithAgentFactory`, or call `WithSandboxes` more than once.
+
+`WithSandbox` permits just its one provider. With neither option, a compiled
+agent permits only Landlock. `Agent.Run` does not read flags and uses the first
+provider. Network and environment options apply to the selected backend; a
+backend that cannot enforce the network policy returns an error.
+
 If you wire the runner yourself, it is the same provider one layer down:
 
 ```go

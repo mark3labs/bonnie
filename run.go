@@ -3,17 +3,14 @@ package bonnie
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"io/fs"
 	"net"
 	"net/http"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"slices"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/mark3labs/bonnie/channel"
@@ -54,46 +51,19 @@ func New(opts ...Option) *Agent {
 // Serve runs the agent until the process is interrupted, then exits.
 //
 // It owns the process, which is what makes a one-line main possible: it
-// parses the operator flags a serving binary accepts, installs the signal
-// handler, drains in-flight turns on SIGINT or SIGTERM, and exits non-zero
+// uses Cobra and Fang for operator flags, help, and startup errors. It installs
+// the signal handler, drains in-flight turns on SIGINT or SIGTERM, and exits non-zero
 // after writing the error to stderr. A host that owns its own process calls
 // [Agent.Run] instead.
 //
-// The flags are -addr and -model, and each wins over the matching option, so
-// an operator can move a built binary to another port or model without
-// rebuilding it. `bonnie dev` starts a tree's binary with -addr, which is the
-// whole contract between the dev loop and the child.
+// The flags -addr and -model override the matching options. The -sandbox
+// flag selects a provider declared with [WithSandboxes] or [WithSandbox];
+// without either option, only the default Landlock provider is permitted.
+// An operator can change the port, model, or permitted backend without
+// rebuilding the binary. `bonnie dev` starts a tree's binary with -addr,
+// which is the whole contract between the dev loop and the child.
 func (a *Agent) Serve() {
-	registerServeFlags(flag.CommandLine)
-	flag.Parse()
-	addr := flag.Lookup("addr").Value.String()
-	model := flag.Lookup("model").Value.String()
-
-	// The flags are applied after the author's options, so they win.
-	if addr != "" {
-		WithAddr(addr)(a.cfg)
-	}
-	if model != "" {
-		WithModel(model)(a.cfg)
-	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	if err := a.Run(ctx); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
-}
-
-// registerServeFlags preserves flags that the host has already registered.
-func registerServeFlags(fs *flag.FlagSet) {
-	if fs.Lookup("addr") == nil {
-		fs.String("addr", "", "address to listen on")
-	}
-	if fs.Lookup("model") == nil {
-		fs.String("model", "", "model to use, for example anthropic/claude-sonnet-4-5")
-	}
+	a.serve()
 }
 
 // Run serves the agent until ctx ends, then drains in-flight turns and
@@ -464,7 +434,10 @@ func (c *config) agentFactory(ctx context.Context, workspace string, opts []kit.
 		return c.factory, nil
 	}
 
-	provider := c.sandbox
+	provider, err := c.selectSandbox()
+	if err != nil {
+		return nil, err
+	}
 	if c.persistentSet {
 		if c.workspaceCleanup != nil {
 			return nil, fmt.Errorf("bonnie: WithRunWorkspaceCleanup cannot be combined with WithPersistentWorkspace")
@@ -474,9 +447,6 @@ func (c *config) agentFactory(ctx context.Context, workspace string, opts []kit.
 		}
 		if c.workspaceSet {
 			return nil, fmt.Errorf("bonnie: WithPersistentWorkspace cannot be combined with WithWorkspace")
-		}
-		if provider == nil {
-			provider = c.defaultSandbox()
 		}
 		switch p := provider.(type) {
 		case *sandbox.LocalProvider:
@@ -498,9 +468,6 @@ func (c *config) agentFactory(ctx context.Context, workspace string, opts []kit.
 		default:
 			return nil, fmt.Errorf("bonnie: WithPersistentWorkspace supports sandbox.Landlock and sandbox.Local, not %s", provider.Name())
 		}
-	}
-	if provider == nil {
-		provider = c.defaultSandbox()
 	}
 	if c.network != nil {
 		net, ok := provider.(sandbox.Networked)
@@ -553,7 +520,9 @@ func (c *config) agentConflicts() string {
 		return "WithModel"
 	case c.prompt != "":
 		return "WithSystemPrompt"
-	case c.sandbox != nil:
+	case c.sandboxesSet:
+		return "WithSandboxes"
+	case c.sandboxSet || c.sandboxName != "":
 		return "WithSandbox"
 	case len(c.sandboxEnv) > 0:
 		return "WithSandboxEnv"

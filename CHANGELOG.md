@@ -31,6 +31,13 @@ Do not use it for work whose loss would hurt.
 
 ### Added
 
+- Use Cobra and Fang in compiled agents for styled help and startup errors.
+  Keep host-registered Go flags and single-dash long flags working. Sandbox
+  help lists permitted providers and the default. `Agent.Run` stays unchanged.
+- Add `bonnie.WithSandboxes` to declare permitted sandbox providers. Compiled
+  agents accept `--sandbox` to select one without losing its configured options.
+  The first provider is the default. Reject invalid lists and unknown names;
+  never fall back when the selected backend is unavailable.
 - Add opt-in NATS targeted task delivery with channel and client configuration
   `TargetedTasks`, `client/nats.Client.SubmitTo`, and
   `channel/nats.ValidateTargetedSubjects`. Workers read shared tasks and their

@@ -4,8 +4,9 @@
 // local development and for inspecting durable runs.
 //
 // The CLI renders its own help and errors with fang. It has an
-// interactive interface in dev and chat; the framework packages render no terminal
-// at all today. The hard boundary this repo enforces is the Kit one above.
+// interactive interface in dev and chat. Compiled agents also use fang in
+// Agent.Serve; Agent.Run and the layered framework packages have no terminal UI.
+// The hard boundary this repo enforces is the public Kit SDK.
 package main
 
 import (
