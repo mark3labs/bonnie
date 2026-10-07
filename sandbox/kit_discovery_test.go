@@ -108,7 +108,7 @@ func TestKitDiscoversNothingOnTheHost(t *testing.T) {
 		if agents := k.GetAgents(); agents != nil {
 			t.Errorf("Kit discovered %d named agent definitions, want none", len(agents))
 		}
-		if !req.HasTool("bash") {
+		if !req.HasTool("shell") {
 			t.Fatalf("the sandboxed tools are missing (%v): the test is not building what Agent builds", req.Tools)
 		}
 	})

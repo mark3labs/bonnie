@@ -31,7 +31,7 @@ func TestManagedCompletionSharesSandbox(t *testing.T) {
 	ctx := context.Background()
 	journal := runtime.NewMemoryJournal()
 	model := fakemodel.New(
-		fakemodel.Call("bash", `{"command":"cat setup.txt; printf model > model.txt"}`),
+		fakemodel.Call("shell", `{"command":"cat setup.txt; printf model > model.txt"}`),
 		fakemodel.Say("draft"), fakemodel.Say("accepted"),
 	)
 	var order []string

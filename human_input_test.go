@@ -72,7 +72,7 @@ func TestWithoutHumanInput(t *testing.T) {
 						t.Errorf("%s present = %v, want %v", tool, req.HasTool(tool), !disabled)
 					}
 				}
-				for _, tool := range []string{"bash", "read_file", "write_file", "list_files", "custom"} {
+				for _, tool := range []string{"shell", "read_file", "write_file", "list_files", "custom"} {
 					if !req.HasTool(tool) {
 						t.Errorf("missing tool %s", tool)
 					}

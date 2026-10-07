@@ -477,10 +477,15 @@ runner := runtime.NewRunner(journal, sandbox.Agent(provider,
 ))
 ```
 
-The model gets four tools that run in the sandbox: `bash`, `read_file`,
+The model gets four tools that run in the sandbox: `shell`, `read_file`,
 `write_file`, and `list_files`. Their root is `sandbox.Workspace`,
 `/workspace`. A path that leaves the workspace, also through a symlink the
 model made, gets `sandbox.ErrOutsideWorkspace`.
+
+The `shell` tool checks for Bash inside the sandbox on each call. It uses
+Bash when available and falls back to `sh` otherwise. Each result names the
+selected shell. A failed command is never retried under another shell.
+Detection does not open the sandbox before the first tool call.
 
 | Backend | Isolation | You install | Network policy |
 |---|---|---|---|

@@ -17,6 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `/quit`. A new conversation keeps the old run on the server. Retry sends the
   last user text as a new turn; it does not undo tool effects.
 
+### Changed
+
+- Rename the sandbox `bash` tool to `shell`. Update prompts and scripted tool
+  calls to use the new name. Prefer Bash inside the sandbox, with `sh` as a
+  fallback when Bash is absent. Keep lazy startup and report the selected shell
+  in each result. Never retry a failed command under another shell.
+
 ## [0.14.0] — 2026-10-06
 
 **Durable NATS statuses, worker controls, and root-subject defaults.**

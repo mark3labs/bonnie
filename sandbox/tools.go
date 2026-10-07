@@ -88,7 +88,7 @@ func lazyOpener(p Provider, s *runtime.Session) (Opener, func() error) {
 	return open, close
 }
 
-// Tools returns the model-facing tools that work inside a sandbox: bash,
+// Tools returns the model-facing tools that work inside a sandbox: shell,
 // read_file, write_file, and list_files.
 //
 // The tools run in the BONNIE process and proxy into the sandbox. The model
@@ -97,39 +97,53 @@ func lazyOpener(p Provider, s *runtime.Session) (Opener, func() error) {
 // travels the same journalling and approval path as any other tool.
 func Tools(open Opener) []kit.Tool {
 	return []kit.Tool{
-		bashTool(open),
+		shellTool(open),
 		readFileTool(open),
 		writeFileTool(open),
 		listFilesTool(open),
 	}
 }
 
-// bashTool runs a shell command in the sandbox.
-func bashTool(open Opener) kit.Tool {
+// shellTool selects a shell inside the sandbox before it runs the command.
+// Detection stays lazy and repeats on each call, because tools can install Bash.
+func shellTool(open Opener) kit.Tool {
 	type input struct {
 		Command string `json:"command" description:"The shell command to run."`
 		Dir     string `json:"dir,omitempty" description:"Working directory, relative to /workspace."`
 	}
-	return kit.NewTool("bash",
-		"Run a shell command inside the isolated sandbox. The working directory is "+
-			"/workspace. Returns stdout, stderr, and the exit code.",
+	return kit.NewTool("shell",
+		"Run a shell command inside the isolated sandbox. Prefer Bash; if Bash is "+
+			"not available, use sh (POSIX syntax). Each result reports the selected shell. "+
+			"The working directory is /workspace. Returns stdout, stderr, and the exit code.",
 		func(ctx context.Context, in input) (kit.ToolOutput, error) {
 			sb, err := open(ctx)
 			if err != nil {
 				return unavailable(err), nil
 			}
-			cmd := Shell(in.Command)
-			cmd.Dir = in.Dir
+			// Probe in the sandbox, not on the host. Do not use a failed
+			// command as the probe: retrying it could repeat an external effect.
+			probe, err := sb.Exec(ctx, Command{Args: []string{"sh", "-c", "command -v bash >/dev/null 2>&1"}, Dir: in.Dir})
+			if err != nil {
+				return kit.ErrorResult(fmt.Sprintf("sandbox error: detect shell: %v", err)), nil
+			}
+			if probe.ExitCode != 0 && probe.ExitCode != 1 && probe.ExitCode != 127 {
+				return kit.ErrorResult("sandbox error: detect shell: " + renderResult(probe)), nil
+			}
+			shell, label := "bash", "Shell: bash"
+			if !probe.OK() {
+				shell, label = "sh", "Shell: sh (Bash unavailable)"
+			}
+			cmd := Command{Args: []string{shell, "-lc", in.Command}, Dir: in.Dir}
 
 			res, err := sb.Exec(ctx, cmd)
 			if err != nil {
 				// The command did not run. That is a fault in BONNIE or the
 				// backend, not something the model did wrong, so say so
 				// plainly rather than let it retry a broken command.
-				return kit.ErrorResult(fmt.Sprintf("sandbox error: %v", err)), nil
+				return kit.ErrorResult(fmt.Sprintf("%s\nsandbox error: %v", label, err)), nil
 			}
 			return kit.ToolOutput{
-				Content: renderResult(res),
+				Content: label + "\n" + renderResult(res),
 				// A non-zero exit is information for the model, not a
 				// transport failure: it must see the error text to fix it.
 				IsError: !res.OK(),

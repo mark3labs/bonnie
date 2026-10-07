@@ -8,7 +8,7 @@
 //
 //	Provider   opens one Sandbox per run
 //	Sandbox    runs commands and moves files
-//	Tools      the model-facing bash/read_file/write_file, which proxy in
+//	Tools      the model-facing shell/read_file/write_file, which proxy in
 //
 // Tools run in the BONNIE process and proxy into the sandbox. The model never
 // holds a handle to the sandbox and never sees a credential: it drives work
@@ -97,8 +97,8 @@ type Command struct {
 	Timeout time.Duration
 }
 
-// Shell builds a [Command] that runs one shell command line. It is what the
-// model-facing bash tool uses.
+// Shell builds a [Command] that runs one command line with sh.
+// The model-facing shell tool selects Bash when available instead.
 func Shell(line string) Command {
 	return Command{Args: []string{"sh", "-lc", line}}
 }

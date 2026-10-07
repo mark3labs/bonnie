@@ -12,7 +12,7 @@ import (
 )
 
 // Count handle cleanup separately from provider opens. Exec also identifies
-// the handle shared by custom setup execution and the model's bash tool.
+// the handle shared by custom setup execution and the model's shell tool.
 type setupSandbox struct {
 	Sandbox
 	closed int
@@ -50,14 +50,14 @@ func setupKitOptions(model *fakemodel.Model) []kit.Option {
 	}}
 }
 
-// Setup execution and bash must use one handle and write one open record.
+// Setup execution and shell must use one handle and write one open record.
 func TestAgentWithSetupSharesSandbox(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	journal := runtime.NewMemoryJournal()
 	s := runtime.NewSession("shared-setup", journal)
 	p := &setupProvider{stubProvider: newStubProvider("stub"), handle: &setupSandbox{}}
-	model := fakemodel.New(fakemodel.Call("bash", `{"command":"echo model"}`), fakemodel.Say("done"))
+	model := fakemodel.New(fakemodel.Call("shell", `{"command":"echo model"}`), fakemodel.Say("done"))
 	calls := 0
 	factory := AgentWithSetup(p, false, func(gotCtx context.Context, k *kit.Kit, gotSession *runtime.Session, open Opener) error {
 		calls++
@@ -75,12 +75,12 @@ func TestAgentWithSetupSharesSandbox(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, promptErr := a.PromptResult(ctx, "run bash")
+	_, promptErr := a.PromptResult(ctx, "run shell")
 	closeErr := a.Close()
 	if promptErr != nil || closeErr != nil {
 		t.Fatalf("prompt: %v; close: %v", promptErr, closeErr)
 	}
-	if calls != 1 || p.opened != 1 || p.handle.execs != 2 || p.handle.closed != 1 {
+	if calls != 1 || p.opened != 1 || p.handle.execs != 3 || p.handle.closed != 1 {
 		t.Fatalf("setup=%d opens=%d execs=%d closes=%d", calls, p.opened, p.handle.execs, p.handle.closed)
 	}
 	recs, err := journal.Replay(ctx, s.RunID())

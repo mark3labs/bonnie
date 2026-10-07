@@ -74,7 +74,7 @@ func TestLiveAgentWorksInsideTheSandbox(t *testing.T) {
 
 	runner := runtime.NewRunner(journal, Agent(provider,
 		kit.WithModel(model),
-		kit.WithSystemPrompt("You are a shell assistant. Use the bash and "+
+		kit.WithSystemPrompt("You are a shell assistant. Use the shell and "+
 			"write_file tools to do the work. Keep answers to one sentence."),
 	))
 	const runID = "sandbox-live-1"

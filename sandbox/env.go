@@ -12,7 +12,7 @@ import (
 // registry token, a feature flag.
 //
 // The variables are configured once, out of band, and the model never sees
-// them as values. The model-facing bash tool builds a [Command] with only a
+// them as values. The model-facing shell tool builds a [Command] with only a
 // working directory, so it cannot set env itself; this wrapper injects below
 // the tool, on the [Sandbox] layer, the same way [Seeded] mirrors files below
 // it. The injection travels over the [Command.Env] seam every backend already

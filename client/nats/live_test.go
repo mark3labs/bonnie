@@ -52,7 +52,7 @@ func TestLiveTaskCompleted(t *testing.T) {
 	runner := runtime.NewRunner(journal, sandbox.Agent(provider,
 		kit.WithModel("opencode/kimi-k3"),
 		kit.WithProviderAPIKey(key),
-		kit.WithSystemPrompt("Use write_file to write the requested file, then use bash to read it. "+
+		kit.WithSystemPrompt("Use write_file to write the requested file, then use shell to read it. "+
 			"Use only relative workspace paths. Reply with the file content in one short sentence. "+
 			"Do not ask for human input or do any other work."),
 		func(o *kit.Options) {
