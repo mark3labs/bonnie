@@ -15,7 +15,7 @@ func (m Model) slash(value string) (tea.Model, tea.Cmd) {
 	case "/exit", "/quit":
 		return m.handleKey(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	case "/help":
-		m.commit(kindQuestion, "/new — start a separate conversation\n/retry — send the last user message again (tool effects can repeat)\n/cancel — stop the active turn\n/exit, /quit — leave chat\n/help — show commands\nPage Up/Down or mouse wheel — scroll\nCtrl+Home/End — first/latest output\nEnter — send; Shift+Enter — new line; Ctrl+W — cancel")
+		m.commit(kindQuestion, "Help\n\n/new — start a separate conversation\n/retry — send the last user message again (tool effects can repeat)\n/cancel — stop the active turn\n/exit, /quit — leave chat\n/help — show commands\nPage Up/Down or mouse wheel — scroll\nCtrl+Home/End — first/latest output\nEnter — send; Shift+Enter — new line; Ctrl+W — cancel")
 		m.syncViewport()
 		m.viewport.GotoBottom()
 		return m, nil

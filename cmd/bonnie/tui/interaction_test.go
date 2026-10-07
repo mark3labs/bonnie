@@ -73,6 +73,9 @@ func TestViewportScrollAndFollow(t *testing.T) {
 		t.Fatal("mouse wheel did not scroll")
 	}
 	m, _ = command(m, "/help")
+	if got := m.entries[len(m.entries)-1].text; !strings.HasPrefix(got, "Help\n\n/new —") {
+		t.Fatalf("help must put the heading before the command list: %q", got)
+	}
 	if !strings.Contains(m.transcript(), "/retry") {
 		t.Fatal("missing command help")
 	}
