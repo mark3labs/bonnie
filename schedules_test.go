@@ -134,6 +134,9 @@ func TestScheduleHTTPDurabilityAndAuthorization(t *testing.T) {
 	if err := r.Close(); err != nil {
 		t.Fatal(err)
 	}
+	// A newly idle keep-alive connection can delay net/http shutdown for
+	// five seconds. Close the test client's connections before cancellation.
+	client.CloseIdleConnections()
 	cancel()
 	select {
 	case err := <-done:
@@ -141,9 +144,11 @@ func TestScheduleHTTPDurabilityAndAuthorization(t *testing.T) {
 			t.Fatal(err)
 		}
 	case <-time.After(5 * time.Second):
+		client.CloseIdleConnections()
 		t.Fatal("server did not stop")
 	}
 	ctx, cancel = context.WithCancel(context.Background())
+	defer cancel()
 	base, done = start()
 	waitScheduleHTTP(t, client, base)
 	// Retry the same external occurrence after restart; it must not run the model again.
@@ -161,6 +166,7 @@ func TestScheduleHTTPDurabilityAndAuthorization(t *testing.T) {
 	if agent.Calls() != 1 {
 		t.Fatalf("duplicate trigger called model: %d", agent.Calls())
 	}
+	client.CloseIdleConnections()
 	cancel()
 	select {
 	case err := <-done:
@@ -168,6 +174,7 @@ func TestScheduleHTTPDurabilityAndAuthorization(t *testing.T) {
 			t.Fatal(err)
 		}
 	case <-time.After(5 * time.Second):
+		client.CloseIdleConnections()
 		t.Fatal("restarted server did not stop")
 	}
 }
