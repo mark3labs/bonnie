@@ -3,6 +3,14 @@
 This package uses JetStream only. The caller supplies and owns the NATS
 connection. The client does not execute agents or store run state.
 
+For targeted delivery, set `TargetedTasks: true` on both client and worker,
+then call `c.SubmitTo(ctx, "worker-id", task)`. `Submit` still sends shared
+work. The input stream must retain `<task-subject>.worker.*`; root-based
+creation includes it when opted in. Existing streams must be updated by the
+operator. Offline targets retain tasks within stream limits, with no fallback
+to another worker. Deduplication is per task route. See the
+[targeted delivery setup](../../README.md#targeted-task-delivery).
+
 ```go
 import (
     "context"

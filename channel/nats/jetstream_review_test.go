@@ -82,7 +82,7 @@ func TestJetStreamAdmittedAnswerRecovery(t *testing.T) {
 				t.Fatal("save did not fail")
 			}
 			_ = c.Shutdown(context.Background())
-			admission, err := c.loadAdmission(t.Context(), c.cacheKey("answer", answer.RunID)+"."+"616e73776572")
+			admission, err := c.loadAdmission(t.Context(), c.cacheKey("answer", answer.RunID, answer.MessageID))
 			if err != nil || admission == nil || admission.Answer.Responses[0].Text != "here" || admission.Suspend.ToolCallID != first.Suspend.ToolCallID {
 				t.Fatalf("admission: %+v %v", admission, err)
 			}

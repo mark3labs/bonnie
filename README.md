@@ -1121,6 +1121,43 @@ an error. There is no global task lookup across separate worker journals. Protec
 worker routes and reply inboxes with NATS permissions. Replies use `_INBOX.*`
 subjects; custom inbox prefixes are not supported.
 
+### Targeted task delivery
+
+Enable `TargetedTasks: true` on both the NATS channel and typed client. This
+requires JetStream. A worker reads shared tasks and tasks for its own `WorkerID`.
+
+```go
+bonnie.WithNATS(natschannel.Config{
+    RootSubject: "agents.review",
+    WorkerID: "review-1",
+    TargetedTasks: true,
+    CreateStream: true,
+})
+
+// nc is a caller-owned NATS connection.
+c, err := natsclient.New(nc, natsclient.Config{
+    RootSubject: "agents.review",
+    TargetedTasks: true,
+    CreateStream: true,
+})
+if err != nil { return err }
+_, err = c.SubmitTo(ctx, "review-1", natsclient.Task{
+    TaskID: "review-42", Text: "Review the code.",
+})
+```
+
+`Submit` still sends shared work. `SubmitTo` stores work on
+`<task-subject>.worker.<worker-id>`. Each worker has a separate durable targeted
+consumer. An offline target's task stays in JetStream within retention limits;
+it never falls back to another worker. Keep one live owner per worker identity.
+Answers and results use their existing routes. Delivery remains at least once.
+
+New input streams include `<task-subject>.worker.*`. For an existing stream,
+add that subject explicitly before enabling targeted delivery. BONNIE does not
+change existing streams. Update NATS permissions to permit these routes. Task
+IDs are deduplicated per route: sending the same ID to shared work or another
+worker is a separate submission and can execute again.
+
 ### JetStream and the typed client
 
 Set `Stream` to enable JetStream. Leave `Consumer` empty to share tasks through

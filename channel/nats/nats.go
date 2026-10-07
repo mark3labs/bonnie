@@ -84,12 +84,17 @@ type Config struct {
 	Buffer int
 	// Stream enables JetStream when nonempty. There is no separate mode flag.
 	Stream string
+	// TargetedTasks enables tasks on Subject+".worker."+WorkerID in addition
+	// to shared tasks. JetStream is required. The input stream must also
+	// retain Subject+".worker.*"; existing streams are never changed.
+	TargetedTasks bool
 	// Consumer is the shared durable task pull consumer. When empty in
 	// JetStream mode, DefaultConsumerName(Subject) supplies a stable name.
 	// Set it explicitly for separate processing groups or existing consumers.
-	// WorkerID identifies this worker and its local journal. Both must be
-	// single safe tokens.
 	Consumer string
+	// WorkerID is required in JetStream mode. It identifies this worker and
+	// its local journal. Use a stable, unique token (letters, digits, hyphen)
+	// and keep the same journal when this worker restarts.
 	WorkerID string
 	// CreateStream permits creation of the input stream. With RootSubject it
 	// also provisions result and status streams. Existing resources are never

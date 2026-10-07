@@ -52,6 +52,9 @@ type Config struct {
 	QuerySubject   string
 	// InputStream selects the input stream for root-based provisioning.
 	InputStream string
+	// TargetedTasks enables SubmitTo and includes TaskSubject+".worker.*"
+	// when provisioning root inputs. Existing streams are never changed.
+	TargetedTasks bool
 	// EventStream and EventConsumer select durable status resources.
 	// Empty names use stable subject-derived defaults. Separate applications
 	// need separate consumers when each must receive all statuses.
@@ -103,6 +106,11 @@ func New(nc *gonats.Conn, cfg Config) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	if cfg.TargetedTasks {
+		if err := protocol.ValidateTargetedSubjects(s); err != nil {
+			return nil, err
+		}
+	}
 	cfg.TaskSubject, cfg.ResultSubject, cfg.AnswerSubject = s.Tasks, s.Results, s.Answers
 	cfg.EventSubject, cfg.CommandSubject, cfg.QuerySubject = s.Events, s.Commands, s.Queries
 	if cfg.InputStream == "" {
@@ -138,7 +146,11 @@ func New(nc *gonats.Conn, cfg Config) (*Client, error) {
 		return nil, fmt.Errorf("bonnie: client/nats: JetStream: %w", err)
 	}
 	if cfg.RootSubject != "" {
-		if err := protocol.EnsureStream(ctx, js, cfg.InputStream, []string{cfg.TaskSubject, cfg.AnswerSubject + ".*"}, cfg.CreateStream); err != nil {
+		inputs := []string{cfg.TaskSubject, cfg.AnswerSubject + ".*"}
+		if cfg.TargetedTasks {
+			inputs = append(inputs, cfg.TaskSubject+".worker.*")
+		}
+		if err := protocol.EnsureStream(ctx, js, cfg.InputStream, inputs, cfg.CreateStream); err != nil {
 			return nil, err
 		}
 	}
@@ -225,13 +237,31 @@ func messageID(kind string, parts ...string) string {
 // rejected. Reuse TaskID on the same TaskSubject only for retries of the same
 // task. A receipt does not mean that an agent has started or completed work.
 func (c *Client) Submit(ctx context.Context, task Task) (Receipt, error) {
+	return c.submit(ctx, c.cfg.TaskSubject, task)
+}
+
+// SubmitTo stores a task for one worker. TargetedTasks must be enabled on
+// the client and worker. An offline worker's task remains in JetStream until
+// retention limits remove it. It never falls back to the shared task route.
+// Reuse TaskID only for retries on the same worker route.
+func (c *Client) SubmitTo(ctx context.Context, workerID string, task Task) (Receipt, error) {
+	if !c.cfg.TargetedTasks {
+		return Receipt{}, errors.New("bonnie: client/nats: TargetedTasks is required for SubmitTo")
+	}
+	if !safeToken(workerID) {
+		return Receipt{}, errors.New("bonnie: client/nats: invalid target worker ID")
+	}
+	return c.submit(ctx, c.cfg.TaskSubject+".worker."+workerID, task)
+}
+
+func (c *Client) submit(ctx context.Context, subject string, task Task) (Receipt, error) {
 	if task.Version == 0 {
 		task.Version = 1
 	}
 	if task.Version != 1 || !validID(task.TaskID) || strings.TrimSpace(task.Text) == "" {
 		return Receipt{}, errors.New("bonnie: client/nats: invalid version 1 task")
 	}
-	return c.publish(ctx, c.cfg.TaskSubject, task.TaskID, messageID("task", c.cfg.TaskSubject, task.TaskID), task)
+	return c.publish(ctx, subject, task.TaskID, messageID("task", subject, task.TaskID), task)
 }
 
 // Answer stores responses for the exact waiting run and tool call. Retries of

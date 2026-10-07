@@ -3,6 +3,7 @@ package nats
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -35,10 +36,18 @@ func safeToken(s string) bool {
 
 func validateJetStream(cfg Config) error {
 	if cfg.Stream == "" {
-		if cfg.Consumer != "" || cfg.WorkerID != "" || cfg.CreateStream {
+		if cfg.Consumer != "" || cfg.WorkerID != "" || cfg.CreateStream || cfg.TargetedTasks {
 			return errors.New("bonnie: channel/nats: Stream is required for JetStream options")
 		}
 		return nil
+	}
+	if cfg.TargetedTasks {
+		if err := ValidateTargetedSubjects(Subjects{Tasks: cfg.Subject, Answers: cfg.AnswerSubject, Results: cfg.ResultSubject, Events: cfg.EventSubject, Commands: cfg.CommandSubject, Queries: cfg.QuerySubject}); err != nil {
+			return err
+		}
+	}
+	if cfg.WorkerID == "" {
+		return errors.New("bonnie: channel/nats: WorkerID is required for JetStream")
 	}
 	if !safeToken(cfg.Stream) || !safeToken(cfg.Consumer) || !safeToken(cfg.WorkerID) {
 		return errors.New("bonnie: channel/nats: stream, consumer, and worker must be safe tokens (letters, digits, hyphen)")
@@ -70,9 +79,13 @@ func (c *Channel) startJetStream(ctx context.Context, nc *gonats.Conn) error {
 			return err
 		}
 	}
+	inputSubjects := []string{c.cfg.Subject, c.cfg.AnswerSubject + ".*"}
+	if c.cfg.TargetedTasks {
+		inputSubjects = append(inputSubjects, c.cfg.Subject+".worker.*")
+	}
 	info, err := js.StreamInfo(c.cfg.Stream, gonats.Context(ready))
 	if errors.Is(err, gonats.ErrStreamNotFound) && c.cfg.CreateStream {
-		info, err = js.AddStream(&gonats.StreamConfig{Name: c.cfg.Stream, Subjects: []string{c.cfg.Subject, c.cfg.AnswerSubject + ".*"}, Storage: gonats.FileStorage}, gonats.Context(ready))
+		info, err = js.AddStream(&gonats.StreamConfig{Name: c.cfg.Stream, Subjects: inputSubjects, Storage: gonats.FileStorage}, gonats.Context(ready))
 		// Another worker can create the stream at the same time.
 		if err != nil {
 			info, err = js.StreamInfo(c.cfg.Stream, gonats.Context(ready))
@@ -84,14 +97,24 @@ func (c *Channel) startJetStream(ctx context.Context, nc *gonats.Conn) error {
 	if !slices.Contains(info.Config.Subjects, c.cfg.Subject) || !slices.Contains(info.Config.Subjects, c.cfg.AnswerSubject+".*") || info.Config.Retention != gonats.LimitsPolicy {
 		return errors.New("bonnie: channel/nats: input stream must retain tasks and worker answer routes with limits retention")
 	}
+	if c.cfg.TargetedTasks && !slices.Contains(info.Config.Subjects, c.cfg.Subject+".worker.*") {
+		return errors.New("bonnie: channel/nats: input stream must retain targeted task routes")
+	}
 	if _, err := c.resultLimit(ready, js, nc); err != nil {
 		return err
 	}
 	var ackWait time.Duration
-	for i, subject := range []string{c.cfg.Subject, c.answerRoute()} {
+	routes := []string{c.cfg.Subject, c.answerRoute()}
+	if c.cfg.TargetedTasks {
+		routes = append(routes, c.cfg.Subject+".worker."+c.cfg.WorkerID)
+	}
+	for i, subject := range routes {
 		name := c.cfg.Consumer
 		if i == 1 {
 			name += "_" + c.cfg.WorkerID
+		}
+		if i == 2 {
+			name = streamName("bonnie-target-", c.cfg.Consumer+"."+subject)
 		}
 		ci, err := js.ConsumerInfo(c.cfg.Stream, name, gonats.Context(ready))
 		if errors.Is(err, gonats.ErrConsumerNotFound) {
@@ -144,12 +167,12 @@ func (c *Channel) startJetStream(ctx context.Context, nc *gonats.Conn) error {
 	}
 	for worker := range c.cfg.Concurrency {
 		wg.Go(func() {
-			index := worker % 2
+			index := worker % len(routes)
 			for workCtx.Err() == nil {
 				fetchCtx, cancel := context.WithTimeout(workCtx, 250*time.Millisecond)
 				msgs, err := c.subs[index].Fetch(1, gonats.Context(fetchCtx))
 				cancel()
-				index = 1 - index
+				index = (index + 1) % len(routes)
 				if err != nil {
 					if workCtx.Err() != nil {
 						return
@@ -183,8 +206,30 @@ func (c *Channel) startJetStream(ctx context.Context, nc *gonats.Conn) error {
 	return nil
 }
 
-func (c *Channel) cacheKey(kind, id string) string {
-	return runtime.ReservedRunPrefix + "nats." + c.cfg.Stream + "." + c.cfg.Consumer + "." + c.cfg.WorkerID + "." + kind + "." + hex.EncodeToString([]byte(id))
+// cacheKey keeps existing journal keys when they fit. Hash the full key when
+// it exceeds the journal's 200-byte limit, including all answer identities.
+// The reserved prefix keeps transport records out of the public run list.
+func (c *Channel) cacheKey(kind string, ids ...string) string {
+	var b strings.Builder
+	b.WriteString(runtime.ReservedRunPrefix)
+	b.WriteString("nats.")
+	b.WriteString(c.cfg.Stream)
+	b.WriteByte('.')
+	b.WriteString(c.cfg.Consumer)
+	b.WriteByte('.')
+	b.WriteString(c.cfg.WorkerID)
+	b.WriteByte('.')
+	b.WriteString(kind)
+	for _, id := range ids {
+		b.WriteByte('.')
+		b.WriteString(hex.EncodeToString([]byte(id)))
+	}
+	key := b.String()
+	if len(key) <= 200 {
+		return key
+	}
+	sum := sha256.Sum256([]byte(key))
+	return runtime.ReservedRunPrefix + "nats.sha256." + hex.EncodeToString(sum[:])
 }
 
 // admittedAnswer records the accepted input before Resume can change the run.
@@ -233,9 +278,9 @@ func (c *Channel) resultLimit(ctx context.Context, js gonats.JetStreamContext, n
 		return 0, err
 	}
 	// NATS counts headers in broker and stream message limits. The cache-key
-	// message ID contains three names of at most 128 bytes plus a sequence
-	// number. Reserve 512 bytes for that header and NATS framing. The client
-	// JSON limit remains maxMessageBytes, independently of broker headers.
+	// message ID is at most 200 bytes. Reserve 512 bytes for that header and
+	// NATS framing. The client JSON limit remains maxMessageBytes,
+	// independently of broker headers.
 	limit = min(int64(maxMessageBytes), limit-512)
 	// Reserve room for maximum-length identities, including JSON escaping.
 	metadata := Result{Version: 1, TaskID: strings.Repeat("<", 256), RunID: strings.Repeat("<", 256), AttemptID: strings.Repeat("a", 32), WorkerID: c.cfg.WorkerID, AnswerSubject: c.answerRoute(), State: runtime.RunFailed, Error: "result too large"}
@@ -370,7 +415,7 @@ func (c *Channel) handleJetStream(ctx context.Context, msg *gonats.Msg) {
 	}
 	answerKey := ""
 	if err == nil && isAnswer && answer.Version == 1 && answer.WorkerID == c.cfg.WorkerID && validID(answer.RunID) && validID(answer.MessageID) {
-		answerKey = c.cacheKey("answer", answer.RunID) + "." + hex.EncodeToString([]byte(answer.MessageID))
+		answerKey = c.cacheKey("answer", answer.RunID, answer.MessageID)
 		cached, loadErr = c.loadResult(ctx, answerKey)
 		if loadErr != nil {
 			c.report("answer cache read failed")

@@ -59,6 +59,18 @@ func ResolveSubjects(root string, s Subjects) (Subjects, error) {
 	return s, nil
 }
 
+// ValidateTargetedSubjects rejects protocol routes inside the targeted task
+// namespace. This prevents a result or answer from being consumed as a task.
+func ValidateTargetedSubjects(s Subjects) error {
+	base := s.Tasks + ".worker"
+	for _, subject := range []string{s.Answers, s.Results, s.Events, s.Commands, s.Queries} {
+		if subject == base || strings.HasPrefix(subject, base+".") || (subject != "" && strings.HasPrefix(base, subject+".")) {
+			return errors.New("bonnie: nats: targeted task routes overlap protocol subjects")
+		}
+	}
+	return nil
+}
+
 // DefaultInputStreamName returns the stable input stream name for a task subject.
 func DefaultInputStreamName(subject string) string { return streamName("bonnie-input-", subject) }
 

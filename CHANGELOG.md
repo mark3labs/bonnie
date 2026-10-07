@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add opt-in NATS targeted task delivery with `TargetedTasks` and client
+  `SubmitTo`. Workers read shared tasks and their own durable task route.
+  Offline targets retain tasks within stream limits, without fallback.
+
 - Use the full terminal width in chat, with resize support and an
   alternate-screen Bubbles viewport. Keep the input fixed while the transcript
   scrolls. Support Page Up/Down, the mouse wheel, and Ctrl+Home/End. Follow new
@@ -23,6 +27,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   calls to use the new name. Prefer Bash inside the sandbox, with `sh` as a
   fallback when Bash is absent. Keep lazy startup and report the selected shell
   in each result. Never retry a failed command under another shell.
+
+### Fixed
+
+- Bound NATS journal cache keys to 200 bytes. Hash oversized input, run,
+  status, and answer keys, including the answer message ID. Keep existing
+  short keys unchanged. Long stream and consumer names no longer block result
+  storage, publication, and task acknowledgement after a run finishes.
 
 ## [0.14.0] — 2026-10-06
 
