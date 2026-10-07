@@ -55,6 +55,39 @@ func Tool() kit.Tool {
 	}
 }
 
+// Codegen embeds context files only, even when a legacy directory exists.
+func TestGenerateContextFilesOnly(t *testing.T) {
+	t.Parallel()
+	root := scaffoldTools(t)
+	for _, dir := range []string{"workspace", "context"} {
+		if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, dir, "seed.txt"), []byte(dir), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	code, _, err := Generate(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(code), "ContextFiles: _contextFiles") || !strings.Contains(string(code), "//go:embed context") || strings.Contains(string(code), "Workspace:") {
+		t.Fatalf("incorrect context wiring:\n%s", code)
+	}
+	if err := os.RemoveAll(filepath.Join(root, "context")); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := Discover(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range plan.Embeds {
+		if entry.Var == "_contextFiles" {
+			t.Fatalf("legacy directory embedded: %+v", entry)
+		}
+	}
+}
+
 // Codegen twice over the same tree must be byte-identical (invariant 12).
 func TestCodegenIsIdempotent(t *testing.T) {
 	t.Parallel()

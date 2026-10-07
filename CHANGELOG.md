@@ -14,6 +14,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   SHA-256 hashes and install the runtime library with the binary. Existing
   installations stay unchanged. `WithSandboxDownload(false)` disables downloads.
 
+### Removed
+
+- Remove the deprecated workspace APIs: `DefaultWorkspace`, `WithWorkspace`,
+  `Tree.Workspace`, `WithPersistentWorkspace`, `WorkspaceCleanupPolicy`,
+  `WithRunWorkspaceCleanup`, `runtime.Runner.CleanupWorkspaces`,
+  `runtime.RecordWorkspaceDeleted`, `sandbox.Workspace`,
+  `sandbox.ErrOutsideWorkspace`, `sandbox.WithLocalSharedWorkspace`, and
+  the Local and Landlock providers' `UseSharedWorkspace` methods.
+  Use the context-file, shared-directory, and sandbox-cleanup names added in
+  v0.17.0. This is a breaking source change.
+- Remove the authored `workspace/` fallback from the runtime, generator, and
+  development watcher. Move seed files to `context/` and regenerate agent wiring.
+  Generated code now uses `Tree.ContextFiles`. Storage paths `/workspace` and
+  `.bonnie/workspaces`, and stored journal record values, stay unchanged.
+
 ## [0.17.0] — 2026-10-07
 
 **Clear context-file names with v0.16.0 compatibility.**

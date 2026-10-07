@@ -123,7 +123,7 @@ func (a *Agent) Run(ctx context.Context) (runErr error) {
 		if err := os.MkdirAll(contextFiles, 0o755); err != nil {
 			return fmt.Errorf("bonnie: contextFiles: %w", err)
 		}
-		if err := seedFromEmbed(contextEmbed(Registered()), contextFiles); err != nil {
+		if err := seedFromEmbed(Registered().ContextFiles, contextFiles); err != nil {
 			return err
 		}
 	}
@@ -355,16 +355,7 @@ func (c *config) contextFilesDir() (string, error) {
 	if c.contextFiles == "" {
 		return "", nil
 	}
-	dir := c.contextFiles
-	// An explicit option never falls back. Existing legacy trees keep their seeds.
-	if !c.contextFilesSet && dir == DefaultContextFiles {
-		if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
-			if info, err := os.Stat(DefaultWorkspace); err == nil && info.IsDir() {
-				dir = DefaultWorkspace
-			}
-		}
-	}
-	abs, err := filepath.Abs(dir)
+	abs, err := filepath.Abs(c.contextFiles)
 	if err != nil {
 		return "", fmt.Errorf("bonnie: contextFiles path: %w", err)
 	}
@@ -631,14 +622,6 @@ func (c *config) agentConflicts() string {
 // owns and `bonnie sandbox prune` has one place to look.
 func (c *config) defaultSandbox() sandbox.Provider {
 	return sandbox.Landlock(sandbox.WithLandlockRoot(filepath.Join(c.journal, "workspaces")))
-}
-
-// contextEmbed prefers the new field, with legacy generated wiring as fallback.
-func contextEmbed(t Tree) fs.FS {
-	if !embedIsEmpty(t.ContextFiles) {
-		return t.ContextFiles
-	}
-	return t.Workspace
 }
 
 // seedFromEmbed materialises the contextFiles files codegen embedded into dest.

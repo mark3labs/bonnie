@@ -89,11 +89,6 @@ type Tree struct {
 	// materialises them beside a built binary that has no tree, and
 	// never overwrites a file that is already there.
 	ContextFiles embed.FS
-
-	// Workspace is the legacy embedded seed data. ContextFiles takes precedence
-	// when it is nonempty. Codegen uses this field to support older releases.
-	// Deprecated: use ContextFiles.
-	Workspace embed.FS
 }
 
 var (

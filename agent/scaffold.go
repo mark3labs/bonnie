@@ -286,7 +286,7 @@ func init() {
 	bonnie.Register(bonnie.Tree{
 		Instructions: _instructions,
 		Skills:       _skills,
-		Workspace:    _contextFiles,
+		ContextFiles: _contextFiles,
 		Tools:        []kit.Tool{},
 	})
 }

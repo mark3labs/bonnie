@@ -12,7 +12,7 @@ import (
 	"github.com/mark3labs/bonnie/sandbox"
 )
 
-func TestRunWorkspaceCleanupValidation(t *testing.T) {
+func TestRunSandboxCleanupValidation(t *testing.T) {
 	t.Parallel()
 	policy := WithRunSandboxCleanup(SandboxCleanupPolicy{CompletedAfter: time.Hour})
 	for name, opts := range map[string][]Option{
@@ -40,7 +40,7 @@ func TestRunWorkspaceCleanupValidation(t *testing.T) {
 
 // The startup sweep uses the selected provider root, keeps the provider root,
 // writes a durable receipt, and stops when its caller cancels the context.
-func TestRunWorkspaceCleanupLoop(t *testing.T) {
+func TestRunSandboxCleanupLoop(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	root := t.TempDir()
