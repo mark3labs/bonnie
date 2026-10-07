@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net"
 	"net/http"
@@ -247,7 +248,7 @@ func (a *Agent) Run(ctx context.Context) (runErr error) {
 		}()
 		defer func() { cancel(); <-done }()
 	}
-	c.banner(ln.Addr().String(), workspace, skills, dotenv)
+	c.banner(os.Stderr, ln.Addr().String(), workspace, skills, dotenv)
 	if schedules == nil {
 		return c.serve(ctx, mux, ln)
 	}
@@ -526,6 +527,10 @@ func (c *config) agentFactory(ctx context.Context, workspace string, opts []kit.
 		return nil, err
 	}
 
+	// Keep the checked provider for the startup message. The configured
+	// single-provider option does not describe a selection from WithSandboxes.
+	c.selectedSandbox = provider
+
 	// Injected environment reaches every command before the workspace seed,
 	// so a bootstrap the seed relies on can read an operator-set variable.
 	if len(c.sandboxEnv) > 0 {
@@ -678,12 +683,13 @@ func embedRel(path string) string {
 // run to warn about. The backend is always named instead: the warning existed
 // to make a dangerous default visible, and naming the confinement in force is
 // what replaces it.
-func (c *config) banner(addr, workspace, skills string, dotenv bool) {
+func (c *config) banner(out io.Writer, addr, workspace, skills string, dotenv bool) {
 	if c.quiet {
 		return
 	}
 	line := func(label, value string) {
-		fmt.Fprintf(os.Stderr, "bonnie: %s %s\n", label, value)
+		// The startup message is best-effort; a closed output must not stop serving.
+		_, _ = fmt.Fprintf(out, "bonnie: %s %s\n", label, value)
 	}
 	if dotenv {
 		line("env", "loaded "+DefaultDotenv)
@@ -698,10 +704,12 @@ func (c *config) banner(addr, workspace, skills string, dotenv bool) {
 		// A host-supplied factory owns the agent, so BONNIE cannot claim
 		// anything about what its tools reach.
 		line("agent", "supplied by the host")
-	case c.sandbox != nil:
-		line("sandbox", c.sandbox.Name())
 	default:
-		line("sandbox", c.defaultSandbox().Name()+" (default)")
+		name := c.selectedSandbox.Name()
+		if !c.sandboxSet && !c.sandboxesSet && c.sandboxName == "" {
+			name += " (default)"
+		}
+		line("sandbox", name)
 	}
 	line("network", networkLabel(c.network))
 	if c.persistentSet {

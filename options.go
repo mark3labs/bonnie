@@ -51,6 +51,7 @@ type config struct {
 	workspaceCleanup    *WorkspaceCleanupPolicy
 	cleanupProvider     sandbox.RunDeleter
 	sandbox             sandbox.Provider
+	selectedSandbox     sandbox.Provider
 	sandboxSet          bool
 	sandboxes           []sandbox.Provider
 	sandboxesSet        bool

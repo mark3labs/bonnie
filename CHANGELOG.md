@@ -5,6 +5,14 @@ All notable changes to BONNIE are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Show the checked sandbox provider in the startup message. A provider selected
+  from `WithSandboxes` or with `--sandbox` no longer appears as the default
+  Landlock backend.
+
 ## [0.16.0] — 2026-10-07
 
 **Durable schedules and turn-scoped cancellation.**
