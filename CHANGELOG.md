@@ -5,6 +5,15 @@ All notable changes to BONNIE are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Install the tracked microsandbox CLI release at startup when the selected
+  backend has no `msb` in `PATH` or the journal directory. Verify pinned
+  SHA-256 hashes and install the runtime library with the binary. Existing
+  installations stay unchanged. `WithSandboxDownload(false)` disables downloads.
+
 ## [0.17.0] — 2026-10-07
 
 **Clear context-file names with v0.16.0 compatibility.**

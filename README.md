@@ -532,6 +532,16 @@ Detection does not open the sandbox before the first tool call.
 | `sandbox.Microsandbox()` | microVM, guest kernel | [`msb`](https://github.com/superradcompany/microsandbox) | `allow-all`, `deny-all`, `allow-list` |
 
 The Docker and microsandbox backends drive a CLI, and Landlock is pure Go.
+When microsandbox is selected, startup first uses `msb` from `PATH`, then
+`<journal>/msb` or `<journal>/microsandbox/bin/msb` (`<journal>` is `.bonnie` by
+default). Existing binaries are not upgraded. If none exists, BONNIE downloads
+its tracked release (`sandbox.MicrosandboxVersion`, currently `v0.7.7`), checks
+its pinned SHA-256, and installs `msb` and `libkrunfw` in
+`<journal>/microsandbox`. The first install needs network access and a writable
+journal directory. The host still needs microsandbox's system requirements,
+including KVM on Linux. Automatic installation supports Linux amd64/arm64 and
+macOS arm64. Use `bonnie.WithSandboxDownload(false)` to disable downloads.
+A custom `sandbox.WithMicrosandboxBinary` path is never downloaded or replaced.
 Thus BONNIE stays one static binary.
 
 > **The default is containment, not isolation.** Landlock confines the

@@ -530,6 +530,12 @@ func (c *config) agentFactory(ctx context.Context, contextFiles string, opts []k
 		return nil, err
 	}
 
+	if p, ok := provider.(*sandbox.MicrosandboxProvider); ok {
+		if err := p.EnsureInstalled(ctx, c.journal, !c.noSandboxDownload); err != nil {
+			return nil, err
+		}
+	}
+
 	availCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 	if err := provider.Available(availCtx); err != nil {

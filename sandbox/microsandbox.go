@@ -20,13 +20,13 @@ import (
 // wrapper around an embedded Rust library: linking it would force
 // CGO_ENABLED=1, need a cross C toolchain per release target, and drop
 // darwin/amd64 support. BONNIE would stop being a single static binary, which
-// is the property it is built around. The CLI costs one dependency the user
-// installs once, and keeps the release trivial. eve reaches microsandbox the
-// same way.
+// is the property it is built around. The CLI needs a separate runtime install,
+// but keeps BONNIE's release CGO-free.
 //
-// The user installs msb themselves; see
-// https://github.com/superradcompany/microsandbox. [MicrosandboxProvider.Available]
-// reports a clear error when it is absent.
+// BONNIE startup calls [MicrosandboxProvider.EnsureInstalled] to use an existing
+// msb or download the tracked release. Direct provider users can call it too,
+// or install msb themselves from https://github.com/superradcompany/microsandbox.
+// [MicrosandboxProvider.Available] only checks the binary; it never downloads.
 type MicrosandboxProvider struct {
 	bin    string
 	image  string

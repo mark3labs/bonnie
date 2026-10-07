@@ -57,6 +57,7 @@ type config struct {
 	sandboxesSet        bool
 	sandboxesDuplicate  bool
 	sandboxName         string
+	noSandboxDownload   bool
 	sandboxEnv          map[string]string
 	network             *sandbox.NetworkPolicy
 	tools               []kit.Tool
@@ -111,6 +112,14 @@ func WithJournal(dir string) Option {
 			c.journal = dir
 		}
 	}
+}
+
+// WithSandboxDownload controls automatic installation of the tracked microsandbox
+// release at startup. Downloads are enabled by default, only for a selected
+// microsandbox backend with no msb in PATH or the journal directory. Disabling
+// downloads does not prevent use of an existing local installation.
+func WithSandboxDownload(enabled bool) Option {
+	return func(c *config) { c.noSandboxDownload = !enabled }
 }
 
 // WithModel selects the model, as "provider/name". Without it, Kit's default
