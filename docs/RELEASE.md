@@ -102,6 +102,44 @@ edited to the required form.
 | `v0.14.0` | `98b9620` | 2026-10-06 |
 | `v0.15.0` | `cd37924` | 2026-10-07 |
 | `v0.16.0` | `eac5456` | 2026-10-07 |
+| `v0.17.0` | `60b3f7d` | 2026-10-07 |
+
+### `v0.17.0`, 2026-10-07 — every box confirmed
+
+- [x] `task release-check` — 1 config validated
+- [x] `task release-snapshot` — linux amd64 and arm64; both archive checksums
+      verify. The statically linked amd64 binary prints
+      `bonnie 0.16.0-SNAPSHOT-60b3f7d`, not `dev`
+- [x] No `replace` directive in the framework or example modules
+- [x] All CI jobs green on `master` at tagged commit `60b3f7d`:
+      `test`, `examples`, and `lint` (run `37675572119`)
+- [x] `CHANGELOG.md` has a dated `[0.17.0]` section in Keep-a-Changelog shape;
+      note extraction passes and the `[Unreleased]` heading is removed
+- [x] Published notes state the three claims and current README limits, including
+      schedule delivery and cooperative cancellation. They match the changelog
+      section except for trailing blank lines
+- [x] Annotated tag pushed after human confirmation; release run `37676166786`
+      succeeded
+- [x] Three artifacts published; both downloaded archive checksums verify.
+      The statically linked downloaded linux amd64 binary prints `bonnie 0.17.0`
+- [x] Both examples pin `v0.17.0`; `task examples` and `task check` pass
+
+**Version choice.** MINOR: the clearer context-file, shared-directory, and
+sandbox-cleanup names add public APIs. The old names remain supported and
+deprecated. Legacy `workspace/` trees remain supported when `context/` is absent.
+Generated registration uses `Tree.Workspace` so the current CLI can build trees
+that still pin v0.16.0. A nonempty `Tree.ContextFiles` takes precedence at runtime.
+
+**CI blocked the first candidate.** Run `37671203857` failed because generated
+`Tree.ContextFiles` wiring did not compile against the examples' v0.16.0 pin.
+Compatibility fields, wrappers, constants, and legacy layout fallback restored
+that build without a premature pin, a committed replace, or a weaker CI check.
+
+**Verified from the artifact.** The downloaded CLI refuses `--sandbox none` and
+names Landlock and Local as alternatives. Compatibility and seeding have automated
+tests; this release did not prove them with a live model from the artifact, run
+integration-tag live-model tests, or execute the arm64 binary. External effects
+and delivery are not exactly once; cancellation is cooperative, not rollback.
 
 ### `v0.16.0`, 2026-10-07 — every box confirmed
 
