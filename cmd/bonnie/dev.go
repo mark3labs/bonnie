@@ -417,7 +417,14 @@ func underDir(path, dir string) bool {
 // contextFilesDir returns the absolute authored context directory. The scaffold,
 // generator, runtime, and watcher use the same layout constant.
 func contextFilesDir(root string) string {
-	return filepath.Join(root, bonnie.DefaultContextFiles)
+	dir := filepath.Join(root, bonnie.DefaultContextFiles)
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		legacy := filepath.Join(root, bonnie.DefaultWorkspace)
+		if info, err := os.Stat(legacy); err == nil && info.IsDir() {
+			return legacy
+		}
+	}
+	return dir
 }
 
 // runDev is the bonnie dev entry, separated from cobra for testing.

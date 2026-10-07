@@ -5,11 +5,39 @@ All notable changes to BONNIE are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.17.0] — 2026-10-07
+
+**Clear context-file names with v0.16.0 compatibility.**
+This is a MINOR release because it adds public context-file, shared-directory,
+and sandbox-cleanup API names. The old public names remain supported and
+deprecated; they are not removed in this release.
+BONNIE remains early and experimental. No release is proven in production.
+Do not use it for work whose loss would hurt.
+
+### The claims
+
+- **A run survives process death.** Another process can restore the full
+  journalled conversation, including typed tool calls, image results, and
+  completion state. SQLite commits a tool-calling step as one transaction.
+  Restore does not repeat an external effect recorded in a completed step.
+  An effect before its step commits can repeat after a crash; execution is not
+  exactly once. Completion callbacks can also run again after interruption.
+- **A run parks indefinitely.** A waiting run needs no live agent process or
+  running sandbox compute. Resume supplies the answer, also after a restart.
+  Keep its journal and sandbox data. Automatic cleanup skips waiting runs.
+  A waiting JetStream run needs its original worker and stored state.
+- **A run is reachable over HTTP.** Routes under `/bonnie/v1` expose durable
+  runs, conversation snapshots, and an NDJSON event stream. The optional NATS
+  transport uses the same run executor.
+
+### Added
+
+- Add the clearer public names for context files, shared directories, and sandbox
+  cleanup described below, including `runtime.Runner.CleanupSandboxes`.
 
 ### Changed
 
-- **Breaking:** Rename authored `workspace/` files to `context/`; they are
+- Prefer authored `context/` files over the legacy `workspace/` layout; they are
   copied into each run and are not prompt text. Rename `WithWorkspace` to
   `WithContextFiles`, `DefaultWorkspace` to `DefaultContextFiles`, and
   `Tree.Workspace` to `Tree.ContextFiles`. Rename `sandbox.Workspace` and
@@ -18,13 +46,154 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `WithSharedDirectory`, `UseSharedDirectory`, and
   `WithLocalSharedDirectory`. Rename workspace cleanup APIs and records to
   `SandboxCleanupPolicy`, `WithRunSandboxCleanup`, and `RecordSandboxDeleted`.
+  Keep all old public names as deprecated aliases or wrappers. Existing
+  `workspace/` trees remain supported when `context/` is absent. A nonempty
+  `Tree.ContextFiles` takes precedence over `Tree.Workspace`. Generated wiring
+  uses `Tree.Workspace` so examples still build against v0.16.0.
   `/workspace` and `.bonnie/workspaces` remain storage paths.
+
+- Record the confirmed v0.16.0 release and pin both examples to v0.16.0.
+  The examples will move to v0.17.0 after publication.
 
 ### Fixed
 
 - Show the checked sandbox provider in the startup message. A provider selected
   from `WithSandboxes` or with `--sandbox` no longer appears as the default
   Landlock backend.
+
+### Known limits
+
+These limits were checked against the current `README.md` and public API
+comments. Schedules and cancellation do not make external effects exactly once.
+
+- **Linux only.** Releases support linux/amd64 and linux/arm64, not macOS or
+  Windows. The default needs kernel 5.13 or newer with Landlock enabled.
+  Without Landlock, BONNIE refuses to start; select `--sandbox docker` instead.
+- **The default sandbox is containment, not isolation.** Landlock confines
+  filesystem access, not the network, and shares the host kernel.
+- **Do not run BONNIE as a user in the `docker` group.** Landlock does not
+  prevent a connection to `/var/run/docker.sock`. Access permits a full host
+  escape. Use an unprivileged user, or microsandbox.
+- **Docker is namespaces, not a kernel.** Use microsandbox for hostile code.
+  microsandbox is verified on Linux with KVM. Its network policy is fixed at
+  creation; a different policy on reattachment returns `ErrPolicyMismatch`.
+- **Sandbox egress is open** until a policy is set. The default backend cannot
+  enforce one and refuses it instead of ignoring it. Local provides no host
+  filesystem or network isolation.
+- **A halt stops the turn, not the step.** A tool called in the same step as
+  `request_approval` or another halting tool still runs before the run parks.
+  Approval gates the next step, not a sibling call. `WithoutHumanInput` omits
+  built-in human-input tools; it does not change permissions or custom tools.
+- **A skill's bundled files stay on the host.** Activation names `scripts/`,
+  `references/`, and `assets/` through host paths that sandbox tools cannot
+  open. Put required text in the skill body and required files in `context/`.
+- **The HTTP channel verifies a caller only when configured.**
+  `http.WithAuthenticator` or `bonnie.WithHTTPAuthenticator` checks every
+  route except health. Without it, authenticate in front of BONNIE;
+  `operation_id` is refused. Chat webhooks verify the platform, not the person,
+  and each adapter refuses to serve without its verification credential.
+- **Run ownership is per host.** The journal does not refuse a second writer.
+  SQLite protects transaction integrity, not turn coordination. Two servers
+  executing one run can interleave the conversation. Network filesystems are
+  unsafe because SQLite needs working POSIX locks.
+- **Events are journal-anchored.** Reconnects can replay durable events after a
+  restart. Live-only deltas are marked and are not replayed.
+- **Cleanup is opt-in and deletes files, not history.** Compiled agents can use
+  retention-based cleanup; CLI `serve` does not sweep workspaces. Waiting runs
+  are kept. A later turn on a cleaned-up run starts without its earlier files;
+  publish output before completion. Cleanup locks are local to one Runner.
+  Deletion callbacks must be safe to repeat after a crash. Shared directories
+  and custom agent factories cannot use automatic cleanup.
+- **A shared directory shares files across runs.** Only Landlock and Local
+  support it. Overlapping opens are rejected through one provider, but separate
+  processes and provider instances are not coordinated. Use one server.
+  Do not combine it with `WithContextFiles`. Pruning preserves the shared directory.
+- **Completion callbacks are trusted host code.** Use `RunScope.Exec` for sandbox
+  commands. Closure state is not durable; interrupted checks can run again.
+  Keep the same policy and limit after restart. Usage can be undercounted after
+  interruption; unsaved initial attachments cannot be restored, and accepted
+  response events can repeat. Checks skip suspension and model failure. Live
+  events and snapshots can show a draft before acceptance. Managed setup and
+  completion options cannot be combined with `WithAgentFactory`.
+- **Activity logs can contain sensitive data.** Info includes final responses;
+  Debug includes prompts, tool arguments, results, and reasoning. Logging is
+  synchronous, so a slow writer delays runs. Replay does not log events again.
+- **Agent authoring needs Go and public module access.** Scaffolds resolve
+  BONNIE and Kit from the public proxy without `GOPRIVATE`. The static agent
+  binary needs neither Go nor BONNIE installed on its destination host, but
+  the selected sandbox backend can need its own runtime.
+- **Cancellation is not process isolation.** Local and Landlock stop a Unix
+  process group. A child that starts a new session can escape that group.
+- **Chat retry is a new turn, not a rollback.** `/retry` can repeat external
+  effects. `/new` keeps the old run on the server. Stop an active turn before
+  either command.
+- **An interrupted HTTP operation needs explicit recovery.** A pending
+  operation left by a crash does not automatically execute again; recover it
+  through the run API. `address` and `operation_id` cannot be combined.
+- **NATS credentials need protection.** Use TLS to protect tokens and passwords
+  in transit. Keep credentials out of source code, logs, and the sandbox
+  environment. Use one authentication method, including environment fallbacks.
+  JWT credentials and other connection options need a caller-supplied
+  authenticated `Config.Conn`.
+- **Core NATS can lose tasks and results.** Offline subscribers, buffer overflow,
+  and process failure can lose delivery. There is no automatic retry of
+  interrupted tasks or result publication. Use one owner per task namespace;
+  ordinary subscribers each receive a copy and can repeat the work.
+- **NATS payloads do not verify identity.** Connection authentication does not
+  replace broker permissions. Restrict publishers, subscribers, worker routes,
+  reply inboxes, and stream administration. Answer route validation does not
+  authenticate a worker.
+- **JetStream delivery is at least once, not exactly once.** Redelivery to
+  another worker can execute a task again. Interrupted tasks start fresh
+  attempts. Broker deduplication has a bounded window. Make external effects
+  and result handlers safe to repeat, and track task, attempt, and run IDs.
+- **JetStream workers do not share run state.** Each needs a unique, stable
+  WorkerID and its own journal and sandbox data, with one live owner. A waiting
+  run needs its original worker to answer. There is no global attempt lookup.
+  Changing consumer names can replay retained tasks, results, or statuses.
+  Shared consumers divide work; separate consumers are required for applications
+  that each need all outcomes or statuses.
+- **Targeted tasks have no fallback.** Enable `TargetedTasks` on both client and
+  worker. Offline tasks remain only within stream retention limits. Add
+  `<task-subject>.worker.*` to existing input streams and permit the routes in
+  broker permissions. Task IDs are deduplicated per route: the same ID sent to
+  shared work or another worker is a separate submission and can execute again.
+- **A publish receipt confirms broker storage, not execution.** Provision the
+  required streams, or explicitly permit their creation. Root configuration
+  needs JetStream and stream administration permissions for creation. Existing
+  streams and consumers are not changed. The result handler must select its
+  task IDs and respect cancellation. Invalid messages need operator correction.
+- **Status delivery can repeat and retention can remove old events.** Discard
+  duplicate `event_id` values and order each run by `seq`. Acceptance confirms
+  a saved attempt mapping, not execution. Statuses and results use independent
+  streams; do not assume ordering between them.
+- **Status queries and cancellation are not durable queued commands.** They
+  use worker-routed request/reply. A timeout does not prove task failure.
+  A saved running state with `Active: false` means interruption, not execution.
+  `CancelRequested` confirms only the request; the final state arrives separately.
+  Parked turns can be cancelled; finished runs are harmless no-ops. Cancellation
+  does not undo external effects. Replies require `_INBOX.*`; custom inbox prefixes are not
+  supported.
+- **Schedules have one journal owner.** A file lock refuses a second scheduler.
+  Definitions are code, not agent-created jobs. Change `Revision` when instructions
+  change; code changes without a revision change cannot be detected. Waiting work
+  blocks new occurrences under the default overlap policy. Latest catch-up needs
+  prior cron history and does not replay every missed occurrence.
+- **Schedule delivery is at least once.** A crash after a platform post but before
+  saving its receipt can repeat the post. Thread creation and multipart delivery
+  also have duplicate windows. Delivery retries use saved results with backoff.
+  Only mounted tracked Slack, Telegram, Discord, and GitHub receivers are supported;
+  scheduled files and NATS destinations are not. Execution is limited to 16 active
+  occurrence workers; excess accepted work stays in the journal.
+- **Schedule callbacks are trusted host code.** Preparation can repeat before its
+  output is saved. Callbacks must be safe to repeat and observe context cancellation.
+  Manual and external HTTP triggers need a configured trigger authorizer, separate
+  from the normal HTTP authenticator. Background runs do not grant automatic approval.
+- **Cancellation is cooperative and turn-scoped, not a rollback or forced kill.**
+  Models, tools, and callbacks must observe their context. Completed effects remain.
+  Route HTTP controls to the execution owner; a shared SQLite journal does not
+  coordinate cancellation across processes. Legacy text answers cannot identify
+  which question a user saw; use turn-scoped responses for delayed clients.
 
 ## [0.16.0] — 2026-10-07
 

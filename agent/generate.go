@@ -185,9 +185,13 @@ func Discover(root string) (*Plan, error) {
 	if hasRealFile(filepath.Join(root, bonnie.DefaultInstructions)) {
 		plan.Embeds = append(plan.Embeds, Embed{Path: bonnie.DefaultInstructions, Var: "_instructions"})
 	}
+	contextPath := bonnie.DefaultContextFiles
+	if _, err := os.Stat(filepath.Join(root, contextPath)); os.IsNotExist(err) {
+		contextPath = bonnie.DefaultWorkspace
+	}
 	for _, slot := range []struct{ path, varName string }{
 		{bonnie.DefaultSkills, "_skills"},
-		{bonnie.DefaultContextFiles, "_contextFiles"},
+		{contextPath, "_contextFiles"},
 	} {
 		if hasRealContent(filepath.Join(root, slot.path)) {
 			plan.Embeds = append(plan.Embeds, Embed{Path: slot.path, Var: slot.varName, Dir: true})
@@ -442,7 +446,7 @@ func init() {
 	bonnie.Register(bonnie.Tree{
 		Instructions: _instructions,
 		Skills:       _skills,
-		ContextFiles:    _contextFiles,
+		Workspace:    _contextFiles,
 		Tools: []kit.Tool{
 `)
 	for i := range p.Tools {

@@ -43,6 +43,10 @@ import (
 // relative path resolves from here; an absolute path is used unchanged.
 const WorkDir = "/workspace"
 
+// Workspace is the guest working-directory path.
+// Deprecated: use WorkDir.
+const Workspace = WorkDir
+
 // Sentinel errors. Test with [errors.Is].
 var (
 	// ErrUnavailable means the backend is not usable on this host: the

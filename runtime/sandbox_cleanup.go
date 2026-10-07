@@ -133,3 +133,17 @@ func (r *Runner) cleanupSandbox(ctx context.Context, runID string, policy Sandbo
 	}
 	return nil
 }
+
+// RecordWorkspaceDeleted records successful sandbox cleanup.
+// Deprecated: use RecordSandboxDeleted.
+const RecordWorkspaceDeleted = RecordSandboxDeleted
+
+// WorkspaceCleanupPolicy is retained for source compatibility.
+// Deprecated: use SandboxCleanupPolicy.
+type WorkspaceCleanupPolicy = SandboxCleanupPolicy
+
+// CleanupWorkspaces is retained for source compatibility.
+// Deprecated: use CleanupSandboxes.
+func (r *Runner) CleanupWorkspaces(ctx context.Context, policy WorkspaceCleanupPolicy, delete func(context.Context, string) (bool, error)) error {
+	return r.CleanupSandboxes(ctx, policy, delete)
+}
