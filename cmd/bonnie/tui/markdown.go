@@ -8,12 +8,6 @@ import (
 	heraldmd "github.com/indaco/herald-md"
 )
 
-// maxTextWidth caps the readable line length of assistant prose. The
-// transcript is scrollback, so the terminal wraps whatever the renderer
-// leaves long; the cap only stops a wide terminal from stretching one
-// paragraph across the whole screen.
-const maxTextWidth = 100
-
 // markdownTypography is the shared herald typography for assistant markdown.
 // Constructing a Typography builds dozens of lipgloss styles, so it must
 // never happen inside a per-frame render path. The pattern — one cached
@@ -48,7 +42,7 @@ func newMarkdownTypography() *herald.Typography {
 		}),
 
 		// The palette puts a bottom margin under every paragraph. In a
-		// scrollback a blank line after each paragraph doubles the height of
+		// transcript a blank line after each paragraph doubles the height of
 		// ordinary prose, so the paragraph style is stripped to nothing —
 		// including its foreground: body text inherits the terminal's own
 		// text color, and pinning a theme color here can land a near-invisible
@@ -87,16 +81,12 @@ func newMarkdownTypography() *herald.Typography {
 	)
 }
 
-// textWidth returns the wrap width for assistant prose: the terminal width
-// less a small right margin, floored for tiny windows and capped at
-// [maxTextWidth]. Before the first WindowSizeMsg the width is unknown, and 80
-// stands in for it.
+// textWidth uses the full terminal width. Use 80 before the first resize.
 func (m Model) textWidth() int {
-	w := m.width
-	if w <= 0 {
-		w = 80
+	if m.width <= 0 {
+		return 80
 	}
-	return min(max(w-2, 20), maxTextWidth)
+	return max(1, m.width)
 }
 
 // renderMarkdown renders assistant markdown and wraps the result to width.

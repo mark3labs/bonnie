@@ -5,6 +5,18 @@ All notable changes to BONNIE are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Use the full terminal width in chat, with resize support and an
+  alternate-screen Bubbles viewport. Keep the input fixed while the transcript
+  scrolls. Support Page Up/Down, the mouse wheel, and Ctrl+Home/End. Follow new
+  output only when the reader is at the bottom.
+- Add local chat commands `/help`, `/new`, `/retry`, `/cancel`, `/exit`, and
+  `/quit`. A new conversation keeps the old run on the server. Retry sends the
+  last user text as a new turn; it does not undo tool effects.
+
 ## [0.14.0] — 2026-10-06
 
 **Durable NATS statuses, worker controls, and root-subject defaults.**

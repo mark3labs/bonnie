@@ -87,8 +87,8 @@ func TestClosedAssistantEntryIsCachedPerWidth(t *testing.T) {
 	if got := m.transcript(); !strings.Contains(got, "changed") {
 		t.Errorf("a new width did not re-render:\n%s", got)
 	}
-	if m.entries[0].renderedWidth != 58 {
-		t.Errorf("renderedWidth = %d, want 58 (width 60 less the margin)",
+	if m.entries[0].renderedWidth != 60 {
+		t.Errorf("renderedWidth = %d, want 60 (full terminal width)",
 			m.entries[0].renderedWidth)
 	}
 }

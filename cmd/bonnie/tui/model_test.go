@@ -221,36 +221,22 @@ func TestModelAcceptsTypedKeys(t *testing.T) {
 	}
 }
 
-// TestViewCursorStaysOnTheInputRowWhenTheFrameExceedsTheScreen pins the
-// inline-mode cursor contract: bubbletea moves the terminal cursor to the
-// screen row the view reports, and a transcript taller than the terminal has
-// its top rows in scrollback. The view must subtract the scrolled rows, or
-// the terminal clamps the move to its bottom row and the cursor lands below
-// the footer (verified in tmux before the fix: cursor at the pane's last row
-// while the input sat three rows up).
+// A long transcript must not move the input out of the fixed screen frame.
 func TestViewCursorStaysOnTheInputRowWhenTheFrameExceedsTheScreen(t *testing.T) {
 	t.Parallel()
-	m := newTestModel(&fakeClient{}) // 100x30 window
+	m := newTestModel(&fakeClient{})
 	for i := range 40 {
-		m.commit(kindAssistant, fmt.Sprintf("answer line %d", i))
+		m.commitUser(fmt.Sprintf("line %d", i))
 	}
-
 	v := m.View()
-	if v.Cursor == nil {
-		t.Fatal("view has no cursor")
+	if !v.AltScreen || v.Cursor == nil {
+		t.Fatal("missing alternate screen or cursor")
 	}
-	// 40 entries + header + status + input + footer text + trailing row is a
-	// frame taller than the 30-row window; the test is only valid while it is.
-	if rows := strings.Count(v.Content, "\n") + 1; rows <= m.height {
-		t.Fatalf("frame has %d rows, want more than the %d-row screen", rows, m.height)
+	if rows := strings.Count(v.Content, "\n") + 1; rows != m.height {
+		t.Fatalf("frame has %d rows, want %d", rows, m.height)
 	}
-	// The frame's bottom row is the screen's bottom row, and the input sits
-	// two rows above it (footer text, then the row the trailing newline
-	// opens) — so the input's screen row is height-3. Verified in tmux at
-	// three window heights, typed and empty input.
 	if v.Cursor.Y != m.height-3 {
-		t.Fatalf("cursor row = %d, want %d (the input row, three above the screen bottom)",
-			v.Cursor.Y, m.height-3)
+		t.Fatalf("cursor row = %d, want %d", v.Cursor.Y, m.height-3)
 	}
 }
 

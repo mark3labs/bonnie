@@ -174,6 +174,17 @@ curl -s localhost:8080/bonnie/v1/runs -d '{"text":"What are you?"}'
 bonnie chat --addr 127.0.0.1:8080
 ```
 
+Chat uses the full terminal width and an alternate-screen transcript. Use
+Page Up/Down or the mouse wheel to scroll. New output follows the bottom only
+when you are already there. Ctrl+Home goes to the first output; Ctrl+End goes
+to the latest output. Enter sends a message; Shift+Enter adds a new line.
+
+Local commands: `/help`, `/new`, `/retry`, `/cancel`, and `/exit` (or `/quit`).
+`/new` starts a separate conversation and keeps the old run on the server.
+`/retry` sends the last user message again as a new turn. It does not undo
+history or tool effects, so an external action can repeat. Cancel an active
+turn, or wait for it to finish, before you use `/new` or `/retry`.
+
 Files under `workspace/` are copied into each run's isolated sandbox by default. A file that the
 model already wrote is never replaced.
 

@@ -17,7 +17,9 @@ import (
 
 	"charm.land/bubbles/v2/cursor"
 	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	kit "github.com/mark3labs/kit/pkg/kit"
 
 	"github.com/mark3labs/bonnie/client"
@@ -69,50 +71,56 @@ const (
 
 // runMsg reports the outcome of an entry point that ended a turn.
 type runMsg struct {
-	run *runtime.Run
-	err error
+	generation int
+	run        *runtime.Run
+	err        error
 }
 
 // lookupMsg reports whether this address already has a durable run.
 type lookupMsg struct {
-	snapshot *client.Snapshot
-	run      *runtime.Run
-	runID    string
-	cursor   int
-	err      error
+	generation int
+	snapshot   *client.Snapshot
+	run        *runtime.Run
+	runID      string
+	cursor     int
+	err        error
 }
 
 // streamReadyMsg carries the event stream once it is open.
 type streamReadyMsg struct {
-	ch    <-chan runtime.Event
-	unsub func()
-	err   error
+	generation int
+	ch         <-chan runtime.Event
+	unsub      func()
+	err        error
 }
 
 // ensureMsg reports the run an address resolves to, created if it was new.
 // It runs no turn; it only teaches the TUI its run ID early enough to
 // subscribe.
 type ensureMsg struct {
-	snapshot *client.Snapshot
-	runID    string
-	cursor   int
-	err      error
+	generation int
+	snapshot   *client.Snapshot
+	runID      string
+	cursor     int
+	err        error
 }
 
 // streamMsg carries one event from the run's stream.
 type streamMsg struct {
-	ev runtime.Event
+	generation int
+	ev         runtime.Event
 }
 
 // streamEndMsg reports the stream channel closed.
-type streamEndMsg struct{}
+type streamEndMsg struct{ generation int }
 
 // reconnectMsg asks the model to reopen a closed event stream.
-type reconnectMsg struct{}
+type reconnectMsg struct{ generation int }
 
 // cancelMsg reports the outcome of a cancel request.
 type cancelMsg struct {
-	err error
+	generation int
+	err        error
 }
 
 // spinnerMsg is a tick of the activity spinner.
@@ -148,6 +156,9 @@ type Model struct {
 	state status
 	label string
 
+	viewport   viewport.Model
+	generation int
+
 	input   textarea.Model
 	initCmd tea.Cmd
 	spin    bool
@@ -176,24 +187,28 @@ type Model struct {
 // New returns a Model that drives one conversation at address over client.
 func New(client Client, ctx context.Context, address string) Model {
 	ta := textarea.New()
-	ta.Placeholder = "Type a message… (enter to send, ctrl+c to quit)"
+	ta.Placeholder = "Type a message or /help…"
 	ta.Prompt = "❯ "
 	ta.SetVirtualCursor(false)
-	ta.SetWidth(60)
+	ta.MaxWidth = 0
+	ta.SetWidth(80)
 	ta.ShowLineNumbers = false
 	ta.CharLimit = 0
+	ta.KeyMap.InsertNewline.SetKeys("shift+enter", "alt+enter", "ctrl+m")
 	focusCmd := ta.Focus()
 
 	m := Model{
-		client:  client,
-		ctx:     ctx,
-		address: address,
-		state:   statusIdle,
-		label:   "ready",
-		input:   ta,
-		initCmd: focusCmd,
-		loading: true,
+		client:   client,
+		ctx:      ctx,
+		address:  address,
+		state:    statusIdle,
+		label:    "ready",
+		input:    ta,
+		viewport: viewport.New(viewport.WithWidth(80), viewport.WithHeight(20)),
+		initCmd:  focusCmd,
+		loading:  true,
 	}
+	m.layout()
 	return m
 }
 
@@ -204,6 +219,39 @@ func (m Model) Init() tea.Cmd {
 
 // Update implements tea.Model.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Ignore results from a conversation that /new has left.
+	generation := m.generation
+	switch v := msg.(type) {
+	case lookupMsg:
+		generation = v.generation
+	case ensureMsg:
+		generation = v.generation
+	case runMsg:
+		generation = v.generation
+	case cancelMsg:
+		generation = v.generation
+	case streamMsg:
+		generation = v.generation
+	case streamEndMsg:
+		generation = v.generation
+	case reconnectMsg:
+		generation = v.generation
+	case streamReadyMsg:
+		generation = v.generation
+		if generation != m.generation && v.unsub != nil {
+			v.unsub()
+		}
+	}
+	if generation != m.generation {
+		return m, nil
+	}
+	next, cmd := m.update(msg)
+	result := next.(Model)
+	result.syncViewport()
+	return result, cmd
+}
+
+func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
@@ -277,10 +325,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.pending != "" {
 				next, turn := m.sendPending()
 				next.label = "reconnecting"
-				return next, tea.Batch(turn, tea.Tick(250*time.Millisecond, func(time.Time) tea.Msg { return reconnectMsg{} }))
+				return next, tea.Batch(turn, tea.Tick(250*time.Millisecond, func(time.Time) tea.Msg { return reconnectMsg{generation: m.generation} }))
 			}
 			m.label = "reconnecting"
-			return m, tea.Tick(250*time.Millisecond, func(time.Time) tea.Msg { return reconnectMsg{} })
+			return m, tea.Tick(250*time.Millisecond, func(time.Time) tea.Msg { return reconnectMsg{generation: m.generation} })
 		}
 		m.streamCh = msg.ch
 		m.streamUn = msg.unsub
@@ -304,7 +352,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.label = "reconnecting"
-		return m, tea.Tick(250*time.Millisecond, func(time.Time) tea.Msg { return reconnectMsg{} })
+		return m, tea.Tick(250*time.Millisecond, func(time.Time) tea.Msg { return reconnectMsg{generation: m.generation} })
 
 	case reconnectMsg:
 		if m.quitting || m.runID == "" || m.streamCh != nil {
@@ -324,6 +372,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case runMsg:
 		return m.finishTurn(msg)
+
+	case tea.MouseWheelMsg:
+		var cmd tea.Cmd
+		m.viewport, cmd = m.viewport.Update(msg)
+		return m, cmd
 
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
@@ -345,27 +398,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // View implements tea.Model.
 func (m Model) View() tea.View {
 	prefix := m.renderPrefix()
-	content := prefix + m.input.View() + footer
+	content := prefix + m.input.View() + m.helpFooter()
+	if m.height > 0 && m.height < 5 {
+		// Keep the input visible when there is no room for a transcript.
+		prefix = ""
+		content = m.input.View()
+	}
 	v := tea.NewView(content)
 	if c := m.input.Cursor(); c != nil {
 		// prefix ends with the newline directly before the textarea. Count
 		// separators, not rendered lines, or that trailing newline adds one
 		// extra row and puts the cursor on the footer.
 		c.Y += strings.Count(prefix, "\n")
-		// That row is frame-relative. Inline mode moves the terminal cursor to
-		// this exact screen position, and a transcript taller than the terminal
-		// has its top rows in scrollback: the frame's bottom rows are the ones
-		// on screen, so subtract the rows the screen has scrolled past. Without
-		// this the terminal clamps the move to its bottom row and the cursor
-		// lands below the footer.
-		if h := m.height; h > 0 {
-			if rows := strings.Count(content, "\n") + 1; rows > h {
-				c.Y -= rows - h
-			}
-		}
+
 		v.Cursor = c
 	}
-	v.AltScreen = false
+	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion
 	return v
 }
 
@@ -373,6 +422,16 @@ func (m Model) View() tea.View {
 // keys that send, cancel, or quit.
 func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
+	case "pgup", "pgdown":
+		var cmd tea.Cmd
+		m.viewport, cmd = m.viewport.Update(msg)
+		return m, cmd
+	case "ctrl+home":
+		m.viewport.GotoTop()
+		return m, nil
+	case "ctrl+end":
+		m.viewport.GotoBottom()
+		return m, nil
 	case "ctrl+c":
 		m.quitting = true
 		m.spin = false
@@ -385,9 +444,14 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		}
 		m.label = "cancelling"
 		return m, func() tea.Msg {
-			return cancelMsg{err: m.client.Cancel(m.ctx, m.runID)}
+			return cancelMsg{generation: m.generation, err: m.client.Cancel(m.ctx, m.runID)}
 		}
 	case "enter":
+		if strings.HasPrefix(strings.TrimSpace(m.input.Value()), "/") {
+			value := strings.TrimSpace(m.input.Value())
+			m.input.Reset()
+			return m.slash(value)
+		}
 		if m.spin || m.loading {
 			return m, nil // a turn or history read is running; wait
 		}
@@ -420,6 +484,8 @@ func (m Model) send(text string) (tea.Model, tea.Cmd) {
 	m.state = statusRunning
 	m.label = "working"
 	m.commitUser(text)
+	m.syncViewport()
+	m.viewport.GotoBottom()
 
 	// The run is not known yet, so nothing can be subscribed to. Resolve it
 	// first and hold the message: the turn is dispatched from
@@ -469,9 +535,9 @@ func (m Model) run(fn func() (*runtime.Run, error)) tea.Cmd {
 	return func() tea.Msg {
 		run, err := fn()
 		if err != nil {
-			return runMsg{err: err}
+			return runMsg{generation: m.generation, err: err}
 		}
-		return runMsg{run: run, err: err}
+		return runMsg{generation: m.generation, run: run, err: err}
 	}
 }
 
@@ -574,7 +640,7 @@ func (m *Model) restoreSnapshot(snapshot *client.Snapshot) {
 func (m Model) lookup() tea.Cmd {
 	return func() tea.Msg {
 		runID, cursor, err := m.client.Lookup(m.ctx, m.address)
-		msg := lookupMsg{runID: runID, cursor: cursor, err: err}
+		msg := lookupMsg{generation: m.generation, runID: runID, cursor: cursor, err: err}
 		if err == nil && runID != "" {
 			msg.snapshot, msg.err = m.client.Snapshot(m.ctx, runID)
 			if msg.snapshot != nil {
@@ -591,7 +657,7 @@ func (m Model) ensure() tea.Cmd {
 	address := m.address
 	return func() tea.Msg {
 		runID, cursor, err := m.client.Ensure(m.ctx, address)
-		msg := ensureMsg{runID: runID, cursor: cursor, err: err}
+		msg := ensureMsg{generation: m.generation, runID: runID, cursor: cursor, err: err}
 		if err == nil && runID != "" {
 			msg.snapshot, msg.err = m.client.Snapshot(m.ctx, runID)
 			if msg.snapshot != nil {
@@ -608,7 +674,7 @@ func (m Model) ensure() tea.Cmd {
 func (m Model) openStream() tea.Cmd {
 	return func() tea.Msg {
 		ch, unsub, err := m.client.Stream(m.ctx, m.runID, m.cursor)
-		return streamReadyMsg{ch: ch, unsub: unsub, err: err}
+		return streamReadyMsg{generation: m.generation, ch: ch, unsub: unsub, err: err}
 	}
 }
 
@@ -617,13 +683,13 @@ func (m Model) openStream() tea.Cmd {
 func (m Model) readStream() tea.Cmd {
 	return func() tea.Msg {
 		if m.streamCh == nil {
-			return streamEndMsg{}
+			return streamEndMsg{generation: m.generation}
 		}
 		ev, ok := <-m.streamCh
 		if !ok {
-			return streamEndMsg{}
+			return streamEndMsg{generation: m.generation}
 		}
-		return streamMsg{ev: ev}
+		return streamMsg{generation: m.generation, ev: ev}
 	}
 }
 
@@ -865,32 +931,44 @@ func (m *Model) toolEntry(callID, name string) int {
 	return -1
 }
 
-// layout sizes the input to the terminal. The transcript is ordinary
-// scrollback, not a boxed viewport, so it does not fill the screen.
+// layout reserves fixed rows for the header, status, input, and help.
 func (m *Model) layout() {
-	w := max(m.width, 20)
+	w := m.textWidth()
+	h := m.height
+	if h <= 0 {
+		h = 24
+	}
+	bottom := m.viewport.AtBottom()
 	m.input.SetWidth(w)
 	m.input.SetHeight(1)
+	m.viewport.SetWidth(w)
+	m.viewport.SetHeight(max(0, h-5))
+	m.viewport.FillHeight = true
+	m.syncViewport()
+	if bottom {
+		m.viewport.GotoBottom()
+	}
 }
 
-// render assembles the frame: header, transcript, status, input, help.
-// The viewport content is recomputed from the transcript on every frame, so it
-// can never drift from [Model.entries].
+// syncViewport follows output only while the reader is at the bottom.
+func (m *Model) syncViewport() {
+	bottom := m.viewport.AtBottom()
+	m.viewport.SetContent(lipgloss.Wrap(m.transcript(), m.textWidth(), ""))
+	if bottom {
+		m.viewport.GotoBottom()
+	}
+}
+
 func (m *Model) render() string {
-	return m.renderPrefix() + m.input.View() + footer
+	return m.renderPrefix() + m.input.View() + m.helpFooter()
 }
 
 func (m *Model) renderPrefix() string {
-	var b strings.Builder
-	b.WriteString(styles.header.Render(" bonnie chat · " + m.address + " "))
-	b.WriteString("\n")
-	if body := m.transcript(); body != "" {
-		b.WriteString(body)
-		b.WriteString("\n")
-	}
-	b.WriteString(m.statusLine())
-	b.WriteString("\n")
-	return b.String()
+	// Also refresh here so a caller that builds a transcript directly gets a view.
+	m.syncViewport()
+	header := lipgloss.NewStyle().MaxWidth(m.textWidth()).MaxHeight(1).Render(styles.header.Render(" bonnie chat · " + m.address + " "))
+	status := lipgloss.NewStyle().MaxWidth(m.textWidth()).MaxHeight(1).Render(m.statusLine())
+	return header + "\n" + m.viewport.View() + "\n" + status + "\n"
 }
 
 // assistantText renders one assistant entry as markdown. The open streaming
@@ -956,7 +1034,9 @@ func (m *Model) transcript() string {
 	return b.String()
 }
 
-const footer = "\n" + "ctrl+c quit · ctrl+w cancel · enter send\n"
+func (m Model) helpFooter() string {
+	return "\n" + lipgloss.NewStyle().MaxWidth(m.textWidth()).MaxHeight(1).Render("/help · pgup/pgdown scroll · ctrl+c exit") + "\n"
+}
 
 func renderTool(e entry, frame int) string {
 	marker := "✓"
