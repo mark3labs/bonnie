@@ -31,7 +31,7 @@ func TestScaffoldIsTheDefaultLayout(t *testing.T) {
 				}
 			}
 			// Directories exist and are tracked.
-			for _, d := range []string{"skills", "workspace"} {
+			for _, d := range []string{"skills", "context"} {
 				if _, err := os.Stat(filepath.Join(dir, d, gitkeep)); err != nil {
 					t.Fatalf("the %s directory was not scaffolded: %v", d, err)
 				}

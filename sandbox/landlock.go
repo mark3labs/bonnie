@@ -62,8 +62,8 @@ var deviceFiles = []string{
 // It is CONTAINMENT, NOT ISOLATION, and the difference is not pedantic:
 //
 //   - The filesystem IS confined. A command, and every process it starts, can
-//     read and write only the run's workspace plus the read-only system paths
-//     a shell needs. An absolute path out of the workspace is refused by the
+//     read and write only the run's work directory plus the read-only system paths
+//     a shell needs. An absolute path out of the work directory is refused by the
 //     kernel, which is what separates this from [LocalProvider].
 //   - Host credentials are NOT passed. The child gets a minimal environment,
 //     so a provider API key in the server's environment does not reach a
@@ -112,28 +112,28 @@ var _ Provider = (*LandlockProvider)(nil)
 // LandlockOption configures a [LandlockProvider].
 type LandlockOption func(*LandlockProvider)
 
-// WithLandlockRoot sets the directory that holds per-run workspaces. The
+// WithLandlockRoot sets the directory that holds per-run work directories. The
 // default is ".bonnie/workspaces".
 func WithLandlockRoot(dir string) LandlockOption {
 	return func(p *LandlockProvider) { p.root = dir }
 }
 
-// UseSharedWorkspace configures one exact host directory as the shared workspace.
+// UseSharedDirectory configures one exact host directory as the shared work directory.
 // Shared runs cannot overlap and shared data is never removed by sandbox cleanup.
-func (p *LandlockProvider) UseSharedWorkspace(dir string) error {
+func (p *LandlockProvider) UseSharedDirectory(dir string) error {
 	if dir == "" {
-		return fmt.Errorf("bonnie: sandbox: shared workspace path is empty")
+		return fmt.Errorf("bonnie: sandbox: shared work directory path is empty")
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if len(p.opened) != 0 {
-		return fmt.Errorf("bonnie: sandbox: cannot enable shared workspace after opening a run")
+		return fmt.Errorf("bonnie: sandbox: cannot enable shared work directory after opening a run")
 	}
 	p.root, p.shared, p.cleanup = dir, true, false
 	return nil
 }
 
-// WithLandlockCleanup removes a run's workspace when its sandbox is deleted.
+// WithLandlockCleanup removes a run's work directory when its sandbox is deleted.
 // Tests use it; a real run wants its files to survive.
 func WithLandlockCleanup() LandlockOption {
 	return func(p *LandlockProvider) { p.cleanup = true }
@@ -177,7 +177,7 @@ func (p *LandlockProvider) Open(_ context.Context, runID string) (Sandbox, error
 	}
 
 	if p.shared && p.sharedActive {
-		return nil, fmt.Errorf("bonnie: sandbox: shared workspace is already in use")
+		return nil, fmt.Errorf("bonnie: sandbox: shared work directory is already in use")
 	}
 	if !p.shared {
 		if err := refuseUncheckedLegacy(p.root, runID); err != nil {
@@ -192,7 +192,7 @@ func (p *LandlockProvider) Open(_ context.Context, runID string) (Sandbox, error
 	}
 	dir, err := filepath.Abs(path)
 	if err != nil {
-		return nil, fmt.Errorf("bonnie: sandbox: resolve workspace: %w", err)
+		return nil, fmt.Errorf("bonnie: sandbox: resolve work directory: %w", err)
 	}
 	if err := os.MkdirAll(filepath.Dir(dir), 0o700); err != nil {
 		return nil, fmt.Errorf("bonnie: sandbox: create provider root: %w", err)
@@ -277,13 +277,13 @@ func (s *landlockSandbox) isClosed() bool {
 // the operation, including missing targets and concurrent path changes.
 func (s *landlockSandbox) relative(p string) (string, error) {
 	resolved := Resolve(p)
-	if resolved == Workspace {
+	if resolved == WorkDir {
 		return ".", nil
 	}
-	if rel, ok := strings.CutPrefix(resolved, Workspace+"/"); ok {
+	if rel, ok := strings.CutPrefix(resolved, WorkDir+"/"); ok {
 		return filepath.FromSlash(rel), nil
 	}
-	return "", fmt.Errorf("%w: %s", ErrOutsideWorkspace, p)
+	return "", fmt.Errorf("%w: %s", ErrOutsideWorkDir, p)
 }
 
 // refuseRootLink prevents one run from adopting another run's directory.
@@ -293,7 +293,7 @@ func refuseRootLink(root *os.Root, name string) error {
 		return rootError(name, err)
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
-		return fmt.Errorf("%w: workspace alias %s", ErrOutsideWorkspace, name)
+		return fmt.Errorf("%w: work directory alias %s", ErrOutsideWorkDir, name)
 	}
 	return nil
 }
@@ -303,7 +303,7 @@ func rootError(p string, err error) error {
 		return nil
 	}
 	if strings.Contains(err.Error(), "escapes from parent") || strings.Contains(err.Error(), "outside root") {
-		return fmt.Errorf("%w: %s: %v", ErrOutsideWorkspace, p, err)
+		return fmt.Errorf("%w: %s: %v", ErrOutsideWorkDir, p, err)
 	}
 	return fmt.Errorf("bonnie: sandbox: file %s: %w", p, err)
 }
@@ -459,7 +459,7 @@ func (s *landlockSandbox) WriteFile(_ context.Context, p string, data []byte) er
 
 // Stop implements [Sandbox]. A jailed command is an ordinary child process
 // that has already exited, so nothing is held between commands and the
-// workspace is untouched.
+// work directory is untouched.
 func (s *landlockSandbox) Stop(context.Context) error { return nil }
 
 // Close implements [Sandbox].
@@ -481,7 +481,7 @@ func (s *landlockSandbox) Close() error {
 	return errors.Join(s.root.Close(), s.scratch.Close())
 }
 
-// Delete implements [Deleter]. It removes the workspace only when the
+// Delete implements [Deleter]. It removes the work directory only when the
 // provider was built with [WithLandlockCleanup], because deleting a
 // developer's files by surprise is worse than leaving them.
 func (s *landlockSandbox) Delete(context.Context) error {
@@ -490,7 +490,7 @@ func (s *landlockSandbox) Delete(context.Context) error {
 		return nil
 	}
 	if err := os.RemoveAll(s.dir); err != nil {
-		return fmt.Errorf("bonnie: sandbox: delete workspace: %w", err)
+		return fmt.Errorf("bonnie: sandbox: delete work directory: %w", err)
 	}
 	if err := removeScratch(filepath.Dir(s.dir), safeName("", s.id)); err != nil {
 		return fmt.Errorf("bonnie: sandbox: delete scratch directory: %w", err)
@@ -514,7 +514,7 @@ func removeScratch(providerDir, name string) error {
 	return rootError(name, root.RemoveAll(filepath.Join(".scratch", name)))
 }
 
-// SandboxExists implements [ExistenceChecker]. A workspace is a directory
+// SandboxExists implements [ExistenceChecker]. A work directory is a directory
 // under the provider root.
 func (p *LandlockProvider) SandboxExists(_ context.Context, runID string) (bool, error) {
 	p.mu.Lock()
@@ -529,7 +529,7 @@ func (p *LandlockProvider) SandboxExists(_ context.Context, runID string) (bool,
 		if os.IsNotExist(err) {
 			return false, nil
 		}
-		return false, fmt.Errorf("bonnie: sandbox: stat workspace: %w", err)
+		return false, fmt.Errorf("bonnie: sandbox: stat work directory: %w", err)
 	}
 	if err := refuseUncheckedLegacy(root, runID); err != nil {
 		return false, err
@@ -542,7 +542,7 @@ func (p *LandlockProvider) SandboxExists(_ context.Context, runID string) (bool,
 	case os.IsNotExist(err):
 		return false, nil
 	default:
-		return false, fmt.Errorf("bonnie: sandbox: stat workspace: %w", err)
+		return false, fmt.Errorf("bonnie: sandbox: stat work directory: %w", err)
 	}
 }
 
@@ -562,10 +562,10 @@ func (p *LandlockProvider) DeleteRun(_ context.Context, runID string) (bool, err
 		if os.IsNotExist(err) {
 			return false, nil
 		}
-		return false, fmt.Errorf("bonnie: sandbox: stat workspace: %w", err)
+		return false, fmt.Errorf("bonnie: sandbox: stat work directory: %w", err)
 	}
 	if err := os.RemoveAll(dir); err != nil {
-		return true, fmt.Errorf("bonnie: sandbox: remove workspace: %w", err)
+		return true, fmt.Errorf("bonnie: sandbox: remove work directory: %w", err)
 	}
 	if err := removeScratch(p.root, safeName("", runID)); err != nil {
 		return true, fmt.Errorf("bonnie: sandbox: remove scratch: %w", err)
@@ -579,7 +579,7 @@ var (
 )
 
 // WorkingDir implements [WorkingDirReporter]. A landlock sandbox is a host
-// directory, so that path — not [Workspace] — is what `pwd` reports and what
+// directory, so that path — not [WorkDir] — is what `pwd` reports and what
 // the system prompt must name.
 func (p *LandlockProvider) WorkingDir(runID string) string {
 	p.mu.Lock()

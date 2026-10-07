@@ -10,12 +10,12 @@ import (
 )
 
 // gitkeep is the scaffold's empty-directory marker. It is bookkeeping for
-// version control, not seed content, and never reaches a workspace.
+// version control, not seed content, and never reaches a work directory.
 const gitkeep = ".gitkeep"
 
 // Seeded wraps a [Provider] and mirrors a local directory into every sandbox
-// it opens. It is how a manifest's workspace seed reaches the run: the files
-// an author wrote under `workspace/` are present at [Workspace] before the
+// it opens. It is how a manifest's context files reaches the run: the files
+// an author wrote under `work directory/` are present at [WorkDir] before the
 // model's first command runs, on every backend, because the mirror travels
 // over the [Sandbox] interface and not over any backend's own tooling.
 //
@@ -61,7 +61,7 @@ func (s *seeded) Open(ctx context.Context, runID string) (Sandbox, error) {
 		return nil, err
 	}
 	if err := seedInto(ctx, sb, s.dir); err != nil {
-		return nil, fmt.Errorf("bonnie: sandbox: seed workspace: %w", err)
+		return nil, fmt.Errorf("bonnie: sandbox: seed work directory: %w", err)
 	}
 	return sb, nil
 }
@@ -112,9 +112,9 @@ func (s *seeded) ValidateRunCleanup() error {
 // backend in run.go, so the wrapper stood between the agent and the only
 // provider that could report a host path. The prompt fell back to
 // /workspace, a directory that does not exist under a host-mapped backend,
-// and a live model said so — "my workspace is not actually /workspace".
+// and a live model said so — "my work directory is not actually /workspace".
 //
-// A provider that runs at [Workspace] reports nothing and the caller's
+// A provider that runs at [WorkDir] reports nothing and the caller's
 // fallback applies, which is why this returns "" rather than guessing.
 func (s *seeded) WorkingDir(runID string) string {
 	r, ok := s.p.(WorkingDirReporter)
@@ -144,7 +144,7 @@ var _ Imaged = (*seededImaged)(nil)
 // Image implements [Imaged] by forwarding to the wrapped provider.
 func (s *seededImaged) Image() string { return s.p.(Imaged).Image() }
 
-// seedInto mirrors dir into the sandbox, relative to [Workspace], skipping
+// seedInto mirrors dir into the sandbox, relative to [WorkDir], skipping
 // files that are already there and skipping [gitkeep].
 func seedInto(ctx context.Context, sb Sandbox, dir string) error {
 	return filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {

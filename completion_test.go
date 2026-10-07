@@ -66,7 +66,7 @@ func TestManagedCompletionSharesSandbox(t *testing.T) {
 					return CompletionFeedback{}, err
 				}
 				if res.ExitCode != 0 || res.Stdout != "setupmodel" {
-					return CompletionFeedback{}, fmt.Errorf("completion used wrong workspace: %+v", res)
+					return CompletionFeedback{}, fmt.Errorf("completion used wrong contextFiles: %+v", res)
 				}
 				if c.ContinuationsUsed == 0 {
 					return CompletionFeedback{ContinueWith: "correct the draft"}, nil

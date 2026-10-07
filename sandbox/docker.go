@@ -169,7 +169,7 @@ func (p *DockerProvider) Open(ctx context.Context, runID string) (Sandbox, error
 
 // ensureRunning creates the container when it is absent and starts it when it
 // is merely stopped. This is what makes a parked run resumable: Stop releases
-// the compute, and the next tool call brings the same workspace back.
+// the compute, and the next tool call brings the same work directory back.
 func (p *DockerProvider) ensureRunning(ctx context.Context, sb *cliSandbox) error {
 	p.policyMu.RLock()
 	defer p.policyMu.RUnlock()
@@ -208,7 +208,7 @@ func (p *DockerProvider) inspectState(ctx context.Context, name string) (string,
 func (p *DockerProvider) create(ctx context.Context, sb *cliSandbox) error {
 	args := []string{
 		"run", "--detach", "--name", sb.name,
-		"--workdir", Workspace,
+		"--workdir", WorkDir,
 		"--label", "bonnie.run=" + sb.id,
 	}
 	if p.policy.Mode == NetworkDenyAll {
@@ -226,17 +226,17 @@ func (p *DockerProvider) create(ctx context.Context, sb *cliSandbox) error {
 	if cerr := cliError("create container from "+p.image, firstLine(stderr), code, err); cerr != nil {
 		return cerr
 	}
-	// A fresh image may not have the workspace yet, and the entrypoint runs
+	// A fresh image may not have the work directory yet, and the entrypoint runs
 	// in parallel with the first exec.
-	_, stderr, code, err = runCLI(ctx, nil, p.bin, "exec", sb.name, "mkdir", "-p", Workspace)
-	if err := cliError("create workspace", firstLine(stderr), code, err); err != nil {
+	_, stderr, code, err = runCLI(ctx, nil, p.bin, "exec", sb.name, "mkdir", "-p", WorkDir)
+	if err := cliError("create work directory", firstLine(stderr), code, err); err != nil {
 		return err
 	}
 	return nil
 }
 
 // idleScript is the container's entrypoint: it keeps the container alive
-// between tool calls, so the workspace persists across a turn.
+// between tool calls, so the work directory persists across a turn.
 //
 // The shell runs as PID 1, and the kernel delivers no signal to PID 1 that
 // it has no handler for. A bare `while true; do sleep 3600; done` therefore
@@ -248,7 +248,7 @@ func (p *DockerProvider) create(ctx context.Context, sb *cliSandbox) error {
 // Guard test: TestDockerStopIsPrompt.
 //
 // `sleep infinity` is not in every busybox, so a portable loop is safer.
-const idleScript = "trap 'exit 0' TERM INT; mkdir -p " + Workspace +
+const idleScript = "trap 'exit 0' TERM INT; mkdir -p " + WorkDir +
 	" && while true; do sleep 3600 & wait $!; done"
 
 // firstLine trims a CLI error down to something a human reads.

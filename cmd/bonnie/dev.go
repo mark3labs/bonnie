@@ -46,9 +46,8 @@ tree, regenerate the tool wiring, rebuild, and gracefully restart the serving ch
 while you interact with the agent in a terminal.
 
 The loop watches the tree: main.go, instructions.md, skills/, tools/**, go.mod
-and go.sum. The workspace is deliberately NOT watched: it is where the running
-agent writes the files a model asks it to write, so rebuilding on it would let
-the agent restart itself mid-turn. A change rebuilds the wrapper and restarts
+and go.sum. The context directory is deliberately NOT watched. Its files are
+copied into each run; it is not the run's writable output directory. A change rebuilds the wrapper and restarts
 the child with SIGTERM, waiting
 out its drain (--shutdown-timeout) before the next starts. A parked run keeps no
 compute and lives in the journal; a restarted child resumes it, and the TUI reconnects
@@ -191,7 +190,7 @@ func (d *devServer) run(ctx context.Context) error {
 		return fmt.Errorf("bonnie: dev: watcher: %w", err)
 	}
 	defer func() { _ = w.Close() }()
-	if err := watchTree(d.root, workspaceDir(d.root), w); err != nil {
+	if err := watchTree(d.root, contextFilesDir(d.root), w); err != nil {
 		return err
 	}
 
@@ -217,12 +216,12 @@ func (d *devServer) run(ctx context.Context) error {
 			if !ok {
 				return nil
 			}
-			if !watched(ev.Name, workspaceDir(d.root)) {
+			if !watched(ev.Name, contextFilesDir(d.root)) {
 				continue
 			}
 			if ev.Op&fsnotify.Create != 0 {
 				if info, err := os.Stat(ev.Name); err == nil && info.IsDir() {
-					if err := watchTree(ev.Name, workspaceDir(d.root), w); err != nil {
+					if err := watchTree(ev.Name, contextFilesDir(d.root), w); err != nil {
 						return fmt.Errorf("bonnie: dev: watch new directory: %w", err)
 					}
 				}
@@ -361,9 +360,9 @@ func stopGracefully(cmd *exec.Cmd, shutdown time.Duration) error {
 // watchTree adds every directory under root to the watcher, so a new file in a
 // subdirectory is seen, not only edits to already-watched paths.
 //
-// workspace is skipped for the same reason .bonnie is: it holds the loop's
-// own output rather than its input. See [watched].
-func watchTree(root, workspace string, w *fsnotify.Watcher) error {
+// Context files are not watched. A later run reads the changed source files
+// without a rebuild. See [watched].
+func watchTree(root, contextFiles string, w *fsnotify.Watcher) error {
 	return filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
 		if os.IsNotExist(err) {
 			return nil // A newly created directory can disappear before registration.
@@ -379,7 +378,7 @@ func watchTree(root, workspace string, w *fsnotify.Watcher) error {
 		if entry.Name() == ".bonnie" || entry.Name() == ".git" || entry.Name() == ".direnv" {
 			return filepath.SkipDir
 		}
-		if workspace != "" && path == workspace {
+		if contextFiles != "" && path == contextFiles {
 			return filepath.SkipDir
 		}
 		return w.Add(path)
@@ -388,19 +387,10 @@ func watchTree(root, workspace string, w *fsnotify.Watcher) error {
 
 // watched reports whether a changed path should trigger a rebuild.
 //
-// Two kinds of path are the loop's own output rather than its input, and
-// rebuilding on either loops:
-//
-//   - the generated file, which every rebuild rewrites;
-//   - the workspace, which is the agent's root for files. A model that writes
-//     a file — the ordinary case, now that the workspace is the root — would
-//     otherwise trigger a rebuild and SIGTERM the child that is still serving
-//     its turn. The agent would restart itself, mid-answer, for doing its job.
-//
-// The workspace is skipped by [watchTree] as well; this second check catches
-// the events the root watcher reports for the directory itself, such as the
-// child creating it on first boot.
-func watched(path, workspace string) bool {
+// Generated files and runtime storage are excluded to prevent rebuild loops.
+// Context files are also excluded: changes reach later runs without a rebuild.
+// They are authored context files, not the running agent's working files.
+func watched(path, contextFiles string) bool {
 	if filepath.Base(path) == "bonnie_gen.go" {
 		return false
 	}
@@ -409,7 +399,7 @@ func watched(path, workspace string) bool {
 			return false
 		}
 	}
-	return !underDir(path, workspace)
+	return !underDir(path, contextFiles)
 }
 
 // underDir reports whether path is dir or sits inside it. Both are absolute.
@@ -424,13 +414,10 @@ func underDir(path, dir string) bool {
 	return rel == "." || (!strings.HasPrefix(rel, ".."+string(filepath.Separator)) && rel != "..")
 }
 
-// workspaceDir is the tree's workspace, absolute: [bonnie.DefaultWorkspace]
-// under the root. It is one constant rather than a copy of the path, so the
-// scaffold, codegen, the runtime, and this loop cannot disagree about which
-// directory the agent writes into — and therefore about which one must not
-// be watched.
-func workspaceDir(root string) string {
-	return filepath.Join(root, bonnie.DefaultWorkspace)
+// contextFilesDir returns the absolute authored context directory. The scaffold,
+// generator, runtime, and watcher use the same layout constant.
+func contextFilesDir(root string) string {
+	return filepath.Join(root, bonnie.DefaultContextFiles)
 }
 
 // runDev is the bonnie dev entry, separated from cobra for testing.

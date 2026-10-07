@@ -8,7 +8,7 @@
 //	bonnie runs list --journal .bonnie             inspect the durable runs
 //
 // This file is yours; BONNIE never rewrites it. The tree's data lives at its
-// default paths — instructions.md is the system prompt, workspace/ is the
+// default paths — instructions.md is the system prompt, context/ is the
 // agent's root for files — and bonnie_gen.go is the wiring `bonnie dev` and
 // `bonnie build` regenerate. Everything else is an option below.
 //

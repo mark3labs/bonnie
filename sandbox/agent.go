@@ -89,7 +89,7 @@ func AgentWithoutHumanInput(p Provider, opts ...kit.Option) runtime.AgentFactory
 // must not be used after the agent is closed or setup fails.
 func AgentWithSetup(p Provider, humanInput bool, setup func(context.Context, *kit.Kit, *runtime.Session, Opener) error, opts ...kit.Option) runtime.AgentFactory {
 	return func(ctx context.Context, s *runtime.Session) (runtime.Agent, error) {
-		// A resumed run whose workspace vanished must hear it from BONNIE,
+		// A resumed run whose work directory vanished must hear it from BONNIE,
 		// not discover an empty directory mid-work. This check runs once
 		// per agent build — once per Start or Resume — and never when the
 		// run never opened a sandbox.
@@ -118,18 +118,18 @@ func AgentWithSetup(p Provider, humanInput bool, setup func(context.Context, *ki
 // promptWorkingDir is the directory the system prompt must name for this
 // backend and run: the real path commands run at.
 //
-// A backend with a guest filesystem runs at [Workspace] and reports nothing.
-// A backend that maps the workspace onto a host directory implements
+// A backend with a guest filesystem runs at [WorkDir] and reports nothing.
+// A backend that maps the work directory onto a host directory implements
 // [WorkingDirReporter] and names that path, because that is what `pwd`
 // returns — and a prompt that disagrees with `pwd` is a defect a live model
-// hit again when this value was hard-coded to [Workspace].
+// hit again when this value was hard-coded to [WorkDir].
 func promptWorkingDir(p Provider, runID string) string {
 	if r, ok := p.(WorkingDirReporter); ok {
 		if dir := r.WorkingDir(runID); dir != "" {
 			return dir
 		}
 	}
-	return Workspace
+	return WorkDir
 }
 
 // sandboxedKitOptions is the option set that makes a Kit agent sandboxed,
@@ -158,10 +158,10 @@ func sandboxedKitOptions(open Opener, workdir string) []kit.Option {
 		//
 		// and the model believes the prompt.
 		//
-		// The value is per backend, not the constant [Workspace]: a
+		// The value is per backend, not the constant [WorkDir]: a
 		// host-mapped backend runs commands at a host path, and naming
 		// /workspace there reproduced the very same defect — a live model
-		// reported "my workspace is not actually /workspace" and found the
+		// reported "my work directory is not actually /workspace" and found the
 		// directory did not exist.
 		//
 		// Setting it is safe precisely because BONNIE owns persistence:
@@ -209,10 +209,10 @@ func sandboxedKitOptions(open Opener, workdir string) []kit.Option {
 // checkRecordedSandbox compares the sandbox a run recorded against what the
 // backend reports now, and notes the loss when they disagree. It is the
 // reason the sandbox record exists: without it, a run whose container was
-// pruned while it was parked resumed in silence with an empty workspace, and
+// pruned while it was parked resumed in silence with an empty work directory, and
 // the model watched files vanish between turns with no way to know why.
 //
-// A vanished workspace is not a failure — a run whose container was pruned
+// A vanished work directory is not a failure — a run whose container was pruned
 // by an operator can still do useful work — but it is never silence. The note
 // lands in the conversation before the first step of the resumed turn, so the
 // model can account for it in what it says next.

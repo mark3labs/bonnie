@@ -42,7 +42,7 @@ func TestDefaultsAreTheScaffoldedLayout(t *testing.T) {
 	c := resolve()
 	cases := []struct{ got, want, what string }{
 		{c.instrPath, "instructions.md", "instructions"},
-		{c.workspace, "workspace", "workspace"},
+		{c.contextFiles, "context", "context"},
 		{c.journal, ".bonnie", "journal"},
 		{c.addr, ":8080", "address"},
 	}
@@ -57,22 +57,22 @@ func TestDefaultsAreTheScaffoldedLayout(t *testing.T) {
 }
 
 // TestWorkspaceIsTheAgentRoot checks the absolute seed path. Tool calls use
-// each run's sandbox workspace, not this directory. The default seed path is
+// each run's sandbox contextFiles, not this directory. The default seed path is
 // the directory bonnie init scaffolds.
 func TestWorkspaceIsTheAgentRoot(t *testing.T) {
 	t.Parallel()
 
 	t.Run("default is absolute and inside the tree", func(t *testing.T) {
 		t.Parallel()
-		dir, err := resolve().workspaceDir()
+		dir, err := resolve().contextFilesDir()
 		if err != nil {
-			t.Fatalf("workspaceDir: %v", err)
+			t.Fatalf("contextFilesDir: %v", err)
 		}
 		if !filepath.IsAbs(dir) {
-			t.Fatalf("workspace %q is not absolute", dir)
+			t.Fatalf("contextFiles %q is not absolute", dir)
 		}
-		if filepath.Base(dir) != DefaultWorkspace {
-			t.Fatalf("workspace = %q, want a %s directory", dir, DefaultWorkspace)
+		if filepath.Base(dir) != DefaultContextFiles {
+			t.Fatalf("contextFiles = %q, want a %s directory", dir, DefaultContextFiles)
 		}
 		// It is never the tree root itself: a write there would land on the
 		// instructions and the journal.
@@ -81,25 +81,25 @@ func TestWorkspaceIsTheAgentRoot(t *testing.T) {
 			t.Fatal(err)
 		}
 		if dir == wd {
-			t.Fatal("the workspace is the tree root itself: a write would land on the agent's own files")
+			t.Fatal("the contextFiles is the tree root itself: a write would land on the agent's own files")
 		}
 	})
 
-	// A host with no tree disables workspace seeding, not the sandbox.
+	// A host with no tree disables contextFiles seeding, not the sandbox.
 	t.Run("no tree", func(t *testing.T) {
 		t.Parallel()
-		dir, err := resolve(WithWorkspace("")).workspaceDir()
+		dir, err := resolve(WithContextFiles("")).contextFilesDir()
 		if err != nil {
-			t.Fatalf("workspaceDir: %v", err)
+			t.Fatalf("contextFilesDir: %v", err)
 		}
 		if dir != "" {
-			t.Fatalf("workspace = %q, want empty without a tree", dir)
+			t.Fatalf("contextFiles = %q, want empty without a tree", dir)
 		}
 	})
 }
 
-// TestSandboxedWorkspaceBecomesASeed: with a sandbox, the workspace is not a
-// working directory but a seed mirrored into [sandbox.Workspace]. Accepting
+// TestSandboxedWorkspaceBecomesASeed: with a sandbox, the contextFiles is not a
+// working directory but a seed mirrored into [sandbox.WorkDir]. Accepting
 // the setting and ignoring it is what invariant 13 forbids.
 func TestSandboxedWorkspaceBecomesASeed(t *testing.T) {
 	t.Parallel()
@@ -107,8 +107,8 @@ func TestSandboxedWorkspaceBecomesASeed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(src), "sandbox.Seeded(provider, workspace)") {
-		t.Fatal("the sandboxed branch does not seed the workspace: " +
+	if !strings.Contains(string(src), "sandbox.Seeded(provider, contextFiles)") {
+		t.Fatal("the sandboxed branch does not seed the contextFiles: " +
 			"the setting would be accepted and ignored")
 	}
 }
@@ -469,7 +469,7 @@ func testRSAPrivateKey(t *testing.T) string {
 	return string(pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(k)}))
 }
 
-// The workspace seed never overwrites. A file already in the workspace is
+// The contextFiles seed never overwrites. A file already in the contextFiles is
 // either the author's seed from an earlier start or the model's own work, and
 // both outrank a copy compiled in months ago.
 func TestSeedNeverOverwrites(t *testing.T) {
@@ -537,7 +537,7 @@ func TestCloseStreamsDoesNotCancelTurn(t *testing.T) {
 // TestDefaultSandboxCannotReadTheJournal is the regression test for the
 // incident that opened issue #1.
 //
-// A live Slack agent ran `find /home/<user>/Workspace/my-agent -type f` and
+// A live Slack agent ran `find /home/<user>/ContextFiles/my-agent -type f` and
 // the result listed main.go, instructions.md, and .bonnie/journal.db — the
 // journal that makes its own runs durable. Nothing refused it, because an
 // absolute path never consults a working directory.
@@ -594,7 +594,7 @@ func TestDefaultSandboxCannotReadTheJournal(t *testing.T) {
 			t.Fatalf("Exec(%q): %v", line, err)
 		}
 		if strings.Contains(res.Stdout, "SECRET") {
-			t.Fatalf("a default run read outside its workspace with %q: %q", line, res.Stdout)
+			t.Fatalf("a default run read outside its contextFiles with %q: %q", line, res.Stdout)
 		}
 	}
 

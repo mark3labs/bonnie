@@ -8,8 +8,8 @@ import (
 	kit "github.com/mark3labs/kit/pkg/kit"
 )
 
-// testSeed stands in for the workspace files codegen embeds. A generated
-// embed binds one directory (`//go:embed workspace`), so every path inside it
+// testSeed stands in for the contextFiles files codegen embeds. A generated
+// embed binds one directory (`//go:embed contextFiles`), so every path inside it
 // begins with that directory's name — the element [seedFromEmbed] has to
 // strip. The fixture keeps exactly that shape.
 //

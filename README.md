@@ -149,7 +149,8 @@ bonnie dev
 
 `bonnie init` writes `instructions.md` (the system prompt), `main.go` (the one
 call you own), `bonnie_gen.go` (the generated wiring), `go.mod`, and the seed
-directories `skills/` and `workspace/`. With `--tools` it also writes a sample
+directories `skills/` and `context/`. It copies authored context files into each
+run; it does not add them to the prompt. With `--tools` it also writes a sample
 tool at `tools/echo/tool.go`. It never replaces a file: if one file exists, it
 refuses, names each file it found, and changes nothing.
 
@@ -185,15 +186,16 @@ Local commands: `/help`, `/new`, `/retry`, `/cancel`, and `/exit` (or `/quit`).
 history or tool effects, so an external action can repeat. Cancel an active
 turn, or wait for it to finish, before you use `/new` or `/retry`.
 
-Files under `workspace/` are copied into each run's isolated sandbox by default. A file that the
-model already wrote is never replaced.
+Files under `context/` are context files. BONNIE copies them into each run's
+isolated sandbox by default. It does not add them to the prompt or replace files
+the model has written.
 
-For a deliberate single-user development workflow, a host can opt into one
-persistent directory shared by all runs:
+For a deliberate single-user development workflow, a host can use one shared
+working-files directory across all runs:
 
 ```go
 bonnie.New(
-    bonnie.WithPersistentWorkspace("./workspace"),
+    bonnie.WithSharedDirectory("./working-files"),
 )
 ```
 
@@ -202,17 +204,13 @@ default Landlock filesystem confinement: runs share this directory, but do not
 get unrestricted host access. Explicit Landlock and Local providers are also
 supported; Local provides no isolation. Other backends are rejected.
 
-Do not combine this option with `WithWorkspace`. Overlapping workspace opens
-through the same provider are rejected, not queued. The guard does not coordinate
-separate processes or provider instances: use one server for this development
-workspace. Run pruning does not remove the shared directory. Without this option,
-the default remains isolated per-run workspaces.
+Do not combine this option with `WithContextFiles`. Overlapping opens through the same provider are rejected, not queued. The guard does not coordinate separate processes or provider instances: use one server for this development directory. Run pruning does not remove the shared directory. Without this option, each run has separate working files.
 
-For one-off tasks, enable automatic cleanup of run-owned workspaces:
+For one-off tasks, enable automatic sandbox cleanup:
 
 ```go
 bonnie.New(
-    bonnie.WithRunWorkspaceCleanup(bonnie.WorkspaceCleanupPolicy{
+    bonnie.WithRunSandboxCleanup(bonnie.SandboxCleanupPolicy{
         CompletedAfter: time.Hour,
         RetiredAfter:   time.Hour,
     }),
@@ -220,15 +218,15 @@ bonnie.New(
 ```
 
 Import `time` for these durations. This works in the compiled agent; it does not
-need the BONNIE CLI. Cleanup runs at startup and once per minute. Zero keeps the
-workspace for that state. `FailedAfter` and `CancelledAfter` can also be set.
+need the BONNIE CLI. Sandbox cleanup runs at startup and once per minute. Zero keeps the sandbox
+for that state. `FailedAfter` and `CancelledAfter` can also be set.
 Pending, running, and waiting runs are never cleaned up. The journal and channel
 addresses remain. A later turn on a cleaned-up run starts without its earlier
 files, so publish task output before the run completes.
 
-Cleanup cannot be combined with `WithPersistentWorkspace`, shared provider modes,
+Sandbox cleanup cannot be combined with `WithSharedDirectory`, shared provider modes,
 or `WithAgentFactory`. Negative durations and providers without deletion support
-are rejected at startup. Use one server for the journal and workspaces; cleanup
+are rejected at startup. Use one server for the journal and working files; cleanup
 locks do not coordinate separate processes. Each deletion has a 30-second timeout.
 Failures are logged and retried on the next sweep.
 
@@ -236,11 +234,11 @@ Files under `skills/` are the agent's skills: one `*.md` per skill, or one
 subdirectory per skill with a `SKILL.md` in it, each with YAML frontmatter
 that gives a `name` and a `description`. Those two fields go in the system
 prompt; the body arrives only when the model calls `activate_skill`, so a
-large skill set costs few tokens until it is used. The tree's `skills/` is the authored set. Workspace-local skills can also be
+large skill set costs few tokens until it is used. The tree's `skills/` is the authored set. Skills in a run's working files can also be
 discovered in the sandbox; skills beside the host process are not inherited.
 
 There is no configuration file. A setting is a file at a known path
-(`instructions.md`, `workspace/`, `skills/`, `tools/`) or an option in
+(`instructions.md`, `context/`, `skills/`, `tools/`) or an option in
 `main.go`. Thus a setting that does not exist is a compile error, and not a key
 that nothing reads. The built binary accepts two operator flags, `-addr` and
 `-model`. Each flag wins over the related option, thus one binary can change
@@ -449,7 +447,7 @@ Each tool call runs in a sandbox. There is no unsandboxed mode. `WithSandbox`
 **selects** a backend, it does not enable one. If you do not call it, you get
 `sandbox.Landlock()`, and not your process.
 
-The default confines tool calls to the run's own workspace with the Linux
+The default confines tool calls to the run's own working files with the Linux
 Landlock LSM, and needs no installation. That is why it is the floor: a default
 that needs Docker is a default that people switch off.
 
@@ -517,9 +515,9 @@ runner := runtime.NewRunner(journal, sandbox.Agent(provider,
 ```
 
 The model gets four tools that run in the sandbox: `shell`, `read_file`,
-`write_file`, and `list_files`. Their root is `sandbox.Workspace`,
-`/workspace`. A path that leaves the workspace, also through a symlink the
-model made, gets `sandbox.ErrOutsideWorkspace`.
+`write_file`, and `list_files`. Their root is the sandbox work directory, `sandbox.WorkDir`, whose path is
+`/workspace`. A path that leaves the work directory, including through a
+symlink the model made, gets `sandbox.ErrOutsideWorkDir`.
 
 The `shell` tool checks for Bash inside the sandbox on each call. It uses
 Bash when available and falls back to `sh` otherwise. Each result names the
@@ -569,7 +567,7 @@ provider, err := sandbox.Select(ctx, sandbox.Microsandbox(), sandbox.Docker(), s
 
 `sandbox.Seeded(provider, dir)` copies a local directory into each sandbox, and
 never replaces a file that the run already has. An agent tree wraps its
-`workspace/` directory this way.
+`context/` directory this way.
 
 The sandbox opens at the **first tool call that needs it**, thus a parked run
 holds no container. Read the godoc of each provider in
@@ -962,7 +960,7 @@ Stated plainly, because the failure modes are not obvious:
   activation, with a host path. The tools run in a sandbox that does not have
   that path, thus the model is told about a file that it cannot open. Put what
   the model must read in the skill body, and put a file that it must open in
-  `workspace/`, which is copied into the sandbox.
+  `context/`, which is copied into the sandbox.
 - **The HTTP channel verifies a caller only when you configure one.**
   `http.WithAuthenticator` (or `bonnie.WithHTTPAuthenticator`) checks every
   route but `GET /bonnie/v1/health` and mints the run's identity from what it
@@ -984,7 +982,7 @@ Stated plainly, because the failure modes are not obvious:
   Live-only deltas are the exception, and they are marked.
 - **Sandbox lifecycle is journalled; cleanup is opt-in.**
   `bonnie sandbox prune` deletes the sandboxes of finished runs. Compiled agents
-  can use `WithRunWorkspaceCleanup` for retention-based cleanup; the CLI `serve`
+  can use `WithRunSandboxCleanup` for retention-based sandbox cleanup; the CLI `serve`
   command does not sweep them. Cleanup keeps waiting runs and history, but deletes
   earlier files of eligible finished runs. Publish output before completion.
   Cleanup locks do not coordinate separate processes or Runner instances.
@@ -1292,7 +1290,7 @@ See [`examples/README.md`](examples/README.md) for commands you can copy.
 | [`CHANGELOG.md`](CHANGELOG.md) | What each release changed, and the limits it recorded |
 | [`docs/SCHEDULES.md`](docs/SCHEDULES.md) | Define cron schedules in code, trigger them over HTTP, and understand their delivery limits |
 | [`docs/RELEASE.md`](docs/RELEASE.md) | The release checklist, and what each tag confirmed |
-| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Boundary rule, workspace setup, commands |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Boundary rule, work-directory setup, commands |
 | [`AGENTS.md`](AGENTS.md) | The same rules, for a coding agent |
 | [`SECURITY.md`](SECURITY.md) | Disclosure, and what BONNIE does not protect you from |
 

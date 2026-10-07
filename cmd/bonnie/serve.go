@@ -56,7 +56,7 @@ you work on it, ` + "`bonnie build`" + ` for the binary it graduates into. A tre
 configuration is Go in its own main.go, so serve cannot read it.
 
 Every tool call runs in a sandbox. The default is landlock, which confines
-tool calls to the run's own workspace using the Linux Landlock LSM and needs
+tool calls to the run's own working files using the Linux Landlock LSM and needs
 nothing installed. It confines the filesystem and the environment, not the
 network: use --sandbox docker or microsandbox for a server reachable from
 outside, and --sandbox-deny-network to cut egress.`,
@@ -96,7 +96,7 @@ func runServe(o serveOpts) error {
 // separate from runServe so tests can read the resolution without serving.
 //
 // serve has no tree, so it takes neither an instructions file, nor a skills
-// directory, nor a workspace: the process's own directory stays the root,
+// directory, nor a sandbox: the process's own directory stays the root,
 // which is the historical behaviour of `bonnie serve`.
 func serveOptions(ctx context.Context, o serveOpts) ([]bonnie.Option, error) {
 	opts := []bonnie.Option{
@@ -106,7 +106,7 @@ func serveOptions(ctx context.Context, o serveOpts) ([]bonnie.Option, error) {
 		bonnie.WithSystemPrompt(o.prompt),
 		bonnie.WithInstructions(""),
 		bonnie.WithSkills(""),
-		bonnie.WithWorkspace(""),
+		bonnie.WithContextFiles(""),
 		bonnie.WithShutdownTimeout(o.shutdown),
 	}
 
@@ -161,7 +161,7 @@ func sandboxProvider(ctx context.Context, kind, image string) (sandbox.Provider,
 		// getting a silent change of behaviour.
 		return nil, fmt.Errorf("--sandbox none is gone: every tool call runs in a sandbox now; " +
 			"the default, --sandbox landlock, needs nothing installed and confines tool " +
-			"calls to the run's workspace; if you really want tool calls to run as this " +
+			"calls to the run's sandbox; if you really want tool calls to run as this " +
 			"process with its files, network, and credentials, that is --sandbox local, " +
 			"which provides NO isolation")
 

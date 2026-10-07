@@ -13,7 +13,7 @@ import (
 
 // gitkeep is the empty-directory marker the scaffold writes. Version
 // control tracks files, not directories, and the scaffolded skills/ and
-// workspace/ start empty. The seeder skips it: it is bookkeeping, not seed
+// context/ start empty. The seeder skips it: it is bookkeeping, not seed
 // content.
 const gitkeep = ".gitkeep"
 
@@ -51,7 +51,7 @@ type scaffoldFile struct {
 // nothing. Refusing is what makes `bonnie init .` safe to run twice.
 //
 // Every tree is a Go module, and there is no manifest: the tree's data lives
-// at the default paths ([bonnie.DefaultInstructions], [bonnie.DefaultWorkspace],
+// at the default paths ([bonnie.DefaultInstructions], [bonnie.DefaultContextFiles],
 // [bonnie.DefaultSkills]) and everything else is code in main.go. main.go is
 // authored and BONNIE never rewrites it; bonnie_gen.go is the wiring BONNIE
 // owns and regenerates. `go build ./...` passes on the fresh scaffold.
@@ -69,7 +69,7 @@ func Scaffold(dir string, opts InitOptions) ([]string, error) {
 		{path: "main.go", content: mainTemplate(opts.Model), mode: 0o644},
 		{path: "bonnie_gen.go", content: genTemplate(), mode: 0o644},
 		{path: filepath.Join(bonnie.DefaultSkills, gitkeep), content: "", mode: 0o644},
-		{path: filepath.Join(bonnie.DefaultWorkspace, gitkeep), content: "", mode: 0o644},
+		{path: filepath.Join(bonnie.DefaultContextFiles, gitkeep), content: "", mode: 0o644},
 	}
 	if opts.Tools {
 		files = append(files,
@@ -203,7 +203,7 @@ func pinVersion(v string) string {
 
 // mainTemplate renders the user's own serving binary. It is authored —
 // BONNIE never rewrites it — and it is one call, because every slot in the
-// tree already has a default: instructions.md is the prompt, workspace/ is
+// tree already has a default: instructions.md is the prompt, context/ is
 // the agent's root for files, .bonnie is the journal, and tools/ is wired by
 // codegen into bonnie_gen.go.
 //
@@ -218,7 +218,7 @@ func mainTemplate(model string) string {
 	return fmt.Sprintf(`// Command serves the agent defined by this tree.
 //
 // This file is yours; BONNIE never rewrites it. The tree's data lives at its
-// default paths — instructions.md is the system prompt, workspace/ is the
+// default paths — instructions.md is the system prompt, context/ is the
 // agent's root for files — and the tools under tools/ are wired by codegen
 // into bonnie_gen.go. Everything else is an option below.
 package main
@@ -232,7 +232,7 @@ func main() {
 %s
 
 		// Every tool call runs in a sandbox. The default is landlock, which
-		// confines tool calls to the run's own workspace and needs nothing
+		// confines tool calls to the run's working files and needs nothing
 		// installed — it confines the filesystem and the environment, not the
 		// network. Uncomment for stronger isolation, or to cut egress.
 		//
@@ -254,7 +254,7 @@ func main() {
 // genTemplate renders the disposable generated-wiring stub. The generator
 // rewrites exactly this file from the tree on the next build or dev run,
 // replacing it with the real tool set and the embedded instructions, skills,
-// and workspace a `bonnie build` ships in the binary. The stub registers an
+// and context files a `bonnie build` ships in the binary. The stub registers an
 // empty tree so the fresh scaffold compiles and runs before codegen has been
 // anywhere near it.
 func genTemplate() string {
@@ -277,7 +277,7 @@ var _instructions string
 
 var _skills embed.FS
 
-var _workspace embed.FS
+var _contextFiles embed.FS
 
 // init hands the tree's discovered code and embedded data to the runtime
 // before main runs. The scaffold's stub registers nothing; bonnie build and
@@ -286,7 +286,7 @@ func init() {
 	bonnie.Register(bonnie.Tree{
 		Instructions: _instructions,
 		Skills:       _skills,
-		Workspace:    _workspace,
+		ContextFiles:    _contextFiles,
 		Tools:        []kit.Tool{},
 	})
 }

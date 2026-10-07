@@ -9,7 +9,7 @@ import (
 )
 
 // newSeedDir writes a seed tree and returns its path. .gitkeep is included
-// because the scaffold writes it, and it must never reach a workspace.
+// because the scaffold writes it, and it must never reach a work directory.
 func newSeedDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -172,7 +172,7 @@ func TestSeededForwardsOptionalInterfaces(t *testing.T) {
 			t.Fatalf("SandboxExists: %v", err)
 		}
 		if !exists {
-			t.Fatal("a local workspace exists once opened, but the check said no")
+			t.Fatal("a local work directory exists once opened, but the check said no")
 		}
 	})
 
@@ -192,12 +192,12 @@ func TestSeededForwardsOptionalInterfaces(t *testing.T) {
 			t.Fatalf("DeleteRun = %v, %v", deleted, err)
 		}
 		if _, err := os.Stat(filepath.Join(root, safeName("", "run-seed-del"))); !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("the workspace survived the delete: %v", err)
+			t.Fatalf("the work directory survived the delete: %v", err)
 		}
 	})
 }
 
-// An empty seed directory is a no-op, and the scaffold's fresh workspace is
+// An empty seed directory is a no-op, and the scaffold's fresh work directory is
 // exactly that.
 func TestSeededEmptyDirectoryIsANoOp(t *testing.T) {
 	t.Parallel()
@@ -228,7 +228,7 @@ func TestSeededEmptyDirectoryIsANoOp(t *testing.T) {
 // agent and the only provider that can report a host working directory. The
 // wrapper did not forward WorkingDir, the prompt fell back to /workspace —
 // a directory that does not exist under a host-mapped backend — and a live
-// model reported the disagreement: "my workspace is not actually /workspace".
+// model reported the disagreement: "my work directory is not actually /workspace".
 //
 // The unit guard passed throughout, because it tested the provider rather
 // than the provider as it is actually assembled.
@@ -254,12 +254,12 @@ func TestSeededForwardsTheWorkingDirectory(t *testing.T) {
 	}
 }
 
-// TestSeededOverAGuestBackendStillReportsWorkspace: a wrapper that forwards
-// must not invent a path for a backend that really does run at Workspace.
-func TestSeededOverAGuestBackendStillReportsWorkspace(t *testing.T) {
+// TestSeededOverAGuestBackendStillReportsWorkDir: a wrapper that forwards
+// must not invent a path for a backend that really does run at WorkDir.
+func TestSeededOverAGuestBackendStillReportsWorkDir(t *testing.T) {
 	t.Parallel()
 	wrapped := Seeded(&stubProvider{}, t.TempDir())
-	if got := promptWorkingDir(wrapped, "run-abc"); got != Workspace {
-		t.Fatalf("prompt working directory = %q, want %q", got, Workspace)
+	if got := promptWorkingDir(wrapped, "run-abc"); got != WorkDir {
+		t.Fatalf("prompt working directory = %q, want %q", got, WorkDir)
 	}
 }

@@ -33,8 +33,8 @@ that is one call. The freshly scaffolded tree builds and serves out of the box.
   bonnie build               compile it into one static binary
 
 There is no manifest. The tree's data lives at its default paths —
-instructions.md is the system prompt, workspace/ is the agent's root for
-files — and everything else is an option in main.go, so a setting that does
+instructions.md is the system prompt, context/ supplies files copied into each
+new run — and everything else is an option in main.go, so a setting that does
 not exist is a compile error rather than a key nothing reads.
 
 --tools adds a sample Go tool (tools/echo) so there is something wired by

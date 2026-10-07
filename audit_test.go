@@ -26,7 +26,7 @@ func TestCustomFactorySkipsInstructions(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	err := New(WithAgentFactory(stubFactory), WithInstructions(filepath.Join(root, "missing")),
-		WithSkills(filepath.Join(root, "missing-skills")), WithWorkspace(""), WithJournal(root), WithAddr("127.0.0.1:0")).Run(ctx)
+		WithSkills(filepath.Join(root, "missing-skills")), WithContextFiles(""), WithJournal(root), WithAddr("127.0.0.1:0")).Run(ctx)
 	if err != nil {
 		t.Fatalf("Run with custom factory: %v", err)
 	}

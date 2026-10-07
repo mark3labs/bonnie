@@ -144,7 +144,7 @@ func TestExamplesMainUsesTheTree(t *testing.T) {
 		"bonnie.WithSystemPrompt(", // the prompt is instructions.md
 		"bonnie.WithInstructions(", // ... at its default path
 		"bonnie.WithSkills(",       // skills/ is the skill set
-		"bonnie.WithWorkspace(",    // workspace/ is the agent's root
+		"bonnie.WithContextFiles(", // context/ is the agent's root
 		"bonnie.Register(",         // bonnie_gen.go owns registration
 	}
 	for _, name := range trees(t) {

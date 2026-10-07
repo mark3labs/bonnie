@@ -97,7 +97,7 @@ func TestEnvInjectedEmptyIsPassthrough(t *testing.T) {
 
 // TestEnvInjectedForwardsSandboxDeleter: the wrapped sandbox must still satisfy
 // a Deleter type assertion, or a reconciler and the conformance cleanup would
-// silently stop reclaiming workspaces.
+// silently stop reclaiming work directories.
 func TestEnvInjectedForwardsSandboxDeleter(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -116,7 +116,7 @@ func TestEnvInjectedForwardsSandboxDeleter(t *testing.T) {
 		t.Fatalf("Delete: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(root, safeName("", "env-deleter"))); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("the workspace survived the delete: %v", err)
+		t.Fatalf("the work directory survived the delete: %v", err)
 	}
 }
 
@@ -199,11 +199,11 @@ func TestEnvInjectedForwardsOptionalInterfaces(t *testing.T) {
 		}
 	})
 
-	t.Run("WorkingDir over a guest backend reports Workspace", func(t *testing.T) {
+	t.Run("WorkingDir over a guest backend reports WorkDir", func(t *testing.T) {
 		t.Parallel()
 		wrapped := EnvInjected(&stubProvider{}, env)
-		if got := promptWorkingDir(wrapped, "run-abc"); got != Workspace {
-			t.Fatalf("prompt working directory = %q, want %q", got, Workspace)
+		if got := promptWorkingDir(wrapped, "run-abc"); got != WorkDir {
+			t.Fatalf("prompt working directory = %q, want %q", got, WorkDir)
 		}
 	})
 }

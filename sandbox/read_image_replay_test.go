@@ -18,7 +18,7 @@ import (
 )
 
 // TestReadImageReachesModelAfterReplay runs the sandbox read_file tool through
-// a real Kit. A second Runner has a new model, provider, and workspace. Only
+// a real Kit. A second Runner has a new model, provider, and work directory. Only
 // the reopened SQLite journal carries the image into its model request.
 // Text-only tool output or replay must fail this test; the source file is
 // removed before the second turn, so reading it again cannot hide data loss.
@@ -27,7 +27,7 @@ func TestReadImageReachesModelAfterReplay(t *testing.T) {
 	ctx := context.Background()
 	const runID = "read-image-replay"
 
-	// Make a valid PNG and put it in the first sandbox's workspace.
+	// Make a valid PNG and put it in the first sandbox's work directory.
 	img := image.NewNRGBA(image.Rect(0, 0, 2, 2))
 	img.SetNRGBA(0, 0, color.NRGBA{R: 255, A: 255})
 	var encoded bytes.Buffer
@@ -38,7 +38,7 @@ func TestReadImageReachesModelAfterReplay(t *testing.T) {
 	providerA := Local(WithLocalRoot(t.TempDir()))
 	path := filepath.Join(providerA.WorkingDir(runID), "chart.png")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatalf("create workspace: %v", err)
+		t.Fatalf("create work directory: %v", err)
 	}
 	if err := os.WriteFile(path, encoded.Bytes(), 0o644); err != nil {
 		t.Fatalf("write image: %v", err)

@@ -60,8 +60,8 @@ func lazyOpener(p Provider, s *runtime.Session) (Opener, func() error) {
 			sb = opened
 		}
 
-		// The record of the workspace's existence. Without it a resumed
-		// run cannot tell a live workspace from a pruned one, and nothing
+		// The record of the work directory's existence. Without it a resumed
+		// run cannot tell a live work directory from a pruned one, and nothing
 		// can find the sandboxes of finished runs to reclaim them.
 		//
 		// The record is retried on every call until the journal takes it,
@@ -209,7 +209,7 @@ func listFilesTool(open Opener) kit.Tool {
 				return unavailable(err), nil
 			}
 			// Backends map Dir into their command namespace. They do not map
-			// argv paths: /workspace in argv is not a host workspace path.
+			// argv paths: /workspace in argv is not a host work directory path.
 			// Keep the path out of shell text and list the mapped directory.
 			res, err := sb.Exec(ctx, Command{
 				Args: []string{"ls", "-la", "--", "."},

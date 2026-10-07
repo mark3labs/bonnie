@@ -17,10 +17,10 @@ func cleanupCheckpoint(t *testing.T, j Journal, id string, state RunState, at ti
 	}
 }
 
-func TestWorkspaceCleanupRejectsNegativeRetention(t *testing.T) {
+func TestSandboxCleanupRejectsNegativeRetention(t *testing.T) {
 	t.Parallel()
 	r := NewRunner(NewMemoryJournal(), nil)
-	if err := r.CleanupWorkspaces(context.Background(), WorkspaceCleanupPolicy{CompletedAfter: -time.Second}, func(context.Context, string) (bool, error) {
+	if err := r.CleanupSandboxes(context.Background(), SandboxCleanupPolicy{CompletedAfter: -time.Second}, func(context.Context, string) (bool, error) {
 		t.Fatal("invalid policy reached deletion")
 		return false, nil
 	}); err == nil {
@@ -28,7 +28,7 @@ func TestWorkspaceCleanupRejectsNegativeRetention(t *testing.T) {
 	}
 }
 
-func TestWorkspaceCleanupRetention(t *testing.T) {
+func TestSandboxCleanupRetention(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	for _, state := range []RunState{RunCompleted, RunFailed, RunCancelled, RunRetired} {
@@ -56,12 +56,12 @@ func TestWorkspaceCleanupRetention(t *testing.T) {
 				calls = append(calls, id)
 				return false, nil // An absent workspace is also a success.
 			}
-			if err := r.CleanupWorkspaces(ctx, WorkspaceCleanupPolicy{}, delete); err != nil || len(calls) != 0 {
+			if err := r.CleanupSandboxes(ctx, SandboxCleanupPolicy{}, delete); err != nil || len(calls) != 0 {
 				t.Fatalf("zero policy: calls=%v err=%v", calls, err)
 			}
-			policy := WorkspaceCleanupPolicy{time.Hour, time.Hour, time.Hour, time.Hour}
+			policy := SandboxCleanupPolicy{time.Hour, time.Hour, time.Hour, time.Hour}
 			for range 2 {
-				if err := r.CleanupWorkspaces(ctx, policy, delete); err != nil {
+				if err := r.CleanupSandboxes(ctx, policy, delete); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -74,7 +74,7 @@ func TestWorkspaceCleanupRetention(t *testing.T) {
 
 // A fresh process must see the receipt without changing the replayed messages.
 // A later turn creates a new terminal checkpoint and permits cleanup again.
-func TestWorkspaceCleanupSQLiteRestart(t *testing.T) {
+func TestSandboxCleanupSQLiteRestart(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -94,8 +94,8 @@ func TestWorkspaceCleanupSQLiteRestart(t *testing.T) {
 	cleanupCheckpoint(t, j, "run", RunCompleted, now().Add(-time.Hour))
 	calls := 0
 	delete := func(context.Context, string) (bool, error) { calls++; return true, nil }
-	policy := WorkspaceCleanupPolicy{CompletedAfter: time.Minute}
-	if err := r.CleanupWorkspaces(ctx, policy, delete); err != nil {
+	policy := SandboxCleanupPolicy{CompletedAfter: time.Minute}
+	if err := r.CleanupSandboxes(ctx, policy, delete); err != nil {
 		t.Fatal(err)
 	}
 	if err := j.Close(); err != nil {
@@ -112,7 +112,7 @@ func TestWorkspaceCleanupSQLiteRestart(t *testing.T) {
 	})
 	f, _ = fakeFactory()
 	r = NewRunner(j, f)
-	if err := r.CleanupWorkspaces(ctx, policy, delete); err != nil || calls != 1 {
+	if err := r.CleanupSandboxes(ctx, policy, delete); err != nil || calls != 1 {
 		t.Fatalf("restart: calls=%d err=%v", calls, err)
 	}
 	after, err := Restore(ctx, "run", j)
@@ -130,12 +130,12 @@ func TestWorkspaceCleanupSQLiteRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	cleanupCheckpoint(t, j, "run", RunCompleted, now().Add(-time.Hour))
-	if err := r.CleanupWorkspaces(ctx, policy, delete); err != nil || calls != 2 {
+	if err := r.CleanupSandboxes(ctx, policy, delete); err != nil || calls != 2 {
 		t.Fatalf("new terminal checkpoint: calls=%d err=%v", calls, err)
 	}
 }
 
-func TestWorkspaceCleanupExcludesActiveTurns(t *testing.T) {
+func TestSandboxCleanupExcludesActiveTurns(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	j := NewMemoryJournal()
@@ -152,7 +152,7 @@ func TestWorkspaceCleanupExcludesActiveTurns(t *testing.T) {
 	<-started
 	// Even a stale terminal checkpoint must not permit cleanup of an active run.
 	cleanupCheckpoint(t, j, "run", RunCompleted, now().Add(-time.Hour))
-	policy := WorkspaceCleanupPolicy{CompletedAfter: time.Minute}
+	policy := SandboxCleanupPolicy{CompletedAfter: time.Minute}
 	calls := 0
 	delete := func(ctx context.Context, id string) (bool, error) {
 		calls++
@@ -161,7 +161,7 @@ func TestWorkspaceCleanupExcludesActiveTurns(t *testing.T) {
 		}
 		return true, nil
 	}
-	err := r.CleanupWorkspaces(ctx, policy, delete)
+	err := r.CleanupSandboxes(ctx, policy, delete)
 	close(ag.block)
 	if turnErr := <-done; turnErr != nil {
 		t.Fatal(turnErr)
@@ -170,12 +170,12 @@ func TestWorkspaceCleanupExcludesActiveTurns(t *testing.T) {
 		t.Fatalf("active cleanup: calls=%d err=%v", calls, err)
 	}
 	cleanupCheckpoint(t, j, "run", RunCompleted, now().Add(-time.Hour))
-	if err := r.CleanupWorkspaces(ctx, policy, delete); err != nil || calls != 1 || r.IsActive("run") {
+	if err := r.CleanupSandboxes(ctx, policy, delete); err != nil || calls != 1 || r.IsActive("run") {
 		t.Fatalf("cleanup lock: calls=%d err=%v", calls, err)
 	}
 }
 
-func TestWorkspaceCleanupRetriesAndJoinsErrors(t *testing.T) {
+func TestSandboxCleanupRetriesAndJoinsErrors(t *testing.T) {
 	t.Parallel()
 	j := NewMemoryJournal()
 	for _, id := range []string{"a", "b", "c"} {
@@ -196,12 +196,12 @@ func TestWorkspaceCleanupRetriesAndJoinsErrors(t *testing.T) {
 		}
 		return true, nil
 	}
-	policy := WorkspaceCleanupPolicy{FailedAfter: time.Minute}
-	err := r.CleanupWorkspaces(context.Background(), policy, delete)
+	policy := SandboxCleanupPolicy{FailedAfter: time.Minute}
+	err := r.CleanupSandboxes(context.Background(), policy, delete)
 	if !errors.Is(err, first) || !errors.Is(err, second) || calls["c"] != 1 {
 		t.Fatalf("errors=%v calls=%v", err, calls)
 	}
-	if err := r.CleanupWorkspaces(context.Background(), policy, delete); err != nil {
+	if err := r.CleanupSandboxes(context.Background(), policy, delete); err != nil {
 		t.Fatal(err)
 	}
 	if calls["a"] != 2 || calls["b"] != 2 || calls["c"] != 1 {

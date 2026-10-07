@@ -209,7 +209,7 @@ func allowedImport(imp, module string) bool {
 
 // Authored files are never rewritten: generating and writing bonnie_gen.go
 // touches only that file, leaving instructions.md, tools/, skills/, and
-// workspace/ untouched.
+// context/ untouched.
 func TestGeneratorRewritesOnlyGeneratedFile(t *testing.T) {
 	t.Parallel()
 	root := scaffoldTools(t)
@@ -268,13 +268,13 @@ func TestPlanStringNamesDiscovery(t *testing.T) {
 	}
 }
 
-// The workspace and skills slots bind to their canonical variables when they
+// The context files and skills slots bind to their canonical variables when they
 // hold real files, and a tree ships no manifest for codegen to embed: the
 // tree's data is at the default paths, and there is nowhere else to look.
 func TestCodegenEmbedsTheDefaultLayout(t *testing.T) {
 	t.Parallel()
 	root := scaffoldTools(t)
-	if err := os.WriteFile(filepath.Join(root, "workspace", "a.txt"), []byte("seed\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "context", "a.txt"), []byte("seed\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "skills", "review.md"), []byte("# review\n"), 0o644); err != nil {
@@ -289,8 +289,8 @@ func TestCodegenEmbedsTheDefaultLayout(t *testing.T) {
 	for _, want := range []string{
 		"//go:embed instructions.md",
 		"//go:embed skills",
-		"//go:embed workspace",
-		"var _workspace embed.FS",
+		"//go:embed context",
+		"var _contextFiles embed.FS",
 		"bonnie.Register(bonnie.Tree{",
 	} {
 		if !strings.Contains(text, want) {
@@ -316,11 +316,11 @@ func TestCodegenSkipsEmptySlots(t *testing.T) {
 		t.Fatalf("Generate: %v", err)
 	}
 	text := string(out)
-	if strings.Contains(text, "//go:embed skills") || strings.Contains(text, "//go:embed workspace") {
+	if strings.Contains(text, "//go:embed skills") || strings.Contains(text, "//go:embed context") {
 		t.Fatalf("an empty slot emitted an embed directive:\n%s", text)
 	}
 	// The slots are still declared, so the accessors always compile.
-	for _, want := range []string{"var _skills embed.FS", "var _workspace embed.FS"} {
+	for _, want := range []string{"var _skills embed.FS", "var _contextFiles embed.FS"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("the generated file does not declare %q:\n%s", want, text)
 		}
@@ -337,7 +337,7 @@ func TestGeneratedFileCompiles(t *testing.T) {
 		t.Fatalf("Scaffold: %v", err)
 	}
 	writeTool(t, root, "charge_card", "charge_card")
-	if err := os.WriteFile(filepath.Join(root, "workspace", "seed.txt"), []byte("seed\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "context", "seed.txt"), []byte("seed\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 

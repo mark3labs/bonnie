@@ -41,7 +41,7 @@ func serveForTest(t *testing.T, opts ...Option) (string, string) {
 			WithAgentFactory(stubFactory),
 			WithJournal(journalDir),
 			WithInstructions(""),
-			WithWorkspace(""),
+			WithContextFiles(""),
 			WithListener(ln),
 			Quiet(),
 		}, opts...)...).Run(ctx)
@@ -82,7 +82,7 @@ func TestReservedNamespaceIsRefused(t *testing.T) {
 		WithAgentFactory(stubFactory),
 		WithJournal(t.TempDir()),
 		WithInstructions(""),
-		WithWorkspace(""),
+		WithContextFiles(""),
 		WithListener(ln),
 		Quiet(),
 		WithChannel(func(*runtime.Runner) (Channel, error) { return squatter{path: "/bonnie/x"}, nil }),

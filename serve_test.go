@@ -66,13 +66,13 @@ func TestServeCommandHelp(t *testing.T) {
 }
 
 // The command must call Run with its context. A custom factory requires no
-// instructions or workspace, and cancellation must stop the HTTP server.
+// instructions or contextFiles, and cancellation must stop the HTTP server.
 func TestServeCommandRun(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	journal := filepath.Join(root, "journal")
 	a := New(WithAgentFactory(stubFactory), WithInstructions(filepath.Join(root, "missing.md")),
-		WithWorkspace(""), WithJournal(journal), WithAddr("invalid-address"), Quiet())
+		WithContextFiles(""), WithJournal(journal), WithAddr("invalid-address"), Quiet())
 	fs := flag.NewFlagSet(t.Name(), flag.ContinueOnError)
 	cmd := a.serveCommand(fs)
 	cmd.SetArgs([]string{"--addr", "127.0.0.1:0"})
@@ -105,7 +105,7 @@ func TestServeCommandOverrides(t *testing.T) {
 			t.Parallel()
 			root := t.TempDir()
 			opts := []Option{WithAgentFactory(stubFactory), WithInstructions(filepath.Join(root, "missing.md")),
-				WithWorkspace(""), WithJournal(root), WithAddr("option-address"), Quiet()}
+				WithContextFiles(""), WithJournal(root), WithAddr("option-address"), Quiet()}
 			if tc.name == "empty" {
 				opts = append(opts, WithModel("option/model"))
 			}

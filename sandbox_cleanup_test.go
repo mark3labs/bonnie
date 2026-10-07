@@ -14,13 +14,13 @@ import (
 
 func TestRunWorkspaceCleanupValidation(t *testing.T) {
 	t.Parallel()
-	policy := WithRunWorkspaceCleanup(WorkspaceCleanupPolicy{CompletedAfter: time.Hour})
+	policy := WithRunSandboxCleanup(SandboxCleanupPolicy{CompletedAfter: time.Hour})
 	for name, opts := range map[string][]Option{
-		"persistent":          {policy, WithPersistentWorkspace(t.TempDir())},
-		"persistent-reversed": {WithPersistentWorkspace(t.TempDir()), policy},
+		"persistent":          {policy, WithSharedDirectory(t.TempDir())},
+		"persistent-reversed": {WithSharedDirectory(t.TempDir()), policy},
 		"factory":             {policy, WithAgentFactory(stubFactory)},
-		"shared":              {policy, WithSandbox(sandbox.Local(sandbox.WithLocalSharedWorkspace()))},
-		"negative":            {WithRunWorkspaceCleanup(WorkspaceCleanupPolicy{CompletedAfter: -time.Second})},
+		"shared":              {policy, WithSandbox(sandbox.Local(sandbox.WithLocalSharedDirectory()))},
+		"negative":            {WithRunSandboxCleanup(SandboxCleanupPolicy{CompletedAfter: -time.Second})},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -45,8 +45,8 @@ func TestRunWorkspaceCleanupLoop(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	provider := sandbox.Local(sandbox.WithLocalRoot(root))
-	cfg := resolve(WithSandbox(provider), WithRunWorkspaceCleanup(WorkspaceCleanupPolicy{CompletedAfter: time.Nanosecond}))
-	if err := cfg.configureWorkspaceCleanup(provider); err != nil {
+	cfg := resolve(WithSandbox(provider), WithRunSandboxCleanup(SandboxCleanupPolicy{CompletedAfter: time.Nanosecond}))
+	if err := cfg.configureSandboxCleanup(provider); err != nil {
 		t.Fatal(err)
 	}
 	sb, err := provider.Open(ctx, "task")
@@ -74,7 +74,7 @@ func TestRunWorkspaceCleanupLoop(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(recs) > 1 && recs[len(recs)-1].Kind == runtime.RecordWorkspaceDeleted {
+		if len(recs) > 1 && recs[len(recs)-1].Kind == runtime.RecordSandboxDeleted {
 			break
 		}
 		select {
@@ -85,7 +85,7 @@ func TestRunWorkspaceCleanupLoop(t *testing.T) {
 	}
 	exists, err := provider.SandboxExists(ctx, "task")
 	if err != nil || exists {
-		t.Fatalf("workspace exists=%v err=%v", exists, err)
+		t.Fatalf("contextFiles exists=%v err=%v", exists, err)
 	}
 	if _, err := os.Stat(filepath.Clean(root)); err != nil {
 		t.Fatal(err)
@@ -94,8 +94,8 @@ func TestRunWorkspaceCleanupLoop(t *testing.T) {
 
 func TestCleanupUnsupportedProvider(t *testing.T) {
 	t.Parallel()
-	cfg := resolve(WithRunWorkspaceCleanup(WorkspaceCleanupPolicy{}))
-	if err := cfg.configureWorkspaceCleanup(sandbox.Seeded(cleanupNoDeleteProvider{}, t.TempDir())); err == nil || !strings.Contains(err.Error(), "cleanup") {
+	cfg := resolve(WithRunSandboxCleanup(SandboxCleanupPolicy{}))
+	if err := cfg.configureSandboxCleanup(sandbox.Seeded(cleanupNoDeleteProvider{}, t.TempDir())); err == nil || !strings.Contains(err.Error(), "cleanup") {
 		t.Fatalf("error = %v", err)
 	}
 }

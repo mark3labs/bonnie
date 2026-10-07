@@ -76,7 +76,7 @@ func (r *Runner) Retire(ctx context.Context, runID, reason string) error {
 }
 
 // Clear drops the run's conversation from the model's context while
-// keeping the run ID, its address, its workspace, and its journal. The
+// keeping the run ID, its address, its working files, and its journal. The
 // next turn starts from an empty window. It refuses while a turn is
 // active with [ErrRunActive], and refuses a retired run.
 func (r *Runner) Clear(ctx context.Context, runID string) error {

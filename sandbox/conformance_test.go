@@ -21,8 +21,8 @@ type backend struct {
 	// open returns a provider, or skips the test when the backend cannot
 	// run on this machine.
 	open func(t *testing.T) Provider
-	// guestFS is true for a backend whose workspace really is [Workspace]
-	// inside a guest filesystem. A backend that maps the workspace onto a
+	// guestFS is true for a backend whose work directory really is [WorkDir]
+	// inside a guest filesystem. A backend that maps the work directory onto a
 	// host directory — local, landlock — reports the host path as its cwd,
 	// so the cases that assert on the path itself skip for those.
 	//
@@ -243,12 +243,12 @@ func TestEveryCallExecutes(t *testing.T) {
 		// Append to a file and read it back. A cached second call would
 		// report one line; a real one reports two.
 		//
-		// The ledger is workspace-relative on purpose. It used to be
+		// The ledger is work directory-relative on purpose. It used to be
 		// /tmp/ledger, which assumed every backend has a writable /tmp — true
 		// inside a guest, and true for the local backend only because it
 		// writes to the HOST's /tmp. A backend that confines the filesystem
 		// refuses that path, correctly, and the case would fail for doing its
-		// job. The workspace is the one location every backend promises.
+		// job. The work directory is the one location every backend promises.
 		const script = "echo tick >> ledger && wc -l < ledger"
 		first, err := sb.Exec(ctx, Shell(script))
 		if err != nil {
@@ -286,7 +286,7 @@ func TestFileRoundTrip(t *testing.T) {
 		}
 
 		// A relative path and its absolute form must name one file.
-		abs, err := sb.ReadFile(ctx, Workspace+"/notes/todo.txt")
+		abs, err := sb.ReadFile(ctx, WorkDir+"/notes/todo.txt")
 		if err != nil {
 			t.Fatalf("ReadFile(absolute): %v", err)
 		}
@@ -333,12 +333,12 @@ func TestReadMissingFile(t *testing.T) {
 	})
 }
 
-// TestWorkspaceIsTheWorkingDirectory pins the one namespace that lets a
+// TestWorkDirIsTheWorkingDirectory pins the one namespace that lets a
 // conversation move between backends and still find its files.
-func TestWorkspaceIsTheWorkingDirectory(t *testing.T) {
+func TestWorkDirIsTheWorkingDirectory(t *testing.T) {
 	t.Parallel()
 	eachBackend(t, func(t *testing.T, b backend, p Provider) {
-		sb := openSandbox(t, p, "workspace-cwd")
+		sb := openSandbox(t, p, "workdir-cwd")
 		ctx := testCtx(t)
 
 		if err := sb.WriteFile(ctx, "here.txt", []byte("x")); err != nil {
@@ -349,19 +349,19 @@ func TestWorkspaceIsTheWorkingDirectory(t *testing.T) {
 			t.Fatalf("Exec: %v", err)
 		}
 		if !res.OK() || !strings.Contains(res.Stdout, "x") {
-			t.Fatalf("a relative path did not resolve from the workspace: %+v", res)
+			t.Fatalf("a relative path did not resolve from the work directory: %+v", res)
 		}
 
-		// A backend with a guest filesystem reports the workspace as its
-		// cwd. The local and landlock backends map the workspace onto a host
+		// A backend with a guest filesystem reports the work directory as its
+		// cwd. The local and landlock backends map the work directory onto a host
 		// directory, so they do not.
 		if b.guestFS {
 			pwd, err := sb.Exec(ctx, Shell("pwd"))
 			if err != nil {
 				t.Fatalf("Exec: %v", err)
 			}
-			if strings.TrimSpace(pwd.Stdout) != Workspace {
-				t.Fatalf("pwd = %q, want %q", strings.TrimSpace(pwd.Stdout), Workspace)
+			if strings.TrimSpace(pwd.Stdout) != WorkDir {
+				t.Fatalf("pwd = %q, want %q", strings.TrimSpace(pwd.Stdout), WorkDir)
 			}
 		}
 	})
@@ -386,20 +386,20 @@ func TestFilesPersistAcrossCommands(t *testing.T) {
 	})
 }
 
-// TestReopenKeepsWorkspace is the durability contract that matters to BONNIE:
+// TestReopenKeepsWorkDir is the durability contract that matters to BONNIE:
 // a run parks, the handle goes away, and the files are still there when it
 // resumes.
-func TestReopenKeepsWorkspace(t *testing.T) {
+func TestReopenKeepsWorkDir(t *testing.T) {
 	t.Parallel()
 	eachBackend(t, func(t *testing.T, _ backend, p Provider) {
 		ctx := testCtx(t)
-		const runID = "reopen-workspace"
+		const runID = "reopen-workdir"
 
 		sb := openSandbox(t, p, runID)
 		if err := sb.WriteFile(ctx, "memo.txt", []byte("from the first turn")); err != nil {
 			t.Fatalf("WriteFile: %v", err)
 		}
-		// Stop releases compute; the workspace must survive it.
+		// Stop releases compute; the work directory must survive it.
 		if err := sb.Stop(ctx); err != nil {
 			t.Fatalf("Stop: %v", err)
 		}
@@ -418,7 +418,7 @@ func TestReopenKeepsWorkspace(t *testing.T) {
 	})
 }
 
-func TestSeparateRunsAreSeparateWorkspaces(t *testing.T) {
+func TestSeparateRunsAreSeparateWorkDirs(t *testing.T) {
 	t.Parallel()
 	eachBackend(t, func(t *testing.T, _ backend, p Provider) {
 		ctx := testCtx(t)
@@ -547,7 +547,7 @@ func TestConcurrentExecIsRaceClean(t *testing.T) {
 	})
 }
 
-func TestOpenTwiceGivesSameWorkspace(t *testing.T) {
+func TestOpenTwiceGivesSameWorkDir(t *testing.T) {
 	t.Parallel()
 	eachBackend(t, func(t *testing.T, _ backend, p Provider) {
 		ctx := testCtx(t)
@@ -567,7 +567,7 @@ func TestOpenTwiceGivesSameWorkspace(t *testing.T) {
 			t.Fatalf("ReadFile: %v", err)
 		}
 		if string(got) != "same place" {
-			t.Fatalf("two Opens gave different workspaces: %q", got)
+			t.Fatalf("two Opens gave different work directories: %q", got)
 		}
 	})
 }

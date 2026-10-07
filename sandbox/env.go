@@ -118,7 +118,7 @@ func (e *envProvider) ValidateRunCleanup() error {
 }
 
 // WorkingDir forwards to the wrapped provider so the system prompt still names
-// the directory the tools really use. A provider that runs at [Workspace]
+// the directory the tools really use. A provider that runs at [WorkDir]
 // reports nothing and the caller's fallback applies. See [Seeded.WorkingDir].
 func (e *envProvider) WorkingDir(runID string) string {
 	r, ok := e.p.(WorkingDirReporter)

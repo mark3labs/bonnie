@@ -21,11 +21,11 @@
 /.task/
 
 # Scratch agent trees. The repository root is a Go library, not an agent tree:
-# a stray instructions.md, skills/, or workspace/ here belongs to someone's
+# a stray instructions.md, skills/, or context/ here belongs to someone's
 # `bonnie init .` and is not part of the project.
 /instructions.md
 /skills/
-/workspace/
+/context/
 /bonnie_gen.go
 
 # Test and coverage output

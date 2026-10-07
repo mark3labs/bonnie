@@ -33,7 +33,7 @@ func TestScheduleHTTPDurabilityAndAuthorization(t *testing.T) {
 			t.Fatal(err)
 		}
 		port := ln.Addr().String()
-		a := New(WithAgentFactory(agent.Factory()), WithJournal(journal), WithWorkspace(""), WithListener(ln), WithSchedule(def), WithScheduleClock(false),
+		a := New(WithAgentFactory(agent.Factory()), WithJournal(journal), WithContextFiles(""), WithListener(ln), WithSchedule(def), WithScheduleClock(false),
 			WithScheduleTriggerAuthorizer(func(r *http.Request) error {
 				if r.Header.Get("Authorization") != "Bearer secret" {
 					return fmt.Errorf("unauthorized")
@@ -190,7 +190,7 @@ func TestScheduleStartupLock(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		a := New(WithAgentFactory(channeltest.NewScriptAgent().Factory()), WithJournal(journal), WithWorkspace(""), WithListener(ln), WithSchedule(def), WithScheduleClock(false), Quiet())
+		a := New(WithAgentFactory(channeltest.NewScriptAgent().Factory()), WithJournal(journal), WithContextFiles(""), WithListener(ln), WithSchedule(def), WithScheduleClock(false), Quiet())
 		ch := make(chan error, 1)
 		go func() { ch <- a.Run(ctx) }()
 		return ch
@@ -246,7 +246,7 @@ func TestScheduleSlackDeliveryUsesThread(t *testing.T) {
 		t.Fatal(err)
 	}
 	def := schedule.Definition{Name: "slack-job", Cron: "0 9 * * *", TimeZone: "UTC", Prompt: "scheduled prompt", Destination: schedule.Destination{Channel: "slack", Target: "C123"}}
-	a := New(WithAgentFactory(channeltest.NewScriptAgent().Factory()), WithJournal(filepath.Join(t.TempDir(), "journal")), WithWorkspace(""), WithListener(ln), WithSchedule(def), WithScheduleClock(false), WithScheduleTriggerAuthorizer(func(*http.Request) error { return nil }), WithSlack(slack.Config{BotToken: "xoxb-test", SigningSecret: "secret", APIURL: api.URL}), Quiet())
+	a := New(WithAgentFactory(channeltest.NewScriptAgent().Factory()), WithJournal(filepath.Join(t.TempDir(), "journal")), WithContextFiles(""), WithListener(ln), WithSchedule(def), WithScheduleClock(false), WithScheduleTriggerAuthorizer(func(*http.Request) error { return nil }), WithSlack(slack.Config{BotToken: "xoxb-test", SigningSecret: "secret", APIURL: api.URL}), Quiet())
 	done := make(chan error, 1)
 	go func() { done <- a.Run(ctx) }()
 	base := "http://" + ln.Addr().String()

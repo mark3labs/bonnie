@@ -52,14 +52,14 @@ func TestWatchNewInputDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = w.Close() }()
-	if err := watchTree(root, workspaceDir(root), w); err != nil {
+	if err := watchTree(root, contextFilesDir(root), w); err != nil {
 		t.Fatal(err)
 	}
 	dir := filepath.Join(root, "tools", "new")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := watchTree(filepath.Join(root, "tools"), workspaceDir(root), w); err != nil {
+	if err := watchTree(filepath.Join(root, "tools"), contextFilesDir(root), w); err != nil {
 		t.Fatal(err)
 	}
 	file := filepath.Join(dir, "tool.go")
@@ -71,8 +71,8 @@ func TestWatchNewInputDirectory(t *testing.T) {
 		select {
 		case ev := <-w.Events:
 			if ev.Name == file {
-				for _, output := range []string{".bonnie", ".git", "workspace"} {
-					if watched(filepath.Join(root, output, "child"), workspaceDir(root)) {
+				for _, output := range []string{".bonnie", ".git", "context"} {
+					if watched(filepath.Join(root, output, "child"), contextFilesDir(root)) {
 						t.Fatalf("output %s watched", output)
 					}
 				}
@@ -120,7 +120,7 @@ func TestWatchRemovedDirectory(t *testing.T) {
 	}
 	defer func() { _ = w.Close() }()
 	root := t.TempDir()
-	if err := watchTree(filepath.Join(root, "removed"), workspaceDir(root), w); err != nil {
+	if err := watchTree(filepath.Join(root, "removed"), contextFilesDir(root), w); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -138,7 +138,7 @@ func TestWatchSkipsDirenv(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = w.Close() }()
-	if err := watchTree(root, workspaceDir(root), w); err != nil {
+	if err := watchTree(root, contextFilesDir(root), w); err != nil {
 		t.Fatal(err)
 	}
 	for _, path := range w.WatchList() {
@@ -146,7 +146,7 @@ func TestWatchSkipsDirenv(t *testing.T) {
 			t.Fatalf("cache watched: %s", path)
 		}
 	}
-	if watched(filepath.Join(cache, "module.go"), workspaceDir(root)) {
+	if watched(filepath.Join(cache, "module.go"), contextFilesDir(root)) {
 		t.Fatal("cache event selected")
 	}
 }

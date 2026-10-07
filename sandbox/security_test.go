@@ -24,7 +24,7 @@ func TestLandlockDanglingSymlink(t *testing.T) {
 	if err := os.Symlink(outside, filepath.Join(s.dir, "link")); err != nil {
 		t.Fatal(err)
 	}
-	if err := sb.WriteFile(context.Background(), "link", []byte("secret")); !errors.Is(err, ErrOutsideWorkspace) {
+	if err := sb.WriteFile(context.Background(), "link", []byte("secret")); !errors.Is(err, ErrOutsideWorkDir) {
 		t.Fatalf("write: %v", err)
 	}
 	if _, err := os.Stat(outside); !errors.Is(err, os.ErrNotExist) {
@@ -86,7 +86,7 @@ func TestLandlockScratchNamespace(t *testing.T) {
 	a := openSandbox(t, p, "x").(*landlockSandbox)
 	b := openSandbox(t, p, "x.tmp").(*landlockSandbox)
 	if a.tmp == b.dir || strings.HasPrefix(a.tmp, b.dir+string(filepath.Separator)) {
-		t.Fatal("scratch aliases another workspace")
+		t.Fatal("scratch aliases another work directory")
 	}
 	if err := os.WriteFile(filepath.Join(a.tmp, "scratch"), []byte("private"), 0600); err != nil {
 		t.Fatal(err)
@@ -114,7 +114,7 @@ func TestSafeNameGeneratedPlainCollision(t *testing.T) {
 	}
 }
 
-// TestHostLegacyAdoptionRefused prevents an unlabelled old lossy workspace
+// TestHostLegacyAdoptionRefused prevents an unlabelled old lossy work directory
 // from being assigned to the wrong ID. Clean IDs still reopen without change.
 func TestHostLegacyAdoptionRefused(t *testing.T) {
 	t.Parallel()
@@ -162,7 +162,7 @@ func TestLifecycleUncertainExistence(t *testing.T) {
 }
 
 // TestCLIExitStatusRefused covers successful process launch with failed stop,
-// delete, or guest workspace setup. These failures used to be discarded.
+// delete, or guest work directory setup. These failures used to be discarded.
 func TestCLIExitStatusRefused(t *testing.T) {
 	t.Parallel()
 	bin := fakeSecurityCLI(t, "echo refused >&2; exit 9")
@@ -176,7 +176,7 @@ func TestCLIExitStatusRefused(t *testing.T) {
 	if err := p.start(context.Background(), "run"); err == nil {
 		t.Fatal("start refusal ignored")
 	}
-	if err := p.ensureWorkspace(context.Background(), &cliSandbox{name: "run"}); err == nil {
+	if err := p.ensureWorkDir(context.Background(), &cliSandbox{name: "run"}); err == nil {
 		t.Fatal("mkdir refusal ignored")
 	}
 }
@@ -299,7 +299,7 @@ func TestDockerLegacyCheckedAdoption(t *testing.T) {
 			t.Fatal(err)
 		}
 		if sb.(*cliSandbox).name != old {
-			t.Fatal("legacy workspace not adopted")
+			t.Fatal("legacy work directory not adopted")
 		}
 	}
 }
@@ -370,9 +370,9 @@ func TestCLIOperationGate(t *testing.T) {
 	}
 }
 
-// TestLocalWorkspacePrefix maps only the workspace path component, not an
+// TestLocalWorkDirPrefix maps only the work directory path component, not an
 // unrelated absolute path with the same text prefix.
-func TestLocalWorkspacePrefix(t *testing.T) {
+func TestLocalWorkDirPrefix(t *testing.T) {
 	t.Parallel()
 	s := &localSandbox{dir: t.TempDir()}
 	if got := s.host("/workspace-other/file"); got != filepath.FromSlash("/workspace-other/file") {
@@ -380,7 +380,7 @@ func TestLocalWorkspacePrefix(t *testing.T) {
 	}
 }
 
-// TestLandlockRootAlias refuses a workspace link to another run, even if the
+// TestLandlockRootAlias refuses a work directory link to another run, even if the
 // target stays inside the provider root.
 func TestLandlockRootAlias(t *testing.T) {
 	t.Parallel()
@@ -390,13 +390,13 @@ func TestLandlockRootAlias(t *testing.T) {
 	if err := os.Symlink("target", filepath.Join(root, "alias")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := p.Open(context.Background(), "alias"); !errors.Is(err, ErrOutsideWorkspace) {
+	if _, err := p.Open(context.Background(), "alias"); !errors.Is(err, ErrOutsideWorkDir) {
 		t.Fatalf("alias: %v", err)
 	}
 }
 
 // TestLandlockPinnedExec keeps a host rename from granting a replacement
-// workspace to the child. The file tools and the kernel must use one identity.
+// work directory to the child. The file tools and the kernel must use one identity.
 func TestLandlockPinnedExec(t *testing.T) {
 	t.Parallel()
 	p := landlockProvider(t)
@@ -442,7 +442,7 @@ func TestLandlockScratchDeleteEscape(t *testing.T) {
 	if err := os.Symlink(outside, filepath.Join(root, ".scratch")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := p.DeleteRun(context.Background(), "scratch-delete"); !errors.Is(err, ErrOutsideWorkspace) {
+	if _, err := p.DeleteRun(context.Background(), "scratch-delete"); !errors.Is(err, ErrOutsideWorkDir) {
 		t.Fatalf("delete: %v", err)
 	}
 	if _, err := os.Stat(target); err != nil {

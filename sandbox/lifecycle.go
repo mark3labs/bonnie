@@ -9,7 +9,7 @@ import (
 
 // ExistenceChecker is implemented by a [Provider] that can report whether a
 // run's sandbox still exists, without opening one. Opening would create, and
-// the whole point of the question is whether the old workspace is gone.
+// the whole point of the question is whether the old work directory is gone.
 //
 // The sandbox.Agent factory uses it on resume: a run whose recorded sandbox
 // is gone gets a note in its conversation, so the model knows its files
@@ -30,7 +30,7 @@ type RunDeleter interface {
 
 // RunCleanupValidator checks whether a provider's current mode supports
 // per-run cleanup. Call it before cleanup starts, even when no runs exist.
-// Shared workspaces cannot be deleted for one run without affecting others.
+// Shared work directories cannot be deleted for one run without affecting others.
 type RunCleanupValidator interface {
 	ValidateRunCleanup() error
 }
@@ -46,7 +46,7 @@ func (p *LocalProvider) ValidateRunCleanup() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.shared {
-		return fmt.Errorf("bonnie: sandbox: shared workspace does not support per-run cleanup")
+		return fmt.Errorf("bonnie: sandbox: shared work directory does not support per-run cleanup")
 	}
 	return nil
 }
@@ -56,7 +56,7 @@ func (p *LandlockProvider) ValidateRunCleanup() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.shared {
-		return fmt.Errorf("bonnie: sandbox: shared workspace does not support per-run cleanup")
+		return fmt.Errorf("bonnie: sandbox: shared work directory does not support per-run cleanup")
 	}
 	return nil
 }
@@ -125,7 +125,7 @@ func (p *MicrosandboxProvider) DeleteRun(ctx context.Context, runID string) (boo
 	return true, nil
 }
 
-// SandboxExists implements [ExistenceChecker]. A Local workspace is a
+// SandboxExists implements [ExistenceChecker]. A Local work directory is a
 // directory under the provider root.
 func (p *LocalProvider) SandboxExists(_ context.Context, runID string) (bool, error) {
 	if err := refuseUncheckedLegacy(p.root, runID); err != nil {
@@ -139,7 +139,7 @@ func (p *LocalProvider) SandboxExists(_ context.Context, runID string) (bool, er
 	case os.IsNotExist(err):
 		return false, nil
 	default:
-		return false, fmt.Errorf("bonnie: sandbox: stat workspace: %w", err)
+		return false, fmt.Errorf("bonnie: sandbox: stat work directory: %w", err)
 	}
 }
 
@@ -153,10 +153,10 @@ func (p *LocalProvider) DeleteRun(_ context.Context, runID string) (bool, error)
 		if os.IsNotExist(err) {
 			return false, nil
 		}
-		return false, fmt.Errorf("bonnie: sandbox: stat workspace: %w", err)
+		return false, fmt.Errorf("bonnie: sandbox: stat work directory: %w", err)
 	}
 	if err := os.RemoveAll(dir); err != nil {
-		return true, fmt.Errorf("bonnie: sandbox: remove workspace: %w", err)
+		return true, fmt.Errorf("bonnie: sandbox: remove work directory: %w", err)
 	}
 	return true, nil
 }

@@ -38,7 +38,7 @@ func secretOutside(t *testing.T) (dir, file string) {
 // TestLandlockConfinesTheShell is the regression test for the incident in
 // issue #1: a model ran `find` over the tree by absolute path and read
 // main.go, instructions.md, and .bonnie/journal.db. Rooting the tools at the
-// workspace did not stop it, because an absolute path never consults a
+// work directory did not stop it, because an absolute path never consults a
 // working directory.
 //
 // The shell is what has to be contained here, not the file tools. A path
@@ -57,7 +57,7 @@ func TestLandlockConfinesTheShell(t *testing.T) {
 		t.Fatalf("Exec: %v", err)
 	}
 	if res.OK() {
-		t.Fatalf("the shell read a file outside the workspace: %q", res.Stdout)
+		t.Fatalf("the shell read a file outside the work directory: %q", res.Stdout)
 	}
 	if strings.Contains(res.Stdout, "SECRET") {
 		t.Fatalf("secret content reached the model: %q", res.Stdout)
@@ -109,17 +109,17 @@ func TestLandlockRefusesToWriteOutside(t *testing.T) {
 		t.Fatalf("Exec: %v", err)
 	}
 	if res.OK() {
-		t.Fatal("the shell wrote outside the workspace")
+		t.Fatal("the shell wrote outside the work directory")
 	}
 	if _, err := os.Stat(target); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("a file was created outside the workspace: %v", err)
+		t.Fatalf("a file was created outside the work directory: %v", err)
 	}
 }
 
-// TestLandlockAllowsTheWorkspace guards the other direction. A jail that also
+// TestLandlockAllowsTheWorkDir guards the other direction. A jail that also
 // stops the agent doing its job would be abandoned, and an abandoned control
 // protects nothing.
-func TestLandlockAllowsTheWorkspace(t *testing.T) {
+func TestLandlockAllowsTheWorkDir(t *testing.T) {
 	t.Parallel()
 	p := landlockProvider(t)
 
@@ -131,7 +131,7 @@ func TestLandlockAllowsTheWorkspace(t *testing.T) {
 		t.Fatalf("Exec: %v", err)
 	}
 	if !res.OK() {
-		t.Fatalf("the agent cannot work in its own workspace: exit=%d stderr=%q", res.ExitCode, res.Stderr)
+		t.Fatalf("the agent cannot work in its own work directory: exit=%d stderr=%q", res.ExitCode, res.Stderr)
 	}
 	if !strings.Contains(res.Stdout, "written") || !strings.Contains(res.Stdout, "deep") {
 		t.Fatalf("stdout = %q", res.Stdout)
@@ -202,17 +202,17 @@ func TestLandlockFileToolsRefuseEscape(t *testing.T) {
 		"a/../../../etc/passwd",
 		"/etc/passwd",
 	} {
-		if _, err := sb.ReadFile(ctx, p); !errors.Is(err, ErrOutsideWorkspace) {
-			t.Fatalf("ReadFile(%q) = %v, want ErrOutsideWorkspace", p, err)
+		if _, err := sb.ReadFile(ctx, p); !errors.Is(err, ErrOutsideWorkDir) {
+			t.Fatalf("ReadFile(%q) = %v, want ErrOutsideWorkDir", p, err)
 		}
-		if err := sb.WriteFile(ctx, p, []byte("x")); !errors.Is(err, ErrOutsideWorkspace) {
-			t.Fatalf("WriteFile(%q) = %v, want ErrOutsideWorkspace", p, err)
+		if err := sb.WriteFile(ctx, p, []byte("x")); !errors.Is(err, ErrOutsideWorkDir) {
+			t.Fatalf("WriteFile(%q) = %v, want ErrOutsideWorkDir", p, err)
 		}
 	}
 }
 
 // TestLandlockFileToolsRefuseSymlinkEscape is the subtle case. The agent can
-// create a symlink inside its own workspace that points out of it, and a
+// create a symlink inside its own work directory that points out of it, and a
 // naive prefix check on the unresolved path would follow it.
 func TestLandlockFileToolsRefuseSymlinkEscape(t *testing.T) {
 	t.Parallel()
@@ -233,14 +233,14 @@ func TestLandlockFileToolsRefuseSymlinkEscape(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := sb.ReadFile(ctx, "link-to-secret"); !errors.Is(err, ErrOutsideWorkspace) {
-		t.Fatalf("ReadFile through a symlink = %v, want ErrOutsideWorkspace", err)
+	if _, err := sb.ReadFile(ctx, "link-to-secret"); !errors.Is(err, ErrOutsideWorkDir) {
+		t.Fatalf("ReadFile through a symlink = %v, want ErrOutsideWorkDir", err)
 	}
-	if err := sb.WriteFile(ctx, "link-to-dir/planted.txt", []byte("x")); !errors.Is(err, ErrOutsideWorkspace) {
-		t.Fatalf("WriteFile through a symlink = %v, want ErrOutsideWorkspace", err)
+	if err := sb.WriteFile(ctx, "link-to-dir/planted.txt", []byte("x")); !errors.Is(err, ErrOutsideWorkDir) {
+		t.Fatalf("WriteFile through a symlink = %v, want ErrOutsideWorkDir", err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "planted.txt")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatal("a write followed a symlink out of the workspace")
+		t.Fatal("a write followed a symlink out of the work directory")
 	}
 }
 

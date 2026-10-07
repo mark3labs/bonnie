@@ -19,16 +19,16 @@ func TestRunCleanupValidation(t *testing.T) {
 	}
 	for _, p := range []interface {
 		RunCleanupValidator
-		UseSharedWorkspace(string) error
+		UseSharedDirectory(string) error
 	}{local, landlock} {
-		if err := p.UseSharedWorkspace(t.TempDir()); err != nil {
+		if err := p.UseSharedDirectory(t.TempDir()); err != nil {
 			t.Fatal(err)
 		}
-		if err := p.ValidateRunCleanup(); err == nil || !strings.Contains(err.Error(), "shared workspace") {
+		if err := p.ValidateRunCleanup(); err == nil || !strings.Contains(err.Error(), "shared work directory") {
 			t.Fatalf("shared cleanup validation = %v", err)
 		}
 	}
-	if err := Local(WithLocalSharedWorkspace()).ValidateRunCleanup(); err == nil {
+	if err := Local(WithLocalSharedDirectory()).ValidateRunCleanup(); err == nil {
 		t.Fatal("shared option accepted cleanup")
 	}
 }
@@ -44,7 +44,7 @@ type cleanupValidatorStub struct {
 
 func (p cleanupValidatorStub) ValidateRunCleanup() error { return p.err }
 
-// Wrappers must not hide an unsupported backend or a shared workspace mode.
+// Wrappers must not hide an unsupported backend or a shared work directory mode.
 // A third-party deleter without a validator remains supported.
 func TestWrappersValidateRunCleanup(t *testing.T) {
 	t.Parallel()
@@ -63,10 +63,10 @@ func TestWrappersValidateRunCleanup(t *testing.T) {
 			t.Parallel()
 			failure := errors.New("cleanup mode rejected")
 			landlock := Landlock()
-			if err := landlock.UseSharedWorkspace(t.TempDir()); err != nil {
+			if err := landlock.UseSharedDirectory(t.TempDir()); err != nil {
 				t.Fatal(err)
 			}
-			for _, p := range []Provider{plainStub{}, Local(WithLocalSharedWorkspace()), landlock} {
+			for _, p := range []Provider{plainStub{}, Local(WithLocalSharedDirectory()), landlock} {
 				if err := wrap(p).(RunCleanupValidator).ValidateRunCleanup(); err == nil {
 					t.Fatalf("wrapped %s accepted cleanup", p.Name())
 				}

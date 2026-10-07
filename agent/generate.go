@@ -73,7 +73,7 @@ type Plan struct {
 	Tools []Tool
 
 	// Embeds are the paths codegen embeds into the binary. instructions.md
-	// is always present in an authored tree; skills and workspace appear
+	// is always present in an authored tree; skills and context appear
 	// when their directory holds real files (never a bare .gitkeep). The
 	// order is stable, so two runs over one tree are byte-identical.
 	Embeds []Embed
@@ -87,7 +87,7 @@ type Plan struct {
 var ErrNotAModule = fmt.Errorf("bonnie: agent: not a Go module: no go.mod")
 
 // Embed is one path the generator embeds into the binary. A scalar (a single
-// file, the instructions) binds to a string; a directory (skills, workspace)
+// file, the instructions) binds to a string; a directory (skills, context)
 // binds to an embed.FS. Var is the identifier the //go:embed directive binds
 // to, so the generated accessors can expose it.
 type Embed struct {
@@ -111,7 +111,7 @@ var (
 // Discover walks the agent tree at root and returns its build-time discovery
 // plan. It reads go.mod for the module path, walks tools/ for one directory
 // per tool, and computes the embed set from the default layout: the
-// instructions file, skills/, and workspace/.
+// instructions file, skills/, and context/.
 //
 // Discovery is a build-time idea. It fails on anything it cannot fully honor:
 // a tool directory that does not export Tool(), or two tools that declare the
@@ -180,14 +180,14 @@ func Discover(root string) (*Plan, error) {
 
 	// The embed set: the tree's data files, at the default layout's paths.
 	// instructions.md is always present in an authored tree; skills/ and
-	// workspace/ appear only when they hold real files. The order is stable,
+	// context/ appear only when they hold real files. The order is stable,
 	// so two runs over one tree are byte-identical.
 	if hasRealFile(filepath.Join(root, bonnie.DefaultInstructions)) {
 		plan.Embeds = append(plan.Embeds, Embed{Path: bonnie.DefaultInstructions, Var: "_instructions"})
 	}
 	for _, slot := range []struct{ path, varName string }{
 		{bonnie.DefaultSkills, "_skills"},
-		{bonnie.DefaultWorkspace, "_workspace"},
+		{bonnie.DefaultContextFiles, "_contextFiles"},
 	} {
 		if hasRealContent(filepath.Join(root, slot.path)) {
 			plan.Embeds = append(plan.Embeds, Embed{Path: slot.path, Var: slot.varName, Dir: true})
@@ -382,7 +382,7 @@ func declaredToolName(file *ast.File) string {
 //
 // The file declares nothing the author could collide with: it binds the embed
 // slots to unexported variables and hands everything to [bonnie.Register]
-// from init. The three slots — instructions, skills, workspace — are always
+// from init. The three slots — instructions, skills, context — are always
 // declared, so the embed import always compiles; a //go:embed directive is
 // emitted only for the slots the plan found.
 func (p *Plan) Render() ([]byte, error) {
@@ -428,7 +428,7 @@ import (
 	for _, slot := range []struct{ varName, typ string }{
 		{"_instructions", "string"},
 		{"_skills", "embed.FS"},
-		{"_workspace", "embed.FS"},
+		{"_contextFiles", "embed.FS"},
 	} {
 		if !done[slot.varName] {
 			fmt.Fprintf(&b, "var %s %s\n\n", slot.varName, slot.typ)
@@ -442,7 +442,7 @@ func init() {
 	bonnie.Register(bonnie.Tree{
 		Instructions: _instructions,
 		Skills:       _skills,
-		Workspace:    _workspace,
+		ContextFiles:    _contextFiles,
 		Tools: []kit.Tool{
 `)
 	for i := range p.Tools {

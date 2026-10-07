@@ -44,11 +44,11 @@ type config struct {
 	prompt              string
 	instrPath           string
 	skillsPath          string
-	workspace           string
-	workspaceSet        bool
-	persistentWorkspace string
-	persistentSet       bool
-	workspaceCleanup    *WorkspaceCleanupPolicy
+	contextFiles        string
+	contextFilesSet     bool
+	sharedDirectory     string
+	sharedDirectorySet  bool
+	sandboxCleanup      *SandboxCleanupPolicy
 	cleanupProvider     sandbox.RunDeleter
 	sandbox             sandbox.Provider
 	selectedSandbox     sandbox.Provider
@@ -86,12 +86,12 @@ type Option func(*config)
 // defaults returns the configuration of a scaffolded tree with no options.
 func defaults() *config {
 	return &config{
-		addr:       DefaultAddr,
-		journal:    DefaultJournal,
-		instrPath:  DefaultInstructions,
-		skillsPath: DefaultSkills,
-		workspace:  DefaultWorkspace,
-		shutdown:   30 * time.Second,
+		addr:         DefaultAddr,
+		journal:      DefaultJournal,
+		instrPath:    DefaultInstructions,
+		skillsPath:   DefaultSkills,
+		contextFiles: DefaultContextFiles,
+		shutdown:     30 * time.Second,
 	}
 }
 
@@ -153,54 +153,54 @@ func WithInstructions(path string) Option {
 // or assets/ file is NAMED in that activation text but lives on the host,
 // outside the sandbox the tools run in, so the model cannot open it. Put what
 // the model must read in the skill body, and put a file it must open in
-// workspace/.
+// context/.
 func WithSkills(dir string) Option {
 	return func(c *config) { c.skillsPath = dir }
 }
 
-// WithWorkspace selects the workspace seed directory instead of
-// [DefaultWorkspace]. The directory supplies seed files for each run's
-// sandbox workspace. An empty dir disables seeding; it does not give tools
-// access to the process directory or disable the sandbox.
-func WithWorkspace(dir string) Option {
-	return func(c *config) { c.workspace, c.workspaceSet = dir, true }
+// WithContextFiles selects the context files to copy into each new run, instead
+// of [DefaultContextFiles]. These files are seed data, not system prompt text.
+// An empty dir disables copying; it does not give tools access to the process
+// directory or disable the sandbox.
+func WithContextFiles(dir string) Option {
+	return func(c *config) { c.contextFiles, c.contextFilesSet = dir, true }
 }
 
-// WorkspaceCleanupPolicy sets retention periods for run-owned workspaces.
+// SandboxCleanupPolicy sets retention periods for run-owned working files.
 // Zero keeps files for that state; positive durations permit deletion after the
 // latest terminal checkpoint. Negative durations are rejected at startup.
-// Completed runs can receive later turns; those turns start with an empty workspace
+// Completed runs can receive later turns; those turns start with an empty working directory
 // if cleanup has removed it. The journal and channel addresses are kept.
 //
 // Cleanup runs at startup and once per minute. One process must own the journal
-// and workspaces: separate processes are not coordinated.
-type WorkspaceCleanupPolicy = runtime.WorkspaceCleanupPolicy
+// and sandboxes: separate processes are not coordinated.
+type SandboxCleanupPolicy = runtime.SandboxCleanupPolicy
 
-// WithRunWorkspaceCleanup enables automatic cleanup of run-owned workspaces.
-// It cannot be combined with WithPersistentWorkspace or WithAgentFactory.
-// The provider must implement sandbox.RunDeleter. Shared workspace modes are
+// WithRunSandboxCleanup enables automatic cleanup of run-owned working files.
+// It cannot be combined with WithSharedDirectory or WithAgentFactory.
+// The provider must implement sandbox.RunDeleter. Shared-directory modes are
 // rejected. Each deletion has a 30-second timeout; errors are logged and retried.
-// Without this option, workspaces are kept.
-func WithRunWorkspaceCleanup(policy WorkspaceCleanupPolicy) Option {
-	return func(c *config) { c.workspaceCleanup = &policy }
+// Without this option, sandboxes and working files are kept.
+func WithRunSandboxCleanup(policy SandboxCleanupPolicy) Option {
+	return func(c *config) { c.sandboxCleanup = &policy }
 }
 
-// WithPersistentWorkspace selects one host directory for every run instead of
-// creating an isolated workspace per run. The default Landlock provider keeps
+// WithSharedDirectory selects one host directory for every run instead of
+// creating an isolated working directory per run. The default Landlock provider keeps
 // filesystem confinement. Explicit Landlock and Local providers are supported;
 // Local provides no filesystem isolation. Other providers are rejected.
 // Overlapping opens through one provider are rejected. Separate processes and
 // provider instances are not coordinated. The directory is never removed by
-// run pruning. This option cannot be combined with [WithWorkspace].
-func WithPersistentWorkspace(dir string) Option {
-	return func(c *config) { c.persistentWorkspace, c.persistentSet = dir, true }
+// run pruning. This option cannot be combined with [WithContextFiles].
+func WithSharedDirectory(dir string) Option {
+	return func(c *config) { c.sharedDirectory, c.sharedDirectorySet = dir, true }
 }
 
 // WithSandbox selects the backend every tool call runs in.
 //
 // It SELECTS a sandbox, it does not enable one. Leaving it out does not give
 // the model this process's filesystem: a run with no explicit backend gets
-// [sandbox.Landlock], which confines tool calls to the run's own workspace
+// [sandbox.Landlock], which confines tool calls to the run's own working directory
 // using the Linux Landlock LSM and needs nothing installed.
 //
 // Pass this to choose something stronger — [sandbox.Docker] for namespaces,
@@ -308,7 +308,7 @@ func WithKit(opts ...kit.Option) Option {
 //
 // What the factory owns, it owns completely: tree instructions, skills, and the
 // tools codegen discovered do not reach it either. They are available through
-// [Registered] for a host that wants them. The journal, the workspace, the
+// [Registered] for a host that wants them. The journal, the working files, the
 // channels, and the shutdown behaviour are unaffected — those are BONNIE's
 // side of the boundary.
 func WithAgentFactory(f runtime.AgentFactory) Option {

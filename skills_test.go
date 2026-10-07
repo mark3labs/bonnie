@@ -20,7 +20,7 @@ var generatedSkills = fstest.MapFS{
 	"skills/tone.md":          &fstest.MapFile{Data: []byte("---\nname: tone\ndescription: How the agent speaks.\n---\n\nBody.\n")},
 }
 
-// The tree's skills directory is a slot like instructions.md and workspace/:
+// The tree's skills directory is a slot like instructions.md and context/:
 // the default layout names it, and an option replaces it.
 func TestSkillsAreASlotInTheTree(t *testing.T) {
 	t.Parallel()
@@ -196,7 +196,7 @@ func TestSkillsFallBackToTheEmbeddedCopy(t *testing.T) {
 	})
 }
 
-// Unlike the workspace seed, unpacking replaces what is there. A skill is
+// Unlike the contextFiles seed, unpacking replaces what is there. A skill is
 // authored data the model never writes, so a copy an older binary left is
 // stale — and keeping it would leave a deleted skill in the system prompt for
 // as long as the journal directory survives.

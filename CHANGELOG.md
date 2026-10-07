@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** Rename authored `workspace/` files to `context/`; they are
+  copied into each run and are not prompt text. Rename `WithWorkspace` to
+  `WithContextFiles`, `DefaultWorkspace` to `DefaultContextFiles`, and
+  `Tree.Workspace` to `Tree.ContextFiles`. Rename `sandbox.Workspace` and
+  `sandbox.ErrOutsideWorkspace` to `sandbox.WorkDir` and
+  `sandbox.ErrOutsideWorkDir`. Rename shared-directory APIs to
+  `WithSharedDirectory`, `UseSharedDirectory`, and
+  `WithLocalSharedDirectory`. Rename workspace cleanup APIs and records to
+  `SandboxCleanupPolicy`, `WithRunSandboxCleanup`, and `RecordSandboxDeleted`.
+  `/workspace` and `.bonnie/workspaces` remain storage paths.
+
 ### Fixed
 
 - Show the checked sandbox provider in the startup message. A provider selected

@@ -10,7 +10,7 @@ sandbox handle as the agent's tools. Callback code itself runs on the host.
 
 ## Example
 
-This agent checks the workspace before it accepts a response. If a required
+This agent checks the working files before it accepts a response. If a required
 file is absent, it asks the model to create the file. Put the agent's prompt
 in `instructions.md`, as in other agent trees.
 
@@ -37,7 +37,7 @@ func main() {
                     }
                     if result.ExitCode != 0 {
                         return bonnie.CompletionFeedback{
-                            ContinueWith: "Create a non-empty report.md in the workspace, then give your final response.",
+                            ContinueWith: "Create a non-empty report.md in the work directory, then give your final response.",
                         }, nil
                     }
                     return bonnie.CompletionFeedback{}, nil
@@ -59,7 +59,7 @@ only: it provides no isolation from the host filesystem or network.
   for each managed Start or Resume execution, including recovery.
 - `RunScope.RunID` identifies the run. `RunScope.Exec` opens the sandbox only
   when needed. Setup, completion, and model tools share that handle and its
-  workspace. BONNIE owns cleanup. Do not retain `Exec` after execution ends.
+  working files. BONNIE owns cleanup. Do not retain `Exec` after execution ends.
 - Closure state is local to the execution. It is not durable. Store durable
   application state outside the closure when needed.
 - Observe context cancellation in callbacks. Use `scope.Exec` for sandbox

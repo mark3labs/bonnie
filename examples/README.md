@@ -69,7 +69,7 @@ Or start from nothing with `bonnie init ~/my-bot` and copy in the
 1. `bonnie init examples/<name>` in this repository.
 2. Edit `instructions.md` and `main.go`. Keep the prompt in
    `instructions.md`: the guard refuses `WithSystemPrompt`,
-   `WithInstructions`, `WithSkills`, and `WithWorkspace` in an example.
+   `WithInstructions`, `WithSkills`, and `WithContextFiles` in an example.
 3. `cd examples/<name> && go mod tidy && bonnie build`, so `go.sum` and
    `bonnie_gen.go` are the files a user gets.
 4. Write a `README.md` that runs it with `bonnie dev`, never with `go run`.

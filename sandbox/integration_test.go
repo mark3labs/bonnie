@@ -29,9 +29,9 @@ func liveModel() string {
 	case os.Getenv("OPENCODE_API_KEY") != "" || os.Getenv("OPENCODE_ZEN_API_KEY") != "":
 		// First, and verified: the live suite ran against this model — the
 		// sandbox suite inside microVMs, and the runtime suspension suite —
-		// and it answered in seconds where the Anthropic workspace behind
+		// and it answered in seconds where the Anthropic work directory behind
 		// us returned 429 for agent-sized requests. A test model must not
-		// share a quota with a busy workspace.
+		// share a quota with a busy work directory.
 		return "opencode/kimi-k2.5"
 	case os.Getenv("ANTHROPIC_API_KEY") != "":
 		return "anthropic/claude-sonnet-4-5"

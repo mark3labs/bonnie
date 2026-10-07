@@ -1,7 +1,7 @@
 # Cancel a turn
 
 Cancellation stops current work. It keeps the conversation, committed steps,
-workspace, and run ID. It does not undo external effects. Model calls and tools
+working files, and run ID. It does not undo external effects. Model calls and tools
 must observe their execution context. Cancellation is not a forced process kill.
 
 ## Controls

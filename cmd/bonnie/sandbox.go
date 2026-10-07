@@ -51,7 +51,7 @@ type pruneOpts struct {
 	dryRun  bool
 }
 
-// runSandboxPrune deletes terminal-run workspaces through the runtime cleanup
+// runSandboxPrune deletes terminal-run sandboxes through the runtime cleanup
 // API. The runtime records successful cleanup so a later pass skips it.
 // Run this command only after the server that owns these runs has stopped:
 // the runtime run lock does not exclude another process.
@@ -60,7 +60,7 @@ func runSandboxPrune(o pruneOpts) error {
 	if err != nil {
 		return err
 	}
-	// Use the same workspace root as serving with this journal directory.
+	// Use the same working-file storage root as serving with this journal directory.
 	switch provider.Name() {
 	case "landlock":
 		provider = sandbox.Landlock(sandbox.WithLandlockRoot(filepath.Join(o.journal, "workspaces")))
@@ -102,13 +102,13 @@ func runSandboxPrune(o pruneOpts) error {
 		runner := runtime.NewRunner(journal, nil)
 		// A positive retention enables every terminal state. One nanosecond
 		// makes this an immediate operator-requested cleanup pass.
-		policy := runtime.WorkspaceCleanupPolicy{
+		policy := runtime.SandboxCleanupPolicy{
 			CompletedAfter: time.Nanosecond,
 			FailedAfter:    time.Nanosecond,
 			CancelledAfter: time.Nanosecond,
 			RetiredAfter:   time.Nanosecond,
 		}
-		cleanupErr = runner.CleanupWorkspaces(ctx, policy, func(ctx context.Context, runID string) (bool, error) {
+		cleanupErr = runner.CleanupSandboxes(ctx, policy, func(ctx context.Context, runID string) (bool, error) {
 			existed, err := reaper.DeleteRun(ctx, runID)
 			if err != nil {
 				actions[runID] = "cleanup failed"

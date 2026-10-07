@@ -235,7 +235,7 @@ func (p *MicrosandboxProvider) ensureRunning(ctx context.Context, sb *cliSandbox
 	if err := p.start(ctx, sb.name); err != nil {
 		return err
 	}
-	return p.ensureWorkspace(ctx, sb)
+	return p.ensureWorkDir(ctx, sb)
 }
 
 // adopt takes over a sandbox that already exists, whether this process made
@@ -258,7 +258,7 @@ func (p *MicrosandboxProvider) adopt(ctx context.Context, sb *cliSandbox) error 
 	if err := p.checkPolicy(ctx, sb); err != nil {
 		return err
 	}
-	return p.ensureWorkspace(ctx, sb)
+	return p.ensureWorkDir(ctx, sb)
 }
 
 // msbAlreadyExists reports whether a create failed only because the sandbox
@@ -356,7 +356,7 @@ type msbNetworkPolicy struct {
 // this runs after start. When the policy differs from the configured one the
 // error says what to do, because the two remedies are both destructive in
 // different ways — restore the old policy, or delete the sandbox and lose
-// the workspace.
+// the work directory.
 func (p *MicrosandboxProvider) checkPolicy(ctx context.Context, sb *cliSandbox) error {
 	stdout, stderr, code, err := runCLI(ctx, nil, p.bin, "inspect", "--format", "json", sb.name)
 	if err != nil {
@@ -385,7 +385,7 @@ func (p *MicrosandboxProvider) checkPolicy(ctx context.Context, sb *cliSandbox) 
 	}
 	return fmt.Errorf("%w: %s was created with a different network policy and "+
 		"msb fixes policy at create time; restore the matching policy, or "+
-		"delete the sandbox and lose the workspace",
+		"delete the sandbox and lose the work directory",
 		ErrPolicyMismatch, sb.name)
 }
 
@@ -454,15 +454,15 @@ func allowKey(host string) string {
 	return "domain=" + h
 }
 
-// ensureWorkspace creates the workspace directory inside the guest.
-func (p *MicrosandboxProvider) ensureWorkspace(ctx context.Context, sb *cliSandbox) error {
+// ensureWorkDir creates the work directory inside the guest.
+func (p *MicrosandboxProvider) ensureWorkDir(ctx context.Context, sb *cliSandbox) error {
 	_, stderr, code, err := runCLI(ctx, nil, p.bin, "exec", sb.name, "--no-tty", "--",
-		"mkdir", "-p", Workspace)
-	return cliError("create workspace", msbError(stderr), code, err)
+		"mkdir", "-p", WorkDir)
+	return cliError("create work directory", msbError(stderr), code, err)
 }
 
 // known uses inspect rather than ps. msb 0.6.18 can omit running sandboxes
-// from ps, so an empty list is not proof that a workspace was deleted.
+// from ps, so an empty list is not proof that a work directory was deleted.
 // Only the explicit missing-sandbox diagnostic proves absence.
 func (p *MicrosandboxProvider) known(ctx context.Context, name string) (bool, error) {
 	stdout, stderr, code, err := runCLI(ctx, nil, p.bin, "inspect", "--format", "json", name)
@@ -491,7 +491,7 @@ func (p *MicrosandboxProvider) known(ctx context.Context, name string) (bool, er
 // msb words this as `error: stat <path>`, which shares no wording with the
 // shell shapes [isMissingPath] knows, so the generic helper never fires here.
 // It must also stay clear of `error: sandbox not found: <name>`: that means
-// the workspace itself is gone, which is a different condition and must not
+// the work directory itself is gone, which is a different condition and must not
 // reach the model as a plain missing file. Anchoring on the path keeps the
 // two apart.
 func msbMissingPath(stderr, guestPath string) bool {

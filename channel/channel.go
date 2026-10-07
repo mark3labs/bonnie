@@ -156,7 +156,7 @@ type SessionRef interface {
 	// pointing at the retired run.
 	Reset(ctx context.Context, reason string) error
 	// Clear drops the conversation from the model's context and keeps
-	// everything else: the run ID, the address, the workspace, the journal.
+	// everything else: the run ID, the address, the working files, the journal.
 	Clear(ctx context.Context) error
 	// Compact summarises the run's older messages now, without a user
 	// message.

@@ -8,10 +8,10 @@ import (
 	"testing"
 )
 
-func TestLocalSharedWorkspacePersistsAndRejectsOverlap(t *testing.T) {
+func TestLocalSharedWorkDirPersistsAndRejectsOverlap(t *testing.T) {
 	t.Parallel()
 	root := filepath.Join(t.TempDir(), "shared")
-	p := Local(WithLocalRoot(root), WithLocalSharedWorkspace(), WithLocalCleanup())
+	p := Local(WithLocalRoot(root), WithLocalSharedDirectory(), WithLocalCleanup())
 	first, err := p.Open(context.Background(), "one")
 	if err != nil {
 		t.Fatal(err)

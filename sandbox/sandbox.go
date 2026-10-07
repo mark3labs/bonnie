@@ -19,13 +19,13 @@
 //
 // A run parks for human input without holding sandbox compute. [Agent] opens
 // the sandbox on the first tool call that needs it, not when the run starts,
-// and [Sandbox.Stop] releases compute while keeping the workspace. A run that
+// and [Sandbox.Stop] releases compute while keeping the work directory. A run that
 // waits a week costs nothing until it resumes.
 //
 // # One path namespace
 //
-// Backends normally give each run its own files at [Workspace]. The explicit
-// shared workspace mode on the local development provider is an exception: it
+// Backends normally give each run its own files at [WorkDir]. The explicit
+// shared work directory mode on the local development provider is an exception: it
 // reuses one directory and must not be used for concurrent runs. A path has
 // the same meaning whether a backend is local, Docker, or microsandbox.
 package sandbox
@@ -39,9 +39,9 @@ import (
 	"time"
 )
 
-// Workspace is the working directory for every command, on every backend. A
+// WorkDir is the working directory for every command, on every backend. A
 // relative path resolves from here; an absolute path is used unchanged.
-const Workspace = "/workspace"
+const WorkDir = "/workspace"
 
 // Sentinel errors. Test with [errors.Is].
 var (
@@ -52,11 +52,11 @@ var (
 	// ErrNotFound means the path does not exist inside the sandbox.
 	ErrNotFound = errors.New("bonnie: path not found in sandbox")
 
-	// ErrOutsideWorkspace means a path would leave the sandbox workspace.
-	// Backends that map the workspace onto a host directory refuse such a
+	// ErrOutsideWorkDir means a path would leave the sandbox work directory.
+	// Backends that map the work directory onto a host directory refuse such a
 	// path rather than following it, because a file tool runs in the BONNIE
 	// process and is not covered by a kernel restriction.
-	ErrOutsideWorkspace = errors.New("bonnie: path is outside the sandbox workspace")
+	ErrOutsideWorkDir = errors.New("bonnie: path is outside the sandbox work directory")
 
 	// ErrClosed means the sandbox handle is closed.
 	ErrClosed = errors.New("bonnie: sandbox is closed")
@@ -69,7 +69,7 @@ var (
 	// ErrPolicyMismatch means a sandbox already exists with a different
 	// network policy than the one configured now. Network policy is fixed at
 	// create time in every CLI backend, so the operator must decide: restore
-	// the matching policy, or delete the sandbox and lose the workspace.
+	// the matching policy, or delete the sandbox and lose the work directory.
 	ErrPolicyMismatch = errors.New("bonnie: sandbox exists with a different network policy")
 )
 
@@ -82,8 +82,8 @@ var (
 type Command struct {
 	// Args is the program and its arguments. It must not be empty.
 	Args []string
-	// Dir is the working directory. Empty means [Workspace]. A relative
-	// path resolves from [Workspace].
+	// Dir is the working directory. Empty means [WorkDir]. A relative
+	// path resolves from [WorkDir].
 	Dir string
 	// Env adds environment variables, as "KEY=value".
 	Env []string
@@ -130,7 +130,7 @@ func (r *Result) Output() string {
 	return r.Stdout
 }
 
-// Sandbox is one isolated workspace, bound to one run.
+// Sandbox is one isolated work directory, bound to one run.
 //
 // Implementations must be safe for concurrent use: an agent may run tools in
 // parallel.
@@ -157,7 +157,7 @@ type Sandbox interface {
 	// WriteFile writes a file, creating parent directories as needed.
 	WriteFile(ctx context.Context, path string, data []byte) error
 
-	// Stop releases compute but keeps the workspace, so a later Open with
+	// Stop releases compute but keeps the work directory, so a later Open with
 	// the same run ID finds the same files. This is what a parked run
 	// calls: it is the difference between a suspended run that costs
 	// nothing and one that holds a VM for a week.
@@ -170,7 +170,7 @@ type Sandbox interface {
 // Deleter is implemented by a [Sandbox] that can destroy its own state.
 // Type-assert for it; not every backend can.
 type Deleter interface {
-	// Delete removes the sandbox and its workspace for good.
+	// Delete removes the sandbox and its work directory for good.
 	Delete(ctx context.Context) error
 }
 
@@ -188,7 +188,7 @@ type Provider interface {
 
 	// Open returns the sandbox for a run, creating it when new and
 	// reattaching when it already exists. Calling it twice with the same
-	// run ID must give the same workspace.
+	// run ID must give the same work directory.
 	Open(ctx context.Context, runID string) (Sandbox, error)
 }
 
@@ -237,17 +237,17 @@ type Imaged interface {
 }
 
 // WorkingDirReporter is implemented by a [Provider] whose commands do not run
-// at [Workspace].
+// at [WorkDir].
 //
-// Most backends give the agent a guest filesystem, so [Workspace] is both the
-// namespace and the real path. A backend that maps the workspace onto a host
+// Most backends give the agent a guest filesystem, so [WorkDir] is both the
+// namespace and the real path. A backend that maps the work directory onto a host
 // directory instead — [LocalProvider], [LandlockProvider] — runs commands at
 // that host path, and `pwd` reports it.
 //
 // This exists so the system prompt can name the directory the tools actually
 // use. Kit renders a working directory into the prompt, and a model believes
 // the prompt over its own observation: telling it /workspace when `pwd` says
-// otherwise is a disagreement a live model hit — "my workspace is not
+// otherwise is a disagreement a live model hit — "my work directory is not
 // actually /workspace" — when the value was hard-coded.
 //
 // It takes a run ID because the directory is per run, and it must not open
@@ -255,30 +255,30 @@ type Imaged interface {
 // would start compute a parked run should not hold.
 //
 // An implementation returns the empty string when the backend does run at
-// [Workspace] after all. That matters for a wrapper such as [Seeded], which
+// [WorkDir] after all. That matters for a wrapper such as [Seeded], which
 // must forward this method to stay transparent and cannot know in advance
 // whether the provider beneath it maps to a host path.
 type WorkingDirReporter interface {
 	// WorkingDir returns the path commands for runID really run at, or ""
-	// when that path is [Workspace].
+	// when that path is [WorkDir].
 	WorkingDir(runID string) string
 }
 
-// Resolve anchors a path to [Workspace]. An absolute path passes through
-// unchanged; a relative one resolves from the workspace root.
+// Resolve anchors a path to [WorkDir]. An absolute path passes through
+// unchanged; a relative one resolves from the work directory root.
 //
 // It also cleans the result, so "a/../../etc/passwd" cannot climb out of the
-// workspace by accident. It is not a security control: a command inside the
+// work directory by accident. It is not a security control: a command inside the
 // sandbox can name any path it likes. The isolation comes from the backend,
 // never from this function.
 func Resolve(p string) string {
 	if p == "" {
-		return Workspace
+		return WorkDir
 	}
 	if path.IsAbs(p) {
 		return path.Clean(p)
 	}
-	return path.Join(Workspace, p)
+	return path.Join(WorkDir, p)
 }
 
 // validate checks a command before a backend tries to run it.
@@ -297,7 +297,7 @@ func (c Command) validate() error {
 // workdir returns the directory the command runs in.
 func (c Command) workdir() string {
 	if c.Dir == "" {
-		return Workspace
+		return WorkDir
 	}
 	return Resolve(c.Dir)
 }

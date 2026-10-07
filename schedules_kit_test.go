@@ -35,7 +35,7 @@ func TestScheduleKitApprovalSurvivesRestart(t *testing.T) {
 			t.Fatal(err)
 		}
 		agent := New(
-			WithJournal(journal), WithWorkspace(""), WithListener(listener), WithSchedule(definition), WithScheduleClock(false),
+			WithJournal(journal), WithContextFiles(""), WithListener(listener), WithSchedule(definition), WithScheduleClock(false),
 			WithSandbox(sandbox.Local(sandbox.WithLocalRoot(t.TempDir()))), WithSystemPrompt("test system prompt"),
 			WithKit(model.Option(), func(o *kit.Options) {
 				o.SkipConfig, o.NoContextFiles, o.NoSkills, o.NoExtensions, o.NoAgents, o.Quiet = true, true, true, true, true, true

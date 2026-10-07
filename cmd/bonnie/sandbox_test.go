@@ -52,7 +52,7 @@ func TestSandboxPruneUsesRuntimeCleanup(t *testing.T) {
 					t.Fatal(err)
 				}
 				for _, rec := range recs {
-					if rec.Kind == runtime.RecordWorkspaceDeleted {
+					if rec.Kind == runtime.RecordSandboxDeleted {
 						t.Fatal("dry run recorded cleanup")
 					}
 				}
@@ -81,7 +81,7 @@ func TestSandboxPruneUsesRuntimeCleanup(t *testing.T) {
 				}
 				deleted := 0
 				for _, rec := range recs {
-					if rec.Kind == runtime.RecordWorkspaceDeleted {
+					if rec.Kind == runtime.RecordSandboxDeleted {
 						deleted++
 					}
 				}

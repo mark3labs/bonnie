@@ -88,12 +88,12 @@ func (s *stubSandbox) Close() error {
 
 var _ Sandbox = (*stubSandbox)(nil)
 
-// TestSharedLocalWorkspaceReleasedAtEndOfRunnerTurn checks that closing the
-// per-turn agent releases the shared workspace for the next run.
-func TestSharedLocalWorkspaceReleasedAtEndOfRunnerTurn(t *testing.T) {
+// TestSharedLocalWorkDirReleasedAtEndOfRunnerTurn checks that closing the
+// per-turn agent releases the shared work directory for the next run.
+func TestSharedLocalWorkDirReleasedAtEndOfRunnerTurn(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
-	p := Local(WithLocalRoot(root), WithLocalSharedWorkspace(), WithLocalCleanup())
+	p := Local(WithLocalRoot(root), WithLocalSharedDirectory(), WithLocalCleanup())
 	model := fakemodel.New(
 		fakemodel.Call("write_file", `{"path":"memory.txt","content":"remember me"}`),
 		fakemodel.Say("written"),
@@ -120,7 +120,7 @@ func TestSharedLocalWorkspaceReleasedAtEndOfRunnerTurn(t *testing.T) {
 }
 
 // TestLazyOpenerJournalsTheOpen covers the record that makes a run's
-// workspace findable: the first open writes one sandbox record, and the
+// work directory findable: the first open writes one sandbox record, and the
 // once-semantics mean the second open does not write another.
 func TestLazyOpenerJournalsTheOpen(t *testing.T) {
 	t.Parallel()
@@ -207,7 +207,7 @@ func (f *failingOnceJournal) Append(ctx context.Context, rec runtime.Record) (in
 
 // TestCheckRecordedSandboxNotesTheLoss covers the resume path this feature
 // exists for: a run parks, its container is pruned, and the resumed run says
-// so in the conversation instead of handing the model an empty workspace in
+// so in the conversation instead of handing the model an empty work directory in
 // silence.
 func TestCheckRecordedSandboxNotesTheLoss(t *testing.T) {
 	t.Parallel()
@@ -238,7 +238,7 @@ func TestCheckRecordedSandboxNotesTheLoss(t *testing.T) {
 		}
 	})
 
-	t.Run("live workspace is silent", func(t *testing.T) {
+	t.Run("live work directory is silent", func(t *testing.T) {
 		t.Parallel()
 		j := runtime.NewMemoryJournal()
 		s := runtime.NewSession("loss-live", j)
@@ -251,7 +251,7 @@ func TestCheckRecordedSandboxNotesTheLoss(t *testing.T) {
 			t.Fatalf("checkRecordedSandbox: %v", err)
 		}
 		if msgs := s.GetMessages(); len(msgs) != 0 {
-			t.Fatalf("a live workspace must not be noted: %v", msgs)
+			t.Fatalf("a live work directory must not be noted: %v", msgs)
 		}
 	})
 
@@ -314,10 +314,10 @@ func messageTextOf(msg kit.LLMMessage) string {
 // model is told the wrong root — and the prompt is the half it believes.
 //
 // The earlier version of this test compared the prompt against the CONSTANT
-// sandbox.Workspace and passed while the defect was live: the landlock and
-// local backends map the workspace onto a host directory, so commands run
+// sandbox.WorkDir and passed while the defect was live: the landlock and
+// local backends map the work directory onto a host directory, so commands run
 // there and /workspace does not exist. A live model reported exactly that:
-// "my workspace is not actually /workspace". The test now asks the sandbox
+// "my work directory is not actually /workspace". The test now asks the sandbox
 // where it really is, with `pwd`, which is the only source that cannot be
 // wrong.
 func TestPromptWorkingDirectoryIsTheToolWorkingDirectory(t *testing.T) {

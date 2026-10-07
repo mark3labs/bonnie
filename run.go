@@ -38,7 +38,7 @@ type Agent struct {
 //	func main() { bonnie.New().Serve() }
 //
 // With no options that is a complete agent: instructions.md is the system
-// prompt, workspace/ is the agent's root for files, .bonnie is the journal,
+// prompt, context/ is the agent's root for files, .bonnie is the journal,
 // the tools under tools/ are wired by codegen, and the HTTP channel is
 // served on :8080. Each [Option] replaces one of those.
 func New(opts ...Option) *Agent {
@@ -108,27 +108,27 @@ func (a *Agent) Run(ctx context.Context) (runErr error) {
 			return err
 		}
 	}
-	workspace, err := c.workspaceDir()
+	contextFiles, err := c.contextFilesDir()
 	if err != nil {
 		return err
 	}
-	if c.persistentSet {
-		workspace = ""
+	if c.sharedDirectorySet {
+		contextFiles = ""
 	}
 
-	// A built binary has no tree beside it, so the workspace seed files come
+	// A built binary has no tree beside it, so the contextFiles seed files come
 	// from the copies codegen embedded. Seeding never overwrites: a file the
 	// model already wrote is the agent's work, not the author's input.
-	if workspace != "" {
-		if err := os.MkdirAll(workspace, 0o755); err != nil {
-			return fmt.Errorf("bonnie: workspace: %w", err)
+	if contextFiles != "" {
+		if err := os.MkdirAll(contextFiles, 0o755); err != nil {
+			return fmt.Errorf("bonnie: contextFiles: %w", err)
 		}
-		if err := seedFromEmbed(Registered().Workspace, workspace); err != nil {
+		if err := seedFromEmbed(Registered().ContextFiles, contextFiles); err != nil {
 			return err
 		}
 	}
 
-	factory, err := c.agentFactory(ctx, workspace, c.kitOptions(prompt, skills))
+	factory, err := c.agentFactory(ctx, contextFiles, c.kitOptions(prompt, skills))
 	if err != nil {
 		return err
 	}
@@ -239,7 +239,7 @@ func (a *Agent) Run(ctx context.Context) (runErr error) {
 		schedules.start(ctx, clock)
 	}
 
-	if c.workspaceCleanup != nil {
+	if c.sandboxCleanup != nil {
 		cleanupCtx, cancel := context.WithCancel(ctx)
 		done := make(chan struct{})
 		go func() {
@@ -248,7 +248,7 @@ func (a *Agent) Run(ctx context.Context) (runErr error) {
 		}()
 		defer func() { cancel(); <-done }()
 	}
-	c.banner(os.Stderr, ln.Addr().String(), workspace, skills, dotenv)
+	c.banner(os.Stderr, ln.Addr().String(), contextFiles, skills, dotenv)
 	if schedules == nil {
 		return c.serve(ctx, mux, ln)
 	}
@@ -349,15 +349,15 @@ func (c *config) systemPrompt() (string, error) {
 	return "", fmt.Errorf("bonnie: the instructions file could not be read: %w", err)
 }
 
-// workspaceDir returns the absolute workspace seed directory. Empty means
-// no files are seeded into the sandbox, as requested by WithWorkspace("").
-func (c *config) workspaceDir() (string, error) {
-	if c.workspace == "" {
+// contextFilesDir returns the absolute contextFiles seed directory. Empty means
+// no files are seeded into the sandbox, as requested by WithContextFiles("").
+func (c *config) contextFilesDir() (string, error) {
+	if c.contextFiles == "" {
 		return "", nil
 	}
-	abs, err := filepath.Abs(c.workspace)
+	abs, err := filepath.Abs(c.contextFiles)
 	if err != nil {
-		return "", fmt.Errorf("bonnie: workspace path: %w", err)
+		return "", fmt.Errorf("bonnie: contextFiles path: %w", err)
 	}
 	return abs, nil
 }
@@ -406,7 +406,7 @@ func hasSkillFiles(dir string) bool {
 // directory beside the journal, never the tree's skills/ — a built binary is
 // the only caller, and it has no tree.
 //
-// Unlike the workspace seed this replaces what is there. A skill is authored
+// Unlike the contextFiles seed this replaces what is there. A skill is authored
 // data that only the tree can change: the model never writes one, so a copy
 // left by an older binary is stale rather than precious, and keeping it would
 // leave a deleted skill in the prompt for as long as the directory survives.
@@ -454,15 +454,15 @@ func unpackSkills(files fs.FS, dest string) (string, error) {
 // **Every other run is sandboxed.** There is no host-tools mode: [WithSandbox]
 // selects a backend, it does not enable one, and leaving it out selects
 // [sandbox.Landlock] rather than the host. BONNIE used to default to running
-// Kit's core tools in this process, rooted at the workspace with
+// Kit's core tools in this process, rooted at the contextFiles with
 // kit.WithWorkDir; a live agent walked out of that root with an absolute path
 // and read its own journal, because a working directory is a base and not a
 // jail.
 //
-// workspace, when set, is the seed mirrored into [sandbox.Workspace] — never
-// a working directory for host tools, which no longer exist. An explicitly
-// selected persistent workspace instead configures a Landlock or Local provider.
-func (c *config) agentFactory(ctx context.Context, workspace string, opts []kit.Option) (runtime.AgentFactory, error) {
+// Context files, when set, are copied into [sandbox.WorkDir] as seed data. They
+// are not a system prompt or a shared working directory. [WithSharedDirectory]
+// instead configures a Landlock or Local provider to use one host directory.
+func (c *config) agentFactory(ctx context.Context, contextFiles string, opts []kit.Option) (runtime.AgentFactory, error) {
 	if c.factory != nil {
 		if conflict := c.agentConflicts(); conflict != "" {
 			return nil, fmt.Errorf("bonnie: WithAgentFactory owns the agent, so %s cannot apply: drop one of the two", conflict)
@@ -474,35 +474,35 @@ func (c *config) agentFactory(ctx context.Context, workspace string, opts []kit.
 	if err != nil {
 		return nil, err
 	}
-	if c.persistentSet {
-		if c.workspaceCleanup != nil {
-			return nil, fmt.Errorf("bonnie: WithRunWorkspaceCleanup cannot be combined with WithPersistentWorkspace")
+	if c.sharedDirectorySet {
+		if c.sandboxCleanup != nil {
+			return nil, fmt.Errorf("bonnie: WithRunSandboxCleanup cannot be combined with WithSharedDirectory")
 		}
-		if c.persistentWorkspace == "" {
-			return nil, fmt.Errorf("bonnie: WithPersistentWorkspace requires a non-empty directory")
+		if c.sharedDirectory == "" {
+			return nil, fmt.Errorf("bonnie: WithSharedDirectory requires a non-empty directory")
 		}
-		if c.workspaceSet {
-			return nil, fmt.Errorf("bonnie: WithPersistentWorkspace cannot be combined with WithWorkspace")
+		if c.contextFilesSet {
+			return nil, fmt.Errorf("bonnie: WithSharedDirectory cannot be combined with WithContextFiles")
 		}
 		switch p := provider.(type) {
 		case *sandbox.LocalProvider:
-			abs, err := filepath.Abs(c.persistentWorkspace)
+			abs, err := filepath.Abs(c.sharedDirectory)
 			if err != nil {
-				return nil, fmt.Errorf("bonnie: persistent workspace path: %w", err)
+				return nil, fmt.Errorf("bonnie: shared directory path: %w", err)
 			}
-			if err := p.UseSharedWorkspace(abs); err != nil {
+			if err := p.UseSharedDirectory(abs); err != nil {
 				return nil, err
 			}
 		case *sandbox.LandlockProvider:
-			abs, err := filepath.Abs(c.persistentWorkspace)
+			abs, err := filepath.Abs(c.sharedDirectory)
 			if err != nil {
-				return nil, fmt.Errorf("bonnie: persistent workspace path: %w", err)
+				return nil, fmt.Errorf("bonnie: shared directory path: %w", err)
 			}
-			if err := p.UseSharedWorkspace(abs); err != nil {
+			if err := p.UseSharedDirectory(abs); err != nil {
 				return nil, err
 			}
 		default:
-			return nil, fmt.Errorf("bonnie: WithPersistentWorkspace supports sandbox.Landlock and sandbox.Local, not %s", provider.Name())
+			return nil, fmt.Errorf("bonnie: WithSharedDirectory supports sandbox.Landlock and sandbox.Local, not %s", provider.Name())
 		}
 	}
 	if c.network != nil {
@@ -517,7 +517,7 @@ func (c *config) agentFactory(ctx context.Context, workspace string, opts []kit.
 		}
 	}
 
-	if err := c.configureWorkspaceCleanup(provider); err != nil {
+	if err := c.configureSandboxCleanup(provider); err != nil {
 		return nil, err
 	}
 
@@ -531,17 +531,17 @@ func (c *config) agentFactory(ctx context.Context, workspace string, opts []kit.
 	// single-provider option does not describe a selection from WithSandboxes.
 	c.selectedSandbox = provider
 
-	// Injected environment reaches every command before the workspace seed,
+	// Injected environment reaches every command before the contextFiles seed,
 	// so a bootstrap the seed relies on can read an operator-set variable.
 	if len(c.sandboxEnv) > 0 {
 		provider = sandbox.EnvInjected(provider, c.sandboxEnv)
 	}
 
-	// The workspace is a seed here: its files are mirrored into every
+	// The contextFiles is a seed here: its files are mirrored into every
 	// sandbox before the model's first command, and an edit the model made
 	// is never reverted on resume.
-	if workspace != "" {
-		provider = sandbox.Seeded(provider, workspace)
+	if contextFiles != "" {
+		provider = sandbox.Seeded(provider, contextFiles)
 	}
 	if c.completionDuplicate {
 		return nil, fmt.Errorf("bonnie: WithCompletionHook may only be set once")
@@ -578,18 +578,18 @@ func (c *config) agentConflicts() string {
 		return "WithCompletionHook"
 	case c.noHumanInput:
 		return "WithoutHumanInput"
-	case c.persistentSet:
-		return "WithPersistentWorkspace"
-	case c.workspaceCleanup != nil:
-		return "WithRunWorkspaceCleanup"
+	case c.sharedDirectorySet:
+		return "WithSharedDirectory"
+	case c.sandboxCleanup != nil:
+		return "WithRunSandboxCleanup"
 	}
 	return ""
 }
 
 // hostWorkspaceOptions is gone, and its absence is the point.
 //
-// It rebuilt Kit's core tools with kit.WithWorkDir(workspace) so a run with no
-// sandbox wrote into the workspace instead of the process's directory. That
+// It rebuilt Kit's core tools with kit.WithWorkDir(contextFiles) so a run with no
+// sandbox wrote into the contextFiles instead of the process's directory. That
 // made the accident rarer without making the escape harder: WithWorkDir sets
 // the base for a RELATIVE path, and the shell tool never resolves one — a
 // model that writes an absolute path reaches the whole filesystem. A live
@@ -618,7 +618,7 @@ func (c *config) defaultSandbox() sandbox.Provider {
 	return sandbox.Landlock(sandbox.WithLandlockRoot(filepath.Join(c.journal, "workspaces")))
 }
 
-// seedFromEmbed materialises the workspace files codegen embedded into dest.
+// seedFromEmbed materialises the contextFiles files codegen embedded into dest.
 // It never overwrites: a file that is already there is either the author's
 // seed from a previous start or the model's own work, and both outrank a
 // copy compiled in months ago.
@@ -639,10 +639,10 @@ func seedFromEmbed(files fs.FS, dest string) error {
 			return fmt.Errorf("bonnie: read embedded seed %s: %w", path, err)
 		}
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-			return fmt.Errorf("bonnie: seed workspace: %w", err)
+			return fmt.Errorf("bonnie: seed contextFiles: %w", err)
 		}
 		if err := os.WriteFile(target, b, 0o644); err != nil {
-			return fmt.Errorf("bonnie: seed workspace: %w", err)
+			return fmt.Errorf("bonnie: seed contextFiles: %w", err)
 		}
 		return nil
 	})
@@ -662,7 +662,7 @@ func embedIsEmpty(files fs.FS) bool {
 
 // embedRel is one embedded path with the embed's own root directory stripped.
 //
-// A generated embed binds one directory (//go:embed workspace, //go:embed
+// A generated embed binds one directory (//go:embed contextFiles, //go:embed
 // skills), so every path it yields begins with that directory's name. Only
 // that first element is stripped — not every leading directory — so a file in
 // a subdirectory keeps its place, which is what a skill bundled as
@@ -683,7 +683,7 @@ func embedRel(path string) string {
 // run to warn about. The backend is always named instead: the warning existed
 // to make a dangerous default visible, and naming the confinement in force is
 // what replaces it.
-func (c *config) banner(out io.Writer, addr, workspace, skills string, dotenv bool) {
+func (c *config) banner(out io.Writer, addr, contextFiles, skills string, dotenv bool) {
 	if c.quiet {
 		return
 	}
@@ -712,10 +712,10 @@ func (c *config) banner(out io.Writer, addr, workspace, skills string, dotenv bo
 		line("sandbox", name)
 	}
 	line("network", networkLabel(c.network))
-	if c.persistentSet {
-		line("workspace", c.persistentWorkspace+" (shared)")
-	} else if workspace != "" {
-		line("workspace", workspace)
+	if c.sharedDirectorySet {
+		line("context", c.sharedDirectory+" (shared)")
+	} else if contextFiles != "" {
+		line("context", contextFiles)
 	}
 	if skills != "" {
 		line("skills", skills)

@@ -11,7 +11,7 @@
 //
 // That is the whole default agent. Every slot in the tree has a framework
 // default, and authoring the slot replaces it: instructions.md is the system
-// prompt, workspace/ is the default seed copied into each isolated run, tools/ holds
+// prompt, context/ is the default seed copied into each isolated run, tools/ holds
 // one directory per tool, and .bonnie holds the journal. Configuration that
 // is not a file is code — an [Option] on [New]:
 //
@@ -48,10 +48,11 @@ const (
 	// DefaultInstructions is the system prompt file, relative to the tree.
 	DefaultInstructions = "instructions.md"
 
-	// DefaultWorkspace is the seed directory mirrored into each run's isolated
-	// sandbox workspace. Use [WithPersistentWorkspace] for explicit shared
+	// DefaultContextFiles is the seed directory mirrored into each run's isolated
+	// sandbox working directory. These files are working data, not prompt text.
+	// Use [WithSharedDirectory] for explicit shared
 	// local development storage.
-	DefaultWorkspace = "workspace"
+	DefaultContextFiles = "context"
 
 	// DefaultSkills is the tree's skills directory.
 	DefaultSkills = "skills"
@@ -83,10 +84,11 @@ type Tree struct {
 	// has, and hands the directory to Kit as Options.SkillsDir.
 	Skills embed.FS
 
-	// Workspace is the embedded copy of the tree's workspace seed files.
-	// [Agent.Run] materialises them beside a built binary that has no tree, and
+	// ContextFiles is the embedded copy of the tree's context files. [Agent.Run]
+	// copies them into each new run; they are not added to the system prompt. It
+	// materialises them beside a built binary that has no tree, and
 	// never overwrites a file that is already there.
-	Workspace embed.FS
+	ContextFiles embed.FS
 }
 
 var (

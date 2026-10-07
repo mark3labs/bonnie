@@ -37,35 +37,35 @@ var _ Provider = (*LocalProvider)(nil)
 // LocalOption configures a [LocalProvider].
 type LocalOption func(*LocalProvider)
 
-// WithLocalRoot sets the directory that holds per-run workspaces. The default
+// WithLocalRoot sets the directory that holds per-run work directories. The default
 // is ".bonnie/workspaces".
 func WithLocalRoot(dir string) LocalOption {
 	return func(p *LocalProvider) { p.root = dir }
 }
 
-// WithLocalSharedWorkspace makes every run use root as the same workspace.
+// WithLocalSharedDirectory makes every run use root as the same work directory.
 // It rejects overlapping opens within this provider. Use only for development;
 // it provides no isolation and cleanup is disabled.
-func WithLocalSharedWorkspace() LocalOption {
+func WithLocalSharedDirectory() LocalOption {
 	return func(p *LocalProvider) { p.shared = true; p.cleanup = false }
 }
 
-// UseSharedWorkspace changes this local provider to use dir as one shared
-// workspace. It rejects an empty path. Shared runs cannot overlap.
-func (p *LocalProvider) UseSharedWorkspace(dir string) error {
+// UseSharedDirectory changes this local provider to use dir as one shared
+// work directory. It rejects an empty path. Shared runs cannot overlap.
+func (p *LocalProvider) UseSharedDirectory(dir string) error {
 	if dir == "" {
-		return fmt.Errorf("bonnie: sandbox: shared workspace path is empty")
+		return fmt.Errorf("bonnie: sandbox: shared work directory path is empty")
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if len(p.opened) != 0 {
-		return fmt.Errorf("bonnie: sandbox: cannot enable shared workspace after opening a run")
+		return fmt.Errorf("bonnie: sandbox: cannot enable shared work directory after opening a run")
 	}
 	p.root, p.shared, p.cleanup = dir, true, false
 	return nil
 }
 
-// WithLocalCleanup removes a run's workspace when its sandbox is deleted.
+// WithLocalCleanup removes a run's work directory when its sandbox is deleted.
 // Tests use it; a real run wants its files to survive.
 func WithLocalCleanup() LocalOption {
 	return func(p *LocalProvider) { p.cleanup = true }
@@ -103,7 +103,7 @@ func (p *LocalProvider) Open(_ context.Context, runID string) (Sandbox, error) {
 	}
 
 	if p.shared && p.sharedActive {
-		return nil, fmt.Errorf("bonnie: sandbox: shared workspace is already in use")
+		return nil, fmt.Errorf("bonnie: sandbox: shared work directory is already in use")
 	}
 	if !p.shared {
 		if err := refuseUncheckedLegacy(p.root, runID); err != nil {
@@ -116,10 +116,10 @@ func (p *LocalProvider) Open(_ context.Context, runID string) (Sandbox, error) {
 	}
 	dir, err := filepath.Abs(path)
 	if err != nil {
-		return nil, fmt.Errorf("bonnie: sandbox: resolve workspace: %w", err)
+		return nil, fmt.Errorf("bonnie: sandbox: resolve work directory: %w", err)
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, fmt.Errorf("bonnie: sandbox: create workspace: %w", err)
+		return nil, fmt.Errorf("bonnie: sandbox: create work directory: %w", err)
 	}
 
 	if p.shared {
@@ -158,16 +158,16 @@ func (s *localSandbox) isClosed() bool {
 
 // host maps a sandbox path onto the host directory that backs it.
 //
-// A path under [Workspace] becomes a path under the run's directory. Anything
+// A path under [WorkDir] becomes a path under the run's directory. Anything
 // else is used as given, which is the honest behaviour for a backend with no
 // isolation: pretending otherwise would suggest a containment this provider
 // does not have.
 func (s *localSandbox) host(p string) string {
 	resolved := Resolve(p)
-	if resolved == Workspace {
+	if resolved == WorkDir {
 		return s.dir
 	}
-	if rel, ok := strings.CutPrefix(resolved, Workspace+"/"); ok {
+	if rel, ok := strings.CutPrefix(resolved, WorkDir+"/"); ok {
 		return filepath.Join(s.dir, filepath.FromSlash(rel))
 	}
 	return filepath.FromSlash(resolved)
@@ -228,7 +228,7 @@ func (s *localSandbox) WriteFile(_ context.Context, p string, data []byte) error
 }
 
 // Stop implements [Sandbox]. The local backend holds no compute between
-// commands, so there is nothing to release and the workspace is untouched.
+// commands, so there is nothing to release and the work directory is untouched.
 func (s *localSandbox) Stop(context.Context) error { return nil }
 
 // Close implements [Sandbox].
@@ -246,7 +246,7 @@ func (s *localSandbox) Close() error {
 	return nil
 }
 
-// Delete implements [Deleter]. It removes the workspace only when the provider
+// Delete implements [Deleter]. It removes the work directory only when the provider
 // was built with [WithLocalCleanup], because deleting a developer's files by
 // surprise is worse than leaving them.
 func (s *localSandbox) Delete(context.Context) error {
@@ -255,13 +255,13 @@ func (s *localSandbox) Delete(context.Context) error {
 		return nil
 	}
 	if err := os.RemoveAll(s.dir); err != nil {
-		return fmt.Errorf("bonnie: sandbox: delete workspace: %w", err)
+		return fmt.Errorf("bonnie: sandbox: delete work directory: %w", err)
 	}
 	return nil
 }
 
 // WorkingDir implements [WorkingDirReporter]. A local sandbox is a host
-// directory, so that path — not [Workspace] — is what `pwd` reports and what
+// directory, so that path — not [WorkDir] — is what `pwd` reports and what
 // the system prompt must name.
 func (p *LocalProvider) WorkingDir(runID string) string {
 	path := filepath.Join(p.root, safeName("", runID))

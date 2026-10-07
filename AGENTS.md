@@ -253,13 +253,15 @@ never both. Do not add a configuration file.
 
 Each directory under `examples/` is an agent tree made with
 `bonnie init <name>`: its own Go module with `instructions.md`, `main.go`,
-`bonnie_gen.go`, `skills/`, `workspace/`, `go.mod`, and `go.sum`. A user runs
-it with `bonnie dev` and ships it with `bonnie build`. It is **never** a
+`bonnie_gen.go`, `skills/`, `context/`, `go.mod`, and `go.sum`. A user runs it
+with `bonnie dev` and ships it with `bonnie build`. It is **never** a
 package in BONNIE's module run with `go run` — that was the old shape, and it
 showed readers a way to run BONNIE that no user uses.
 
+- Context files under `context/` are copied into each run; they are not prompt
+  text.
 - The prompt is `instructions.md`. `main.go` must not call
-  `WithSystemPrompt`, `WithInstructions`, `WithSkills`, or `WithWorkspace`.
+  `WithSystemPrompt`, `WithInstructions`, `WithSkills`, or `WithContextFiles`.
 - `go.mod` pins a released bonnie and has no `replace`.
 - `bonnie_gen.go` is committed and current: `task examples-gen`.
 - After a release is tagged, `task examples-pin TAG=vX.Y.Z` (see

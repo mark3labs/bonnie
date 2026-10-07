@@ -197,7 +197,7 @@ func (c *cliSandbox) WriteFile(ctx context.Context, p string, data []byte) error
 	return nil
 }
 
-// Stop implements [Sandbox]. The workspace survives; the next command starts
+// Stop implements [Sandbox]. The work directory survives; the next command starts
 // the sandbox again.
 func (c *cliSandbox) Stop(ctx context.Context) error {
 	release, err := c.operation(ctx)

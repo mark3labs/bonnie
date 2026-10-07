@@ -36,13 +36,13 @@ func (j *cleanupErrorJournal) Replay(ctx context.Context, id string) ([]Record, 
 }
 
 func (j *cleanupErrorJournal) Append(ctx context.Context, rec Record) (int, error) {
-	if j.operation == "append" && rec.Kind == RecordWorkspaceDeleted && rec.RunID == "a" {
+	if j.operation == "append" && rec.Kind == RecordSandboxDeleted && rec.RunID == "a" {
 		return 0, j.err
 	}
 	return j.MemoryJournal.Append(ctx, rec)
 }
 
-func TestWorkspaceCleanupJournalErrors(t *testing.T) {
+func TestSandboxCleanupJournalErrors(t *testing.T) {
 	t.Parallel()
 	for _, operation := range []string{"runs", "state", "replay", "append"} {
 		t.Run(operation, func(t *testing.T) {
@@ -56,8 +56,8 @@ func TestWorkspaceCleanupJournalErrors(t *testing.T) {
 			r := NewRunner(j, nil)
 			calls := make(map[string]int)
 			delete := func(_ context.Context, id string) (bool, error) { calls[id]++; return true, nil }
-			policy := WorkspaceCleanupPolicy{CompletedAfter: time.Minute}
-			if err := r.CleanupWorkspaces(ctx, policy, delete); !errors.Is(err, want) {
+			policy := SandboxCleanupPolicy{CompletedAfter: time.Minute}
+			if err := r.CleanupSandboxes(ctx, policy, delete); !errors.Is(err, want) {
 				t.Fatalf("cleanup error=%v", err)
 			}
 			if operation != "runs" && calls["b"] != 1 {
@@ -67,7 +67,7 @@ func TestWorkspaceCleanupJournalErrors(t *testing.T) {
 				t.Fatal("cleanup did not release run")
 			}
 			j.operation = ""
-			if err := r.CleanupWorkspaces(ctx, policy, delete); err != nil {
+			if err := r.CleanupSandboxes(ctx, policy, delete); err != nil {
 				t.Fatal(err)
 			}
 			wantCalls := 1
@@ -81,15 +81,15 @@ func TestWorkspaceCleanupJournalErrors(t *testing.T) {
 	}
 }
 
-func TestWorkspaceCleanupCallerContext(t *testing.T) {
+func TestSandboxCleanupCallerContext(t *testing.T) {
 	t.Parallel()
 	j := NewMemoryJournal()
 	cleanupCheckpoint(t, j, "run", RunCancelled, now().Add(-time.Hour))
 	r := NewRunner(j, nil)
-	policy := WorkspaceCleanupPolicy{CancelledAfter: time.Minute}
+	policy := SandboxCleanupPolicy{CancelledAfter: time.Minute}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	if err := r.CleanupWorkspaces(ctx, policy, func(got context.Context, _ string) (bool, error) {
+	if err := r.CleanupSandboxes(ctx, policy, func(got context.Context, _ string) (bool, error) {
 		if got != ctx {
 			t.Error("callback did not receive caller context")
 		}
@@ -99,7 +99,7 @@ func TestWorkspaceCleanupCallerContext(t *testing.T) {
 		t.Fatalf("cleanup error=%v", err)
 	}
 	calls := 0
-	if err := r.CleanupWorkspaces(context.Background(), policy, func(context.Context, string) (bool, error) {
+	if err := r.CleanupSandboxes(context.Background(), policy, func(context.Context, string) (bool, error) {
 		calls++
 		return false, nil
 	}); err != nil || calls != 1 {
@@ -132,14 +132,14 @@ func (j *cleanupChangedJournal) State(ctx context.Context, id string) (RunState,
 	return j.MemoryJournal.State(ctx, id)
 }
 
-func TestWorkspaceCleanupRechecksState(t *testing.T) {
+func TestSandboxCleanupRechecksState(t *testing.T) {
 	t.Parallel()
 	j := &cleanupChangedJournal{MemoryJournal: NewMemoryJournal()}
 	cleanupCheckpoint(t, j, "run", RunCompleted, now().Add(-time.Hour))
 	r := NewRunner(j, nil)
 	j.runner = r
 	calls := 0
-	if err := r.CleanupWorkspaces(context.Background(), WorkspaceCleanupPolicy{CompletedAfter: time.Minute}, func(context.Context, string) (bool, error) {
+	if err := r.CleanupSandboxes(context.Background(), SandboxCleanupPolicy{CompletedAfter: time.Minute}, func(context.Context, string) (bool, error) {
 		calls++
 		return true, nil
 	}); err != nil || calls != 0 {

@@ -37,7 +37,7 @@ the difference decides whether it is enough for your deployment:
 
 | | Landlock (default) | Docker | Microsandbox |
 |---|---|---|---|
-| Filesystem | **confined** to the run's workspace | container | microVM |
+| Filesystem | **confined** to the run's work directory | container | microVM |
 | Host credentials | **not passed** to commands | not passed | not passed |
 | Network | **open** | open unless a policy is set | policy, incl. allow-list |
 | Kernel | **shared with the host** | shared | own guest kernel |
@@ -115,10 +115,10 @@ Whatever the backend, the host is responsible for the rest:
 This is a real risk, not a hypothetical one, and it has bitten twice. BONNIE's
 own live-model test once ran with host tools and the model wrote a
 `Dockerfile`, a `terraform/` directory, and deployment scripts into the
-repository working directory. Later, with tool calls rooted at the workspace,
+repository working directory. Later, with tool calls rooted at the work directory,
 a live Slack agent ran `find` over its own tree by **absolute path** and read
 `main.go`, `instructions.md`, and `.bonnie/journal.db` — the journal that made
-its own runs durable. Nothing failed and nothing warned either time. A working
+its own runs durable. Nothing failed and nothing warned either time. A work
 directory is a base, not a jail; that is why the sandbox is no longer
 optional.
 

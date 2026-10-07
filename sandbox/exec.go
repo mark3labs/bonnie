@@ -233,7 +233,7 @@ func legacySafeName(prefix, runID string) string {
 // maxNameLen keeps a generated name inside the limits every backend accepts.
 const maxNameLen = 60
 
-// refuseUncheckedLegacy keeps an old lossy workspace from being assigned to
+// refuseUncheckedLegacy keeps an old lossy work directory from being assigned to
 // another run. Old host directories have no identity record, so adoption
 // cannot prove ownership. Plain IDs retain their existing directory names.
 func refuseUncheckedLegacy(root, runID string) error {
@@ -246,9 +246,9 @@ func refuseUncheckedLegacy(root, runID string) error {
 		return nil
 	}
 	if err != nil {
-		return fmt.Errorf("bonnie: sandbox: inspect legacy workspace: %w", err)
+		return fmt.Errorf("bonnie: sandbox: inspect legacy work directory: %w", err)
 	}
-	return fmt.Errorf("%w: legacy workspace %s has no checked run identity; migrate or delete it", ErrPolicyMismatch, old)
+	return fmt.Errorf("%w: legacy work directory %s has no checked run identity; migrate or delete it", ErrPolicyMismatch, old)
 }
 
 // legacyDigestName reserves the old generated suffix too. An old generated

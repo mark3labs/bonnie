@@ -688,7 +688,7 @@ const (
 	// from them.
 	CancelCommand = "/cancel"
 	// ClearCommand drops the conversation from the model's context and keeps
-	// everything else — the same run, the same address, the same workspace.
+	// everything else — the same run, the same address, the same working files.
 	ClearCommand = "/clear"
 	// CompactCommand summarises the conversation so far, now, without
 	// waiting for the context window to fill.

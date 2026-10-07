@@ -152,11 +152,11 @@ func (s *landlockSandbox) execJailed(ctx context.Context, cmd Command, dir *os.F
 
 	// Inherit pinned directories. Resolving s.dir after a rename could grant
 	// another run's files, even though file tools use the original os.Root.
-	workspace, err := s.root.Open(".")
+	workDir, err := s.root.Open(".")
 	if err != nil {
 		return nil, rootError(".", err)
 	}
-	defer func() { _ = workspace.Close() }()
+	defer func() { _ = workDir.Close() }()
 	scratch, err := s.scratch.Open(".")
 	if err != nil {
 		return nil, rootError("scratch", err)
@@ -180,7 +180,7 @@ func (s *landlockSandbox) execJailed(ctx context.Context, cmd Command, dir *os.F
 
 	c := exec.CommandContext(ctx, self)
 	c.Dir = fmt.Sprintf("/proc/%d/fd/%d", os.Getpid(), dir.Fd())
-	c.ExtraFiles = []*os.File{workspace, scratch}
+	c.ExtraFiles = []*os.File{workDir, scratch}
 	c.Env = append(s.childEnv(cmd.Env), control...)
 	return runChild(ctx, c, cmd)
 }

@@ -58,7 +58,7 @@ Commands:
   build    compile an agent tree into one static binary
   init     scaffold a new agent tree
   runs     inspect durable runs
-  sandbox  manage sandbox workspaces
+  sandbox  manage run sandboxes
 
 Planned:
   eval     Run evals against a local or remote agent`,

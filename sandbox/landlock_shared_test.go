@@ -8,13 +8,13 @@ import (
 	"testing"
 )
 
-func TestLandlockSharedWorkspacePersistenceCleanupAndConfinement(t *testing.T) {
+func TestLandlockSharedWorkDirPersistenceCleanupAndConfinement(t *testing.T) {
 	if err := landlockSupported(); err != nil {
 		t.Skipf("Landlock unavailable: %v", err)
 	}
 	ctx := context.Background()
 	base := t.TempDir()
-	shared := filepath.Join(base, "exact-workspace")
+	shared := filepath.Join(base, "exact-workdir")
 	outside := filepath.Join(base, "outside")
 	if err := os.MkdirAll(shared, 0o700); err != nil {
 		t.Fatal(err)
@@ -23,7 +23,7 @@ func TestLandlockSharedWorkspacePersistenceCleanupAndConfinement(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := Landlock(WithLandlockRoot(filepath.Join(base, "unused")), WithLandlockCleanup())
-	if err := p.UseSharedWorkspace(shared); err != nil {
+	if err := p.UseSharedDirectory(shared); err != nil {
 		t.Fatal(err)
 	}
 	first, err := p.Open(ctx, "run-one")
@@ -64,7 +64,7 @@ func TestLandlockSharedWorkspacePersistenceCleanupAndConfinement(t *testing.T) {
 		t.Fatal(err)
 	}
 	if result.ExitCode == 0 {
-		t.Fatal("read outside workspace succeeded")
+		t.Fatal("read outside work directory succeeded")
 	}
 	if err := second.Close(); err != nil {
 		t.Fatal(err)

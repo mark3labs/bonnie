@@ -52,7 +52,7 @@ func (s *listingSandbox) Exec(_ context.Context, cmd Command) (*Result, error) {
 	return &Result{Stdout: "file.txt\n"}, nil
 }
 
-// A model can list the default workspace and paths with shell metacharacters
+// A model can list the default work directory and paths with shell metacharacters
 // on both host-mapped backends. No path can become a shell command.
 func TestListFilesHostMappedBackends(t *testing.T) {
 	t.Parallel()
@@ -177,7 +177,7 @@ func TestLazyOpenerConcurrentRetryAfterCanceledOpen(t *testing.T) {
 }
 
 // Seeded.Open can fail after the backend opens. LazyOpener must retry the
-// seed, not retain that error or expose the workspace before the seed lands.
+// seed, not retain that error or expose the work directory before the seed lands.
 func TestLazyOpenerRetriesTransientSeedFailure(t *testing.T) {
 	t.Parallel()
 	ctx := testCtx(t)

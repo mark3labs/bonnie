@@ -8,10 +8,10 @@ import (
 	"time"
 )
 
-// WorkspaceCleanupPolicy sets how long to keep a workspace after the latest
-// terminal checkpoint. A zero duration keeps the workspace for that state.
+// SandboxCleanupPolicy sets how long to keep a sandbox after the latest
+// terminal checkpoint. A zero duration keeps the sandbox for that state.
 // Durations must not be negative.
-type WorkspaceCleanupPolicy struct {
+type SandboxCleanupPolicy struct {
 	// CompletedAfter is the retention period for completed runs.
 	CompletedAfter time.Duration
 	// FailedAfter is the retention period for failed runs.
@@ -22,7 +22,7 @@ type WorkspaceCleanupPolicy struct {
 	RetiredAfter time.Duration
 }
 
-func (p WorkspaceCleanupPolicy) retention(state RunState) time.Duration {
+func (p SandboxCleanupPolicy) retention(state RunState) time.Duration {
 	switch state {
 	case RunCompleted:
 		return p.CompletedAfter
@@ -37,15 +37,15 @@ func (p WorkspaceCleanupPolicy) retention(state RunState) time.Duration {
 	}
 }
 
-// CleanupWorkspaces deletes workspaces of terminal runs whose retention period
+// CleanupSandboxes deletes sandboxes of terminal runs whose retention period
 // has passed. It skips reserved runs and runs active on this Runner. Waiting,
-// running, and pending runs keep their workspaces.
+// running, and pending runs keep their sandboxes.
 //
 // The delete callback receives the run ID and the caller's context. The caller
 // supplies any timeout. The callback must be safe to repeat: a crash or a failed
 // journal write after deletion can cause another call. Its bool reports whether
-// the workspace existed; either bool with a nil error means it is now absent.
-// A successful call writes RecordWorkspaceDeleted, even for an absent workspace.
+// the sandbox existed; either bool with a nil error means it is now absent.
+// A successful call writes RecordSandboxDeleted, even for an absent sandbox.
 // No further deletion is attempted until a new terminal checkpoint is written.
 // History and run state do not change.
 //
@@ -55,18 +55,18 @@ func (p WorkspaceCleanupPolicy) retention(state RunState) time.Duration {
 //
 // Cleanup continues after per-run errors and returns errors.Join of those errors.
 // Failed deletions and failed journal writes are retried on the next call.
-func (r *Runner) CleanupWorkspaces(ctx context.Context, policy WorkspaceCleanupPolicy, delete func(context.Context, string) (bool, error)) error {
+func (r *Runner) CleanupSandboxes(ctx context.Context, policy SandboxCleanupPolicy, delete func(context.Context, string) (bool, error)) error {
 	for _, d := range []time.Duration{policy.CompletedAfter, policy.FailedAfter, policy.CancelledAfter, policy.RetiredAfter} {
 		if d < 0 {
-			return errors.New("bonnie: workspace cleanup retention must not be negative")
+			return errors.New("bonnie: sandbox cleanup retention must not be negative")
 		}
 	}
 	if delete == nil {
-		return errors.New("bonnie: cleanup workspaces: nil delete callback")
+		return errors.New("bonnie: cleanup sandboxes: nil delete callback")
 	}
 	runs, err := r.journal.Runs(ctx, "")
 	if err != nil {
-		return fmt.Errorf("bonnie: list runs for workspace cleanup: %w", err)
+		return fmt.Errorf("bonnie: list runs for sandbox cleanup: %w", err)
 	}
 	var errs []error
 	for _, runID := range runs {
@@ -77,14 +77,14 @@ func (r *Runner) CleanupWorkspaces(ctx context.Context, policy WorkspaceCleanupP
 			errs = append(errs, err)
 			break
 		}
-		if err := r.cleanupWorkspace(ctx, runID, policy, delete); err != nil {
-			errs = append(errs, fmt.Errorf("bonnie: cleanup workspace %s: %w", runID, err))
+		if err := r.cleanupSandbox(ctx, runID, policy, delete); err != nil {
+			errs = append(errs, fmt.Errorf("bonnie: cleanup sandbox %s: %w", runID, err))
 		}
 	}
 	return errors.Join(errs...)
 }
 
-func (r *Runner) cleanupWorkspace(ctx context.Context, runID string, policy WorkspaceCleanupPolicy, delete func(context.Context, string) (bool, error)) error {
+func (r *Runner) cleanupSandbox(ctx context.Context, runID string, policy SandboxCleanupPolicy, delete func(context.Context, string) (bool, error)) error {
 	// acquire detaches the turn context from caller cancellation. Cleanup must
 	// use ctx instead, so the host can stop or bound a cleanup pass.
 	if _, _, err := r.acquire(ctx, runID); err != nil {
@@ -110,7 +110,7 @@ func (r *Runner) cleanupWorkspace(ctx context.Context, runID string, policy Work
 	// Journal order, not timestamp order, identifies the latest checkpoint.
 	// Later metadata must not extend the retention period.
 	for _, rec := range slices.Backward(recs) {
-		if rec.Kind == RecordWorkspaceDeleted {
+		if rec.Kind == RecordSandboxDeleted {
 			return nil
 		}
 		if rec.Kind != RecordState || !rec.State.IsTerminal() {
@@ -127,7 +127,7 @@ func (r *Runner) cleanupWorkspace(ctx context.Context, runID string, policy Work
 		receiptCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		_, err := r.journal.Append(receiptCtx, Record{
-			RunID: runID, Kind: RecordWorkspaceDeleted, Timestamp: now(),
+			RunID: runID, Kind: RecordSandboxDeleted, Timestamp: now(),
 		})
 		return err
 	}

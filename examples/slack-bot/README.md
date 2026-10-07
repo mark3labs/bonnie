@@ -16,7 +16,7 @@ own agent:
 | `instructions.md` | the system prompt |
 | `main.go` | the `bonnie.New(...)` call: the Slack channel and its activity mode |
 | `bonnie_gen.go` | the wiring `bonnie dev` and `bonnie build` regenerate; do not edit |
-| `skills/`, `workspace/` | the agent's skills and its root for files, empty here |
+| `skills/`, `context/` | the agent's skills and its root for files, empty here |
 | `go.mod`, `go.sum` | pin a released BONNIE |
 
 ## What you need

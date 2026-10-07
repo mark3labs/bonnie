@@ -132,16 +132,16 @@ func TestNoncesDiffer(t *testing.T) {
 	}
 }
 
-func TestResolveAnchorsToWorkspace(t *testing.T) {
+func TestResolveAnchorsToWorkDir(t *testing.T) {
 	t.Parallel()
 	cases := []struct{ in, want string }{
-		{"", Workspace},
-		{"a.txt", Workspace + "/a.txt"},
-		{"sub/a.txt", Workspace + "/sub/a.txt"},
-		{"./a.txt", Workspace + "/a.txt"},
+		{"", WorkDir},
+		{"a.txt", WorkDir + "/a.txt"},
+		{"sub/a.txt", WorkDir + "/sub/a.txt"},
+		{"./a.txt", WorkDir + "/a.txt"},
 		{"/etc/hosts", "/etc/hosts"},
-		{Workspace + "/a.txt", Workspace + "/a.txt"},
-		{"a/../b.txt", Workspace + "/b.txt"},
+		{WorkDir + "/a.txt", WorkDir + "/a.txt"},
+		{"a/../b.txt", WorkDir + "/b.txt"},
 	}
 	for _, c := range cases {
 		if got := Resolve(c.in); got != c.want {
@@ -542,7 +542,7 @@ func TestRenderResultShowsExitCodeOnlyOnFailure(t *testing.T) {
 // isMissingPath does not recognise, so ReadFile returned a bare error instead
 // of ErrNotFound and no caller could tell the two apart. The opposite mistake
 // is worse: "sandbox not found" contains "not found" and so satisfies the
-// generic helper, which would report a vanished workspace to the model as an
+// generic helper, which would report a vanished work directory to the model as an
 // ordinary missing file.
 func TestMsbMissingPathSeparatesAbsentFileFromAbsentSandbox(t *testing.T) {
 	t.Parallel()
@@ -551,7 +551,7 @@ func TestMsbMissingPathSeparatesAbsentFileFromAbsentSandbox(t *testing.T) {
 	if !msbMissingPath("error: stat "+path+"\n", path) {
 		t.Fatal("the real msb wording for an absent path was not recognised")
 	}
-	// A gone workspace is a different failure and must not be flattened
+	// A gone work directory is a different failure and must not be flattened
 	// into ErrNotFound, even though the generic helper matches its wording.
 	if msbMissingPath("error: sandbox not found: bonnie-run-1\n", path) {
 		t.Fatal("an absent sandbox was reported as an absent file")

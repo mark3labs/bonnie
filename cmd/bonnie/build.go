@@ -29,7 +29,7 @@ func newBuildCmd() *cobra.Command {
 		Use:   "build [dir]",
 		Short: "Compile an agent tree into one static binary",
 		Long: `Compile the agent tree at dir into a single static binary: generate the
-tool wiring, embed the instructions, skills, and workspace, and build the
+tool wiring, embed the instructions, skills, and context files, and build the
 module. The output binary serves the agent on a host with no Go toolchain and
 no BONNIE install — the tree graduates into a binary it owns.
 

@@ -10,14 +10,14 @@ import (
 	"github.com/mark3labs/bonnie/sandbox"
 )
 
-func (c *config) configureWorkspaceCleanup(provider sandbox.Provider) error {
-	if c.workspaceCleanup == nil {
+func (c *config) configureSandboxCleanup(provider sandbox.Provider) error {
+	if c.sandboxCleanup == nil {
 		return nil
 	}
-	p := c.workspaceCleanup
+	p := c.sandboxCleanup
 	for _, d := range []time.Duration{p.CompletedAfter, p.FailedAfter, p.CancelledAfter, p.RetiredAfter} {
 		if d < 0 {
-			return fmt.Errorf("bonnie: workspace cleanup retention must not be negative")
+			return fmt.Errorf("bonnie: sandbox cleanup retention must not be negative")
 		}
 	}
 	deleter, ok := provider.(sandbox.RunDeleter)
@@ -26,7 +26,7 @@ func (c *config) configureWorkspaceCleanup(provider sandbox.Provider) error {
 	}
 	if validator, ok := provider.(sandbox.RunCleanupValidator); ok {
 		if err := validator.ValidateRunCleanup(); err != nil {
-			return fmt.Errorf("bonnie: workspace cleanup: %w", err)
+			return fmt.Errorf("bonnie: sandbox cleanup: %w", err)
 		}
 	}
 	c.cleanupProvider = deleter
@@ -39,13 +39,13 @@ func (c *config) cleanupLoop(ctx context.Context, runner *runtime.Runner, interv
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
-		err := runner.CleanupWorkspaces(ctx, *c.workspaceCleanup, func(ctx context.Context, runID string) (bool, error) {
+		err := runner.CleanupSandboxes(ctx, *c.sandboxCleanup, func(ctx context.Context, runID string) (bool, error) {
 			deleteCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 			defer cancel()
 			return c.cleanupProvider.DeleteRun(deleteCtx, runID)
 		})
 		if err != nil && ctx.Err() == nil {
-			slog.Error("bonnie: workspace cleanup failed; will retry", "error", err)
+			slog.Error("bonnie: sandbox cleanup failed; will retry", "error", err)
 		}
 		select {
 		case <-ctx.Done():

@@ -33,7 +33,7 @@ func lifecycleAgent(t *testing.T, opts ...Option) *Agent {
 	t.Helper()
 	return New(append([]Option{
 		WithAgentFactory(stubFactory), WithJournal(t.TempDir()),
-		WithInstructions(""), WithWorkspace(""), Quiet(),
+		WithInstructions(""), WithContextFiles(""), Quiet(),
 		WithShutdownTimeout(time.Second),
 	}, opts...)...)
 }
