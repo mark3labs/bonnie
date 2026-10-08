@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add `schedule.Definition.Run` for durable host callbacks with no agent
+  dispatches. Recovery repeats unsaved results with the same fire ID. Callbacks
+  must be safe to repeat.
 - Store tool intents before execution and recover interrupted calls with an
   explicit replay-safe policy. Unknown external actions are not repeated.
 - Add durable submissions with request-ID deduplication, queued input,

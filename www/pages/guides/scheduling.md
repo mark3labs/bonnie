@@ -5,7 +5,7 @@ description: Define durable cron work, inspect occurrences, and trigger BONNIE s
 
 # Scheduling
 
-BONNIE schedules start durable agent turns from code-defined cron jobs. The operator defines the jobs; the model does not create or edit them. There is no schedule manifest.
+BONNIE schedules start durable agent turns or host callbacks from code-defined cron jobs. The operator defines the jobs; the model does not create or edit them. There is no schedule manifest.
 
 A schedule occurrence is not the same as a conversation. One occurrence can prepare several dispatches. Each dispatch starts or continues agent work, with its own saved result and delivery progress.
 
@@ -40,12 +40,12 @@ Every definition needs:
 
 - A unique, nonempty name with no slash or backslash.
 - A five-field cron expression: minute, hour, day of month, month, day of week.
-- Exactly one of `Prompt` or `Prepare`.
+- Exactly one of `Prompt`, `Prepare`, or `Run`.
 - A valid IANA time zone, or an empty `TimeZone` for UTC.
 
 For example, `0 9 * * *` is daily at 09:00 in the configured zone, and `*/15 * * * *` is every 15 minutes. Do not add a seconds field. Zone rules include daylight-saving changes; local clock times can be absent or repeated. Use UTC when you need a schedule independent of local clock changes. Built binaries include IANA zone data.
 
-An empty `Destination.Channel` starts background work. It uses the normal factory, sandbox, tools, skills, and completion hooks. Inspect its run through the run API or CLI. It does not publish a plain notification automatically.
+For agent dispatches, an empty `Destination.Channel` starts background work. It uses the normal factory, sandbox, tools, skills, and completion hooks. Inspect its run through the run API or CLI. It does not publish a plain notification automatically.
 
 ## Choose missed-fire and overlap behavior
 
@@ -88,11 +88,34 @@ bonnie.WithSchedule(schedule.Definition{
 }),
 ```
 
-`Prepare` runs on the host, not in the sandbox. It must be safe to repeat if the process stops before its dispatches are saved. `Fire.ID` is stable across retries. Use stable keys that are unique within the occurrence. An empty dispatch list produces no work. Scheduled dispatches do not support files in this release.
+`Prepare` runs on the host, not in the sandbox. It must be safe to repeat if the process stops before its dispatches are saved. `Fire.ID` is stable across retries. Use stable keys that are unique within the occurrence. An empty dispatch list with no error sets the occurrence to `Skipped`. Scheduled dispatches do not support files in this release.
 
 Use trusted data sources, timeouts, and context-aware requests. Do not perform a non-idempotent external action in preparation. BONNIE cannot stop a callback that ignores its context.
 
 The default identity is `bonnie:app`, with authenticator `app` and kind `runtime`. A dispatch can supply an authorized principal with `Auth`. Identity does not replace schedule provenance: `Session.CurrentTrigger()` reports the trigger separately from conversation origin and identity. Never construct privileged identity from unverified model input.
+
+## Run host-only work
+
+Use `Run` instead of `Prompt` or `Prepare` for work that needs no agent. Its signature is `func(context.Context, schedule.Fire) error`. This option creates a directory without a model call:
+
+```go
+// Import context, os, path/filepath, bonnie, and schedule.
+bonnie.WithSchedule(schedule.Definition{
+    Name:     "daily-directory",
+    Cron:     "0 9 * * *",
+    Revision: "1",
+    Run: func(ctx context.Context, fire schedule.Fire) error {
+        if err := ctx.Err(); err != nil {
+            return err
+        }
+        return os.MkdirAll(filepath.Join("reports", fire.ID), 0o750)
+    },
+})
+```
+
+`Run` starts no agent dispatches and makes no channel deliveries. A nil error sets the occurrence to `Completed`; an error sets it to `Failed`. A saved failure is not retried. In contrast, `Prepare` with no dispatches and no error produces `Skipped`.
+
+Both callbacks run on the host, outside the agent sandbox. They must respect context cancellation and be safe to repeat. Recovery can repeat a callback if its result was not saved, with the same stable `Fire.ID`. Use that ID to prevent repeated external effects. BONNIE does not guarantee exactly-once execution.
 
 ## Dispatch to a channel
 
