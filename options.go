@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"github.com/mark3labs/bonnie/channel"
 	"github.com/mark3labs/bonnie/channel/discord"
 	"github.com/mark3labs/bonnie/channel/github"
@@ -37,6 +39,7 @@ type ChannelFunc func(*runtime.Runner) (Channel, error)
 // config is the resolved configuration of one [Agent]. Every field has a
 // default from the scaffolded layout; an [Option] replaces one.
 type config struct {
+	commands            []func(*cobra.Command, *Agent)
 	addr                string
 	name                string
 	journal             string
@@ -80,7 +83,7 @@ type config struct {
 	scheduleAuthorizer  func(*http.Request) error
 }
 
-// Option configures [New]. This is where a setting that is not a
+// Option configures [New] or [Agent.Configure]. This is where a setting that is not a
 // file in the tree lives: the model, a sandbox, an extra channel. A setting
 // that does not exist is a compile error, which is the point.
 type Option func(*config)
@@ -95,6 +98,17 @@ func defaults() *config {
 		contextFiles: DefaultContextFiles,
 		shutdown:     30 * time.Second,
 	}
+}
+
+// WithCommand adds a callback that configures the root command used by
+// [Agent.Serve]. Callbacks run in registration order, after the built-in flags
+// and host Go flags are added, but before parsing. They may add flags and
+// subcommands or set Cobra hooks. They do not run in [Agent.Run].
+//
+// To apply parsed flags, call [Agent.Configure] from a pre-run hook. Help runs
+// the registration callbacks, but does not run pre-run hooks or open resources.
+func WithCommand(fn func(*cobra.Command, *Agent)) Option {
+	return func(c *config) { c.commands = append(c.commands, fn) }
 }
 
 // WithAddr binds the HTTP channel to addr instead of [DefaultAddr].

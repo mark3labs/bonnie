@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add `WithCommand` for agent-specific Cobra commands, root flags, and hooks
+  in built binaries. Add `Agent.Configure` for parsed options before startup.
+- Add scoped `Agent.WithJournal` and `Agent.WithRuntime` operations without
+  starting an HTTP server. See `docs/AGENT_COMMANDS.md` for resource rules.
 - Add `schedule.Definition.Run` for durable host callbacks with no agent
   dispatches. Recovery repeats unsaved results with the same fire ID. Callbacks
   must be safe to repeat.
