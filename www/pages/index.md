@@ -9,6 +9,10 @@ toc: false
   <p>Durable agent runs for Go.</p>
 </div>
 
+<img class="bonnie-demo" src="/quick-start.gif" alt="Terminal recording: create a BONNIE agent with openai/gpt-6.1-sol, edit its personality instructions, fetch dependencies, then chat about KITT's mission recovery and turbo-boost approval through bonnie dev." width="1100" height="720" />
+
+Create an agent and join a Knight Rider-themed conversation with `openai/gpt-6.1-sol`. Follow the [Quick start](/quick-start) for the commands.
+
 Build an agent once. Keep its conversation after a process stops. Wait days for a human answer without keeping an agent process running. Connect through HTTP, Slack, Discord, Telegram, GitHub, or NATS.
 
 **BONNIE is early and experimental.** The API can change. No release is proven in production. Do not use it for work whose loss would hurt.

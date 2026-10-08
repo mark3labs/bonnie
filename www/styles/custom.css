@@ -26,6 +26,7 @@ h1 { text-wrap: balance; }
 :focus-visible { outline: 3px solid #ff64cf; outline-offset: 4px; }
 .bonnie-hero { text-align: center; padding: 1.5rem 1rem 2rem; border-bottom: 2px solid #ed21aa; background: radial-gradient(ellipse at top, #1b2352, transparent 75%); }
 .bonnie-hero img { display: block; width: min(100%, 320px); margin: 0 auto 1rem; }
+.bonnie-demo { display: block; width: 100%; height: auto; margin: 1.5rem 0 0.75rem; border: 1px solid #323d60; border-radius: 8px; }
 .bonnie-hero p { font-size: 1.2rem; color: #f4f5ff; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation: none !important; transition: none !important; }

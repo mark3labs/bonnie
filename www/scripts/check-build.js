@@ -13,9 +13,11 @@ for (const id of config.navigation.flatMap((group) => group.pages)) {
     assert(existsSync(`out${match[1]}`), `Missing asset: ${match[1]}`);
   }
 }
-for (const path of ["CNAME", ".nojekyll", "404.html", "logo.png", "favicon.svg", "search.json", "sitemap.xml", "llms.txt", "llms-full.txt"]) {
+for (const path of ["CNAME", ".nojekyll", "404.html", "logo.png", "quick-start.gif", "favicon.svg", "search.json", "sitemap.xml", "llms.txt", "llms-full.txt"]) {
   assert(existsSync(`out/${path}`), `Missing build output: ${path}`);
 }
+assert.equal(readFileSync("out/quick-start.gif").subarray(0, 6).toString(), "GIF89a", "Invalid demo GIF");
+assert(readFileSync("out/assets/" + readdirSync("out/assets").find((path) => path.startsWith("page-") && path.endsWith(".js")), "utf8").includes("/quick-start.gif"), "Home page must include the demo");
 assert.equal(readFileSync("out/CNAME", "utf8").trim(), "go-bonnie.dev");
 const css = readdirSync("out/assets").filter((path) => path.endsWith(".css")).map((path) => readFileSync(`out/assets/${path}`, "utf8")).join("\n");
 assert(css.includes("--bg:#080b20"), "Missing custom navy palette");

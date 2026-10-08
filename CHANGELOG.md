@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add a short VHS recording below the documentation home-page logo. Show agent
+  creation with `openai/gpt-6.1-sol`, a personality edit of `instructions.md`,
+  and a live Knight Rider-themed conversation through `bonnie dev`.
+  Keep the tape and recording script for updates.
 - Add a Tome documentation site in `www` with getting-started guides, channel
   setup, operating procedures, and CLI and Go API references. Use the BONNIE
   artwork's cyan, pink, and navy colors. Validate and publish the static site
