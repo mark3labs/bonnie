@@ -11,6 +11,23 @@ The code and exported godoc define the contract. BONNIE is experimental, pre-1.0
 
 For normal hosting, use `bonnie.New(...).Serve()` or `Agent.Run(ctx)`. They install the managed sandbox, SQLite storage, and HTTP channel. See [Options](/reference/options), [Deployment](/guides/deployment), and [Channels](/channels/overview).
 
+## Scoped agent operations
+
+The root `bonnie.Agent` exposes resources for custom commands without starting a server:
+
+| API | Contract |
+| --- | --- |
+| `Agent.WithJournal(ctx, func(context.Context, runtime.Journal) error)` | Opens and closes the configured SQLite journal. No dotenv, agent files, factory, provider, or server setup. Opening can create storage and apply schema setup; this is not a read-only connection. |
+| `Agent.WithRuntime(ctx, func(context.Context, *bonnie.Runtime) error)` | Prepares the same files, factory, journal, and runner as `Agent.Run`. No HTTP listener, channels, scheduler, or background cleanup starts. |
+| `Runtime.Journal()` | Returns the callback's journal. Do not close it. |
+| `Runtime.Runner()` | Returns the callback's configured runner. |
+
+Do not retain these resources after the callback. Wait for all operations and goroutines before returning. Callback, context cancellation, and close errors are returned together. Nil callbacks fail without opening resources. Hosts outside `Serve` must supply their own signal-aware context.
+
+The caller manages any `Runner.RunScheduler` explicitly: start it, cancel it, and wait for it within the callback. Only one scheduler may own a journal at a time. Do not drive runs in a journal already owned by a serving process; use the HTTP API for live-server operations. Start and Resume have the cancellation rules described below.
+
+See [Agent Commands](/guides/agent-commands) for command registration and a complete inspection example.
+
 ## Execution interfaces
 
 `runtime.Agent` has three methods:

@@ -103,7 +103,9 @@ Generic serve has no GitHub, NATS, HTTP authentication, automatic cleanup, or sc
 
 ## Compiled-agent flags
 
-An agent that calls `Agent.Serve()` registers these framework flags. A host can register additional Go flags before Serve; existing names are retained.
+An agent that calls `Agent.Serve()` registers these framework flags. A host can register additional Go flags before Serve; existing names are retained. Use `WithCommand` to add Cobra root flags, persistent flags, subcommands, and hooks. `bonnie build` includes them in the agent binary, not in the developer `bonnie` CLI. See [Agent Commands](/guides/agent-commands).
+
+Keep the root serving action and `-addr` support for `bonnie dev`. Apply parsed custom options with `Agent.Configure` in a pre-run hook. Inspection commands can use `Agent.WithJournal`; execution commands can use `Agent.WithRuntime` without starting HTTP.
 
 | Flag | Registered default | Meaning |
 | --- | --- | --- |

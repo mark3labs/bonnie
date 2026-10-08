@@ -5,7 +5,7 @@ description: All BONNIE root options, their defaults, validation rules, and mana
 
 # Options
 
-Import `github.com/mark3labs/bonnie`. Pass `bonnie.Option` values to `bonnie.New(opts...)`.
+Import `github.com/mark3labs/bonnie`. Pass `bonnie.Option` values to `bonnie.New(opts...)` or `Agent.Configure(opts...)` before resource setup.
 
 `New` returns `*bonnie.Agent` without opening files, checking backends, or binding a listener. Invalid combinations fail when execution starts. `Agent.Serve()` owns flags, signals, help, and process exit. `Agent.Run(ctx)` returns an error and does not read process flags or install signal handlers.
 
@@ -92,6 +92,16 @@ The hook is skipped on suspension and model failure. Hook errors fail the run. A
 It cannot be combined with `WithModel`, `WithSystemPrompt`, `WithSandbox`, `WithSandboxes`, `WithSandboxEnv`, `WithNetwork`, `WithTools`, `WithKit`, `WithoutHumanInput`, `WithKitSetup`, `WithCompletionHook`, or `WithRunSandboxCleanup`. BONNIE refuses agent settings that it would otherwise ignore.
 
 Tree instructions, skills, and generated tools do not automatically reach the custom factory. Use `Registered()` if the host needs them. BONNIE still owns journal storage, working files, channels, and shutdown. The host owns its agent's isolation.
+
+## Command configuration
+
+`WithCommand(fn func(*cobra.Command, *Agent))` appends a root command configuration callback. Callbacks run in registration order after BONNIE adds its built-in and host Go flags, but before argument parsing. They run only in `Serve`, not in `Run`. Add custom flags, subcommands, and Cobra hooks here.
+
+Use `Agent.Configure(opts ...Option)` from a pre-run hook to apply parsed values. It keeps the option replacement, additive, and validation rules. It opens no resources. Do not call it concurrently or to change a live agent. Explicit built-in serving flags override matching options before `Run` starts.
+
+Use `cmd.Context()` for blocking operations. A context set in a pre-run hook reaches `Agent.Run`. Setting a hook replaces the existing hook unless you explicitly chain it. Help runs registration callbacks, but not pre-run hooks.
+
+See [Agent Commands](/guides/agent-commands) for a complete example and scoped journal and runner access.
 
 ## HTTP and process hosting
 
