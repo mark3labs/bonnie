@@ -101,6 +101,8 @@ func TestRenderedComponents(t *testing.T) {
 				}
 				check(find("data-slot", "separator"), "aria-orientation", "horizontal")
 				check(find("data-slot", "table-head"), "scope", "col")
+				// State tags take their color from data-state, not from the variant.
+				check(find("data-state", string(runtime.RunWaiting)), "data-slot", "badge")
 			case "trace":
 				check(find("id", "trace-filter"), "value", v.Filter)
 				check(find("id", "trace-filter"), "data-ignore-morph", "")

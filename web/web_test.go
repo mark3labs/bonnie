@@ -258,6 +258,14 @@ func TestLocalAssets(t *testing.T) {
 	if got := pretty(json.RawMessage("bad <script>")); got != "bad <script>" {
 		t.Fatal("invalid payload was lost")
 	}
+	// The logo is embedded at two sizes: 64px for the favicon and the 32px
+	// header mark, 320px for the 160px welcome image. Both at 2x density.
+	for _, path := range []string{"logo-64.png", "logo-320.png"} {
+		w := request(h, "GET", "/web/assets/"+path, nil, nil)
+		if w.Code != 200 || w.Header().Get("Content-Type") != "image/png" {
+			t.Fatalf("asset %s: %d %s", path, w.Code, w.Header().Get("Content-Type"))
+		}
+	}
 }
 
 // Suspension controls retain the durable turn ID and show explicit decisions.

@@ -47,13 +47,14 @@ templ page(v view) {
 			<meta charset="utf-8"/>
 			<meta name="viewport" content="width=device-width, initial-scale=1"/>
 			<title>BONNIE · Chat</title>
+			<link rel="icon" type="image/png" href="/web/assets/logo-64.png"/>
 			<link rel="stylesheet" href="/web/assets/web.css"/>
 			<script type="module" src="/web/assets/datastar.js"></script>
 			<script defer src="/web/assets/web.js"></script>
 		</head>
 		<body data-view={ v.View }>
 			<header>
-				<a href="/web/">BONNIE</a>
+				<a href="/web/" class="brand"><img class="brand-logo" src="/web/assets/logo-64.png" width="32" height="32" alt=""/>BONNIE</a>
 				<nav aria-label="Views" class="view-nav">
 					@button.Button(button.Props{Href: viewURL("chat", v.ID), Variant: button.VariantOutline, Attributes: templ.Attributes{"aria-current": currentView(v, "chat")}}) {
 						Chat 
@@ -64,10 +65,11 @@ templ page(v view) {
 					@button.Button(button.Props{Href: viewURL("trace", v.ID), Variant: button.VariantOutline, Attributes: templ.Attributes{"aria-current": currentView(v, "trace")}}) {
 						Trace 
 					}
-					@button.Button(button.Props{Href: "/web/", Variant: button.VariantOutline, Attributes: templ.Attributes{"id": "new-chat"}}) {
-						New chat 
-					}
 				</nav>
+				@button.Button(button.Props{Href: "/web/", Variant: button.VariantOutline, Class: "new-chat", Attributes: templ.Attributes{"id": "new-chat"}}) {
+					@icon("M12 5v14M5 12h14")
+					New chat
+				}
 				<span id="connection-status" class="connection" role="status" aria-live="polite" data-state="connecting">Connecting…</span>
 			</header>
 			<main>
@@ -77,6 +79,18 @@ templ page(v view) {
 			</main>
 		</body>
 	</html>
+}
+
+// icon draws one decorative stroke icon. Screen readers use the button text.
+templ icon(path string) {
+	<svg class="icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d={ path }></path></svg>
+}
+
+// stateBadge colors a run state through its data-state attribute.
+templ stateBadge(state string, variant badge.Variant) {
+	@badge.Badge(badge.Props{Variant: variant, Attributes: templ.Attributes{"data-state": state}}) {
+		{ state }
+	}
 }
 
 templ hidden(v view) {
@@ -110,9 +124,7 @@ templ panel(v view) {
 											<a href={ templ.SafeURL(viewURL("runs", run.ID)) } aria-current={ fmt.Sprint(run.ID == v.ID) }><code>{ run.ID }</code></a>
 										}
 										@table.Cell() {
-											@badge.Badge(badge.Props{Variant: badge.VariantSecondary}) {
-												{ string(run.State) }
-											}
+											@stateBadge(string(run.State), badge.VariantSecondary)
 										}
 									}
 								}
@@ -123,10 +135,11 @@ templ panel(v view) {
 			}
 			if v.ID != "" {
 				@consoleCard(v.ID, "Clear removes model context, not the journal. Reset closes the run for good.", false) {
-					@badge.Badge() {
-						{ string(v.Snapshot.State) }
-					}
-					<p><a href={ templ.SafeURL(runURL(v.ID)) }>Open chat</a> · <a href={ templ.SafeURL(viewURL("trace", v.ID)) }>Open trace</a></p>
+					<div class="run-summary">
+						@stateBadge(string(v.Snapshot.State), badge.VariantDefault)
+						<a href={ templ.SafeURL(runURL(v.ID)) }>Open chat</a>
+						<a href={ templ.SafeURL(viewURL("trace", v.ID)) }>Open trace</a>
+					</div>
 					@separator.Separator()
 					<h2>Run controls</h2>
 					<p class="muted">Clear removes messages from model context, not the journal. Reset closes the run for good.</p>
@@ -152,16 +165,18 @@ templ panel(v view) {
 				}
 			} else {
 				@consoleCard("Journal trace", "Append-only history, including old branches. Search matches sequence, role, kind, state, text, and payload.", false) {
-					<form method="get" action="/web/">
+					<form method="get" action="/web/" class="trace-filter">
 						<input type="hidden" name="run" value={ v.ID }/>
 						<input type="hidden" name="view" value="trace"/>
 						@label.Label(label.Props{For: "trace-filter"}) {
 							Filter 
 						}
-						@input.Input(input.Props{ID: "trace-filter", Name: "filter", Value: v.Filter, Placeholder: "tool, state, error…", Attributes: templ.Attributes{"data-ignore-morph": true}})
-						@button.Button(button.Props{Type: button.TypeSubmit, Variant: button.VariantOutline}) {
-							Filter 
-						}
+						<div class="filter-row">
+							@input.Input(input.Props{ID: "trace-filter", Name: "filter", Value: v.Filter, Placeholder: "tool, state, error…", Attributes: templ.Attributes{"data-ignore-morph": true}})
+							@button.Button(button.Props{Type: button.TypeSubmit, Variant: button.VariantOutline}) {
+								Filter
+							}
+						</div>
 					</form>
 					@table.Table(table.Props{Class: "trace-table", Attributes: templ.Attributes{"aria-label": "Journal records"}}) {
 						@table.Header() {
@@ -239,15 +254,13 @@ templ panel(v view) {
 				<div class="chat-heading">
 					<h1><span class="muted" aria-hidden="true"># </span>{ chatTitle(v) }</h1>
 					if v.ID != "" {
-						@badge.Badge(badge.Props{Variant: badge.VariantSecondary}) {
-							{ string(v.Snapshot.State) }
-						}
+						@stateBadge(string(v.Snapshot.State), badge.VariantSecondary)
 						<a class="muted" href={ templ.SafeURL(viewURL("runs", v.ID)) }>Run details</a>
 					}
 				</div>
 				<div id="transcript" class="transcript" role="region" aria-label="Messages" tabindex="0">
 					if v.ID == "" {
-						<div class="welcome"><h2>How can I help?</h2><p class="muted">Send a message to start a new chat.</p></div>
+						<div class="welcome"><img class="welcome-logo" src="/web/assets/logo-320.png" width="160" height="160" alt=""/><h2>How can I help?<span class="cursor" aria-hidden="true"></span></h2><p class="muted">Send a message to start a new chat. Each run is durable: it continues after a crash.</p></div>
 					} else {
 						for i, msg := range v.Messages {
 							<article class="message" data-role={ msg.Role }>
@@ -324,7 +337,7 @@ templ panel(v view) {
 						if v.ID == "" {
 							<span class="muted">New chat · no run yet</span>
 						} else {
-							<span class="muted">Run: { string(v.Snapshot.State) }</span>
+							<span class="muted">Run: <span data-state={ string(v.Snapshot.State) }>{ string(v.Snapshot.State) }</span></span>
 						}
 						if canStop(v) {
 							<form id="stop-form" method="post" action="/web/actions/cancel" class="action">
@@ -344,9 +357,10 @@ templ panel(v view) {
 							}
 							@textarea.Textarea(textarea.Props{ID: "start-text", Name: "text", Rows: 2, Placeholder: "Ask the agent a question", Attributes: templ.Attributes{"required": true, "data-ignore-morph": true}})
 							<div class="composer-footer">
-								<span class="muted">Ctrl+Enter to send</span>
+								<span class="muted"><kbd>Ctrl</kbd> + <kbd>Enter</kbd> to send</span>
 								@button.Button(button.Props{Type: button.TypeSubmit, Disabled: !canSend(v)}) {
-									Send 
+									Send
+									@icon("M5 12h14M13 6l6 6-6 6")
 								}
 							</div>
 						</form>
@@ -358,9 +372,10 @@ templ panel(v view) {
 							}
 							@textarea.Textarea(textarea.Props{ID: "send-text", Name: "text", Rows: 2, Placeholder: "Message the agent", Attributes: templ.Attributes{"required": true, "data-ignore-morph": true}})
 							<div class="composer-footer">
-								<span class="muted">Ctrl+Enter to send</span>
+								<span class="muted"><kbd>Ctrl</kbd> + <kbd>Enter</kbd> to send</span>
 								@button.Button(button.Props{Type: button.TypeSubmit, Disabled: !canSend(v)}) {
-									Send 
+									Send
+									@icon("M5 12h14M13 6l6 6-6 6")
 								}
 							</div>
 						</form>

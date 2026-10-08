@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Restyle the web UI as a flat, matte terminal: monospaced text, square
+  corners, and no shadows or gradients. Add the BONNIE logo to the header,
+  favicon, and new-chat screen. Add tabbed view navigation, colored run-state
+  tags, a composer that grows with the draft, and a transcript that follows new
+  messages. Clear and reset show as destructive actions. The palette does not
+  change.
+
 ### Fixed
 
 - Resolve the journal-local Microsandbox runtime during sandbox prune, without

@@ -44,7 +44,7 @@ document.addEventListener('submit', async (event) => {
       }
     }
     // Do not clear a new draft typed while the request was in progress.
-    if (message && message.value === submittedText) message.value = '';
+    if (message && message.value === submittedText) { message.value = ''; fitComposer(message); }
   } catch (error) {
     status.textContent = error.message || 'Request failed. Check the journal before you retry.';
   } finally {
@@ -52,6 +52,36 @@ document.addEventListener('submit', async (event) => {
     buttons.forEach(button => { button.disabled = false; });
   }
 });
+
+// The composer grows with its draft up to the CSS max-height. The textarea
+// has data-ignore-morph, so a live patch does not reset the inline height.
+const composerIDs = ['start-text', 'send-text'];
+function fitComposer(input) {
+  input.style.height = 'auto';
+  input.style.height = `${input.scrollHeight}px`;
+}
+document.addEventListener('input', (event) => {
+  if (event.target instanceof HTMLTextAreaElement && composerIDs.includes(event.target.id)) fitComposer(event.target);
+});
+
+// Keep the transcript at the newest message while the reader is at the end.
+// A reader who scrolls up to read history stays where they are.
+let followTranscript = true;
+let autoScrollUntil = 0;
+const toEnd = (behavior) => {
+  const transcript = document.getElementById('transcript');
+  if (!transcript) return;
+  autoScrollUntil = Date.now() + 600;
+  transcript.scrollTo({ top: transcript.scrollHeight, behavior });
+};
+document.addEventListener('scroll', (event) => {
+  const el = event.target;
+  if (!(el instanceof HTMLElement) || el.id !== 'transcript' || Date.now() < autoScrollUntil) return;
+  followTranscript = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+}, true);
+new MutationObserver(() => { if (followTranscript) toEnd('smooth'); })
+  .observe(document.querySelector('main') || document.body, { childList: true, subtree: true });
+toEnd('instant');
 
 // Plain Enter keeps a newline. Ctrl+Enter uses native form validation and Send.
 document.addEventListener('keydown', (event) => {

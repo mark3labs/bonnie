@@ -187,7 +187,7 @@ func TestChatStructureAndState(t *testing.T) {
 			t.Fatal(err)
 		}
 		html := b.String()
-		if !strings.Contains(html, `# </span>&lt;run&gt;`) || !strings.Contains(html, "Run: "+string(state)) || !strings.Contains(html, "Ctrl+Enter to send") {
+		if !strings.Contains(html, `# </span>&lt;run&gt;`) || !strings.Contains(html, fmt.Sprintf(`Run: <span data-state="%s">%s</span>`, state, state)) || !strings.Contains(html, "<kbd>Ctrl</kbd> + <kbd>Enter</kbd> to send") {
 			t.Fatalf("structure: %s", html)
 		}
 		if strings.Contains(html, `id="stop-form"`) != canStop(v) {

@@ -4,9 +4,19 @@
 Mount it at `/web` and `/web/`. Mount the HTTP channel at its normal API paths.
 The host owns the runner and journal. The UI does not close either resource.
 
-The default `/web/` page is chat, not a management console. The chat uses a compact, terminal-style layout, up to 1100px wide. The transcript
-scrolls above a full-width composer. Chat text is monospaced. User messages have
-a subtle surface and a blue left rule. Assistant Markdown has no surrounding box.
+The default `/web/` page is chat, not a management console. The look is flat
+and matte, like the terminal UI: monospaced text, square corners, solid fills,
+and 1px rules. There is no shadow, gradient, blur, or rounded edge; the browser
+E2E test checks each element of the chat view for this. A sticky header holds
+the logo, a tabbed view switch, and the connection status. The chat is a
+centered column, up to 960px wide. The transcript scrolls above a bordered
+composer that grows with the draft. The composer label is visually hidden but
+stays the accessible name. User messages have a card surface, a blue left rule,
+and a `>` prompt. Assistant messages have a brand-color block marker and no
+surrounding box. The transcript follows new messages while the reader is at
+the end, and stops following when the reader scrolls up. Run states show as
+colored square tags (`data-state`). Blinking cursors stop when the reader
+prefers reduced motion.
 The compact session heading shows `#` and the run ID, or `New chat`. The current
 snapshot API has no title metadata, so the UI does not infer a title. It does not
 show model, token, or cost estimates. Send the first message
@@ -112,7 +122,8 @@ checks WCAG AA text contrast (4.5:1), focus and control borders (3:1), and a
 small, nonzero stripe luminance difference in both modes. Chromium E2E checks
 the applied brand, button, focus, page, stripe, and turn-header colors in both
 modes. Sequence parity keeps trace stripes stable during filtering and updates.
-Chat layout changes use these same palette variables; the palette values do not change.
+Layout rules use these palette variables, or `color-mix()` of them for tints;
+the palette values do not change.
 
 ## Live updates
 
@@ -181,6 +192,18 @@ expanded payloads need no row-toggle script. Turn separators are not striped.
 Rendering is serialized because that release's shared class-merger cache is not
 concurrency-safe.
 
+`assets/logo-64.png` (favicon and the 32px header mark) and
+`assets/logo-320.png` (the 160px welcome image) are the repository `logo.png`,
+scaled for 2x displays and reduced to a 256-color palette. Regenerate them
+after a logo change:
+
+```sh
+for s in 64 320; do
+  magick logo.png -filter Lanczos -resize ${s}x${s} -strip -colors 256 \
+    -define png:compression-level=9 PNG8:web/assets/logo-$s.png
+done
+```
+
 `assets/datastar.js` is the actual Datastar v1.0.4 release bundle from:
 
 https://raw.githubusercontent.com/starfederation/datastar/v1.0.4/bundles/datastar.js
@@ -208,7 +231,7 @@ options, turn IDs, escaping, and morph attributes for approval, choice, and
 free-text forms. The live-state browser test also preserves an approval
 selection and note across a patch.
 
-The full flow checks first-message run creation, separate view navigation, terminal chat structure, narrow-screen layout, Markdown, Ctrl+Enter, followup context, real SSE
+The full flow checks first-message run creation, separate view navigation, chat structure, narrow-screen layout, Markdown, Ctrl+Enter, followup context, real SSE
 patches without page navigation, draft and disclosure preservation, trace
 filtering, clear, reset, approval with resume, tool summaries and expansion across
 resume, and Stop on a running turn. It checks native validation,
