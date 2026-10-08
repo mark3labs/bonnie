@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add `schedule.Definition.Run` for durable host callbacks with no agent
+  dispatches. Recovery repeats unsaved results with the same fire ID. Callbacks
+  must be safe to repeat.
 - Add `bonnie runs inspect [run-id]` for read-only terminal inspection of a
   local journal. Use Bubbles for run filtering, detail scrolling, loading,
   and keyboard help. Show record payloads on demand and refresh live runs.

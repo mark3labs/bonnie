@@ -99,7 +99,7 @@ Ordinary chat delivery is asynchronous and best-effort. A webhook ACK is not a c
 
 ## Scheduled channel work
 
-Schedules are code-defined jobs, not another transport. Slack, Discord, Telegram, and GitHub support tracked schedule delivery. NATS does not support tracked schedule destinations. An empty destination starts a background run.
+Schedules are code-defined jobs, not another transport. Slack, Discord, Telegram, and GitHub support tracked schedule delivery. NATS does not support tracked schedule destinations. For agent dispatches, an empty destination starts a background run.
 
 ```go
 // Import github.com/mark3labs/bonnie/schedule and mount Slack too.
@@ -116,7 +116,11 @@ bonnie.WithSchedule(schedule.Definition{
 })
 ```
 
-Definitions need a unique name, five-field cron expression, and exactly one of `Prompt` or `Prepare`. Time is UTC by default. `Prepare` runs in the host and must be safe to repeat until its dispatches are saved. Waiting work blocks new occurrences with the default overlap policy, `skip`. `CatchUp: "latest"` can run the latest missed occurrence when prior cron history exists; it does not run every missed occurrence.
+Definitions need a unique name, five-field cron expression, and exactly one of `Prompt`, `Prepare`, or `Run`. Time is UTC by default. `Run` has signature `func(context.Context, schedule.Fire) error` and starts no agent dispatches or channel deliveries. A nil error sets the occurrence to `Completed`; an error sets it to `Failed`. An empty `Prepare` result with no error sets it to `Skipped`.
+
+`Prepare` and `Run` execute on the host, outside the sandbox. Both must respect context cancellation and be safe to repeat until their results are saved. Recovery uses the same stable `Fire.ID`; use it to prevent repeated external effects. BONNIE does not guarantee exactly-once execution. See [Scheduling](/guides/scheduling) for a host-only example.
+
+Waiting work blocks new occurrences with the default overlap policy, `skip`. `CatchUp: "latest"` can run the latest missed occurrence when prior cron history exists; it does not run every missed occurrence.
 
 Slack opens a new thread with public root text `Scheduled task`, not the private prompt. The other tracked adapters continue the destination's bound conversation. GitHub needs an installation ID for this use. Scheduled dispatches do not support files.
 

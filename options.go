@@ -364,7 +364,8 @@ func Quiet() Option {
 	return func(c *config) { c.quiet = true }
 }
 
-// WithSchedule adds durable time-based dispatch definitions.
+// WithSchedule adds durable time-based agent dispatch or host callback definitions.
+// Host callbacks must be safe to repeat. See schedule.Definition.
 func WithSchedule(definitions ...schedule.Definition) Option {
 	definitions = append([]schedule.Definition(nil), definitions...)
 	return func(c *config) { c.schedules = append(c.schedules, definitions...) }
