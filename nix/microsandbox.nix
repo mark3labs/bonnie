@@ -18,21 +18,22 @@
 }:
 
 let
-  version = "0.6.18";
+  version = "0.7.7";
 
-  # sha256 values come from the release checksums.sha256 asset.
+  # Keep this release and its archive hashes aligned with
+  # sandbox/microsandbox_install.go.
   sources = {
     "x86_64-linux" = {
       asset = "microsandbox-linux-x86_64.tar.gz";
-      hash = "sha256-sAGzxrmAqx/8zrgXSWZIwVINuja54MqsN+qNL0rNm90=";
+      hash = "sha256-s8xKXj9S392Tim9nrEqalZ3f4wS6tW3klkBEuGE/Abs=";
     };
     "aarch64-linux" = {
       asset = "microsandbox-linux-aarch64.tar.gz";
-      hash = "sha256-5TCY52Af3dha9+lD1K89Q3Cs4nbZ6GOolFYzjy0HbRs=";
+      hash = "sha256-iZex6nbeWGifttD6ezKvb76MvCRhLaQLFopbQzx9gxg=";
     };
     "aarch64-darwin" = {
       asset = "microsandbox-darwin-aarch64.tar.gz";
-      hash = "sha256-HoxAhZFCzTj7mbMBvbH7QJWphaQGXQgPmbOj58uaYwU=";
+      hash = "sha256-7tX6oWIXrTda2eSrXoGWVrrquMzeDTq355xK9JMZ1AM=";
     };
   };
 
