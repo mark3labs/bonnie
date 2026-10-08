@@ -50,7 +50,7 @@ func TestServeCommandHelp(t *testing.T) {
 			if err := cmd.ExecuteContext(t.Context()); err != nil {
 				t.Fatal(err)
 			}
-			for _, want := range []string{tc.want, "--addr", "--model", "--sandbox"} {
+			for _, want := range []string{tc.want, "--addr", "--model", "--sandbox", "--web"} {
 				if !strings.Contains(output.String(), want) {
 					t.Errorf("help does not contain %q: %s", want, &output)
 				}

@@ -269,6 +269,18 @@ func (c *Channel) Routes() []channel.Route {
 	return routes
 }
 
+// Protect applies the channel's authenticator to a related HTTP handler.
+// It uses the same refusal status and verified request identity as API routes.
+// With no authenticator, requests proceed unattributed. The handler must not
+// treat authentication as per-run authorization; this channel has no such policy.
+func (c *Channel) Protect(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if c.authenticate(w, r) {
+			next.ServeHTTP(w, r)
+		}
+	})
+}
+
 // guard wraps one route handler in the configured [Authenticator].
 func (c *Channel) guard(next channel.RouteHandler) channel.RouteHandler {
 	return func(w http.ResponseWriter, r *http.Request, in channel.Inbound, out channel.Outbound) {

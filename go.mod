@@ -7,6 +7,8 @@ require (
 	charm.land/bubbletea/v2 v2.0.10
 	charm.land/fantasy v0.45.2
 	charm.land/lipgloss/v2 v2.0.6
+	github.com/a-h/templ v0.3.1070
+	github.com/axadrn/shadcn-templ/v2 v2.0.0-beta.13
 	github.com/charmbracelet/fang v1.0.0
 	github.com/charmbracelet/log v1.0.0
 	github.com/fsnotify/fsnotify v1.10.1
@@ -29,6 +31,7 @@ require (
 	cloud.google.com/go/auth v0.24.0 // indirect
 	cloud.google.com/go/auth/oauth2adapt v0.3.0 // indirect
 	cloud.google.com/go/compute/metadata v0.10.0 // indirect
+	github.com/Oudwins/tailwind-merge-go v0.2.2 // indirect
 	github.com/anthropics/anthropic-sdk-go v1.78.0 // indirect
 	github.com/antithesishq/antithesis-sdk-go v0.4.3-default-no-op // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
@@ -143,7 +146,6 @@ require (
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
 	golang.org/x/time v0.16.0 // indirect
-	golang.org/x/tools v0.51.0 // indirect
 	google.golang.org/api v0.300.0 // indirect
 	google.golang.org/genai v1.72.0 // indirect
 	google.golang.org/genproto v0.0.0-20260928230214-8a89bd6388cc // indirect

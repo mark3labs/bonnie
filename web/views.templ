@@ -1,0 +1,372 @@
+package web
+
+import (
+	"fmt"
+	"time"
+
+	"github.com/axadrn/shadcn-templ/v2/components/badge"
+	"github.com/axadrn/shadcn-templ/v2/components/button"
+	"github.com/axadrn/shadcn-templ/v2/components/card"
+	"github.com/axadrn/shadcn-templ/v2/components/input"
+	"github.com/axadrn/shadcn-templ/v2/components/label"
+	"github.com/axadrn/shadcn-templ/v2/components/nativeselect"
+	"github.com/axadrn/shadcn-templ/v2/components/separator"
+	"github.com/axadrn/shadcn-templ/v2/components/table"
+	"github.com/axadrn/shadcn-templ/v2/components/textarea"
+)
+
+// consoleCard keeps a section and a real heading around the library's div-based card.
+templ consoleCard(title, description string, primary bool) {
+	<section>
+		@card.Card() {
+			@card.Header() {
+				@card.Title() {
+					if primary {
+						<h1>{ title }</h1>
+					} else {
+						<h2>{ title }</h2>
+					}
+				}
+				if description != "" {
+					@card.Description() {
+						{ description }
+					}
+				}
+			}
+			@card.Content() {
+				{ children... }
+			}
+		}
+	</section>
+}
+
+templ page(v view) {
+	<!DOCTYPE html>
+	<html lang="en">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<title>BONNIE · Chat</title>
+			<link rel="stylesheet" href="/web/assets/web.css"/>
+			<script type="module" src="/web/assets/datastar.js"></script>
+			<script defer src="/web/assets/web.js"></script>
+		</head>
+		<body data-view={ v.View }>
+			<header>
+				<a href="/web/">BONNIE</a>
+				<nav aria-label="Views" class="view-nav">
+					@button.Button(button.Props{Href: viewURL("chat", v.ID), Variant: button.VariantOutline, Attributes: templ.Attributes{"aria-current": currentView(v, "chat")}}) {
+						Chat 
+					}
+					@button.Button(button.Props{Href: viewURL("runs", v.ID), Variant: button.VariantOutline, Attributes: templ.Attributes{"aria-current": currentView(v, "runs")}}) {
+						Runs 
+					}
+					@button.Button(button.Props{Href: viewURL("trace", v.ID), Variant: button.VariantOutline, Attributes: templ.Attributes{"aria-current": currentView(v, "trace")}}) {
+						Trace 
+					}
+					@button.Button(button.Props{Href: "/web/", Variant: button.VariantOutline, Attributes: templ.Attributes{"id": "new-chat"}}) {
+						New chat 
+					}
+				</nav>
+				<span id="connection-status" class="connection" role="status" aria-live="polite" data-state="connecting">Connecting…</span>
+			</header>
+			<main>
+				<div id="live-connection" data-init={ fmt.Sprintf("@get(%q, {openWhenHidden: true, retry: 'always'})", liveURL(v)) }></div>
+				@panel(v)
+				<p id="action-status" role="status" aria-live="polite"></p>
+			</main>
+		</body>
+	</html>
+}
+
+templ hidden(v view) {
+	<input type="hidden" name="csrf" value={ v.Token }/>
+	<input type="hidden" name="run" value={ v.ID }/>
+}
+
+templ panel(v view) {
+	<div id="live-panel" class={ "view-" + v.View }>
+		if v.View == "runs" {
+			@consoleCard("Runs", "", false) {
+				<nav aria-label="Runs" class="runs">
+					if len(v.Runs) == 0 {
+						<p class="muted">No runs yet.</p>
+					} else {
+						@table.Table() {
+							@table.Header() {
+								@table.Row() {
+									@table.Head(table.HeadProps{Attributes: templ.Attributes{"scope": "col"}}) {
+										Run 
+									}
+									@table.Head(table.HeadProps{Attributes: templ.Attributes{"scope": "col"}}) {
+										State 
+									}
+								}
+							}
+							@table.Body() {
+								for _, run := range v.Runs {
+									@table.Row() {
+										@table.Cell() {
+											<a href={ templ.SafeURL(viewURL("runs", run.ID)) } aria-current={ fmt.Sprint(run.ID == v.ID) }><code>{ run.ID }</code></a>
+										}
+										@table.Cell() {
+											@badge.Badge(badge.Props{Variant: badge.VariantSecondary}) {
+												{ string(run.State) }
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+				</nav>
+			}
+			if v.ID != "" {
+				@consoleCard(v.ID, "Clear removes model context, not the journal. Reset closes the run for good.", false) {
+					@badge.Badge() {
+						{ string(v.Snapshot.State) }
+					}
+					<p><a href={ templ.SafeURL(runURL(v.ID)) }>Open chat</a> · <a href={ templ.SafeURL(viewURL("trace", v.ID)) }>Open trace</a></p>
+					@separator.Separator()
+					<h2>Run controls</h2>
+					<p class="muted">Clear removes messages from model context, not the journal. Reset closes the run for good.</p>
+					<div class="controls">
+						for _, action := range []string{"cancel", "compact", "clear", "reset"} {
+							<form method="post" action={ templ.SafeURL("/web/actions/" + action) } class="action" data-confirm={ action }>
+								@hidden(v)
+								<input type="hidden" name="turn" value={ v.Snapshot.TurnID }/>
+								@button.Button(button.Props{Type: button.TypeSubmit, Variant: button.VariantOutline}) {
+									{ action }
+								}
+							</form>
+						}
+					</div>
+				}
+			}
+		} else if v.View == "trace" {
+			if v.ID == "" {
+				@consoleCard("Journal trace", "Select a run to inspect its journal.", true) {
+					@button.Button(button.Props{Href: viewURL("runs", ""), Variant: button.VariantOutline}) {
+						Choose run 
+					}
+				}
+			} else {
+				@consoleCard("Journal trace", "Append-only history, including old branches. Search matches sequence, role, kind, state, text, and payload.", false) {
+					<form method="get" action="/web/">
+						<input type="hidden" name="run" value={ v.ID }/>
+						<input type="hidden" name="view" value="trace"/>
+						@label.Label(label.Props{For: "trace-filter"}) {
+							Filter 
+						}
+						@input.Input(input.Props{ID: "trace-filter", Name: "filter", Value: v.Filter, Placeholder: "tool, state, error…", Attributes: templ.Attributes{"data-ignore-morph": true}})
+						@button.Button(button.Props{Type: button.TypeSubmit, Variant: button.VariantOutline}) {
+							Filter 
+						}
+					</form>
+					@table.Table(table.Props{Class: "trace-table", Attributes: templ.Attributes{"aria-label": "Journal records"}}) {
+						@table.Header() {
+							@table.Row() {
+								for _, heading := range []string{"Sequence", "Time (UTC)", "Kind", "Role", "State", "Summary"} {
+									@table.Head(table.HeadProps{Attributes: templ.Attributes{"scope": "col"}}) {
+										{ heading }
+									}
+								}
+							}
+						}
+						@table.Body() {
+							{{ lastTurn := -1 }}
+							for _, row := range v.Trace {
+								if row.Turn != lastTurn {
+									@table.Row(table.RowProps{Class: "trace-turn", ID: fmt.Sprintf("trace-turn-%d", row.Turn)}) {
+										@table.Head(table.HeadProps{Attributes: templ.Attributes{"colspan": "6", "scope": "row"}}) {
+											if row.Turn == 0 {
+												Initialization
+											} else {
+												{ fmt.Sprintf("Turn %d", row.Turn) }
+											}
+										}
+									}
+									{{ lastTurn = row.Turn }}
+								}
+								@table.Row(table.RowProps{Class: "trace-row", ID: fmt.Sprintf("trace-row-%d", row.Seq), Attributes: templ.Attributes{"data-stripe": fmt.Sprint(row.Seq % 2)}}) {
+									@table.Cell() {
+										<span class="seq">{ fmt.Sprintf("#%d", row.Seq) }</span>
+									}
+									@table.Cell() {
+										<time datetime={ row.Timestamp.Format(time.RFC3339Nano) } title={ row.Timestamp.UTC().Format(time.RFC3339Nano) }>{ row.Timestamp.UTC().Format("15:04:05Z") }</time>
+									}
+									@table.Cell() {
+										{ string(row.Kind) }
+									}
+									@table.Cell() {
+										{ row.Role }
+									}
+									@table.Cell() {
+										{ string(row.State) }
+									}
+									@table.Cell(table.CellProps{Class: "trace-summary"}) {
+										<details class="record" id={ fmt.Sprintf("trace-%d", row.Seq) } data-preserve-attr="open">
+											<summary aria-label={ fmt.Sprintf("Record #%d: %s. Expand full record", row.Seq, row.Kind) }>
+												for _, tool := range row.Tools {
+													<code class="tool-name">{ tool }</code>
+												}
+												if row.Preview != "" {
+													<span class="preview">{ row.Preview }</span>
+												} else {
+													<span class="preview">Full record</span>
+												}
+											</summary>
+											<dl><dt>Time (UTC)</dt><dd>{ row.Timestamp.UTC().Format(time.RFC3339Nano) }</dd><dt>Entry</dt><dd>{ row.EntryID }</dd><dt>Parent</dt><dd>{ row.ParentID }</dd></dl>
+											if row.Text != "" {
+												<pre class="text">{ row.Text }</pre>
+											}
+											if row.PayloadText != "" {
+												<pre>{ row.PayloadText }</pre>
+											}
+										</details>
+									}
+								}
+							}
+						}
+					}
+					if len(v.Trace) == 0 {
+						<p class="muted">No matching records.</p>
+					}
+				}
+			}
+		} else {
+			<section class="chat" aria-label="Conversation">
+				<div class="chat-heading">
+					<h1><span class="muted" aria-hidden="true"># </span>{ chatTitle(v) }</h1>
+					if v.ID != "" {
+						@badge.Badge(badge.Props{Variant: badge.VariantSecondary}) {
+							{ string(v.Snapshot.State) }
+						}
+						<a class="muted" href={ templ.SafeURL(viewURL("runs", v.ID)) }>Run details</a>
+					}
+				</div>
+				<div id="transcript" class="transcript" role="region" aria-label="Messages" tabindex="0">
+					if v.ID == "" {
+						<div class="welcome"><h2>How can I help?</h2><p class="muted">Send a message to start a new chat.</p></div>
+					} else {
+						for i, msg := range v.Messages {
+							<article class="message" data-role={ msg.Role }>
+								if msg.Role != "tool" {
+									<strong class="message-role">{ msg.Role }</strong>
+								}
+								if msg.Role == "assistant" {
+									<div class="markdown">@templ.Raw(msg.HTML)</div>
+								} else if msg.Text != "" {
+									<pre class="text">{ msg.Text }</pre>
+								}
+								for n, tool := range msg.Tools {
+									<details class="tool-activity" id={ fmt.Sprintf("%s-tool-%d", messageDetailID(i, msg), n) } data-preserve-attr="open">
+										<summary><code class="tool-name">{ tool.Name }</code><span class="tool-kind">{ tool.Kind }</span><span class="tool-summary">{ tool.Summary }</span></summary>
+										<pre>{ tool.Detail }</pre>
+									</details>
+								}
+								<details class="message-payload" id={ messageDetailID(i, msg) } data-preserve-attr="open"><summary>Message content</summary><pre>{ msg.Payload }</pre></details>
+							</article>
+						}
+						if len(v.Messages) == 0 {
+							<p class="muted">No messages in the current branch.</p>
+						}
+						if v.Snapshot.Suspend != nil {
+							<section class="waiting">
+								<h3>Waiting for input</h3>
+								<p>{ v.Snapshot.Suspend.Prompt }</p>
+								<form id={ "respond-" + v.Snapshot.Suspend.TurnID } method="post" action="/web/actions/respond" class="action">
+									@hidden(v)
+									<input type="hidden" name="turn" value={ v.Snapshot.Suspend.TurnID }/>
+									if v.Snapshot.Suspend.Kind == "approval" {
+										@label.Label(label.Props{For: "respond-approval"}) {
+											Decision 
+										}
+										@nativeselect.NativeSelect(nativeselect.Props{ID: "respond-approval", Name: "approval", Required: true, Attributes: templ.Attributes{"data-ignore-morph": true}}) {
+											@nativeselect.Option(nativeselect.OptionProps{Value: "reject"}) {
+												Reject 
+											}
+											@nativeselect.Option(nativeselect.OptionProps{Value: "approve"}) {
+												Approve 
+											}
+										}
+										@label.Label(label.Props{For: "respond-note"}) {
+											Note 
+										}
+										@input.Input(input.Props{ID: "respond-note", Name: "text", Attributes: templ.Attributes{"data-ignore-morph": true}})
+									} else if len(v.Snapshot.Suspend.Options) > 0 {
+										@label.Label(label.Props{For: "respond-choice"}) {
+											Answer 
+										}
+										@nativeselect.NativeSelect(nativeselect.Props{ID: "respond-choice", Name: "text", Required: true, Attributes: templ.Attributes{"data-ignore-morph": true}}) {
+											for _, option := range v.Snapshot.Suspend.Options {
+												@nativeselect.Option(nativeselect.OptionProps{Value: option}) {
+													{ option }
+												}
+											}
+										}
+									} else {
+										@label.Label(label.Props{For: "respond-answer"}) {
+											Answer 
+										}
+										@textarea.Textarea(textarea.Props{ID: "respond-answer", Name: "text", Attributes: templ.Attributes{"required": true, "data-ignore-morph": true}})
+									}
+									@button.Button(button.Props{Type: button.TypeSubmit}) {
+										Respond 
+									}
+								</form>
+							</section>
+						}
+					}
+				</div>
+				<div class="composer">
+					<div class="composer-state" role="status">
+						if v.ID == "" {
+							<span class="muted">New chat · no run yet</span>
+						} else {
+							<span class="muted">Run: { string(v.Snapshot.State) }</span>
+						}
+						if canStop(v) {
+							<form id="stop-form" method="post" action="/web/actions/cancel" class="action">
+								@hidden(v)
+								<input type="hidden" name="turn" value={ v.Snapshot.TurnID }/>
+								@button.Button(button.Props{Type: button.TypeSubmit, Variant: button.VariantOutline}) {
+									Stop
+								}
+							</form>
+						}
+					</div>
+					if v.ID == "" {
+						<form id="start-form" method="post" action="/web/actions/start" class="action">
+							<input type="hidden" name="csrf" value={ v.Token }/>
+							@label.Label(label.Props{For: "start-text"}) {
+								Message 
+							}
+							@textarea.Textarea(textarea.Props{ID: "start-text", Name: "text", Rows: 2, Placeholder: "Ask the agent a question", Attributes: templ.Attributes{"required": true, "data-ignore-morph": true}})
+							<div class="composer-footer">
+								<span class="muted">Ctrl+Enter to send</span>
+								@button.Button(button.Props{Type: button.TypeSubmit, Disabled: !canSend(v)}) {
+									Send 
+								}
+							</div>
+						</form>
+					} else {
+						<form id="send-form" method="post" action="/web/actions/send" class="action">
+							@hidden(v)
+							@label.Label(label.Props{For: "send-text"}) {
+								Message 
+							}
+							@textarea.Textarea(textarea.Props{ID: "send-text", Name: "text", Rows: 2, Placeholder: "Message the agent", Attributes: templ.Attributes{"required": true, "data-ignore-morph": true}})
+							<div class="composer-footer">
+								<span class="muted">Ctrl+Enter to send</span>
+								@button.Button(button.Props{Type: button.TypeSubmit, Disabled: !canSend(v)}) {
+									Send 
+								}
+							</div>
+						</form>
+					}
+				</div>
+			</section>
+		}
+	</div>
+}

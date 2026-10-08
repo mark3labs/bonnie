@@ -1,0 +1,117 @@
+/* Local styles for the generated shadcn-templ v2 classes. No Tailwind runtime. */
+/* Palette source: cmd/bonnie/tui/styles.go and markdown.go. See web/README.md.
+   Light accents are darker versions of the fixed ANSI TUI colors for contrast. */
+:root{
+ color-scheme:light dark;
+ --bg:#f8f7f9;--card:#ffffff;--text:#262626;--muted:#626262;
+ --border:#dedade;--control-border:#898389;
+ --primary:#a82065;--primary-text:#ffffff;--primary-hover:#8d1954;
+ --brand:#a82065;--focus:#a82065;--link:#006580;--user:#006a9e;
+ --success:#007548;--warning:#746500;--danger:#c40000;
+ --badge-bg:#eee9ee;--badge-text:#626262;
+ --zebra:#f4f0f4;--row-hover:#ece5ec;--trace-turn:#e9e1e9;
+ font:15px/1.6 system-ui,sans-serif
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text)}
+header{display:flex;gap:1.5rem;align-items:center;padding:1rem 2rem;border-bottom:1px solid var(--border)}
+header a{color:var(--brand);font-weight:800;letter-spacing:.12em}
+a{color:var(--link);text-decoration:none}a:hover{text-decoration:underline}
+main{max-width:1080px;margin:auto;padding:2rem 1rem}
+h1,h2,h3{line-height:1.3;letter-spacing:-.02em}h1{font-size:1.6rem}h2{font-size:1.2rem;margin-top:0}h3{font-size:1rem}
+.muted,time,.cn-card-description{color:var(--muted);font-size:.88rem}
+.cn-card{display:flex;flex-direction:column;background:var(--card);border:1px solid var(--border);border-radius:12px;margin-bottom:1.2rem;overflow:hidden}
+.cn-card-header{display:grid;gap:.5rem;padding:1.5rem 1.5rem 0}
+.cn-card-title h1,.cn-card-title h2{margin:0}
+.cn-card-content{padding:1.5rem;min-width:0}
+.cn-label{display:block;margin:.6rem 0 .3rem;font-size:.9rem;font-weight:500}
+.cn-input,.cn-textarea,.cn-native-select{display:block;width:100%;min-width:0;background:var(--card);color:var(--text);border:1px solid var(--control-border);border-radius:6px;padding:.65rem;font:inherit}
+.cn-textarea{resize:vertical;min-height:4rem}
+.cn-native-select-wrapper{position:relative;width:100%}
+.cn-native-select{appearance:none;padding-right:2.5rem}
+.cn-native-select-icon{position:absolute;right:.75rem;top:50%;transform:translateY(-50%);width:1rem;height:1rem;pointer-events:none;color:var(--muted)}
+.cn-input:focus-visible,.cn-textarea:focus-visible,.cn-native-select:focus-visible,.cn-button:focus-visible,summary:focus-visible,a:focus-visible{outline:2px solid var(--focus);outline-offset:3px}
+.cn-input:disabled,.cn-textarea:disabled,.cn-native-select:disabled{opacity:.5;cursor:not-allowed}
+.cn-button{display:inline-flex;align-items:center;justify-content:center;cursor:pointer;border:1px solid var(--control-border);border-radius:6px;font:inherit;font-weight:600}
+.cn-button-size-default{padding:.5rem 1rem}
+.cn-button-variant-default,.cn-badge-variant-default{background:var(--primary);color:var(--primary-text);border-color:var(--primary)}
+.cn-button-variant-default:hover{background:var(--primary-hover);border-color:var(--primary-hover)}
+.cn-button-variant-outline{background:var(--card);color:var(--text)}
+.cn-button:disabled{opacity:.5;cursor:wait}
+form>.cn-button{margin-top:.7rem}.controls form>.cn-button{margin-top:0}
+.cn-badge{display:inline-flex;align-items:center;border:1px solid var(--border);border-radius:6px;padding:.1rem .5rem;font-size:.75rem;font-weight:600;vertical-align:middle;white-space:nowrap}
+.cn-badge-variant-secondary{background:var(--badge-bg);color:var(--badge-text)}
+[data-slot=separator]{height:1px;width:100%;background:var(--border);margin:1.5rem 0}
+.cn-table-container{width:100%;overflow:auto}
+.cn-table{width:100%;border-collapse:collapse;font-size:.9rem}
+.cn-table-head,.cn-table-cell{padding:.5rem;text-align:left;vertical-align:middle}
+.cn-table-head{color:var(--muted);font-weight:500}
+.cn-table-row{border-bottom:1px solid var(--border)}
+.cn-table-body .cn-table-row:last-child{border-bottom:0}
+.cn-table-body .cn-table-row:hover{background:var(--row-hover)}
+.runs{max-height:20rem;overflow:auto}.runs a{display:block;padding:.25rem;border-radius:4px}.runs a[aria-current=true]{background:var(--badge-bg);color:var(--brand);font-weight:700}
+.controls{display:flex;flex-wrap:wrap;gap:.6rem}
+.message{padding:1rem 0;border-bottom:1px solid var(--border)}
+pre{white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.6 ui-monospace,monospace;background:var(--bg);padding:1rem;border-radius:6px}
+pre.text{font:inherit}
+summary{cursor:pointer}details{margin:.5rem 0}details>summary:hover{color:var(--muted)}
+.waiting{color:var(--warning);margin-top:1rem;padding:1rem;border:1px solid var(--warning);border-radius:6px;background:var(--bg)}
+#action-status:empty{display:none}#action-status{overflow-wrap:anywhere}
+dl{display:grid;grid-template-columns:6rem minmax(0,1fr);gap:.25rem .75rem}dt{font-weight:600}dd{margin:0;overflow-wrap:anywhere}
+.connection{margin-left:auto;font-size:.85rem;color:var(--muted)}.connection::before{content:"";display:inline-block;width:.5rem;height:.5rem;border-radius:50%;background:currentColor;margin-right:.45rem}.connection[data-state=connected]{color:var(--success)}.connection[data-state=disconnected]{color:var(--warning)}
+.message[data-role=user]{padding-left:1rem;border-left:3px solid var(--border)}.message[data-role=user]>strong{color:var(--user)}.message>strong{text-transform:capitalize;font-size:.85rem;color:var(--muted)}
+.markdown h1,.markdown h2,.markdown h3,.markdown h4,.markdown h5,.markdown h6{color:var(--brand)}
+.markdown{overflow-wrap:anywhere}.markdown>:first-child{margin-top:.5rem}.markdown>:last-child{margin-bottom:1rem}.markdown a{color:var(--link);text-decoration:underline}.markdown blockquote{margin-left:0;padding-left:1rem;border-left:3px solid var(--border);color:var(--muted)}.markdown pre{white-space:pre;overflow:auto}.markdown code{font-size:.88em;background:var(--bg);padding:.15em .3em;border-radius:4px}.markdown pre code{padding:0}.markdown img{max-width:100%}
+/* Sequence parity keeps stripes stable across filtering and live appends. */
+.trace-table{min-width:760px;table-layout:fixed;margin-top:1rem}
+.trace-table .cn-table-head,.trace-table .cn-table-cell{vertical-align:top;padding:.45rem .6rem;overflow-wrap:anywhere}
+.trace-table thead th:nth-child(1){width:5.5rem}.trace-table thead th:nth-child(2){width:6.5rem}.trace-table thead th:nth-child(3){width:7rem}.trace-table thead th:nth-child(4){width:5.5rem}.trace-table thead th:nth-child(5){width:6rem}
+.trace-table .trace-row[data-stripe="0"]{background:var(--card)}
+.trace-table .trace-row[data-stripe="1"]{background:var(--zebra)}
+.trace-table .trace-row:hover{background:var(--row-hover)}
+.trace-table .trace-turn,.trace-table .trace-turn:hover{background:var(--trace-turn)}
+.trace-table .trace-turn th{color:var(--brand);font-weight:700;padding:.65rem .6rem}
+.trace-table time,.trace-table .seq{white-space:nowrap;font-variant-numeric:tabular-nums;font-size:.8rem}
+.record{margin:0;padding:0;min-width:0}.record>summary{font-size:.85rem}
+.record .preview{color:var(--muted);overflow-wrap:anywhere}.record .tool-name{color:var(--link);background:var(--card);border:1px solid var(--border);border-radius:4px;padding:0 .35rem;margin-right:.35rem}
+.record[open]{padding-bottom:.4rem}.record>pre{margin:.5rem 0}.record>dl{font-size:.8rem}
+@media(max-width:640px){header{flex-wrap:wrap;gap:.5rem 1rem;padding:1rem}.connection{margin-left:0}.cn-card-header{padding:1rem 1rem 0}.cn-card-content{padding:1rem}}
+@media(prefers-color-scheme:dark){:root{
+ --bg:#303030;--card:#262626;--text:#eeeeee;--muted:#a8a8a8;
+ --border:#505050;--control-border:#858585;
+ --primary:#ff5faf;--primary-text:#262626;--primary-hover:#ff87c3;
+ --brand:#ff5faf;--focus:#ff5faf;--link:#5fd7ff;--user:#00afff;
+ --success:#00d787;--warning:#ffff5f;--danger:#ff8787;
+ --badge-bg:#302b30;--badge-text:#b2b2b2;
+ --zebra:#302b30;--row-hover:#342e34;--trace-turn:#352935
+}}
+/* Chat structure uses only the existing palette variables. Management is unchanged. */
+body[data-view=chat]{height:100dvh;display:flex;flex-direction:column;overflow:hidden;font-family:ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace;font-size:14px}
+body[data-view=chat] header{flex:none;padding:.5rem 1rem;gap:1rem}
+body[data-view=chat] main{display:flex;flex-direction:column;flex:1;min-height:0;width:100%;max-width:1100px;padding:0 1rem}
+body[data-view=chat] #live-panel{flex:1;min-height:0;display:flex;flex-direction:column}
+.chat{display:flex;flex-direction:column;flex:1;min-height:0}
+.chat-heading{display:flex;gap:.75rem;align-items:center;flex:none;padding:.65rem 0;border-bottom:1px solid var(--border);min-width:0}
+.chat-heading h1{font-size:1rem;margin:0;overflow-wrap:anywhere;min-width:0}.chat-heading>a{margin-left:auto;white-space:nowrap}
+.transcript{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:0 .5rem 1rem 0;scrollbar-gutter:stable}
+.welcome{min-height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}.welcome h2{font-size:1.4rem;margin-bottom:0}
+.chat .message{border:0;padding:.8rem 0}
+.chat .message[data-role=user]{padding:.65rem 1rem;border-left:3px solid var(--user);border-radius:0;background:var(--card);margin:.75rem 0}
+.chat .message[data-role=user] pre.text{background:transparent;padding:0;margin:.3rem 0}
+.chat .message-role{font-size:.75rem}
+.chat .message details{font-size:.8rem;color:var(--muted)}
+.chat .message[data-role=tool]{padding:.15rem 0}
+.chat .markdown:empty{display:none}
+.chat .markdown>:last-child{margin-bottom:.5rem}
+.tool-activity{margin:.25rem 0}.tool-activity summary{overflow-wrap:anywhere}
+.tool-name{color:var(--link)}.tool-kind{margin:0 .65rem;font-size:.75rem}.tool-summary{color:var(--muted)}
+.message-payload{opacity:1}
+.composer{flex:none;display:flex;flex-direction:column;background:var(--card);border-left:3px solid var(--user);padding:.65rem 1rem;margin-bottom:max(.75rem,env(safe-area-inset-bottom))}
+.composer form{margin:0}.composer .cn-label{margin:0;font-size:.75rem;color:var(--muted)}
+.composer .cn-textarea{max-height:25dvh;resize:vertical;border-radius:0;border-color:var(--border);padding:.5rem;margin:.3rem 0;background:transparent}
+.composer-footer,.composer-state{display:flex;align-items:center;justify-content:space-between;gap:.75rem}
+.composer-footer{margin-top:.5rem}.composer-footer .cn-button{min-height:36px;padding:.3rem .8rem}
+.composer-state{order:2;font-size:.75rem;margin-top:.35rem}.composer-state form>.cn-button{margin:0;padding:.2rem .65rem}
+.view-nav{display:flex;gap:.4rem;flex-wrap:wrap}.view-nav .cn-button{font-size:.85rem;padding:.35rem .65rem;min-height:36px}.view-nav [aria-current=page]{background:var(--primary);color:var(--primary-text);border-color:var(--primary)}
+body[data-view=chat] #action-status{flex:none;font-size:.85rem;margin:0 0 .5rem}
+@media(max-width:640px){body[data-view=chat] header{padding:.5rem .75rem;gap:.5rem}.view-nav{gap:.25rem}.view-nav .cn-button{padding:.3rem .5rem}.connection{font-size:.75rem}body[data-view=chat] main{padding:0 .75rem}.chat-heading{flex-wrap:wrap}.transcript{padding-right:0}.composer{padding:.5rem .65rem}}

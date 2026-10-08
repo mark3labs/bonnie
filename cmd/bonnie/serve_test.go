@@ -176,3 +176,20 @@ func TestDefaultSandboxFlagIsNotNone(t *testing.T) {
 		t.Fatalf("--sandbox default = %q, want landlock", f.DefValue)
 	}
 }
+
+// Generic serving exposes web without opening a browser or starting a server
+// while parsing help. The root integration tests check the mounted routes.
+func TestServeWebFlag(t *testing.T) {
+	t.Parallel()
+	cmd := newServeCmd()
+	if f := cmd.Flags().Lookup("web"); f == nil || f.DefValue != "false" {
+		t.Fatal("serve must expose --web, disabled by default")
+	}
+	if err := cmd.ParseFlags([]string{"--web"}); err != nil {
+		t.Fatal(err)
+	}
+	enabled, err := cmd.Flags().GetBool("web")
+	if err != nil || !enabled {
+		t.Fatalf("web flag = %v, %v", enabled, err)
+	}
+}

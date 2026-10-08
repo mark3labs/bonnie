@@ -587,6 +587,46 @@ holds no container. Read the godoc of each provider in
 [package `sandbox`](https://pkg.go.dev/github.com/mark3labs/bonnie/sandbox)
 before you deploy. Each provider states what it contains and what it does not.
 
+## Web UI
+
+Open an agent tree in your browser with hot reload:
+
+```bash
+bonnie dev my-agent --web
+```
+
+This replaces the default terminal interface and opens `/web/` after the
+server is ready. If the browser cannot open, the CLI prints the URL.
+
+For a deployed agent, enable the UI with `bonnie.WithWebUI(true)` in
+`main.go`, or pass `--web` to the compiled agent. It is disabled by default.
+`bonnie serve --web` also enables it.
+
+The UI includes conversations, approval and input responses, a run list,
+and cancel, compact, clear, and reset controls. Assistant messages use safe
+Markdown. The journal trace groups records by turn, with text and tool
+summaries, sequence numbers, timestamps, and expandable formatted payloads.
+Use the filter to find text, tool names, errors, roles, and record kinds.
+Clear changes model context; reset retires a run. Neither deletes its journal.
+
+The UI uses templ, shadcn-templ, and Datastar. All browser assets are embedded
+in the binary. Live updates show committed journal state, not transient model
+tokens, and reconnect after hot reload.
+
+Web access uses the HTTP channel's authenticator. For browser deployments,
+use a session cookie or an authenticated reverse proxy; there is no built-in
+bearer-token login. This is an operator UI: an authenticated operator can
+read all conversation runs and their full payloads. Do not expose it to
+untrusted users. Web actions also have same-origin and CSRF checks.
+
+The default `/web/` page is chat. Send a first message to create a run; send
+followups from the same bottom composer. **New chat** starts an empty chat.
+Use **Runs** (`?view=runs`) for run controls, or **Trace**
+(`?view=trace&run=ID`) for journal records and filtering. These views do not
+share the chat transcript or composer.
+
+See [`web/README.md`](web/README.md) for asset and template maintenance.
+
 ## HTTP API
 
 ```bash

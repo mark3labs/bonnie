@@ -29,6 +29,7 @@ type devOpts struct {
 	dryRun        bool
 	shutdown      time.Duration
 	tui           bool
+	web           bool
 	scheduleClock bool
 	// addr is the explicit address to bind. Empty starts at :8080 and
 	// walks 8081, 8082, … until one is free.
@@ -40,7 +41,7 @@ func newDevCmd() *cobra.Command {
 	var o devOpts
 	cmd := &cobra.Command{
 		Use:   "dev [dir]",
-		Short: "Run an agent tree with hot reload and the built-in TUI",
+		Short: "Run an agent tree with hot reload and a terminal or browser interface",
 		Long: `Run the agent tree at dir locally with hot reload and the built-in TUI: watch the
 tree, regenerate the tool wiring, rebuild, and gracefully restart the serving child —
 while you interact with the agent in a terminal.
@@ -55,11 +56,15 @@ to the stream (the journal is the durable record).
 
 The TUI connects to the same HTTP channel the child serves, so the transcript you see
 is what any client sees. --tui=false runs the serve loop alone for CI and
-non-interactive hosts.
+non-interactive hosts. --web opens the browser interface instead of the default
+TUI. Explicit --tui=true cannot be combined with --web.
 
 --dry-run prints the discovery plan without watching or building.`,
 		Args: cobra.MaximumNArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := o.selectInterface(cmd.Flags().Changed("tui")); err != nil {
+				return err
+			}
 			dir := "."
 			if len(args) == 1 {
 				dir = args[0]
@@ -69,11 +74,23 @@ non-interactive hosts.
 	}
 	f := cmd.Flags()
 	f.BoolVar(&o.dryRun, "dry-run", false, "print the discovery plan without watching or building")
+	f.BoolVar(&o.web, "web", false, "open the browser interface against the child")
 	f.BoolVar(&o.tui, "tui", true, "open the built-in terminal interface against the child")
 	f.BoolVar(&o.scheduleClock, "schedule-clock", false, "enable schedule clock in the child")
 	f.StringVar(&o.addr, "addr", "", "address to bind (empty = :8080, then :8081, …)")
 	f.DurationVar(&o.shutdown, "shutdown-timeout", 30*time.Second, "how long to wait for in-flight turns on restart")
 	return cmd
+}
+
+// selectInterface keeps the default TUI off when the browser is selected.
+func (o *devOpts) selectInterface(tuiExplicit bool) error {
+	if o.web && o.tui && tuiExplicit {
+		return fmt.Errorf("bonnie: dev: --web cannot be combined with --tui=true")
+	}
+	if o.web {
+		o.tui = false
+	}
+	return nil
 }
 
 // devServer runs one dev loop. It builds the child binary, serves it, and
@@ -90,6 +107,7 @@ type devServer struct {
 	// bound verbatim.
 	addr          string
 	scheduleClock bool
+	web           bool
 
 	// served is the address the child bound. It is set once at first start
 	// and reused on every restart, so the TUI stays connected.
@@ -106,7 +124,7 @@ type devServer struct {
 	beforeStop func()
 
 	// ready closes after the first child process starts. The caller then
-	// waits until that child accepts connections before it opens the TUI.
+	// waits for readiness before it opens the selected interface.
 	ready     chan struct{}
 	readyOnce sync.Once
 
@@ -128,6 +146,7 @@ func newDevServer(root string, o devOpts) *devServer {
 		shutdown:      o.shutdown,
 		addr:          o.addr,
 		scheduleClock: o.scheduleClock,
+		web:           o.web,
 		log:           log,
 		ready:         make(chan struct{}),
 	}
@@ -305,7 +324,11 @@ func (d *devServer) start() error {
 		d.mu.Unlock()
 	}
 
-	cmd := exec.Command(d.bin, "-addr", addr, "-schedule-clock="+strconv.FormatBool(d.scheduleClock))
+	args := []string{"-addr", addr, "-schedule-clock=" + strconv.FormatBool(d.scheduleClock)}
+	if d.web {
+		args = append(args, "-web=true")
+	}
+	cmd := exec.Command(d.bin, args...)
 	cmd.Dir = d.root
 	cmd.Stdout = d.log
 	cmd.Stderr = d.log
@@ -456,9 +479,9 @@ func runDev(root string, o devOpts) error {
 		}
 	}()
 
-	if o.tui {
-		// Wait for the child to bind, then take over the foreground until
-		// the user leaves the TUI.
+	if o.tui || o.web {
+		// Wait for the child to start. The browser opens after HTTP readiness;
+		// the TUI owns the foreground until the user leaves it.
 		select {
 		case <-d.ready:
 		case err := <-loopErr:
@@ -467,17 +490,23 @@ func runDev(root string, o devOpts) error {
 			return <-loopErr
 		}
 		url := chatURL(d.servedURL())
-		if err := waitForListen(ctx, d.servedURL()); err != nil {
-			return err
+		if o.web {
+			if err := launchDevWeb(ctx, url, os.Stderr, openBrowser); err != nil {
+				return err
+			}
+		} else {
+			if err := waitForListen(ctx, d.servedURL()); err != nil {
+				return err
+			}
+			c := client.New(url)
+			d.mu.Lock()
+			d.beforeStop = c.CloseStreams
+			d.mu.Unlock()
+			if err := runTUIClient(ctx, c, tuiAddress(d.root)); err != nil {
+				return err
+			}
+			return nil
 		}
-		c := client.New(url)
-		d.mu.Lock()
-		d.beforeStop = c.CloseStreams
-		d.mu.Unlock()
-		if err := runTUIClient(ctx, c, tuiAddress(d.root)); err != nil {
-			return err
-		}
-		return nil
 	}
 
 	select {

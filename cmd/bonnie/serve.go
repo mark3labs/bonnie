@@ -31,6 +31,7 @@ type serveOpts struct {
 	slack       bool
 	discord     bool
 	telegram    bool
+	web         bool
 }
 
 // newServeCmd mounts `bonnie serve`.
@@ -71,6 +72,7 @@ outside, and --sandbox-deny-network to cut egress.`,
 	f.StringVar(&o.sandboxImg, "sandbox-image", "", "sandbox image, for example python:3.12-slim")
 	f.BoolVar(&o.denyNetwork, "sandbox-deny-network", false, "block all network egress from the sandbox")
 	f.DurationVar(&o.shutdown, "shutdown-timeout", 30*time.Second, "how long to wait for in-flight turns on shutdown")
+	f.BoolVar(&o.web, "web", false, "serve the browser interface at /web")
 	f.BoolVar(&o.slack, "slack", false, "mount the Slack channel (credentials from the environment)")
 	f.BoolVar(&o.discord, "discord", false, "mount the Discord channel (credentials from the environment)")
 	f.BoolVar(&o.telegram, "telegram", false, "mount the Telegram channel (credentials from the environment)")
@@ -92,15 +94,15 @@ func runServe(o serveOpts) error {
 	return bonnie.New(opts...).Run(ctx)
 }
 
-// serveOptions turns the flags into the options [bonnie.Run] takes. It is
+// serveOptions turns the flags into the options [bonnie.Agent.Run] takes. It is
 // separate from runServe so tests can read the resolution without serving.
 //
-// serve has no tree, so it takes neither an instructions file, nor a skills
-// directory, nor a sandbox: the process's own directory stays the root,
-// which is the historical behaviour of `bonnie serve`.
+// serve has no tree, so it takes no instructions, skills, or context files.
+// Each run still uses the selected sandbox.
 func serveOptions(ctx context.Context, o serveOpts) ([]bonnie.Option, error) {
 	opts := []bonnie.Option{
 		bonnie.WithAddr(o.addr),
+		bonnie.WithWebUI(o.web),
 		bonnie.WithJournal(o.journal),
 		bonnie.WithModel(o.model),
 		bonnie.WithSystemPrompt(o.prompt),

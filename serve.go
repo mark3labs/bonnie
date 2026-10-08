@@ -49,6 +49,9 @@ func (a *Agent) serveCommand(fs *flag.FlagSet) *cobra.Command {
 			if fs.Lookup("schedule-clock") != nil {
 				WithScheduleClock(fs.Lookup("schedule-clock").Value.String() == "true")(a.cfg)
 			}
+			if cmd.Flags().Changed("web") || fs.Lookup("web").Value.String() == "true" {
+				WithWebUI(fs.Lookup("web").Value.String() == "true")(a.cfg)
+			}
 			a.cfg.sandboxName = fs.Lookup("sandbox").Value.String()
 			return a.Run(cmd.Context())
 		},
@@ -66,6 +69,9 @@ const sandboxFlagUsage = "sandbox backend to use from the agent's permitted prov
 
 // registerServeFlags preserves flags that the host has already registered.
 func registerServeFlags(fs *flag.FlagSet) {
+	if fs.Lookup("web") == nil {
+		fs.Bool("web", false, "serve the browser interface at /web")
+	}
 	if fs.Lookup("sandbox") == nil {
 		fs.String("sandbox", "", sandboxFlagUsage)
 	}

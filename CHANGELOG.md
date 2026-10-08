@@ -18,6 +18,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add a repeatable Chromium web test with the actual SQLite journal, Runner,
+  HTTP channel, and hermetic Kit scripted model. Check live updates, conversation
+  actions, trace controls, and approval. Add an opt-in offline web demo server
+  with a durable journal and no model credentials.
+- Add `WithWebUI`, `--web` for serving, and `bonnie dev --web`. Serve a
+  chat-first templ, shadcn-templ, and Datastar interface at `/web` with the
+  BONNIE palette, separate run controls, and a striped journal trace table.
+  Embed browser assets and use the HTTP authenticator with CSRF checks.
+  The dev loop waits for health readiness and opens a browser instead of
+  the default TUI. Web streams close on shutdown and reconnect after reload.
+
 - Add a short VHS recording below the documentation home-page logo. Show agent
   creation with `openai/gpt-6.1-sol`, a personality edit of `instructions.md`,
   and a live Knight Rider-themed conversation through `bonnie dev`.

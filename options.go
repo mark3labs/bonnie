@@ -71,6 +71,7 @@ type config struct {
 	listener            net.Listener
 	activityLogger      runtime.ActivityLogger
 	quiet               bool
+	webUI               bool
 	noHumanInput        bool
 	auth                bonniehttp.Authenticator
 	schedules           []schedule.Definition
@@ -103,6 +104,13 @@ func WithAddr(addr string) Option {
 			c.addr = addr
 		}
 	}
+}
+
+// WithWebUI enables the browser interface at /web on the HTTP listener.
+// It uses the same runner, journal, and HTTP channel as the wire API.
+// The interface is disabled by default. This option does not open a browser.
+func WithWebUI(enabled bool) Option {
+	return func(c *config) { c.webUI = enabled }
 }
 
 // WithJournal writes the run journal to dir instead of [DefaultJournal].

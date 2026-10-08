@@ -18,6 +18,7 @@ import (
 	bonniehttp "github.com/mark3labs/bonnie/channel/http"
 	"github.com/mark3labs/bonnie/runtime"
 	"github.com/mark3labs/bonnie/sandbox"
+	"github.com/mark3labs/bonnie/web"
 	kit "github.com/mark3labs/kit/pkg/kit"
 )
 
@@ -57,7 +58,7 @@ func New(opts ...Option) *Agent {
 // after writing the error to stderr. A host that owns its own process calls
 // [Agent.Run] instead.
 //
-// The flags -addr and -model override the matching options. The -sandbox
+// The flags -addr, -model, and -web override the matching options. The -sandbox
 // flag selects a provider declared with [WithSandboxes] or [WithSandbox];
 // without either option, only the default Landlock provider is permitted.
 // An operator can change the port, model, or permitted backend without
@@ -209,7 +210,13 @@ func (a *Agent) Run(ctx context.Context) (runErr error) {
 	if c.auth != nil {
 		httpOpts = append(httpOpts, bonniehttp.WithAuthenticator(c.auth))
 	}
-	mount(mux, bonniehttp.New(runner, httpOpts...), out)
+	httpChannel := bonniehttp.New(runner, httpOpts...)
+	mount(mux, httpChannel, out)
+	if c.webUI {
+		handler := web.New(runner, journal, httpChannel)
+		mux.Handle("/web", handler)
+		mux.Handle("/web/", handler)
+	}
 	schedules.mount(mux, c)
 	for _, ch := range channels {
 		mount(mux, ch, out)
@@ -779,11 +786,12 @@ func (c *config) serve(ctx context.Context, mux http.Handler, ln net.Listener) e
 }
 
 // closeStreamsOnShutdown closes long-lived event streams when server shutdown
-// starts. Other requests keep their original context and can finish a
+// starts, including the web UI live connection. Other requests keep their
+// original context and can finish a
 // checkpoint during the shutdown timeout.
 func closeStreamsOnShutdown(ctx context.Context, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || !strings.HasSuffix(r.URL.Path, "/stream") {
+		if r.Method != http.MethodGet || (r.URL.Path != "/web/live" && !strings.HasSuffix(r.URL.Path, "/stream")) {
 			next.ServeHTTP(w, r)
 			return
 		}
