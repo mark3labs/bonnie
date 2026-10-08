@@ -326,7 +326,16 @@ Examine what occurred, with no server:
 ```bash
 bonnie runs list --journal .bonnie
 bonnie runs show --journal .bonnie run-1
+bonnie runs inspect --journal .bonnie
+bonnie runs inspect --journal .bonnie run-1
 ```
+
+`runs inspect` opens a read-only terminal inspector. Use `/` to filter runs,
+Tab to change panel focus, and the arrow keys to select runs or scroll details.
+Press `v` in the detail panel to show record payloads, `r` to refresh, and
+Ctrl+C to exit. The inspector checks for journal updates every two seconds
+when the list is not filtered. It works with a stopped server. Wide terminals
+show both panels; narrow terminals show the focused panel.
 
 ```
 RUN    TITLE              STATE      STEPS  LAST

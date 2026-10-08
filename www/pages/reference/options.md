@@ -139,8 +139,12 @@ For NATS, select only one authentication method, including environment fallbacks
 
 | Exact API | Behavior |
 | --- | --- |
-| `WithSchedule(definitions ...schedule.Definition)` | Appends durable time-based dispatch definitions. |
+| `WithSchedule(definitions ...schedule.Definition)` | Appends durable time-based agent dispatch or host callback definitions. |
 | `WithScheduleClock(enabled bool)` | Enables or disables cron evaluation. Production default is true; `bonnie dev` passes false unless enabled. |
 | `WithScheduleTriggerAuthorizer(fn func(*http.Request) error)` | Mounts and authorizes external/manual schedule triggers. This is separate from the normal HTTP authenticator. |
 
-Definitions and revisions are code. Prepared dispatches and delivery progress are durable, but delivery is at least once. The scheduler takes a journal-directory lock; this is not a general distributed run lock. See [Scheduling](/guides/scheduling).
+Definitions and revisions are code. Each definition requires exactly one of `Prompt`, `Prepare`, or `Run`. `Run` has signature `func(context.Context, schedule.Fire) error` and starts no agent dispatches or channel deliveries. A nil error sets the occurrence to `Completed`; an error sets it to `Failed`. A saved failure is not retried. An empty `Prepare` result with no error sets it to `Skipped`.
+
+`Prepare` and `Run` execute on the host, outside the agent sandbox. Both must respect context cancellation and be safe to repeat if their results were not saved. `Fire.ID` stays stable across retries; use it to prevent repeated external effects. BONNIE does not guarantee exactly-once execution.
+
+Prepared dispatches and delivery progress are durable, but delivery is at least once. The scheduler takes a journal-directory lock; this is not a general distributed run lock. See [Scheduling](/guides/scheduling).

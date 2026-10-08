@@ -1,6 +1,6 @@
 # Schedules
 
-BONNIE schedules start durable agent turns from code-defined cron jobs. They do not create agent-owned jobs. There is no schedule manifest. Add definitions with `bonnie.WithSchedule` when you build the agent.
+BONNIE schedules start durable agent turns or host callbacks from code-defined cron jobs. They do not create agent-owned jobs. There is no schedule manifest. Add definitions with `bonnie.WithSchedule` when you build the agent.
 
 ```go
 bonnie.New(
@@ -13,7 +13,30 @@ bonnie.New(
 ).Serve()
 ```
 
-Import `github.com/mark3labs/bonnie/schedule`. A definition needs a unique name, a five-field cron expression, and exactly one of `Prompt` or `Prepare`. Leave `Destination` empty to start a background run (the default). Set it to route work to a tracked channel. `Prepare(context.Context, schedule.Fire)` runs in the host, not in the agent sandbox. It returns dispatches and must be safe to repeat until BONNIE saves them. Use this to prepare input from trusted host data; do not treat it as an agent schedule API.
+Import `github.com/mark3labs/bonnie/schedule`. A definition needs a unique name, a five-field cron expression, and exactly one of `Prompt`, `Prepare`, or `Run`. `Prompt` starts one agent dispatch. `Prepare` returns dispatches; an empty list with no error sets the occurrence to `Skipped`. Leave `Destination` empty for a background agent run, or set it to route agent work to a tracked channel.
+
+## Host-only work
+
+`Run` has signature `func(context.Context, schedule.Fire) error`. It starts no agent dispatches and makes no channel deliveries. A nil error sets the occurrence to `Completed`; an error sets it to `Failed`. A saved failure is not retried.
+
+This option creates a directory without a model call:
+
+```go
+// Import context, os, path/filepath, bonnie, and schedule.
+bonnie.WithSchedule(schedule.Definition{
+    Name:     "daily-directory",
+    Cron:     "0 9 * * *",
+    Revision: "1",
+    Run: func(ctx context.Context, fire schedule.Fire) error {
+        if err := ctx.Err(); err != nil {
+            return err
+        }
+        return os.MkdirAll(filepath.Join("reports", fire.ID), 0o750)
+    },
+})
+```
+
+`Prepare` and `Run` execute on the host, outside the agent sandbox. Both must be safe to repeat: recovery can call them again if their results were not saved. `Fire.ID` stays stable across retries; use it to prevent repeated external effects. BONNIE does not guarantee exactly-once execution. Callbacks must respect context cancellation.
 
 ## Time and missed fires
 

@@ -1,4 +1,4 @@
-// Package schedule starts durable agent work from code-defined cron jobs.
+// Package schedule starts durable agent or host work from code-defined cron jobs.
 package schedule
 
 import (
@@ -9,9 +9,12 @@ import (
 	"github.com/mark3labs/bonnie/runtime"
 )
 
-// Definition declares a job. Exactly one of Prompt and Prepare is required.
-// Prepare runs on the host, not in the agent sandbox. It must be safe to
-// repeat if the process stops before its returned dispatches are saved.
+// Definition declares a job. Exactly one of Prompt, Prepare, and Run is required.
+// Prepare and Run execute on the host, not in the agent sandbox. Both must be
+// safe to repeat if the process stops before their results are saved. Use the
+// stable Fire.ID to prevent repeated external effects.
+// Run starts no agent dispatches. A nil error completes the occurrence; an
+// error fails it. Prepare returning no dispatches skips the occurrence.
 // CatchUp accepts "skip" (default) or "latest". Overlap accepts "skip"
 // (default) or "allow". Waiting runs count as unfinished work.
 type Definition struct {
@@ -22,6 +25,7 @@ type Definition struct {
 	Prompt      string                                          `json:"-"`
 	Destination Destination                                     `json:"destination"`
 	Prepare     func(context.Context, Fire) ([]Dispatch, error) `json:"-"`
+	Run         func(context.Context, Fire) error               `json:"-"`
 	CatchUp     string                                          `json:"catch_up,omitempty"`
 	Overlap     string                                          `json:"overlap,omitempty"`
 }
@@ -55,15 +59,16 @@ type Fire struct {
 type State string
 
 const (
-	// Pending means preparation has not been saved.
+	// Pending means preparation or the host callback result has not been saved.
 	Pending State = "pending"
 	// Running means work or delivery is unfinished.
 	Running State = "running"
 	// Waiting means at least one run needs external input.
 	Waiting State = "waiting"
-	// Completed means all dispatched turns and initial deliveries finished.
+	// Completed means the host callback succeeded, or all dispatched turns
+	// and initial deliveries finished.
 	Completed State = "completed"
-	// Failed means preparation or execution failed; no fresh agent retry is made.
+	// Failed means preparation or execution failed. A saved failure is not retried.
 	Failed State = "failed"
 	// Skipped means overlap policy or preparation produced no work.
 	Skipped State = "skipped"
@@ -83,6 +88,7 @@ type Work struct {
 }
 
 // Occurrence is an append-only snapshot of a schedule firing.
+// Prepared means dispatches or a successful host callback result were saved.
 type Occurrence struct {
 	Fire     Fire   `json:"fire"`
 	Revision string `json:"revision,omitempty"`

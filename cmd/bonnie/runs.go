@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/mark3labs/bonnie/cmd/bonnie/inspect"
 	"github.com/mark3labs/bonnie/runtime"
 )
 
@@ -26,10 +28,38 @@ func newRunsCmd() *cobra.Command {
 These read the journal directly, so they work against a stopped server —
 which is exactly when an operator needs them.`,
 		RunE: func(*cobra.Command, []string) error {
-			return fmt.Errorf("runs needs a subcommand: list or show")
+			return fmt.Errorf("runs needs a subcommand: list, show, or inspect")
 		},
 	}
-	cmd.AddCommand(newRunsListCmd(), newRunsShowCmd())
+	cmd.AddCommand(newRunsListCmd(), newRunsShowCmd(), newRunsInspectCmd())
+	return cmd
+}
+
+// newRunsInspectCmd opens a read-only terminal inspector of the local journal.
+func newRunsInspectCmd() *cobra.Command {
+	var dir string
+	cmd := &cobra.Command{
+		Use:   "inspect [run-id]",
+		Short: "Inspect durable runs in an interactive terminal",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) (err error) {
+			journal, err := runtime.OpenSQLiteJournal(dir)
+			if err != nil {
+				return fmt.Errorf("bonnie: open inspector journal: %w", err)
+			}
+			defer func() {
+				if closeErr := journal.Close(); closeErr != nil {
+					err = errors.Join(err, fmt.Errorf("bonnie: close inspector journal: %w", closeErr))
+				}
+			}()
+			var runID string
+			if len(args) > 0 {
+				runID = args[0]
+			}
+			return inspect.Run(cmd.Context(), journal, runID)
+		},
+	}
+	addJournalFlag(cmd.Flags(), &dir)
 	return cmd
 }
 

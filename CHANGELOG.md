@@ -13,7 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in built binaries. Add `Agent.Configure` for parsed options before startup.
 - Add scoped `Agent.WithJournal` and `Agent.WithRuntime` operations without
   starting an HTTP server. See `docs/AGENT_COMMANDS.md` for resource rules.
-
+- Add `schedule.Definition.Run` for durable host callbacks with no agent
+  dispatches. Recovery repeats unsaved results with the same fire ID. Callbacks
+  must be safe to repeat.
+- Add `bonnie runs inspect [run-id]` for read-only terminal inspection of a
+  local journal. Use Bubbles for run filtering, detail scrolling, loading,
+  and keyboard help. Show record payloads on demand and refresh live runs.
 - Store tool intents before execution and recover interrupted calls with an
   explicit replay-safe policy. Unknown external actions are not repeated.
 - Add durable submissions with request-ID deduplication, queued input,

@@ -57,9 +57,19 @@ func New(r *runtime.Runner, destinations map[string]channel.TrackedReceiver, def
 			cancel()
 			return nil, fmt.Errorf("bonnie: schedule: duplicate name %q", d.Name)
 		}
-		if (d.Prompt == "") == (d.Prepare == nil) {
+		modes := 0
+		if d.Prompt != "" {
+			modes++
+		}
+		if d.Prepare != nil {
+			modes++
+		}
+		if d.Run != nil {
+			modes++
+		}
+		if modes != 1 {
 			cancel()
-			return nil, fmt.Errorf("bonnie: schedule %q: exactly one of Prompt and Prepare is required", d.Name)
+			return nil, fmt.Errorf("bonnie: schedule %q: exactly one of Prompt, Prepare, and Run is required", d.Name)
 		}
 		if d.CatchUp != "" && d.CatchUp != "skip" && d.CatchUp != "latest" {
 			cancel()
@@ -216,6 +226,16 @@ func (e *Engine) fail(ctx context.Context, o Occurrence, err error) error {
 }
 func (e *Engine) execute(ctx context.Context, d Definition, o Occurrence) error {
 	if !o.Prepared {
+		if d.Run != nil {
+			if err := d.Run(ctx, o.Fire); err != nil {
+				return e.fail(ctx, o, err)
+			}
+			// Save success only after the callback returns. Recovery can repeat
+			// the callback with the same Fire.ID if this write does not finish.
+			o.Prepared = true
+			o.State = Completed
+			return e.save(ctx, o)
+		}
 		dispatches := []Dispatch{{Key: "default", Input: runtime.Input{Text: d.Prompt}, Destination: d.Destination}}
 		var err error
 		if d.Prepare != nil {
@@ -382,7 +402,8 @@ func (e *Engine) execute(ctx context.Context, d Definition, o Occurrence) error 
 }
 
 // Reconcile resumes accepted work and retries deliveries without a fresh model
-// turn. Definitions removed or changed by Revision are not executed again.
+// turn. Host callbacks whose results were not saved can run again with the same
+// Fire.ID. Definitions removed or changed by Revision are not executed again.
 func (e *Engine) Reconcile(ctx context.Context) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
