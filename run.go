@@ -255,11 +255,28 @@ func (a *Agent) Run(ctx context.Context) (runErr error) {
 		}()
 		defer func() { cancel(); <-done }()
 	}
+	// The scheduler owns admitted durable inputs. Old runs without submission
+	// records are not retried: their external tool effects can be unknown.
+	schedulerCtx, stopScheduler := context.WithCancel(ctx)
+	schedulerDone := make(chan error, 1)
+	go func() {
+		err := runner.RunScheduler(schedulerCtx)
+		schedulerDone <- err
+		if err != nil && !errors.Is(err, context.Canceled) {
+			stopScheduler()
+		}
+	}()
+	defer func() {
+		stopScheduler()
+		if err := <-schedulerDone; err != nil && !errors.Is(err, context.Canceled) {
+			runErr = errors.Join(runErr, fmt.Errorf("bonnie: scheduler: %w", err))
+		}
+	}()
 	c.banner(os.Stderr, ln.Addr().String(), contextFiles, skills, dotenv)
 	if schedules == nil {
-		return c.serve(ctx, mux, ln)
+		return c.serve(schedulerCtx, mux, ln)
 	}
-	serveCtx, cancel := context.WithCancel(ctx)
+	serveCtx, cancel := context.WithCancel(schedulerCtx)
 	defer cancel()
 	served := make(chan error, 1)
 	go func() { served <- c.serve(serveCtx, mux, ln) }()

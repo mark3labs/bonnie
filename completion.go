@@ -15,6 +15,8 @@ import (
 // that execution ends. BONNIE owns sandbox cleanup.
 type RunScope struct {
 	RunID string
+	// Session provides trusted setup code with durable state and tool recovery controls.
+	Session *runtime.Session
 	// Exec opens the sandbox lazily and uses the same handle as agent tools.
 	Exec func(context.Context, sandbox.Command) (*sandbox.Result, error)
 }
@@ -102,7 +104,7 @@ func (c *config) managedFactory(provider sandbox.Provider, opts []kit.Option) ru
 		var hook CompletionHook
 		factory := sandbox.AgentWithSetup(provider, !c.noHumanInput,
 			func(ctx context.Context, k *kit.Kit, s *runtime.Session, open sandbox.Opener) error {
-				scope := RunScope{RunID: s.RunID(), Exec: func(ctx context.Context, cmd sandbox.Command) (*sandbox.Result, error) {
+				scope := RunScope{RunID: s.RunID(), Session: s, Exec: func(ctx context.Context, cmd sandbox.Command) (*sandbox.Result, error) {
 					sb, err := open(ctx)
 					if err != nil {
 						return nil, err

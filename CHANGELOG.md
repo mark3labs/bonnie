@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Store tool intents before execution and recover interrupted calls with an
+  explicit replay-safe policy. Unknown external actions are not repeated.
+- Add durable submissions with request-ID deduplication, queued input,
+  text steering, withdrawal, and restart recovery. The service starts a
+  submission scheduler and leaves human-input waits parked.
+- Add durable child runs with stable creation keys, foreground waits,
+  background ownership, and cancellation of owned descendants.
+- Add HTTP submission and child-run routes. See `docs/DURABLE_WORK.md` for
+  usage and the single-process ownership requirement.
+
 ### Changed
 
 - Restyle the web UI as a flat, matte terminal: monospaced text, square

@@ -45,8 +45,10 @@ type Session struct {
 
 	// turnContext is the context for the turn being run. It lives on the
 	// session only for the duration of the turn; see [Session.SetTurnContext].
-	turnContext []string
-	trigger     *Trigger
+	turnContext      []string
+	trigger          *Trigger
+	replaySafe       map[string]bool
+	interruptedTools map[string]bool
 }
 
 type sessionEntry struct {

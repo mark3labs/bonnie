@@ -79,6 +79,7 @@ import (
 // Channel is the HTTP transport. It implements [channel.Channel] and
 // [channel.Inbound].
 type Channel struct {
+	runner      *runtime.Runner
 	core        *chat.Core
 	policy      channel.TurnPolicy
 	idGen       []chat.CoreOption
@@ -185,7 +186,7 @@ type healthResponse struct {
 
 // New returns an HTTP channel over a runner.
 func New(r *runtime.Runner, opts ...Option) *Channel {
-	c := &Channel{policy: channel.PolicySteer}
+	c := &Channel{policy: channel.PolicySteer, runner: r}
 	for _, opt := range opts {
 		opt(c)
 	}
@@ -256,6 +257,12 @@ func (c *Channel) Routes() []channel.Route {
 		{Method: http.MethodPost, Path: p + "/runs/{id}/clear", Handler: c.handleClear},
 		{Method: http.MethodPost, Path: p + "/runs/{id}/compact", Handler: c.handleCompact},
 		{Method: http.MethodGet, Path: p + "/runs/{id}/stream", Handler: c.handleStream},
+		{Method: http.MethodPost, Path: p + "/runs/{id}/submissions", Handler: c.handleSubmit},
+		{Method: http.MethodGet, Path: p + "/runs/{id}/submissions", Handler: c.handleSubmissions},
+		{Method: http.MethodDelete, Path: p + "/runs/{id}/submissions/{submission}", Handler: c.handleAbortSubmission},
+		{Method: http.MethodGet, Path: p + "/runs/{id}/children", Handler: c.handleChildren},
+		{Method: http.MethodPost, Path: p + "/runs/{id}/children", Handler: c.handleSpawnChild},
+		{Method: http.MethodPost, Path: p + "/runs/{id}/cancel-owned", Handler: c.handleCancelOwned},
 	}
 	if c.auth == nil {
 		return routes

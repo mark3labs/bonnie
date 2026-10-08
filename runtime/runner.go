@@ -125,6 +125,10 @@ func KitAgentWithSetup(humanInput bool, setup KitSetup, opts ...kit.Option) Agen
 				return nil, setupErr
 			}
 		}
+		if err := recoverTools(ctx, k, s); err != nil {
+			return nil, errors.Join(fmt.Errorf("bonnie: recover tools: %w", err), k.Close())
+		}
+		attachToolRecovery(k, s)
 		return k, nil
 	}
 }
@@ -136,8 +140,8 @@ func kitAgent(humanInput bool, opts ...kit.Option) AgentFactory {
 // attachCheckpoints wires Kit's hooks to the journal. This is where durability
 // actually happens.
 func attachCheckpoints(k *kit.Kit, s *Session) {
-	// Checkpoint at the step boundary. On replay we know which steps already
-	// ran, so their side effects are not repeated.
+	// Checkpoint at the step boundary. Completed journalled steps are not
+	// repeated. Tool intent records cover the earlier external-action window.
 	k.OnStepFinish(func(e kit.StepFinishEvent) {
 		_, _ = s.journal.Append(context.Background(), Record{
 			RunID:     s.runID,
@@ -179,23 +183,23 @@ type Trigger struct {
 type Input struct {
 	// Text is the user's message: the one thing that enters the
 	// conversation as a user turn.
-	Text string
+	Text string `json:"text"`
 	// Files carries file parts through FileAgent. An agent that does not
 	// implement FileAgent refuses non-empty files with ErrFilesUnsupported.
-	Files []kit.LLMFilePart
+	Files []kit.LLMFilePart `json:"files,omitempty"`
 	// Context is what the model should know for this turn and this turn
 	// only: the event that fired, the diff a comment refers to, who is
 	// speaking. It is journalled as a [RecordContext] and shown to the
 	// model in front of Text; it never becomes conversation history.
-	Context []string
+	Context []string `json:"context,omitempty"`
 	// Title names the run in operator-facing listings. It is recorded on
 	// the first turn that carries one and ignored after that.
-	Title string
+	Title string `json:"title,omitempty"`
 	// Origin says where the conversation lives. It is recorded on the
 	// first turn that carries one and ignored after that.
-	Origin Origin
+	Origin Origin `json:"origin,omitzero"`
 	// Trigger is structured provenance for this turn.
-	Trigger *Trigger
+	Trigger *Trigger `json:"trigger,omitempty"`
 }
 
 // Run is a snapshot of a durable run after a turn boundary.
@@ -225,8 +229,10 @@ type Runner struct {
 	completionHook  CompletionHook
 	completionLimit int
 
-	mu     sync.Mutex
-	active map[string]*activeTurn
+	mu         sync.Mutex
+	active     map[string]*activeTurn
+	workMu     sync.Mutex
+	scheduling bool
 }
 
 // activeTurn is the handle a Runner keeps on a turn it is executing, so an
@@ -549,8 +555,11 @@ func (r *Runner) Start(ctx context.Context, runID string, in Input) (*Run, error
 	if err != nil {
 		return nil, err
 	}
-	defer r.release(runID)
+	return r.startAcquired(turnCtx, act, runID, in)
+}
 
+func (r *Runner) startAcquired(turnCtx context.Context, act *activeTurn, runID string, in Input) (*Run, error) {
+	defer r.release(runID)
 	if err := r.recoverCancellation(turnCtx, runID); err != nil {
 		return nil, err
 	}
@@ -774,6 +783,22 @@ func (r *Runner) turn(ctx context.Context, act *activeTurn, s *Session, prompt s
 	defer stop()
 
 	res, err := r.completionTurn(ctx, s, agent, prompt, files, completion, resumed)
+	if err == nil && res != nil {
+		if _, parked := suspensionFrom(res); !parked {
+			err = r.WaitChildren(ctx, runID)
+		}
+	}
+	if err != nil || ctx.Err() != nil {
+		children, childErr := r.Children(book, runID)
+		if childErr != nil {
+			err = errors.Join(err, childErr)
+		}
+		for _, child := range children {
+			if !child.Background {
+				err = errors.Join(err, r.CancelOwned(book, child.ID, false))
+			}
+		}
+	}
 	act.control.Lock()
 	defer act.control.Unlock()
 	defer func() { act.finished = true }()
