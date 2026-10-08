@@ -103,6 +103,34 @@ edited to the required form.
 | `v0.15.0` | `cd37924` | 2026-10-07 |
 | `v0.16.0` | `eac5456` | 2026-10-07 |
 | `v0.17.0` | `60b3f7d` | 2026-10-07 |
+| `v0.18.0` | `6be6b44` | 2026-10-08 |
+
+### `v0.18.0`, 2026-10-08 — publication verified
+
+- [x] `task release-check` and `task release-snapshot` pass through the Nix shell.
+      Both Linux archive checksums verify; the amd64 snapshot prints
+      `bonnie 0.17.0-SNAPSHOT-6be6b44`, not `dev`.
+- [x] No `replace` directive in the framework or example modules.
+- [x] `test`, `examples`, and `lint` pass at tagged commit `6be6b44`
+      (CI run `37739773030`). Local `task ci` also passes before the tag.
+- [x] The dated `[0.18.0]` changelog section states the three claims, current
+      limits, and breaking-change migration. The `[Unreleased]` heading is removed.
+- [x] Annotated tag pushed after human confirmation. Release run `37742693557`
+      succeeded. Published notes match the changelog section.
+- [x] Three artifacts published. Both downloaded archive checksums verify.
+      The downloaded amd64 binary prints `bonnie 0.18.0` and is statically linked.
+- [x] Both examples pin v0.18.0; `task examples` passes.
+
+**Version choice.** MINOR: public runtime-installation APIs are added, deprecated
+workspace APIs are removed, and authored `workspace/` seed trees must move to
+`context/`. Storage paths and journal record values stay unchanged.
+
+**Local validation found an old runtime pin.** The Nix shell used microsandbox
+v0.6.18, which refused the database migrated by a newer runtime. It now uses
+v0.7.7, matching the installer. A test keeps versions and archive hashes aligned.
+The database was not reset or deleted; the microsandbox tests then passed.
+The arm64 artifact and live-model behaviour were not executed during release
+verification. External effects are not exactly once.
 
 ### `v0.17.0`, 2026-10-07 — every box confirmed
 
