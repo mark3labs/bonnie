@@ -105,6 +105,33 @@ edited to the required form.
 | `v0.17.0` | `60b3f7d` | 2026-10-07 |
 | `v0.18.0` | `6be6b44` | 2026-10-08 |
 
+### `v0.19.0`, 2026-10-08 — prepared, awaiting human confirmation
+
+- [x] `task release-check` and `task release-snapshot` pass at `981d6d9`.
+      Both Linux archive checksums verify. The statically linked amd64 snapshot
+      prints `bonnie 0.18.0-SNAPSHOT-981d6d9`, not `dev`.
+- [x] No `replace` directive in the framework or example modules.
+- [x] `test`, `examples`, and `lint` pass on `master` at `981d6d9`
+      (CI run `37846613877`). CI excludes the two browser tests by name.
+- [x] The dated `[0.19.0]` section groups changes under Added, Changed, and
+      Fixed, and states the claims and current limits. Note extraction passes.
+      Local `task check` and `task ci` pass with the prepared notes.
+- [ ] Commit and push the prepared notes; confirm CI at the exact tag candidate.
+- [ ] Human confirmation, annotated tag push, and successful release workflow.
+- [ ] Published artifacts and notes verified; downloaded checksums verify and
+      the statically linked amd64 binary prints `bonnie 0.19.0`.
+- [ ] Pin both examples to v0.19.0 after publication; `task examples` passes.
+
+**Version choice.** MINOR: public agent-command and scoped-runtime APIs,
+scheduled host callbacks, tool recovery policies, durable submissions and child
+runs, new HTTP routes, and the web interface are added.
+
+**Validation limits.** Local quality checks used cached results for many packages.
+CI green does not prove the excluded Chromium live-state and end-to-end flows.
+No published artifact exists for this candidate yet. The arm64 binary and
+live-model behaviour were not executed during this preparation. External effects
+are not exactly once; use one submission scheduler and process per journal.
+
 ### `v0.18.0`, 2026-10-08 — publication verified
 
 - [x] `task release-check` and `task release-snapshot` pass through the Nix shell.
