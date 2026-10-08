@@ -25,11 +25,11 @@ import (
 // Agent is a configured agent: the tree's defaults with the options applied
 // over them. Build one with [New], then [Agent.Serve] it.
 //
-// Nothing is opened, bound, or read until it serves, so building an agent
+// Nothing is opened, bound, or read until an operation starts, so building an agent
 // cannot fail and [New] returns no error. A setting that cannot apply — a
 // network policy with no sandbox to enforce it, a model beside a
-// host-supplied agent factory — is refused when serving starts, which is the
-// first moment the whole configuration is known.
+// host-supplied agent factory — is refused when Run or WithRuntime starts.
+// WithJournal needs only the journal configuration.
 type Agent struct {
 	cfg *config
 }
@@ -89,66 +89,16 @@ func (a *Agent) Run(ctx context.Context) (runErr error) {
 		}
 	}()
 
-	// Load a .env before anything reads the environment: the provider key the
-	// agent factory needs and the channel credentials resolved below both come
-	// from os.Getenv, so the file has to fill the gaps first. An exported
-	// variable still wins over the file.
-	dotenv, err := loadDotenv()
+	prepared, err := c.prepareRuntime(ctx)
 	if err != nil {
 		return err
 	}
-
-	var prompt, skills string
-	if c.factory == nil {
-		prompt, err = c.systemPrompt()
-		if err != nil {
-			return err
-		}
-		skills, err = c.skillsDir()
-		if err != nil {
-			return err
-		}
-	}
-	contextFiles, err := c.contextFilesDir()
+	rt, err := c.openRuntime(prepared.factory)
 	if err != nil {
 		return err
 	}
-	if c.sharedDirectorySet {
-		contextFiles = ""
-	}
-
-	// A built binary has no tree beside it, so the contextFiles seed files come
-	// from the copies codegen embedded. Seeding never overwrites: a file the
-	// model already wrote is the agent's work, not the author's input.
-	if contextFiles != "" {
-		if err := os.MkdirAll(contextFiles, 0o755); err != nil {
-			return fmt.Errorf("bonnie: contextFiles: %w", err)
-		}
-		if err := seedFromEmbed(Registered().ContextFiles, contextFiles); err != nil {
-			return err
-		}
-	}
-
-	factory, err := c.agentFactory(ctx, contextFiles, c.kitOptions(prompt, skills))
-	if err != nil {
-		return err
-	}
-
-	journal, err := runtime.OpenSQLiteJournal(c.journal)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err := journal.Close(); err != nil {
-			runErr = errors.Join(runErr, fmt.Errorf("bonnie: close journal: %w", err))
-		}
-	}()
-
-	runnerOpts := []runtime.RunnerOption{runtime.WithActivityLogger(c.activityLogger)}
-	if c.completion != nil {
-		runnerOpts = append(runnerOpts, runtime.WithCompletionLimit(c.completion.MaxContinuations))
-	}
-	runner := runtime.NewRunner(journal, factory, runnerOpts...)
+	defer func() { runErr = closeJournal(rt.journal, runErr) }()
+	journal, runner := rt.journal, rt.runner
 
 	// One mux carries every channel: the HTTP transport always, then
 	// whatever an option added. The others are built first so the HTTP
@@ -272,7 +222,7 @@ func (a *Agent) Run(ctx context.Context) (runErr error) {
 			runErr = errors.Join(runErr, fmt.Errorf("bonnie: scheduler: %w", err))
 		}
 	}()
-	c.banner(os.Stderr, ln.Addr().String(), contextFiles, skills, dotenv)
+	c.banner(os.Stderr, ln.Addr().String(), prepared.contextFiles, prepared.skills, prepared.dotenv)
 	if schedules == nil {
 		return c.serve(schedulerCtx, mux, ln)
 	}

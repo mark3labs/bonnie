@@ -241,9 +241,15 @@ skills in run working files. Skills beside the host process are not inherited.
 There is no configuration file. A setting is a file at a known path
 (`instructions.md`, `context/`, `skills/`, `tools/`) or an option in
 `main.go`. Thus a setting that does not exist is a compile error, and not a key
-that nothing reads. The built binary accepts two operator flags, `-addr` and
-`-model`. Each flag wins over the related option, thus one binary can change
-port or model without a new build.
+that nothing reads. The built binary accepts operator flags such as `--addr`,
+`--model`, `--web`, `--sandbox`, and `--schedule-clock`. Explicit flags override
+the related options, so an operator can change settings without a new build.
+
+Use `WithCommand` to add Cobra commands and flags to the built binary. Use
+`Agent.Configure` to apply parsed options before serving, and `Agent.WithJournal`
+or `Agent.WithRuntime` for scoped operations without starting an HTTP server.
+See [Agent commands and flags](docs/AGENT_COMMANDS.md) for a complete example
+and resource ownership rules.
 
 When the agent is ready, `bonnie build` compiles the tree into one static
 binary. The binary contains the tools, the instructions, the skills, and the

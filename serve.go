@@ -18,7 +18,7 @@ import (
 // serve keeps process ownership separate from the library's Run method.
 func (a *Agent) serve() {
 	cmd := a.serveCommand(flag.CommandLine)
-	cmd.SetArgs(serveArgs(os.Args[1:], flag.CommandLine))
+	cmd.SetArgs(serveArgs(os.Args[1:], flag.CommandLine, cmd))
 	if err := fang.Execute(context.Background(), cmd,
 		fang.WithNotifySignal(os.Interrupt, syscall.SIGTERM),
 		fang.WithoutVersion(),
@@ -46,13 +46,15 @@ func (a *Agent) serveCommand(fs *flag.FlagSet) *cobra.Command {
 			if model := fs.Lookup("model").Value.String(); model != "" {
 				WithModel(model)(a.cfg)
 			}
-			if fs.Lookup("schedule-clock") != nil {
+			if cmd.Flags().Changed("schedule-clock") || fs.Lookup("schedule-clock").Value.String() != "true" {
 				WithScheduleClock(fs.Lookup("schedule-clock").Value.String() == "true")(a.cfg)
 			}
 			if cmd.Flags().Changed("web") || fs.Lookup("web").Value.String() == "true" {
 				WithWebUI(fs.Lookup("web").Value.String() == "true")(a.cfg)
 			}
-			a.cfg.sandboxName = fs.Lookup("sandbox").Value.String()
+			if name := fs.Lookup("sandbox").Value.String(); name != "" {
+				a.cfg.sandboxName = name
+			}
 			return a.Run(cmd.Context())
 		},
 	}
@@ -61,6 +63,9 @@ func (a *Agent) serveCommand(fs *flag.FlagSet) *cobra.Command {
 	// providers without touching their runtime resources.
 	if fs.Lookup("sandbox").Usage == sandboxFlagUsage {
 		cmd.Flags().Lookup("sandbox").Usage = a.cfg.sandboxHelp()
+	}
+	for _, fn := range a.cfg.commands {
+		fn(cmd, a)
 	}
 	return cmd
 }
@@ -110,8 +115,10 @@ func (c *config) sandboxHelp() string {
 }
 
 // serveArgs retains Go flag's single-dash long names, including the -addr
-// used by bonnie dev. Values and arguments after -- must stay unchanged.
-func serveArgs(args []string, fs *flag.FlagSet) []string {
+// used by bonnie dev. An optional command adds custom root Cobra flags.
+// Values and arguments after -- must stay unchanged. Subcommand-local flags
+// use normal Cobra syntax.
+func serveArgs(args []string, fs *flag.FlagSet, commands ...*cobra.Command) []string {
 	result := append([]string(nil), args...)
 	for i := 0; i < len(result); i++ {
 		arg := result[i]
@@ -122,18 +129,42 @@ func serveArgs(args []string, fs *flag.FlagSet) []string {
 			continue
 		}
 		name, _, hasValue := strings.Cut(strings.TrimLeft(arg, "-"), "=")
-		f := fs.Lookup(name)
-		if f == nil {
+		// Cobra values take precedence when a callback changes a root flag.
+		known, takesValue := false, false
+		if len(commands) != 0 {
+			f := commands[0].Flags().Lookup(name)
+			if f == nil {
+				f = commands[0].PersistentFlags().Lookup(name)
+			}
+			if f != nil {
+				known, takesValue = true, f.NoOptDefVal == ""
+			}
+		}
+		if !known {
+			if f := fs.Lookup(name); f != nil {
+				boolFlag, ok := f.Value.(interface{ IsBoolFlag() bool })
+				known, takesValue = true, !ok || !boolFlag.IsBoolFlag()
+			}
+		}
+		if !known {
+			// Preserve a custom shorthand and its value without turning it
+			// into a long flag. Exact long names keep Go flag precedence.
+			if len(commands) != 0 && len(name) == 1 && !strings.HasPrefix(arg, "--") {
+				f := commands[0].Flags().ShorthandLookup(name)
+				if f == nil {
+					f = commands[0].PersistentFlags().ShorthandLookup(name)
+				}
+				if f != nil && f.NoOptDefVal == "" && !hasValue {
+					i++
+				}
+			}
 			continue
 		}
 		if !strings.HasPrefix(arg, "--") {
 			result[i] = "-" + arg
 		}
-		if !hasValue {
-			boolFlag, ok := f.Value.(interface{ IsBoolFlag() bool })
-			if !ok || !boolFlag.IsBoolFlag() {
-				i++
-			}
+		if !hasValue && takesValue {
+			i++
 		}
 	}
 	return result
