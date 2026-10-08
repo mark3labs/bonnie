@@ -1,0 +1,17 @@
+{
+  "name": "bonnie-docs",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tome dev",
+    "build": "tome build && node scripts/finalize-build.js",
+    "check": "node scripts/check-docs.js",
+    "test": "bun run check && bun run build && node scripts/check-build.js"
+  },
+  "devDependencies": {
+    "@tomehq/cli": "0.9.0",
+    "@tomehq/theme": "0.9.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  }
+}

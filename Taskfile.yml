@@ -252,6 +252,24 @@ tasks:
       vars: [TAG]
 
   # -----------------------------------------------------------------------
+  # Documentation
+  # -----------------------------------------------------------------------
+
+  docs-dev:
+    desc: Run the Tome documentation development server
+    dir: www
+    cmds:
+      - bun install --frozen-lockfile
+      - bun run dev
+
+  docs-check:
+    desc: Validate and build the documentation site
+    dir: www
+    cmds:
+      - bun install --frozen-lockfile
+      - bun run test
+
+  # -----------------------------------------------------------------------
   # Cleanup
   # -----------------------------------------------------------------------
 

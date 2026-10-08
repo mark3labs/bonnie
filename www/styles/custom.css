@@ -1,0 +1,32 @@
+/* Cyan and pink from the BONNIE artwork, on a dark navy surface.
+   Tome sets palette variables on its layout element with inline styles. */
+:root,
+#tome-root .tome-grain {
+  color-scheme: dark;
+  --bg: #080b20 !important;
+  --sf: #10152d !important;
+  --sfH: #19203d !important;
+  --bd: #323d60 !important;
+  --tx: #f4f5ff !important;
+  --tx2: #bcc5df !important;
+  --txM: #9faecc !important;
+  --ac: #00cbea !important;
+  --acD: rgba(0, 203, 234, 0.14) !important;
+  --acT: #62e8ff !important;
+  --cdBg: #090e24 !important;
+  --cdTx: #e1e9ff !important;
+  --sbBg: #0b1027 !important;
+  --hdBg: rgba(8, 11, 32, 0.96) !important;
+}
+*, *::before, *::after { box-sizing: border-box; }
+body { margin: 0; background: #080b20; color: #f4f5ff; -webkit-font-smoothing: antialiased; }
+h1, h2, h3, h4, h5, h6 { font-family: "Space Grotesk", sans-serif !important; font-style: normal !important; }
+h1 { text-wrap: balance; }
+::selection { background: #ab126f; color: #fff; }
+:focus-visible { outline: 3px solid #ff64cf; outline-offset: 4px; }
+.bonnie-hero { text-align: center; padding: 1.5rem 1rem 2rem; border-bottom: 2px solid #ed21aa; background: radial-gradient(ellipse at top, #1b2352, transparent 75%); }
+.bonnie-hero img { display: block; width: min(100%, 320px); margin: 0 auto 1rem; }
+.bonnie-hero p { font-size: 1.2rem; color: #f4f5ff; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation: none !important; transition: none !important; }
+}

@@ -234,8 +234,9 @@ Files under `skills/` are the agent's skills: one `*.md` per skill, or one
 subdirectory per skill with a `SKILL.md` in it, each with YAML frontmatter
 that gives a `name` and a `description`. Those two fields go in the system
 prompt; the body arrives only when the model calls `activate_skill`, so a
-large skill set costs few tokens until it is used. The tree's `skills/` is the authored set. Skills in a run's working files can also be
-discovered in the sandbox; skills beside the host process are not inherited.
+large skill set costs few tokens until it is used. The tree's `skills/` is the authored set. The managed agent-tree path selects
+that directory explicitly and does not automatically discover model-written
+skills in run working files. Skills beside the host process are not inherited.
 
 There is no configuration file. A setting is a file at a known path
 (`instructions.md`, `context/`, `skills/`, `tools/`) or an option in
@@ -516,8 +517,10 @@ runner := runtime.NewRunner(journal, sandbox.Agent(provider,
 
 The model gets four tools that run in the sandbox: `shell`, `read_file`,
 `write_file`, and `list_files`. Their root is the sandbox work directory, `sandbox.WorkDir`, whose path is
-`/workspace`. A path that leaves the work directory, including through a
-symlink the model made, gets `sandbox.ErrOutsideWorkDir`.
+`/workspace`. Local and Landlock file operations reject paths that leave the work directory,
+including symlink escapes, with `sandbox.ErrOutsideWorkDir`. Docker and
+microsandbox permit absolute paths inside the guest filesystem; their boundary
+is the container or microVM, not only the work directory.
 
 The `shell` tool checks for Bash inside the sandbox on each call. It uses
 Bash when available and falls back to `sh` otherwise. Each result names the
@@ -1293,6 +1296,10 @@ bonnie dev --addr 127.0.0.1:8081 --tui=false
 See [`examples/README.md`](examples/README.md) for commands you can copy.
 
 ## Documentation
+
+The [documentation site](https://go-bonnie.dev) has installation steps,
+agent guides, channel setup, and CLI and Go API references. To run or build
+it locally, see [`www/README.md`](www/README.md).
 
 | Document | Purpose |
 |---|---|

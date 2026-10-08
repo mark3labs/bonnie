@@ -5,6 +5,15 @@ All notable changes to BONNIE are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Add a Tome documentation site in `www` with getting-started guides, channel
+  setup, operating procedures, and CLI and Go API references. Use the BONNIE
+  artwork's cyan, pink, and navy colors. Validate and publish the static site
+  through GitHub Pages, with custom-domain setup for `go-bonnie.dev`.
+
 ## [0.18.0] — 2026-10-08
 
 **Automatic microsandbox installation and removal of deprecated workspace APIs.**
