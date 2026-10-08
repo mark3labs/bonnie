@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Resolve the journal-local Microsandbox runtime during sandbox prune, without
+  downloading a runtime. Require confirmed absence after Microsandbox deletion
+  and reject ambiguous missing-sandbox errors. Failed cleanup remains retryable.
+- Add `bonnie sandbox prune --recheck` to retry terminal-run cleanup despite an
+  existing `workspace_deleted` record. Dry-run now respects cleanup records and
+  reports the same eligibility as deletion. Keep the stored record name unchanged.
+
 ### Added
 
 - Add a short VHS recording below the documentation home-page logo. Show agent

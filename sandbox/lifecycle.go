@@ -118,11 +118,7 @@ func (p *MicrosandboxProvider) DeleteRun(ctx context.Context, runID string) (boo
 	if !exists {
 		return false, nil
 	}
-	_, stderr, code, err := runCLI(ctx, nil, p.bin, "rm", "--force", name)
-	if cerr := cliError("rm "+name, msbError(stderr), code, err); cerr != nil {
-		return true, cerr
-	}
-	return true, nil
+	return true, p.remove(ctx, name)
 }
 
 // SandboxExists implements [ExistenceChecker]. A Local work directory is a

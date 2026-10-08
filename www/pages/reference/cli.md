@@ -142,8 +142,9 @@ Deletes working files of terminal runs; it keeps history and state. Stop the ser
 | `--sandbox` | `docker` | Backend used by these runs: Landlock, Docker, Microsandbox/`msb`, or Local |
 | `--sandbox-image` | empty | Image needed to construct the selected backend |
 | `--dry-run` | `false` | Report eligible terminal runs without deleting files |
+| `--recheck` | `false` | Retry cleanup of terminal runs even when cleanup is already recorded |
 
-Use the actual backend. Landlock and Local use the journal's `workspaces` root. Non-terminal runs are kept. Successful cleanup is recorded so later passes skip it until another terminal checkpoint. Completed runs can receive new turns with an empty directory after pruning. There is no built-in transcript deletion command.
+Use the actual backend. Landlock and Local use the journal's `workspaces` root. Microsandbox uses the same runtime lookup as agent startup, including the journal-local installation; prune does not download a runtime. Use the same runtime environment and backend context as the server. To remove a sandbox that remains after a cleanup record, stop the server and run `bonnie sandbox prune --journal .bonnie --sandbox microsandbox --recheck`. Add `--dry-run` to check eligibility without deletion. A recheck keeps non-terminal runs and does not change old journal records. Successful cleanup is recorded so later passes skip it until another terminal checkpoint. Completed runs can receive new turns with an empty directory after pruning. There is no built-in transcript deletion command.
 
 ## `bonnie schedules`
 

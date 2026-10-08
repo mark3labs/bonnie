@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"text/tabwriter"
 	"time"
 
@@ -40,6 +41,7 @@ func newSandboxPruneCmd() *cobra.Command {
 	f.StringVar(&o.kind, "sandbox", "docker", "sandbox backend the runs used: landlock, docker, microsandbox, msb, or local")
 	f.StringVar(&o.image, "sandbox-image", "", "sandbox image, only needed to construct the backend")
 	f.BoolVar(&o.dryRun, "dry-run", false, "report what would be deleted, delete nothing")
+	f.BoolVar(&o.recheck, "recheck", false, "retry terminal-run cleanup even when cleanup was already recorded")
 	return cmd
 }
 
@@ -49,10 +51,12 @@ type pruneOpts struct {
 	kind    string
 	image   string
 	dryRun  bool
+	recheck bool
 }
 
 // runSandboxPrune deletes terminal-run sandboxes through the runtime cleanup
-// API. The runtime records successful cleanup so a later pass skips it.
+// API. The runtime records successful cleanup so a later pass skips it unless
+// the operator requests a recheck.
 // Run this command only after the server that owns these runs has stopped:
 // the runtime run lock does not exclude another process.
 func runSandboxPrune(o pruneOpts) error {
@@ -66,6 +70,11 @@ func runSandboxPrune(o pruneOpts) error {
 		provider = sandbox.Landlock(sandbox.WithLandlockRoot(filepath.Join(o.journal, "workspaces")))
 	case "local":
 		provider = sandbox.Local(sandbox.WithLocalRoot(filepath.Join(o.journal, "workspaces")))
+	case "microsandbox":
+		// Match serving's runtime lookup, but never download during cleanup.
+		if err := provider.(*sandbox.MicrosandboxProvider).EnsureInstalled(context.Background(), o.journal, false); err != nil {
+			return err
+		}
 	}
 	if v, ok := provider.(sandbox.RunCleanupValidator); ok {
 		if err := v.ValidateRunCleanup(); err != nil {
@@ -107,6 +116,7 @@ func runSandboxPrune(o pruneOpts) error {
 			FailedAfter:    time.Nanosecond,
 			CancelledAfter: time.Nanosecond,
 			RetiredAfter:   time.Nanosecond,
+			RecheckDeleted: o.recheck,
 		}
 		cleanupErr = runner.CleanupSandboxes(ctx, policy, func(ctx context.Context, runID string) (bool, error) {
 			existed, err := reaper.DeleteRun(ctx, runID)
@@ -139,12 +149,30 @@ func runSandboxPrune(o pruneOpts) error {
 			continue
 		}
 		if o.dryRun {
-			_, _ = fmt.Fprintf(tw, "%s\t%s\twould delete sandbox\n", runID, state)
+			recs, err := journal.Replay(ctx, runID)
+			if err != nil {
+				return fmt.Errorf("bonnie: replay %s: %w", runID, err)
+			}
+			action := "kept (not eligible)"
+			for _, rec := range slices.Backward(recs) {
+				if rec.Kind == runtime.RecordSandboxDeleted && !o.recheck {
+					action = "kept (cleanup already recorded; use --recheck to retry)"
+					break
+				}
+				if rec.Kind != runtime.RecordState || !rec.State.IsTerminal() {
+					continue
+				}
+				if rec.State == state && !rec.Timestamp.IsZero() && time.Since(rec.Timestamp) >= time.Nanosecond {
+					action = "would delete sandbox"
+				}
+				break
+			}
+			_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\n", runID, state, action)
 			continue
 		}
 		action := actions[runID]
 		if action == "" {
-			action = "kept (cleanup already recorded or not eligible)"
+			action = "kept (cleanup already recorded or not eligible; use --recheck to retry)"
 		}
 		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\n", runID, state, action)
 	}

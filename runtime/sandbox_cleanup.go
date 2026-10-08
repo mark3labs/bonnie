@@ -20,6 +20,11 @@ type SandboxCleanupPolicy struct {
 	CancelledAfter time.Duration
 	// RetiredAfter is the retention period for retired runs.
 	RetiredAfter time.Duration
+	// RecheckDeleted ignores deletion receipts and calls delete again for eligible
+	// runs. Terminal state, retention, reserved-run, and active-run rules still
+	// apply. The default false skips runs with a receipt after their latest
+	// terminal checkpoint.
+	RecheckDeleted bool
 }
 
 func (p SandboxCleanupPolicy) retention(state RunState) time.Duration {
@@ -46,7 +51,9 @@ func (p SandboxCleanupPolicy) retention(state RunState) time.Duration {
 // journal write after deletion can cause another call. Its bool reports whether
 // the sandbox existed; either bool with a nil error means it is now absent.
 // A successful call writes RecordSandboxDeleted, even for an absent sandbox.
-// No further deletion is attempted until a new terminal checkpoint is written.
+// Unless RecheckDeleted is true, no further deletion is attempted until a new
+// terminal checkpoint is written. RecheckDeleted ignores existing receipts but
+// does not change the terminal state, retention, reserved-run, or active-run rules.
 // History and run state do not change.
 //
 // One Runner must own all turns and cleanup for these runs. The run lock is local
@@ -110,7 +117,7 @@ func (r *Runner) cleanupSandbox(ctx context.Context, runID string, policy Sandbo
 	// Journal order, not timestamp order, identifies the latest checkpoint.
 	// Later metadata must not extend the retention period.
 	for _, rec := range slices.Backward(recs) {
-		if rec.Kind == RecordSandboxDeleted {
+		if rec.Kind == RecordSandboxDeleted && !policy.RecheckDeleted {
 			return nil
 		}
 		if rec.Kind != RecordState || !rec.State.IsTerminal() {

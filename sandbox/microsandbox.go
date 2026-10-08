@@ -173,18 +173,7 @@ func (p *MicrosandboxProvider) Open(ctx context.Context, runID string) (Sandbox,
 			return cliError("stop microsandbox "+c.name, msbError(stderr), code, err)
 		},
 		deleteFn: func(ctx context.Context, c *cliSandbox) error {
-			// -f stops the sandbox first. Without it msb refuses to remove
-			// a running sandbox ("still running"), and because a delete
-			// failure is usually ignored by the caller, the microVM is
-			// leaked in silence along with its memory.
-			_, stderr, code, err := runCLI(ctx, nil, c.bin, "rm", "--force", c.name)
-			if err != nil {
-				return err
-			}
-			if code != 0 {
-				return fmt.Errorf("bonnie: sandbox: rm %s: %s", c.name, firstLine(stderr))
-			}
-			return nil
+			return p.remove(ctx, c.name)
 		},
 		// msb has a documented `cp`. Exec-with-stdin is not documented to
 		// carry bytes, so file I/O goes through cp, which is.
@@ -470,7 +459,7 @@ func (p *MicrosandboxProvider) known(ctx context.Context, name string) (bool, er
 		return false, err
 	}
 	if code != 0 {
-		if strings.Contains(stderr, "sandbox not found: "+name) {
+		if strings.TrimSpace(stderr) == "error: sandbox not found: "+name {
 			return false, nil
 		}
 		return false, cliError("inspect "+name, msbError(stderr), code, nil)
@@ -483,6 +472,23 @@ func (p *MicrosandboxProvider) known(ctx context.Context, name string) (bool, er
 		return false, fmt.Errorf("bonnie: sandbox: inspect %s returned no configuration", name)
 	}
 	return true, nil
+}
+
+// remove requires proof of absence after rm. A successful CLI exit alone
+// must not produce a cleanup receipt while the sandbox still exists.
+func (p *MicrosandboxProvider) remove(ctx context.Context, name string) error {
+	_, stderr, code, err := runCLI(ctx, nil, p.bin, "rm", "--force", name)
+	if err := cliError("rm "+name, msbError(stderr), code, err); err != nil {
+		return err
+	}
+	exists, err := p.known(ctx, name)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return fmt.Errorf("bonnie: sandbox: rm %s returned success but the sandbox still exists", name)
+	}
+	return nil
 }
 
 // msbMissingPath reports whether an `msb cp` failure means the guest path is
