@@ -38,8 +38,23 @@ Tome 0.9 emits relative canonical links and minimal HTML heads on detail pages.
 `scripts/finalize-build.js` adds absolute canonical links, shared font and
 favicon metadata, a sitemap, `.nojekyll`, and the Pages 404 fallback. No Tome
 package code is changed. Tome also generates search and LLM-readable exports.
-Open Graph image generation is optional and is skipped if its renderer is not
-available; the normal site build still completes.
+Each static page also receives Open Graph and Twitter large-image card tags.
+Titles and descriptions come from page frontmatter; URLs use the HTTPS custom
+domain. All pages share `public/og.png`, a committed 1200 × 630 PNG with the
+BONNIE logo and site colors. Build checks verify the card dimensions, copied
+image, and page-specific tags. This does not depend on Tome's optional OG renderer.
+
+To update the card after a logo or design change, run from `www/`:
+
+```bash
+go run ./scripts/generate-og
+bun run test
+```
+
+The generator uses the repository's existing Go image dependency and embedded
+Go fonts. Commit the generator and `public/og.png`, not `out/`. After deployment,
+check a nested page's HTML and request a fresh preview from the social platform;
+platforms can cache old images and metadata.
 
 ## GitHub Pages deployment
 

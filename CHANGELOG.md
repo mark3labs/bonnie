@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Branded 1200 × 630 social preview image with the BONNIE logo, plus page-specific
+  Open Graph and Twitter card metadata on the documentation site. Build checks
+  verify the image and tags without an optional renderer.
 - Optional worker presence with stable worker and process instance identities,
   labels, endpoint capabilities, and discovery watches.
 - NATS JetStream KV registry with TTL expiry and revision-checked ownership.
