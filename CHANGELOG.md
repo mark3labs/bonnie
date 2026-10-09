@@ -5,6 +5,17 @@ All notable changes to BONNIE are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Optional worker presence with stable worker and process instance identities,
+  labels, endpoint capabilities, and discovery watches.
+- NATS JetStream KV registry with TTL expiry and revision-checked ownership.
+- `WithPresence` host lifecycle integration and presence endpoint reporting for
+  HTTP, NATS, Slack, Discord, Telegram, and GitHub. Presence does not schedule
+  work or authorize automatic reassignment.
+
 ## [0.19.0] — 2026-10-08
 
 **Durable work, agent commands, scheduled callbacks, and a web interface.**

@@ -73,6 +73,7 @@ import (
 
 	"github.com/mark3labs/bonnie/channel"
 	"github.com/mark3labs/bonnie/channel/chat"
+	"github.com/mark3labs/bonnie/presence"
 	"github.com/mark3labs/bonnie/runtime"
 )
 
@@ -224,6 +225,11 @@ func moduleVersion() string {
 
 // Name implements [channel.Channel].
 func (c *Channel) Name() string { return "http" }
+
+// PresenceEndpoints describes the configured http endpoint without credentials.
+func (c *Channel) PresenceEndpoints() []presence.Endpoint {
+	return []presence.Endpoint{{Channel: c.Name(), Address: channel.APIPrefix + "/runs", Input: true, Delivery: true, Ready: true}}
+}
 
 // Routes implements [channel.Channel]. Every path is under
 // [channel.APIPrefix].

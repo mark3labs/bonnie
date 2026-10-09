@@ -61,6 +61,7 @@ import (
 
 	"github.com/mark3labs/bonnie/channel"
 	"github.com/mark3labs/bonnie/channel/chat"
+	"github.com/mark3labs/bonnie/presence"
 	"github.com/mark3labs/bonnie/runtime"
 )
 
@@ -319,6 +320,11 @@ func parseKey(pemKey string) (*rsa.PrivateKey, error) {
 
 // Name implements [channel.Channel].
 func (c *Channel) Name() string { return "github" }
+
+// PresenceEndpoints describes the configured github endpoint without credentials.
+func (c *Channel) PresenceEndpoints() []presence.Endpoint {
+	return []presence.Endpoint{{Channel: c.Name(), Address: DefaultPath, Input: true, Delivery: c.cfg.AppID != "" && c.cfg.PrivateKey != "", Ready: true}}
+}
 
 // Routes implements [channel.Channel].
 func (c *Channel) Routes() []channel.Route {

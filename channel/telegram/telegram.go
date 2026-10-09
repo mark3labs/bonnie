@@ -58,6 +58,7 @@ import (
 
 	"github.com/mark3labs/bonnie/channel"
 	"github.com/mark3labs/bonnie/channel/chat"
+	"github.com/mark3labs/bonnie/presence"
 	"github.com/mark3labs/bonnie/runtime"
 )
 
@@ -162,6 +163,15 @@ func (c *Channel) verify(token string) bool {
 
 // Name implements [channel.Channel].
 func (c *Channel) Name() string { return "telegram" }
+
+// PresenceEndpoints describes the configured telegram endpoint without credentials.
+func (c *Channel) PresenceEndpoints() []presence.Endpoint {
+	path := c.cfg.Path
+	if path == "" {
+		path = DefaultPath
+	}
+	return []presence.Endpoint{{Channel: c.Name(), Address: path, Input: true, Delivery: c.cfg.Token != "", Ready: true}}
+}
 
 // Routes implements [channel.Channel].
 func (c *Channel) Routes() []channel.Route {

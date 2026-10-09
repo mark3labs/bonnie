@@ -81,6 +81,7 @@ type config struct {
 	scheduleClock       bool
 	scheduleClockSet    bool
 	scheduleAuthorizer  func(*http.Request) error
+	presence            *PresenceConfig
 }
 
 // Option configures [New] or [Agent.Configure]. This is where a setting that is not a

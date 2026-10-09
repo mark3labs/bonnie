@@ -16,6 +16,7 @@ import (
 
 	"github.com/mark3labs/bonnie/channel"
 	bonniehttp "github.com/mark3labs/bonnie/channel/http"
+	"github.com/mark3labs/bonnie/presence"
 	"github.com/mark3labs/bonnie/runtime"
 	"github.com/mark3labs/bonnie/sandbox"
 	"github.com/mark3labs/bonnie/web"
@@ -105,16 +106,27 @@ func (a *Agent) Run(ctx context.Context) (runErr error) {
 	// channel's info route can name them, and each is refused a route in
 	// the framework's namespace before anything is served.
 	var channels []Channel
+	var pl *presenceLifecycle
 	// Register cleanup before construction. A channel can own resources even
 	// when it has not started, or when a later channel cannot be built.
 	defer func() {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), c.shutdown)
 		defer cancel()
+		if pl != nil {
+			if err := pl.register(shutdownCtx, "draining"); err != nil {
+				runErr = errors.Join(runErr, err)
+			}
+		}
 		for _, ch := range slices.Backward(channels) {
 			if lifecycle, ok := ch.(channel.Lifecycle); ok {
 				if err := lifecycle.Shutdown(shutdownCtx); err != nil {
 					runErr = errors.Join(runErr, fmt.Errorf("bonnie: shutdown channel %q: %w", ch.Name(), err))
 				}
+			}
+		}
+		if pl != nil {
+			if err := pl.cfg.Registry.Unregister(shutdownCtx, pl.id); err != nil && !errors.Is(err, presence.ErrNotFound) {
+				runErr = errors.Join(runErr, err)
 			}
 		}
 	}()
@@ -191,6 +203,24 @@ func (a *Agent) Run(ctx context.Context) (runErr error) {
 		}
 	}
 
+	var presenceErr <-chan error
+	if c.presence != nil {
+		candidate, err := newPresenceLifecycle(*c.presence, append(append([]Channel(nil), channels...), httpChannel))
+		if err != nil {
+			return err
+		}
+		if err := candidate.register(ctx, "ready"); err != nil {
+			return fmt.Errorf("bonnie: register presence: %w", err)
+		}
+		pl = candidate
+		loopCtx, stop := context.WithCancel(ctx)
+		done := make(chan error, 1)
+		finished := make(chan struct{})
+		go func() { defer close(finished); done <- pl.run(loopCtx) }()
+		presenceErr = done
+		defer func() { stop(); <-finished }()
+	}
+
 	if schedules != nil {
 		clock := !c.scheduleClockSet || c.scheduleClock
 		schedules.start(ctx, clock)
@@ -224,7 +254,24 @@ func (a *Agent) Run(ctx context.Context) (runErr error) {
 	}()
 	c.banner(os.Stderr, ln.Addr().String(), prepared.contextFiles, prepared.skills, prepared.dotenv)
 	if schedules == nil {
-		return c.serve(schedulerCtx, mux, ln)
+		if presenceErr == nil {
+			return c.serve(schedulerCtx, mux, ln)
+		}
+		serveCtx, cancel := context.WithCancel(schedulerCtx)
+		defer cancel()
+		served := make(chan error, 1)
+		go func() { served <- c.serve(serveCtx, mux, ln) }()
+		select {
+		case err := <-served:
+			return err
+		case err := <-presenceErr:
+			cancel()
+			serveErr := <-served
+			if err != nil {
+				return errors.Join(serveErr, err)
+			}
+			return serveErr
+		}
 	}
 	serveCtx, cancel := context.WithCancel(schedulerCtx)
 	defer cancel()
@@ -233,6 +280,13 @@ func (a *Agent) Run(ctx context.Context) (runErr error) {
 	select {
 	case err := <-served:
 		return err
+	case err := <-presenceErr:
+		cancel()
+		serverErr := <-served
+		if err != nil {
+			return errors.Join(serverErr, err)
+		}
+		return serverErr
 	case err := <-schedules.done:
 		schedules.done = nil
 		cancel()

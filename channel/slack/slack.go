@@ -77,6 +77,7 @@ import (
 
 	"github.com/mark3labs/bonnie/channel"
 	"github.com/mark3labs/bonnie/channel/chat"
+	"github.com/mark3labs/bonnie/presence"
 	"github.com/mark3labs/bonnie/runtime"
 )
 
@@ -194,6 +195,15 @@ func (c *Channel) Routes() []channel.Route {
 		{Method: http.MethodPost, Path: path, Handler: c.handleEvent},
 		{Method: http.MethodPost, Path: c.cancelPath(path), Handler: c.handleCancelCommand},
 	}
+}
+
+// PresenceEndpoints reports the webhook input and, when configured, reply delivery.
+func (c *Channel) PresenceEndpoints() []presence.Endpoint {
+	path := c.cfg.Path
+	if path == "" {
+		path = DefaultPath
+	}
+	return []presence.Endpoint{{Channel: c.Name(), Address: path, Input: true, Delivery: c.cfg.BotToken != "", Ready: true}}
 }
 
 // From implements [channel.Inbound].

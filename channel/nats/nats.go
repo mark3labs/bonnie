@@ -34,6 +34,7 @@ import (
 
 	"github.com/mark3labs/bonnie/channel"
 	"github.com/mark3labs/bonnie/channel/chat"
+	"github.com/mark3labs/bonnie/presence"
 	"github.com/mark3labs/bonnie/runtime"
 )
 
@@ -292,6 +293,21 @@ func validSubject(s string) bool {
 
 // Name implements channel.Channel.
 func (c *Channel) Name() string { return "nats" }
+
+// PresenceEndpoints describes the configured nats endpoint without credentials.
+func (c *Channel) PresenceEndpoints() []presence.Endpoint {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	ready := c.conn != nil && c.conn.IsConnected() && !c.stopped
+	address := c.cfg.Subject
+	if c.cfg.TargetedTasks {
+		address += ".worker." + c.cfg.WorkerID
+	}
+	return []presence.Endpoint{{Channel: c.Name(), Address: address, Input: true, Delivery: true, Ready: ready}}
+}
+
+// WorkerIdentity implements [channel.WorkerIdentity].
+func (c *Channel) WorkerIdentity() string { return c.cfg.WorkerID }
 
 // Routes implements channel.Channel; NATS has no HTTP routes.
 func (c *Channel) Routes() []channel.Route { return nil }

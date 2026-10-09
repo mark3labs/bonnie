@@ -59,6 +59,7 @@ import (
 
 	"github.com/mark3labs/bonnie/channel"
 	"github.com/mark3labs/bonnie/channel/chat"
+	"github.com/mark3labs/bonnie/presence"
 	"github.com/mark3labs/bonnie/runtime"
 )
 
@@ -195,6 +196,15 @@ func New(r *runtime.Runner, cfg Config, opts ...chat.CoreOption) (*Channel, erro
 
 // Name implements [channel.Channel].
 func (c *Channel) Name() string { return "discord" }
+
+// PresenceEndpoints describes the configured discord endpoint without credentials.
+func (c *Channel) PresenceEndpoints() []presence.Endpoint {
+	path := c.cfg.Path
+	if path == "" {
+		path = DefaultPath
+	}
+	return []presence.Endpoint{{Channel: c.Name(), Address: path, Input: true, Delivery: c.cfg.BotToken != "", Ready: true}}
+}
 
 // Routes implements [channel.Channel].
 func (c *Channel) Routes() []channel.Route {

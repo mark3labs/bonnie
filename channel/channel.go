@@ -21,6 +21,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/mark3labs/bonnie/presence"
 	"github.com/mark3labs/bonnie/runtime"
 )
 
@@ -263,6 +264,18 @@ type TrackedReceiver interface {
 type Lifecycle interface {
 	Start(ctx context.Context) error
 	Shutdown(ctx context.Context) error
+}
+
+// WorkerIdentity is an optional capability for channels that process work as
+// a named worker.
+type WorkerIdentity interface {
+	WorkerIdentity() string
+}
+
+// PresenceProvider is an optional capability implemented by channels that can
+// describe their transport endpoints without exposing credentials or host URLs.
+type PresenceProvider interface {
+	PresenceEndpoints() []presence.Endpoint
 }
 
 // Channel is an inbound transport. A channel with no HTTP surface returns no

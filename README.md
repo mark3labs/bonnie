@@ -727,6 +727,64 @@ The same address always resolves to the same run.
 `POST /bonnie/v1/runs/{id}` is the opposite: it targets one exact run, and
 returns `404` instead of making a run.
 
+## Host worker presence
+
+A host can advertise a worker in a `presence.Registry` after all channel lifecycles have started. Registration and refresh failures fail `Agent.Run`; shutdown publishes `draining` and unregisters using a bounded context.
+
+```go
+bonnie.New(
+    bonnie.WithPresence(bonnie.PresenceConfig{
+        Registry: registry, WorkerID: "support-agent",
+        Labels: map[string]string{"region": "eu-west"},
+        // Set externally advertised URLs explicitly; bind addresses are not URLs.
+        Endpoints: []presence.Endpoint{{Address: "https://agent.example.com", Input: true}},
+    }),
+).Serve()
+```
+
+`InstanceID` is generated randomly when omitted and refresh defaults to 10 seconds. When `Endpoints` is omitted, mounted channels implementing `channel.PresenceProvider` provide endpoint data. Presence does not schedule or assign work. The registry is required, and host deployments should ensure its lease/TTL exceeds the refresh interval.
+
+### NATS presence registry
+
+Use a caller-owned NATS connection with JetStream enabled:
+
+```go
+// Import presencenats "github.com/mark3labs/bonnie/presence/nats".
+registry, err := presencenats.New(ctx, nc, presencenats.Config{
+    Bucket: "workers", Create: true, // Explicit permission to create resources.
+})
+if err != nil { return err }
+// Pass registry to WithPresence. Use the same WorkerID in WithNATS.
+workers, err := registry.Discover(ctx, presence.Filter{
+    Labels: map[string]string{"region": "eu-west"},
+})
+if err != nil { return err }
+_ = workers
+snapshot, changes, err := registry.Watch(ctx, presence.Filter{})
+if err != nil { return err }
+_ = snapshot
+for event := range changes {
+    if event.Err != nil { return event.Err } // Start a new watch to resynchronise.
+    // event.Deleted removes event.Record.Identity from the local view.
+}
+```
+
+The bucket is the discovery scope. Its default TTL is 30 seconds. Existing
+buckets must match the requested TTL. Watches poll at most once per second;
+they include an initial snapshot and report expired records as deletions.
+This is current-state discovery, not a durable history of every join and leave.
+Protect registration and discovery with NATS permissions. Labels are not
+authorization claims. A different live instance cannot replace a worker record.
+
+All built-in channels report input and delivery capabilities separately. NATS
+also reports connection readiness; the webhook channels report local configured
+capabilities, not remote platform health. HTTP addresses are relative unless
+explicit endpoint overrides provide a public URL. Overrides replace the full
+endpoint list and are the application's responsibility. No credentials are
+published. Presence expiry is not proof that task execution stopped and must
+not trigger automatic reassignment. Scheduling, claims, and failover remain
+outside this feature.
+
 ## Chat channels
 
 Slack, Discord, Telegram, and GitHub put the same durable runs into a
