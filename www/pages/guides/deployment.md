@@ -147,7 +147,7 @@ agent := bonnie.New(
 return agent.Run(ctx)
 ```
 
-The host does not close `nc`. Keep the connection available through shutdown. JetStream must be enabled on the broker. `Bucket` is required and defines the discovery scope. `Create: true` permits creation of a missing file-backed KV bucket; otherwise provision it first. TTL defaults to 30 seconds, must be positive, and must match an existing bucket. Restrict bucket access with NATS permissions. Labels are metadata, not authorization claims.
+The host does not close `nc`. Keep the connection available through shutdown. JetStream must be enabled on the broker. `Bucket` is required and defines the discovery scope. `Create: true` permits creation of a missing file-backed KV bucket; otherwise provision it first. TTL defaults to 30 seconds, must be positive, and must match an existing bucket. Existing buckets keep their storage type and history; the store does not validate these settings. Restrict bucket access with NATS permissions. Labels are metadata, not authorization claims.
 
 `WorkerID` is the stable worker name. Omit `InstanceID` to generate a random ID for each host run. A different live instance cannot claim the same worker name: registration returns `presence.ErrConflict`. Use `errors.Is` to test this error. A refresh updates the same instance's record and renews its TTL. An old instance cannot unregister its replacement. Expiry permits a new instance to register, but does not prove that the old process or its tools stopped.
 

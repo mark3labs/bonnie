@@ -40,6 +40,7 @@ type Store struct {
 // New opens a JetStream KV presence bucket, or creates it when cfg.Create permits.
 // JetStream must be enabled. The caller owns conn and must keep it available for
 // store operations; Store does not close it. An existing bucket must match cfg.TTL.
+// New does not validate an existing bucket's storage type or history.
 func New(ctx context.Context, conn *nats.Conn, cfg Config) (*Store, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
