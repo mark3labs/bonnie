@@ -46,7 +46,7 @@ func New(runner *runtime.Runner, journal runtime.Journal, httpChannel *httpchann
 			http.Error(w, "Web UI is not configured", http.StatusServiceUnavailable)
 		})
 	}
-	s := &server{journal: journal, api: httpChannel.Handler()}
+	s := &server{journal: journal, runner: runner, api: httpChannel.Handler()}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /web", s.page)
 	mux.HandleFunc("GET /web/{$}", s.page)
@@ -69,6 +69,7 @@ func New(runner *runtime.Runner, journal runtime.Journal, httpChannel *httpchann
 
 type server struct {
 	journal runtime.Journal
+	runner  *runtime.Runner
 	api     http.Handler
 }
 type runRow struct {
@@ -215,6 +216,13 @@ func (s *server) page(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v.Token = token(w, r)
+	if r.Header.Get("Datastar-Request") == "true" {
+		w.Header().Set("Content-Type", "text/event-stream")
+		if err := patch(w, r, application(v)); err != nil {
+			return
+		}
+		return
+	}
 	render(w, r, page(v))
 }
 
@@ -247,6 +255,14 @@ func (s *server) action(w http.ResponseWriter, r *http.Request) {
 	path := "/bonnie/v1/runs"
 	var body any
 	switch action {
+	case "ensure":
+		address := r.PostForm.Get("address")
+		if address == "" || strings.ContainsAny(address, "/\\\\") {
+			http.Error(w, "Invalid address", 400)
+			return
+		}
+		path = "/bonnie/v1/addresses/" + url.PathEscape("web-"+address)
+		body = struct{}{}
 	case "start":
 		body = httpchannel.StartRequest{Text: r.PostForm.Get("text"), Title: r.PostForm.Get("title")}
 	case "send":
@@ -272,7 +288,7 @@ func (s *server) action(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	if action != "start" {
+	if action != "start" && action != "ensure" {
 		if id == "" || runtime.IsReservedRun(id) || strings.ContainsAny(id, "/\\") {
 			http.Error(w, "Invalid run", 400)
 			return
@@ -299,17 +315,18 @@ func (s *server) action(w http.ResponseWriter, r *http.Request) {
 	s.api.ServeHTTP(w, req)
 }
 
-// live polls durable snapshots. It holds no runner subscription or goroutine.
-// A disconnect cancels journal reads and stops the ticker. Transient model
-// deltas are not durable and are deliberately absent from this stream.
+// live subscribes before it reads the snapshot, so a concurrent change is not
+// lost. Reconnects read durable state; transient text is not journal history.
 func (s *server) live(w http.ResponseWriter, r *http.Request) {
+	events, stop := s.runner.Events().SubscribeAll()
+	defer stop()
 	v, err := s.load(r)
 	if err != nil {
 		readError(w, err)
 		return
 	}
 	c, err := r.Cookie("bonnie_web_csrf")
-	if err != nil {
+	if err != nil || len(c.Value) != 64 {
 		http.Error(w, "Open the web page first", 400)
 		return
 	}
@@ -321,44 +338,92 @@ func (s *server) live(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("X-Accel-Buffering", "no")
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-	previous := ""
+	if err := patch(w, r, panel(v)); err != nil {
+		return
+	}
+	flusher.Flush()
+	heartbeat := time.NewTicker(15 * time.Second)
+	defer heartbeat.Stop()
+	var text string
 	for {
-		var b bytes.Buffer
-		if err := renderComponent(r, panel(v), &b); err != nil {
-			return
-		}
-		current := b.String()
-		if current != previous {
-			// Datastar patch-elements protocol: each HTML line gets its own data field.
-			var event strings.Builder
-			event.WriteString("event: datastar-patch-elements\ndata: mode outer\n")
-			for line := range strings.SplitSeq(current, "\n") {
-				event.WriteString("data: elements " + line + "\n")
-			}
-			event.WriteString("\n")
-			if _, err := fmt.Fprint(w, event.String()); err != nil {
-				return
-			}
-			previous = current
-		} else {
-			if _, err := fmt.Fprint(w, ": keepalive\n\n"); err != nil {
-				return
-			}
-		}
-		flusher.Flush()
 		select {
 		case <-r.Context().Done():
 			return
-		case <-ticker.C:
+		case <-heartbeat.C:
+			if _, err := fmt.Fprint(w, ": keepalive\n\n"); err != nil {
+				return
+			}
+			flusher.Flush()
+		case ev, ok := <-events:
+			if !ok {
+				return
+			}
+			if runtime.IsReservedRun(ev.RunID) {
+				continue
+			}
+			if v.View != "runs" && ev.RunID != v.ID {
+				continue
+			}
+			if ev.RunID == v.ID && v.View == "chat" {
+				switch ev.Type {
+				case string(kit.EventMessageUpdate):
+					var update kit.MessageUpdateEvent
+					if json.Unmarshal(ev.Data, &update) != nil || update.Chunk == "" {
+						continue
+					}
+					text += update.Chunk
+					if err := patch(w, r, streamingMessage(text)); err != nil {
+						return
+					}
+					flusher.Flush()
+					continue
+				case string(kit.EventMessageStart), string(kit.EventMessageEnd), runtime.EventTurn,
+					runtime.EventResponse, runtime.EventSuspend:
+					text = ""
+				case runtime.EventState:
+					if ev.State != runtime.RunRunning {
+						text = ""
+					}
+				}
+			}
+			// Kit events can precede the step commit. Runtime events follow durable
+			// writes; step completion also refreshes tool activity and the trace.
+			if !strings.HasPrefix(ev.Type, "run_") && ev.Type != string(kit.EventStepFinish) {
+				continue
+			}
+			v, err = s.load(r)
+			if err != nil {
+				return
+			}
+			v.Token = c.Value
+			if err := patch(w, r, panel(v)); err != nil {
+				return
+			}
+			if text != "" {
+				if err := patch(w, r, streamingMessage(text)); err != nil {
+					return
+				}
+			}
+			flusher.Flush()
 		}
-		v, err = s.load(r)
-		if err != nil {
-			return
-		}
-		v.Token = c.Value
 	}
+}
+
+// patch writes a Datastar element morph. templ escapes model text before it
+// reaches the wire. Each HTML line has its own SSE data field.
+func patch(w http.ResponseWriter, r *http.Request, component templ.Component) error {
+	var b bytes.Buffer
+	if err := renderComponent(r, component, &b); err != nil {
+		return err
+	}
+	var event strings.Builder
+	event.WriteString("event: datastar-patch-elements\ndata: mode outer\n")
+	for line := range strings.SplitSeq(b.String(), "\n") {
+		event.WriteString("data: elements " + line + "\n")
+	}
+	event.WriteString("\n")
+	_, err := io.WriteString(w, event.String())
+	return err
 }
 
 func liveURL(v view) string {

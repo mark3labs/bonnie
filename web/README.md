@@ -83,8 +83,12 @@ The web palette follows `internal/tui/styles.go` and
 `internal/tui/markdown.go`, not the CLI help theme. The TUI uses fixed
 xterm-256 colors. It has no light/dark adaptive palette. Body paragraphs inherit
 the terminal color, and faint styles depend on the terminal. The web interface
-uses explicit colors and `prefers-color-scheme` instead. It does not import
-terminal packages.
+uses explicit colors instead. **Theme** in the header cycles through System,
+Light, and Dark. System follows `prefers-color-scheme`, including changes while
+the page is open. The browser saves the choice in local storage; it contains no
+credentials. If storage is blocked, the choice lasts for the current page.
+The theme is applied before the page is drawn and stays active across Datastar
+view updates. It does not import terminal packages.
 
 The CLI and compiled-agent help use Fang's default adaptive theme
 (`github.com/charmbracelet/fang` v1.0.0, `theme.go`, `DefaultColorScheme`).
@@ -127,12 +131,22 @@ the palette values do not change.
 
 ## Live updates
 
-The local Datastar module opens `/web/live`. The adapter polls durable data
-once per second, sends a patch only when the rendered snapshot changes, and
-sends a keepalive otherwise. It stops on request cancellation or a write
-error. No event subscription or background goroutine is retained. It does
-not show live reasoning or token deltas. This simple adapter reads full
-snapshots and is intended for a small operator console, not a large run index.
+The local Datastar module opens `/web/live`. The adapter subscribes to runtime
+events before it reads the initial snapshot. Runtime changes push DOM patches;
+an idle connection does not read the journal. A keepalive runs every 15 seconds.
+Disconnects and view changes release the subscription. The run index receives
+changes from all non-reserved runs. Changes made directly to the journal by a
+separate process do not publish events in this host.
+
+Assistant text chunks patch a separate transient message. Text is escaped;
+completed messages use safe Markdown from the durable snapshot. Reconnects read
+the current snapshot, not old transient chunks. Reasoning deltas are not shown.
+
+Links, trace filters, and new chats use Datastar patches without a document
+reload. URLs and browser history remain available. The first message creates an
+empty run through the channel, opens its live connection, then sends the text,
+so the first turn can stream. Actions keep the channel's form adapter, CSRF
+checks, and error replies. Each view cancels its SSE request when it is removed.
 
 The conversation uses the HTTP snapshot API, so clear, branch selection, and
 torn-step repair use the same rules as other clients. Journal trace records
@@ -239,7 +253,8 @@ label associations, table headings, local component styles,
 select defaults, and the absence of external asset requests. It also checks the requests
 that Kit sends to the scripted model. It does not test compact, approval
 rejection, question forms, stream reconnection, authentication deployment, or
-other browser engines. SSE shows durable records, not transient token deltas.
+other browser engines. Handler tests check transient text escaping and removal,
+event-driven updates, idle streams, and navigation patches.
 
 Start an offline manual server with a durable journal:
 

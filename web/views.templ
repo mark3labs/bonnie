@@ -48,11 +48,21 @@ templ page(v view) {
 			<meta name="viewport" content="width=device-width, initial-scale=1"/>
 			<title>BONNIE · Chat</title>
 			<link rel="icon" type="image/png" href="/web/assets/logo-64.png"/>
+			<script src="/web/assets/theme.js"></script>
 			<link rel="stylesheet" href="/web/assets/web.css"/>
 			<script type="module" src="/web/assets/datastar.js"></script>
 			<script defer src="/web/assets/web.js"></script>
 		</head>
-		<body data-view={ v.View }>
+		<body>
+			<div id="navigation" data-on:bonnie-navigate="@get(evt.detail.url)"></div>
+			@application(v)
+		</body>
+	</html>
+}
+
+// application replaces the view and its SSE connection without page navigation.
+templ application(v view) {
+	<div id="application" data-view={ v.View } data-location={ liveURL(v) }>
 			<header>
 				<a href="/web/" class="brand"><img class="brand-logo" src="/web/assets/logo-64.png" width="32" height="32" alt=""/>BONNIE</a>
 				<nav aria-label="Views" class="view-nav">
@@ -70,15 +80,17 @@ templ page(v view) {
 					@icon("M12 5v14M5 12h14")
 					New chat
 				}
+				@button.Button(button.Props{Type: button.TypeButton, Variant: button.VariantOutline, Attributes: templ.Attributes{"id": "theme-toggle", "aria-label": "Theme: system. Switch to light."}}) {
+					Theme: System
+				}
 				<span id="connection-status" class="connection" role="status" aria-live="polite" data-state="connecting">Connecting…</span>
 			</header>
 			<main>
-				<div id="live-connection" data-init={ fmt.Sprintf("@get(%q, {openWhenHidden: true, retry: 'always'})", liveURL(v)) }></div>
+				<div id={ "live-connection-" + liveURL(v) } data-url={ liveURL(v) } data-init={ fmt.Sprintf("@get(%q, {openWhenHidden: true, retry: 'always', requestCancellation: 'cleanup'})", liveURL(v)) }></div>
 				@panel(v)
 				<p id="action-status" role="status" aria-live="polite"></p>
 			</main>
-		</body>
-	</html>
+	</div>
 }
 
 // icon draws one decorative stroke icon. Screen readers use the button text.
@@ -284,6 +296,7 @@ templ panel(v view) {
 						if len(v.Messages) == 0 {
 							<p class="muted">No messages in the current branch.</p>
 						}
+						@streamingMessage("")
 						if v.Snapshot.Suspend != nil {
 							<section class="waiting">
 								<h3>Waiting for input</h3>
@@ -384,4 +397,15 @@ templ panel(v view) {
 			</section>
 		}
 	</div>
+}
+
+// streamingMessage is transient and is replaced by the next durable snapshot.
+// Plain text avoids unsafe HTML and incomplete Markdown during a model stream.
+templ streamingMessage(text string) {
+ <article id="streaming-message" class={ templ.KV("message", text != "") } data-role="assistant" aria-live="off">
+  if text != "" {
+   <strong class="message-role">assistant · streaming</strong>
+   <pre class="text">{ text }</pre>
+  }
+ </article>
 }

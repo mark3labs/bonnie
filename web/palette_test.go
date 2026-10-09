@@ -26,7 +26,7 @@ func TestPaletteSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dark := paletteVariables(t, strings.Split(string(css), "@media(prefers-color-scheme:dark)")[1])
+	dark := paletteVariables(t, strings.Split(string(css), ":root[data-theme=dark]")[1])
 	for _, tc := range []struct {
 		role, variable string
 		index          int
@@ -88,7 +88,7 @@ func TestPaletteContrast(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	themes := strings.Split(string(data), "@media(prefers-color-scheme:dark)")
+	themes := strings.Split(string(data), ":root[data-theme=dark]")
 	for i, name := range []string{"light", "dark"} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()

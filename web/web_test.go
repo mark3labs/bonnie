@@ -177,8 +177,8 @@ func (j *observedJournal) Runs(ctx context.Context, state runtime.RunState) ([]s
 	return j.Journal.Runs(ctx, state)
 }
 
-// SSE sends real Datastar patches, observes new durable records, and stops
-// polling after the browser closes the connection.
+// SSE sends Datastar patches on runtime events. An idle connection does not
+// read the journal, and a disconnect releases its subscription.
 func TestLive(t *testing.T) {
 	t.Parallel()
 	memory := runtime.NewMemoryJournal()
@@ -210,6 +210,7 @@ func TestLive(t *testing.T) {
 	if err := journal.Checkpoint(t.Context(), "live-run", runtime.RunPending); err != nil {
 		t.Fatal(err)
 	}
+	runner.Events().Publish(runtime.Event{RunID: "live-run", Type: runtime.EventState, State: runtime.RunPending})
 	found := make(chan bool, 1)
 	go func() {
 		for {
@@ -231,6 +232,11 @@ func TestLive(t *testing.T) {
 		}
 	case <-time.After(4 * time.Second):
 		t.Fatal("no live update")
+	}
+	beforeIdle := journal.reads.Load()
+	time.Sleep(1100 * time.Millisecond)
+	if journal.reads.Load() != beforeIdle {
+		t.Fatal("idle stream read the journal")
 	}
 	if err := response.Body.Close(); err != nil {
 		t.Fatal(err)

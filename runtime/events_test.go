@@ -13,10 +13,34 @@ import (
 // has fallen off the backlog edge, because every event is anchored to a
 // journal record and the journal replays past the edge.
 
-// TestStreamEventsReplaysPastTheBacklog is the §4.8 contract, stated as a
-// test. A run with more events than the backlog holds, a client whose cursor
-// is 0: the replay covers everything, in order, with the same Seqs the live
-// path used, and nothing is delivered twice.
+// All-run subscribers receive new events from each run, but no backlog.
+func TestEventBusSubscribeAllIsLiveOnlyAcrossRuns(t *testing.T) {
+	t.Parallel()
+	bus := NewEventBus(8)
+	bus.Publish(Event{RunID: "old", Type: "prior"})
+	events, stop := bus.SubscribeAll()
+	defer stop()
+
+	for _, want := range []Event{{RunID: "one", Type: "first"}, {RunID: "two", Type: "second"}} {
+		bus.Publish(want)
+		select {
+		case got := <-events:
+			if got.RunID != want.RunID || got.Type != want.Type {
+				t.Fatalf("got %#v, want %#v", got, want)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for event")
+		}
+	}
+	stop()
+	if _, ok := <-events; ok {
+		t.Fatal("channel remains open after unsubscribe")
+	}
+}
+
+// A run with more events than the backlog holds, and a client whose cursor
+// is 0: replay covers everything in order, with the same Seqs as the live
+// path, and nothing is delivered twice.
 func TestStreamEventsReplaysPastTheBacklog(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

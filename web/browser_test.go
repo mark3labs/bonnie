@@ -72,7 +72,7 @@ trace.open = true;
 const filter = document.getElementById('trace-filter');
 filter.value = 'unfinished filter';
 
-const connection = document.getElementById('live-connection');
+const connection = document.querySelector('[id^="live-connection"]');
 const emit = (type, argsRaw = {}) => document.dispatchEvent(new CustomEvent('datastar-fetch', {detail: {type, el: connection, argsRaw}}));
 emit('retrying');
 const retry = document.getElementById('connection-status').textContent === 'Reconnecting…';

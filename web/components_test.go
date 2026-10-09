@@ -223,7 +223,7 @@ func TestLiveConnectionRetriesCleanEOF(t *testing.T) {
 				init = attr.Val
 			}
 		}
-		if id == "live-connection" {
+		if strings.HasPrefix(id, "live-connection-") {
 			expression = init
 		}
 		for child := n.FirstChild; child != nil; child = child.NextSibling {
@@ -231,7 +231,7 @@ func TestLiveConnectionRetriesCleanEOF(t *testing.T) {
 		}
 	}
 	visit(doc)
-	want := `@get("/web/live?filter=&run=&view=chat", {openWhenHidden: true, retry: 'always'})`
+	want := `@get("/web/live?filter=&run=&view=chat", {openWhenHidden: true, retry: 'always', requestCancellation: 'cleanup'})`
 	if expression != want {
 		t.Fatalf("live data-init = %q, want %q", expression, want)
 	}

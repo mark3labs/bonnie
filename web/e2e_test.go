@@ -245,7 +245,8 @@ const browserE2E = `
   await call('Page.navigate', {url: base + '/web/'});
   await wait('document.querySelector("#connection-status")?.dataset.state === "connected"', 'initial live connection');
   if (!await evaluate("(() => { const text=document.querySelector('#start-text'); return !text.checkValidity() && text.labels[0].textContent.trim()==='Message' && !document.querySelector('#start-title') && !document.querySelector('.record') && !document.querySelector('.runs') && getComputedStyle(document.querySelector('.chat')).display==='flex' && getComputedStyle(document.querySelector('.composer')).borderTopLeftRadius==='0px' && getComputedStyle(document.querySelector('.composer .cn-label')).position==='absolute' && [...document.querySelectorAll('.brand-logo, .welcome-logo')].length===2 && [...document.querySelectorAll('.brand-logo, .welcome-logo')].every(i=>i.complete && i.naturalWidth>0 && i.alt===''); })()")) throw new Error('Entry composer, logo, or chat layout failed');
-  await submit('start', 'browser first message');
+  await evaluate('window.documentIdentity="same-document"');
+   await submit('start', 'browser first message');
   await wait('document.querySelector(".markdown h2")?.textContent === "First reply"', 'new conversation and Markdown');
   await wait('document.querySelector("#connection-status").dataset.state === "connected"', 'run SSE');
   if (!await evaluate('!!document.querySelector(".markdown strong") && document.querySelectorAll(".markdown li").length===2 && !!document.querySelector(".markdown pre code")')) throw new Error('Markdown was not rendered');
@@ -259,6 +260,17 @@ const browserE2E = `
    // Wait until the browser applies the selected color scheme.
    await wait('(() => { const body=getComputedStyle(document.body), button=getComputedStyle(document.querySelector("#send-form button")), user=getComputedStyle(document.querySelector(".message[data-role=user] .message-role")), composer=getComputedStyle(document.querySelector(".composer")); return body.backgroundColor==='+JSON.stringify(bg)+' && button.backgroundColor==='+JSON.stringify(brand)+' && user.color==='+JSON.stringify(user)+' && composer.backgroundColor==='+JSON.stringify(surface)+'; })()', 'chat palette: '+theme);
   }
+  await call('Emulation.setEmulatedMedia', {features:[{name:'prefers-color-scheme',value:'dark'}]});
+  await evaluate('document.querySelector("#theme-toggle").click()');
+  await wait('document.documentElement.dataset.theme==="light" && getComputedStyle(document.body).backgroundColor==="rgb(248, 247, 249)"', 'explicit light overrides system dark');
+  await evaluate('document.querySelector("#theme-toggle").click()');
+  await wait('document.documentElement.dataset.theme==="dark" && localStorage.getItem("bonnie_web_theme")==="dark"', 'explicit dark saved');
+  await call('Emulation.setEmulatedMedia', {features:[{name:'prefers-color-scheme',value:'light'}]});
+  await wait('getComputedStyle(document.body).backgroundColor==="rgb(48, 48, 48)"', 'explicit dark overrides system light');
+  await call('Page.reload');
+  await wait('document.querySelector("#theme-toggle")?.textContent==="Theme: Dark" && document.querySelector("#connection-status")?.dataset.state==="connected" && document.documentElement.dataset.theme==="dark"', 'theme after reload');
+  await evaluate('window.documentIdentity="same-document";document.querySelector("#theme-toggle").click()');
+  await wait('document.documentElement.dataset.theme==="light" && localStorage.getItem("bonnie_web_theme")==="system"', 'return to system');
   await call('Emulation.setEmulatedMedia', {features:[]});
   await call('Emulation.setDeviceMetricsOverride', {width:390,height:844,deviceScaleFactor:1,mobile:false});
   if (!await evaluate('document.documentElement.scrollWidth<=390 && document.querySelector(".composer").getBoundingClientRect().bottom<=844')) throw new Error('Chat mobile overflow');
@@ -266,7 +278,7 @@ const browserE2E = `
   const runURL = await evaluate('location.href');
   const navigateView = async view => {
    await evaluate('document.querySelector(' + JSON.stringify('.view-nav a[href*="view=' + view + '"]') + ').click()');
-   await wait('document.body?.dataset.view===' + JSON.stringify(view) + ' && document.querySelector("#connection-status").dataset.state==="connected"', view + ' navigation');
+   await wait('document.querySelector("#application")?.dataset.view===' + JSON.stringify(view) + ' && document.querySelector("#connection-status").dataset.state==="connected"', view + ' navigation');
   };
   await evaluate('document.querySelector(".message details summary").click()');
   const patches = await evaluate('window.patchCount');
@@ -279,7 +291,8 @@ const browserE2E = `
   if (await evaluate('location.href') !== runURL) throw new Error('followup navigated instead of using SSE');
   if (!await evaluate('document.querySelector(".message details").open && document.querySelector("#send-text").value==="unfinished draft" && document.querySelector("#send-text").selectionStart===3 && document.querySelector("#send-text").selectionEnd===8')) throw new Error('live patch lost draft or disclosures');
   await navigateView('trace');
-  if (!await evaluate('!document.querySelector("#send-text") && !document.querySelector(".runs") && document.querySelectorAll(".record").length>0')) throw new Error('Trace is not separate');
+  if (!await evaluate('window.documentIdentity==="same-document"')) throw new Error('New chat or view navigation reloaded the document');
+   if (!await evaluate('!document.querySelector("#send-text") && !document.querySelector(".runs") && document.querySelectorAll(".record").length>0')) throw new Error('Trace is not separate');
   if (!await evaluate("(() => {    const table=document.querySelector('.trace-table');    const headings=[...table.querySelectorAll('thead th')];    const rows=[...table.querySelectorAll('.trace-row')];    const odd=rows.find(r=>r.dataset.stripe==='1'), even=rows.find(r=>r.dataset.stripe==='0');    return headings.map(h=>h.textContent.trim()).join(',')==='Sequence,Time (UTC),Kind,Role,State,Summary' && headings.every(h=>h.scope==='col') && rows.every(r=>r.cells.length===6 && r.cells[5].querySelector('details.record')) && odd && even && getComputedStyle(odd).backgroundColor!==getComputedStyle(even).backgroundColor && [...table.querySelectorAll('.trace-turn')].every(r=>!r.hasAttribute('data-stripe') && r.cells[0].colSpan===6) && table.textContent.includes('Initialization');   })()")) throw new Error('Trace table headings, stripes, or turn groups failed');
   await evaluate('document.querySelector(".record summary").focus()');
   await call('Input.dispatchKeyEvent', {type:'keyDown', key:'Enter', code:'Enter', text:'\r', windowsVirtualKeyCode:13});

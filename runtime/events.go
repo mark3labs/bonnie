@@ -76,6 +76,7 @@ type EventBus struct {
 	mu      sync.Mutex
 	backlog map[string][]Event
 	subs    map[string]map[int]*subscriber
+	allSubs map[int]*subscriber
 	nextSub int
 }
 
@@ -89,6 +90,7 @@ func NewEventBus(capacity int) *EventBus {
 		capacity: capacity,
 		backlog:  make(map[string][]Event),
 		subs:     make(map[string]map[int]*subscriber),
+		allSubs:  make(map[int]*subscriber),
 	}
 }
 
@@ -140,6 +142,9 @@ func (b *EventBus) Publish(ev Event) Event {
 	b.backlog[ev.RunID] = buf
 
 	for _, s := range b.subs[ev.RunID] {
+		s.push(ev)
+	}
+	for _, s := range b.allSubs {
 		s.push(ev)
 	}
 	logger := b.logger
@@ -209,6 +214,30 @@ func (b *EventBus) Subscribe(runID string, after int) (<-chan Event, func()) {
 				delete(b.subs, runID)
 			}
 		}
+		b.mu.Unlock()
+		s.close()
+	}
+}
+
+// SubscribeAll returns a live-only stream of events from every run. It does
+// not include buffered events published before the subscription.
+//
+// The returned function unsubscribes and closes the channel. It is safe to
+// call more than once. It uses the same cleanup path as run-scoped subscribers.
+func (b *EventBus) SubscribeAll() (<-chan Event, func()) {
+	b.mu.Lock()
+	s := newSubscriber()
+	b.nextSub++
+	id := b.nextSub
+	if b.allSubs == nil {
+		b.allSubs = make(map[int]*subscriber)
+	}
+	b.allSubs[id] = s
+	b.mu.Unlock()
+
+	return s.out, func() {
+		b.mu.Lock()
+		delete(b.allSubs, id)
 		b.mu.Unlock()
 		s.close()
 	}

@@ -5,6 +5,21 @@ All notable changes to BONNIE are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Web views use event-driven Datastar SSE patches instead of snapshot polling.
+  Assistant text streams before the durable reply. Navigation, trace filters,
+  and first-message run creation do not reload the document. View changes release
+  their live subscriptions; idle streams do not read the journal.
+
+### Added
+
+- `runtime.EventBus.SubscribeAll` provides a live-only stream across runs.
+- Web theme control with System, Light, and Dark settings. The browser saves
+  the choice and keeps it across live view updates.
+
 ## [0.20.0] — 2026-10-09
 
 **Worker presence and operator commands in deployed agents.**

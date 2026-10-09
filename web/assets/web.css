@@ -7,7 +7,7 @@
    fills, 1px rules. No shadow, gradient, blur, or rounded edge. The browser
    E2E test enforces this on every element of the chat view. */
 :root{
- color-scheme:light dark;
+ color-scheme:light;
  --bg:#f8f7f9;--card:#ffffff;--text:#262626;--muted:#626262;
  --border:#dedade;--control-border:#898389;
  --primary:#a82065;--primary-text:#ffffff;--primary-hover:#8d1954;
@@ -17,7 +17,8 @@
  --zebra:#f4f0f4;--row-hover:#ece5ec;--trace-turn:#e9e1e9;
  font:14px/1.6 ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,"Liberation Mono",monospace
 }
-@media(prefers-color-scheme:dark){:root{
+:root[data-theme=dark]{
+ color-scheme:dark;
  --bg:#303030;--card:#262626;--text:#eeeeee;--muted:#a8a8a8;
  --border:#505050;--control-border:#858585;
  --primary:#ff5faf;--primary-text:#262626;--primary-hover:#ff87c3;
@@ -25,7 +26,7 @@
  --success:#00d787;--warning:#ffff5f;--danger:#ff8787;
  --badge-bg:#302b30;--badge-text:#b2b2b2;
  --zebra:#302b30;--row-hover:#342e34;--trace-turn:#352935
-}}
+}
 :root{--brand-soft:color-mix(in srgb,var(--brand) 12%,var(--card))}
 
 /* Base: square everything, including browser defaults on form controls. */
