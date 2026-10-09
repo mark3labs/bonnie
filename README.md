@@ -651,8 +651,10 @@ Use the filter to find text, tool names, errors, roles, and record kinds.
 Clear changes model context; reset retires a run. Neither deletes its journal.
 
 The UI uses templ, shadcn-templ, and Datastar. All browser assets are embedded
-in the binary. Live updates show committed journal state, not transient model
-tokens, and reconnect after hot reload.
+in the binary. Event-driven live updates show committed journal state and escaped
+transient assistant text. Reconnects restore durable state, not old transient text.
+Reasoning deltas are not shown. Navigation does not reload the document, and the
+browser saves the System, Light, or Dark theme choice.
 
 Web access uses the HTTP channel's authenticator. For browser deployments,
 use a session cookie or an authenticated reverse proxy; there is no built-in
