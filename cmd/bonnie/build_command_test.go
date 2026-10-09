@@ -84,7 +84,23 @@ func TestBuildOutputKeepsCustomCommands(t *testing.T) {
 	}{
 		{
 			name: "root help", args: []string{"--help"},
-			want: []string{"inspect", "--label", "custom root label", "--tenant", "custom persistent tenant"},
+			want: []string{"inspect", "chat", "runs", "schedules", "version", "serve", "--label", "custom root label", "--tenant", "custom persistent tenant"},
+		},
+		{
+			name: "chat help", args: []string{"chat", "--help"},
+			want: []string{"--addr", "--run", "--token"},
+		},
+		{
+			name: "runs help", args: []string{"runs", "--help"},
+			want: []string{"list", "show", "inspect"},
+		},
+		{
+			name: "schedules help", args: []string{"schedules", "--help"},
+			want: []string{"list", "show", "history", "trigger"},
+		},
+		{
+			name: "version", args: []string{"version"},
+			want: []string{"agent", "bonnie"},
 		},
 		{
 			name: "child help", args: []string{"inspect", "--help"},

@@ -70,8 +70,7 @@ var ErrNotFound = client.ErrNotFound
 // HTTP is the wire client the TUI runs against.
 //
 // Deprecated: use [github.com/mark3labs/bonnie/client.Client] directly. The
-// alias remains so an out-of-tree caller of this package's constructor keeps
-// compiling.
+// alias remains for callers inside BONNIE.
 type HTTP = client.Client
 
 // NewHTTP returns a client that talks to the channel at base, for example

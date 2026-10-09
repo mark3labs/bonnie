@@ -255,6 +255,32 @@ When the agent is ready, `bonnie build` compiles the tree into one static
 binary. The binary contains the tools, the instructions, the skills, and the
 seed files. It serves on a host that has no Go and no BONNIE installation.
 
+The agent binary also includes its operator commands:
+
+```bash
+./my-agent serve                      # same action as ./my-agent
+./my-agent chat --run production      # connect to a running HTTP server
+./my-agent runs list                  # read the configured local journal
+./my-agent runs show <run-id> --json
+./my-agent runs inspect
+./my-agent schedules list             # use the running server's HTTP API
+./my-agent version                    # agent and BONNIE build information
+```
+
+`chat` and `schedules` default to the agent's configured address and accept
+`--token` for bearer authentication. `runs` defaults to `WithJournal` and
+accepts `--journal` to select another local journal. Inspection works when
+the server is stopped. No command starts a server except the default action
+and `serve`.
+
+Use `WithChatCommand(false)`, `WithRunsCommand(false)`,
+`WithSchedulesCommand(false)`, or `WithVersionCommand(false)` in `main.go`
+to disable individual commands. These options control command availability,
+not access to HTTP routes or journal files, and do not promise smaller binaries.
+The same commands are included when you compile the agent with `go build`.
+`Agent.Run` remains terminal-free. Development and sandbox provisioning
+commands remain in the BONNIE CLI.
+
 ## Use the library
 
 A durable run in 25 lines. The journal on disk is what makes the run durable.

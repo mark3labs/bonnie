@@ -1,10 +1,3 @@
-// Package tui is the BONNIE terminal user interface.
-//
-// It is an HTTP client of the same channel a server exposes, so the transcript
-// a developer sees is the transcript any client sees: one durable run, streamed
-// from the journal. The model talks only to the wire the channel defines,
-// which is what makes the TUI usable against any running bonnie server, not
-// only the one `dev` started.
 package tui
 
 import (

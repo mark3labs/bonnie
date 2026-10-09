@@ -18,11 +18,11 @@ func TestPaletteSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	styles, err := os.ReadFile("../cmd/bonnie/tui/styles.go")
+	styles, err := os.ReadFile("../internal/tui/styles.go")
 	if err != nil {
 		t.Fatal(err)
 	}
-	markdown, err := os.ReadFile("../cmd/bonnie/tui/markdown.go")
+	markdown, err := os.ReadFile("../internal/tui/markdown.go")
 	if err != nil {
 		t.Fatal(err)
 	}

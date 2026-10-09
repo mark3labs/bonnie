@@ -79,8 +79,8 @@ text is escaped by templ; no model HTML is trusted.
 
 ## Colors and palette source
 
-The web palette follows `cmd/bonnie/tui/styles.go` and
-`cmd/bonnie/tui/markdown.go`, not the CLI help theme. The TUI uses fixed
+The web palette follows `internal/tui/styles.go` and
+`internal/tui/markdown.go`, not the CLI help theme. The TUI uses fixed
 xterm-256 colors. It has no light/dark adaptive palette. Body paragraphs inherit
 the terminal color, and faint styles depend on the terminal. The web interface
 uses explicit colors and `prefers-color-scheme` instead. It does not import

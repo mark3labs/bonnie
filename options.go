@@ -40,6 +40,10 @@ type ChannelFunc func(*runtime.Runner) (Channel, error)
 // default from the scaffolded layout; an [Option] replaces one.
 type config struct {
 	commands            []func(*cobra.Command, *Agent)
+	noChatCommand       bool
+	noRunsCommand       bool
+	noSchedulesCommand  bool
+	noVersionCommand    bool
 	addr                string
 	name                string
 	journal             string
@@ -110,6 +114,31 @@ func defaults() *config {
 // the registration callbacks, but does not run pre-run hooks or open resources.
 func WithCommand(fn func(*cobra.Command, *Agent)) Option {
 	return func(c *config) { c.commands = append(c.commands, fn) }
+}
+
+// WithChatCommand controls the chat command in [Agent.Serve]. It is enabled
+// by default and connects to a running HTTP channel; it does not start a server.
+// Disabling the command does not remove its dependencies from the binary.
+func WithChatCommand(enabled bool) Option {
+	return func(c *config) { c.noChatCommand = !enabled }
+}
+
+// WithRunsCommand controls the local journal commands in [Agent.Serve].
+// They are enabled by default. This option does not restrict journal access.
+func WithRunsCommand(enabled bool) Option {
+	return func(c *config) { c.noRunsCommand = !enabled }
+}
+
+// WithSchedulesCommand controls the schedule commands in [Agent.Serve].
+// They are enabled by default. This option does not disable HTTP schedule routes.
+func WithSchedulesCommand(enabled bool) Option {
+	return func(c *config) { c.noSchedulesCommand = !enabled }
+}
+
+// WithVersionCommand controls the version command in [Agent.Serve].
+// It is enabled by default and reports build information without starting the agent.
+func WithVersionCommand(enabled bool) Option {
+	return func(c *config) { c.noVersionCommand = !enabled }
 }
 
 // WithAddr binds the HTTP channel to addr instead of [DefaultAddr].

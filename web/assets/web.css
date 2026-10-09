@@ -1,5 +1,5 @@
 /* Local styles for the generated shadcn-templ v2 classes. No Tailwind runtime. */
-/* Palette source: cmd/bonnie/tui/styles.go and markdown.go. See web/README.md.
+/* Palette source: internal/tui/styles.go and markdown.go. See web/README.md.
    Light accents are darker versions of the fixed ANSI TUI colors for contrast.
    The two palette blocks hold the only hex values. Each other color is a
    palette variable or a color-mix of palette variables.

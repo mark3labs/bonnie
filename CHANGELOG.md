@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Agent binaries include `chat`, `runs list/show/inspect`, `schedules`, and
+  `version` by default, plus an explicit `serve` command. Code options can
+  disable each operator command. Commands share their implementation with the
+  BONNIE CLI and use the agent's configured address and journal defaults.
+- Terminal chat accepts a bearer token with `--token`.
 - Branded 1200 × 630 social preview image with the BONNIE logo, plus page-specific
   Open Graph and Twitter card metadata on the documentation site. Build checks
   verify the image and tags without an optional renderer.
@@ -18,6 +23,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `WithPresence` host lifecycle integration and presence endpoint reporting for
   HTTP, NATS, Slack, Discord, Telegram, and GitHub. Presence does not schedule
   work or authorize automatic reassignment.
+
+### Changed
+
+- Move runs and schedules commands into a shared internal package for use by
+  the CLI and agent binaries. Run commands use the command context and output
+  writer, and return journal close errors.
 
 ## [0.19.0] — 2026-10-08
 

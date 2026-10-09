@@ -275,12 +275,12 @@ example easier to write; change the example.
 
 ### Terminal rendering
 
-Kit renders the agent's terminal UI. BONNIE's framework packages ship no TUI
-today. The CLI owns one interactive surface, `bonnie dev` / `bonnie chat`
-(`cmd/bonnie/tui`, charm's bubbletea/bubbles/lipgloss v2, with herald-md for
-assistant markdown — the same libraries upstream Kit's TUI uses), and styles
-its own help and errors with fang. The compiled agent's `Agent.Serve` also
-uses Cobra and Fang for flags, help, and startup errors. `Agent.Run` and the
+BONNIE shares its terminal interface between `bonnie dev`, `bonnie chat`,
+and compiled agents' `chat` commands (`internal/tui`, charm's
+bubbletea/bubbles/lipgloss v2, with herald-md for assistant markdown).
+Shared operator commands live in `internal/agentcmd`; the run inspector lives
+in `internal/inspect`. The CLI and compiled agent's `Agent.Serve` use Cobra
+and Fang for flags, help, and startup errors. `Agent.Run` and the
 layered framework packages stay terminal-free. A host that wants an off-screen
 conversation uses the HTTP channel. The hard boundary is the public-Kit-SDK rule above, and it extends
 here: the TUI talks to the wire the channel exposes, never to Kit internals.

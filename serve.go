@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/fang"
 	"github.com/spf13/cobra"
 
+	"github.com/mark3labs/bonnie/internal/agentcmd"
 	"github.com/mark3labs/bonnie/sandbox"
 )
 
@@ -63,6 +64,26 @@ func (a *Agent) serveCommand(fs *flag.FlagSet) *cobra.Command {
 	// providers without touching their runtime resources.
 	if fs.Lookup("sandbox").Usage == sandboxFlagUsage {
 		cmd.Flags().Lookup("sandbox").Usage = a.cfg.sandboxHelp()
+	}
+	// Explicit serve has the same flags and action as the default command.
+	serve := &cobra.Command{
+		Use: "serve", Short: "Serve the agent over HTTP", Args: cobra.NoArgs,
+		RunE: cmd.RunE,
+	}
+	serve.Flags().AddGoFlagSet(fs)
+	serve.Flags().Lookup("sandbox").Usage = cmd.Flags().Lookup("sandbox").Usage
+	cmd.AddCommand(serve)
+	if !a.cfg.noChatCommand {
+		cmd.AddCommand(agentcmd.NewChatCommand(a.cfg.addr))
+	}
+	if !a.cfg.noRunsCommand {
+		cmd.AddCommand(agentcmd.NewRunsCommand(a.cfg.journal))
+	}
+	if !a.cfg.noSchedulesCommand {
+		cmd.AddCommand(agentcmd.NewSchedulesCommand(a.cfg.addr))
+	}
+	if !a.cfg.noVersionCommand {
+		cmd.AddCommand(agentcmd.NewVersionCommand())
 	}
 	for _, fn := range a.cfg.commands {
 		fn(cmd, a)

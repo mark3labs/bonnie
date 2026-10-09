@@ -199,6 +199,7 @@ func TestServeArgs(t *testing.T) {
 
 // Fang must write help and errors to the command's writers. Disable its extra
 // commands and version flag, as Serve does, without taking process ownership.
+// BONNIE's own commands must remain available.
 func TestServeFangExecute(t *testing.T) {
 	t.Parallel()
 	for _, help := range []bool{true, false} {
@@ -227,8 +228,13 @@ func TestServeFangExecute(t *testing.T) {
 			} else if err == nil || !strings.Contains(err.Error(), "unknown flag") || !strings.Contains(strings.ToLower(stderr.String()), "unknown flag") || stdout.Len() != 0 {
 				t.Fatalf("stdout = %q, stderr = %q, error = %v", &stdout, &stderr, err)
 			}
-			if cmd.Version != "" || cmd.Flags().Lookup("version") != nil || len(cmd.Commands()) != 0 {
-				t.Fatal("Fang added a disabled command or version flag")
+			if cmd.Version != "" || cmd.Flags().Lookup("version") != nil {
+				t.Fatal("Fang added a disabled version flag")
+			}
+			for _, child := range cmd.Commands() {
+				if child.Name() == "completion" || child.Name() == "man" {
+					t.Fatalf("Fang added disabled command %s", child.Name())
+				}
 			}
 			if p.availableCalls != 0 {
 				t.Fatal("Fang help or parse error checked backend availability")

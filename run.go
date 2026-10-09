@@ -51,7 +51,11 @@ func New(opts ...Option) *Agent {
 	return &Agent{cfg: c}
 }
 
-// Serve runs the agent until the process is interrupted, then exits.
+// Serve runs the agent's command interface and owns the process.
+// With no subcommand, or with serve, it serves until the process is interrupted.
+// It also includes chat, runs, schedules, and version commands by default.
+// Use [WithChatCommand], [WithRunsCommand], [WithSchedulesCommand], and
+// [WithVersionCommand] to disable them. Operator commands do not start the agent.
 //
 // It owns the process, which is what makes a one-line main possible: it
 // uses Cobra and Fang for operator flags, help, and startup errors. It installs
