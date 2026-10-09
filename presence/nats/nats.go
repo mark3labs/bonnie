@@ -23,8 +23,11 @@ var ErrConflict = presence.ErrConflict
 
 // Config configures a JetStream key-value presence bucket.
 type Config struct {
+	// Bucket is the required bucket name and defines the discovery scope.
 	Bucket string
-	TTL    time.Duration
+	// TTL defaults to 30 seconds. It must be positive and match an existing bucket.
+	TTL time.Duration
+	// Create permits creation of a missing file-backed bucket with history 1.
 	Create bool
 }
 
@@ -34,6 +37,9 @@ type Store struct {
 	ttl time.Duration
 }
 
+// New opens a JetStream KV presence bucket, or creates it when cfg.Create permits.
+// JetStream must be enabled. The caller owns conn and must keep it available for
+// store operations; Store does not close it. An existing bucket must match cfg.TTL.
 func New(ctx context.Context, conn *nats.Conn, cfg Config) (*Store, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

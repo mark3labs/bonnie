@@ -228,6 +228,12 @@ All four `Target` fields are required and must match a locally admitted attempt.
 
 Set `TargetedTasks: true` to also accept tasks on `Subject + ".worker." + WorkerID`, for example `ops.agent.tasks.worker.worker-1`. JetStream is required. Existing input streams must already list `Subject + ".worker.*"`; the adapter does not update them. Each worker has a separate stable targeted pull consumer. Targeted routing is useful when the chosen journal must own the task, but does not make side effects exactly once.
 
+## Presence registry
+
+Worker discovery is opt-in and separate from the task protocol. Use `bonnie.WithPresence` with the JetStream KV store in `github.com/mark3labs/bonnie/presence/nats`. Use the same `WorkerID` in the presence and channel configurations. A presence bucket defines discovery scope independently of task streams and consumers; enabling a NATS channel does not create a registry.
+
+The channel advertises its task subject, or its worker-targeted subject when `TargetedTasks` is enabled. Readiness follows the connection state and becomes false when the channel stops. Discovery does not submit tasks or guarantee that a selected worker can execute them. Expiry must not trigger automatic reassignment. See [Deployment](/guides/deployment#advertise-worker-presence) for KV creation, TTL, ownership, and watch behavior.
+
 ## Resource and security limits
 
 - `Concurrency` defaults to 4 and must be 1–1,024. JetStream workers fetch one message when an execution slot is free and alternate task and answer consumers.

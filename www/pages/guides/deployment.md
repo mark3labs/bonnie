@@ -113,6 +113,92 @@ A host that owns its own process lifecycle uses `Agent.Run(ctx)`. That method do
 
 **SQLite integrity is not turn coordination.** SQLite serializes writes and rejects duplicate record sequence numbers, but two servers executing the same run can interleave work. Keep one owner. Schedule locking adds exclusive scheduler ownership; it does not make the rest of the runtime a distributed worker coordinator. Use local storage with working POSIX locks, not an unsafe network filesystem.
 
+## Advertise worker presence
+
+Presence is optional current-state discovery. It lets a caller find a worker by identity, labels, state, and endpoint capabilities. It does not assign work, coordinate run execution, or provide failover. Hosts without `WithPresence` keep their existing behavior.
+
+Create a registry, then pass it to the host. This example uses a caller-owned authenticated NATS connection `nc` and a host context `ctx`:
+
+```go
+// Import time, github.com/mark3labs/bonnie/presence, and
+// presencenats "github.com/mark3labs/bonnie/presence/nats".
+registry, err := presencenats.New(ctx, nc, presencenats.Config{
+    Bucket: "workers",
+    TTL:    30 * time.Second,
+    Create: true,
+})
+if err != nil {
+    return err
+}
+agent := bonnie.New(
+    bonnie.WithPresence(bonnie.PresenceConfig{
+        Registry:        registry,
+        WorkerID:        "report-worker-1",
+        Labels:          map[string]string{"region": "eu-west"},
+        RefreshInterval: 10 * time.Second,
+        Endpoints: []presence.Endpoint{{
+            Channel:  "http",
+            Address:  "https://agent.example.com/bonnie/v1/runs",
+            Input:    true,
+            Delivery: true,
+        }},
+    }),
+)
+return agent.Run(ctx)
+```
+
+The host does not close `nc`. Keep the connection available through shutdown. JetStream must be enabled on the broker. `Bucket` is required and defines the discovery scope. `Create: true` permits creation of a missing file-backed KV bucket; otherwise provision it first. TTL defaults to 30 seconds, must be positive, and must match an existing bucket. Restrict bucket access with NATS permissions. Labels are metadata, not authorization claims.
+
+`WorkerID` is the stable worker name. Omit `InstanceID` to generate a random ID for each host run. A different live instance cannot claim the same worker name: registration returns `presence.ErrConflict`. Use `errors.Is` to test this error. A refresh updates the same instance's record and renews its TTL. An old instance cannot unregister its replacement. Expiry permits a new instance to register, but does not prove that the old process or its tools stopped.
+
+The host registers `ready` after listener binding and channel startup, before HTTP serving starts. Each refresh reads channel endpoint readiness again. Registration or refresh errors stop `Agent.Run` and return an error. During shutdown, the host stops refresh, advertises `draining` with endpoints not ready, shuts down lifecycle channels, and unregisters. These cleanup operations share a context bounded by `WithShutdownTimeout`; errors are returned. A forced kill leaves the KV record until TTL expiry.
+
+### Endpoint capabilities
+
+When `Endpoints` is omitted, the host collects endpoints from mounted `channel.PresenceProvider` implementations, including its built-in HTTP channel. A non-empty override replaces the complete list, not only HTTP. Supply public URLs explicitly: the host does not convert bind addresses or webhook paths to public URLs. Override readiness follows host state, not remote health.
+
+| Channel | Advertised address | Readiness and delivery |
+| --- | --- | --- |
+| HTTP | `/bonnie/v1/runs` | Local input and response delivery |
+| Slack, Discord, Telegram | Configured webhook path, or its default | Local input; delivery when a bot token is configured |
+| GitHub | `/github/events` | Local input; delivery when App ID and private key are configured |
+| NATS | Task subject; with targeted tasks, `Subject + ".worker." + WorkerID` | Input and delivery; ready when connected and not stopped |
+
+`Input` and `Delivery` are independent capability flags. `Ready` reports current input readiness, not guaranteed execution or remote platform health. Built-in providers do not publish credentials. Keep secrets out of custom labels and endpoint overrides too. A channel's non-empty `channel.WorkerIdentity()` must match `PresenceConfig.WorkerID`; use the same worker ID in `WithNATS`.
+
+### Discover and watch workers
+
+The NATS store implements `presence.Registry`, `presence.Discoverer`, `presence.Watcher`, and `presence.TTLStore`. Discover returns live records in worker, then instance, order. Empty filter fields impose no restriction; labels select exact values.
+
+```go
+workers, err := registry.Discover(ctx, presence.Filter{
+    State:  presence.Ready,
+    Labels: map[string]string{"region": "eu-west"},
+})
+if err != nil {
+    return err
+}
+_ = workers
+snapshot, changes, err := registry.Watch(ctx, presence.Filter{})
+if err != nil {
+    return err
+}
+_ = snapshot // Initialize the caller's view before processing changes.
+for event := range changes {
+    if event.Err != nil {
+        return event.Err // Start a new watch to restore the current view.
+    }
+    // Add or update event.Record by Identity.
+    // If event.Deleted, remove event.Record.Identity from the view.
+}
+```
+
+Watch polls at `min(TTL/3, one second)`. It emits additions and timestamp updates, including refreshes. When a record expires, is removed, or stops matching the filter, a deletion carries its last matching record. Cancel `ctx` to close the stream. A discovery error produces a terminal `Event.Err` and closes the NATS watch. This is not a durable history: short-lived changes between polls can be missed. Do not use a deletion event to reassign tasks automatically.
+
+For process-local tests, `presence.NewMemoryStore()` provides registration, discovery, and a polled watch. It stores an explicitly supplied `Record.ExpiresAt`, but has no default TTL or lease renewal. Host registration does not set expiry for this store. It is not cross-process discovery.
+
+See [Options](/reference/options#worker-presence) for all host fields, [NATS](/channels/nats#targeted-tasks) for targeted submission, and the [presence godoc](https://pkg.go.dev/github.com/mark3labs/bonnie/presence) for custom stores.
+
 ## Verify health and recovery
 
 ```bash

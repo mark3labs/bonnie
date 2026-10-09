@@ -13,18 +13,34 @@ import (
 	"github.com/mark3labs/bonnie/presence"
 )
 
-// PresenceConfig configures host-side worker registration.
+// PresenceConfig configures optional worker registration during [Agent.Run].
+// Presence is advisory; it does not assign work or coordinate execution.
 type PresenceConfig struct {
-	Registry        presence.Registry
-	WorkerID        string
-	InstanceID      string
-	Labels          map[string]string
+	// Registry is required. The host does not close it.
+	Registry presence.Registry
+	// WorkerID is the required stable worker name. It must match each mounted
+	// channel's non-empty [channel.WorkerIdentity].
+	WorkerID string
+	// InstanceID distinguishes process instances. When empty, the host generates
+	// a random ID for each Run. Do not reuse it across simultaneous instances.
+	InstanceID string
+	// Labels holds discovery metadata, not authorization claims.
+	Labels map[string]string
+	// RefreshInterval defaults to 10 seconds. Negative values are invalid.
+	// It must be less than the registry TTL when it implements [presence.TTLStore].
 	RefreshInterval time.Duration
-	Endpoints       []presence.Endpoint
+	// Endpoints replaces the full provider endpoint list when entries are supplied.
+	// When omitted, the host collects endpoints from [channel.PresenceProvider]
+	// implementations, including HTTP. Supply public URLs explicitly; the host
+	// does not infer them from bind addresses. Override readiness follows host state.
+	Endpoints []presence.Endpoint
 }
 
-// WithPresence enables worker presence registration. WorkerID and Registry are required;
-// InstanceID is generated when omitted. Endpoint overrides replace provider endpoints.
+// WithPresence enables worker presence registration after channel startup.
+// WorkerID and Registry are required; InstanceID is generated when omitted.
+// It copies labels and endpoints. Endpoint overrides replace provider endpoints.
+// Registration and refresh failures stop [Agent.Run]. Shutdown attempts to publish
+// draining and unregister with a context bounded by [WithShutdownTimeout].
 func WithPresence(cfg PresenceConfig) Option {
 	cfg.Labels = maps.Clone(cfg.Labels)
 	cfg.Endpoints = append([]presence.Endpoint(nil), cfg.Endpoints...)

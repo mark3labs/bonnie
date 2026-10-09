@@ -56,7 +56,7 @@ does not do a side effect a second time.
 
 - [Install](#install) · [Scaffold an agent](#scaffold-an-agent) · [Use the library](#use-the-library) · [Park and resume](#park-and-resume)
 - [Your own tools](#your-own-tools) · [Sandboxes](#sandboxes) · [HTTP API](#http-api) · [Chat channels](#chat-channels)
-- [CLI](#cli) · [Journal](#journal) · [Events](#events) · [Session controls](#session-controls)
+- [Worker presence](#host-worker-presence) · [CLI](#cli) · [Journal](#journal) · [Events](#events) · [Session controls](#session-controls)
 - [Run states](#run-states) · [How it works](#how-it-works) · [Limits](#limits) · [Docs](#documentation)
 
 ## Install
@@ -737,12 +737,17 @@ bonnie.New(
         Registry: registry, WorkerID: "support-agent",
         Labels: map[string]string{"region": "eu-west"},
         // Set externally advertised URLs explicitly; bind addresses are not URLs.
-        Endpoints: []presence.Endpoint{{Address: "https://agent.example.com", Input: true}},
+        Endpoints: []presence.Endpoint{{Channel: "http", Address: "https://agent.example.com/bonnie/v1/runs", Input: true, Delivery: true}},
     }),
 ).Serve()
 ```
 
-`InstanceID` is generated randomly when omitted and refresh defaults to 10 seconds. When `Endpoints` is omitted, mounted channels implementing `channel.PresenceProvider` provide endpoint data. Presence does not schedule or assign work. The registry is required, and host deployments should ensure its lease/TTL exceeds the refresh interval.
+`WorkerID` and `Registry` are required. `InstanceID` is generated randomly when
+omitted, and `RefreshInterval` defaults to 10 seconds. Negative intervals are
+refused. If the registry implements `presence.TTLStore`, the interval must be
+less than its TTL. When `Endpoints` is omitted, mounted channels implementing
+`channel.PresenceProvider` provide endpoint data, including HTTP. Presence does
+not schedule or assign work. Without `WithPresence`, host behavior is unchanged.
 
 ### NATS presence registry
 
@@ -770,7 +775,7 @@ for event := range changes {
 ```
 
 The bucket is the discovery scope. Its default TTL is 30 seconds. Existing
-buckets must match the requested TTL. Watches poll at most once per second;
+buckets must match the requested TTL. Watches poll at `min(TTL/3, one second)`;
 they include an initial snapshot and report expired records as deletions.
 This is current-state discovery, not a durable history of every join and leave.
 Protect registration and discovery with NATS permissions. Labels are not
@@ -784,6 +789,11 @@ endpoint list and are the application's responsibility. No credentials are
 published. Presence expiry is not proof that task execution stopped and must
 not trigger automatic reassignment. Scheduling, claims, and failover remain
 outside this feature.
+
+See the [deployment guide](https://go-bonnie.dev/guides/deployment#advertise-worker-presence)
+for registry ownership, watch error handling, and memory-store limits, and the
+[option reference](https://go-bonnie.dev/reference/options#worker-presence)
+for all `PresenceConfig` fields.
 
 ## Chat channels
 
