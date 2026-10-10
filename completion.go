@@ -90,6 +90,16 @@ func (a *managedCompletion) PromptResultWithFiles(ctx context.Context, prompt st
 	return capable.PromptResultWithFiles(ctx, prompt, files)
 }
 
+func (a *managedCompletion) ContinueResult(ctx context.Context) (*kit.TurnResult, error) {
+	capable, ok := a.Agent.(runtime.ContinuationAgent)
+	if !ok {
+		return nil, runtime.ErrContinuationUnsupported
+	}
+	return capable.ContinueResult(ctx)
+}
+
+var _ runtime.ContinuationAgent = (*managedCompletion)(nil)
+
 func (a *managedCompletion) Subscribe(listener kit.EventListener) func() {
 	if capable, ok := a.Agent.(interface {
 		Subscribe(kit.EventListener) func()
