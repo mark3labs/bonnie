@@ -1255,7 +1255,9 @@ nats pub agents.review.answers '{"task_id":"review-42","tool_call_id":"CALL_ID_F
 
 A repeated task is rejected, not interpreted as an answer. Answers must match
 the current suspension. Workers and buffers are bounded; `Concurrency` defaults
-to 4 and `Buffer` to 64. Shutdown cancels active turns and waits for workers.
+to 4 and `Buffer` to 64. Shutdown interrupts active turns and waits for workers.
+Connection loss also interrupts active turns. The saved `interrupted` state is
+not an operator cancellation; `Runner.Start` can continue it.
 
 **This adapter follows the asynchronous GitHub pattern, not a durable broker
 queue.** It uses Core NATS, not JetStream. Offline subscribers, buffer overflow,
@@ -1422,7 +1424,9 @@ that cannot be safely continued returns an explicit failure instead of guessing.
 Oversized outcomes return a bounded error; full run data stays in the journal.
 
 **Delivery is at least once, not exactly once.** Redelivery to another worker
-can execute the task again. Interrupted tasks start fresh attempts. Track
+can execute the task again. Redelivery to the same worker reuses its saved local
+attempt and run after interruption. Keep the original journal and sandbox data;
+recovery does not make external effects exactly once. Track
 `task_id`, `attempt_id`, and `run_id`, and make external effects and result
 handlers safe to repeat. Broker deduplication has a bounded window. A waiting
 run needs its original worker and stored state to answer; lost worker state

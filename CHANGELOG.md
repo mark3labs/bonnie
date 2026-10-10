@@ -7,8 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.21.0] — 2026-10-09
 
-**Live web updates and theme control.**
-This is a MINOR release because it adds the public `EventBus.SubscribeAll` API
+**Live web updates, theme control, and interruption recovery.**
+This is a MINOR release because it adds public event and interruption APIs
 and new web features. BONNIE remains early and experimental. No release is
 proven in production. Do not use it for work whose loss would hurt.
 
@@ -28,6 +28,9 @@ proven in production. Do not use it for work whose loss would hurt.
 ### Added
 
 - `runtime.EventBus.SubscribeAll` provides a live-only stream across runs.
+- `runtime.Runner.Interrupt` stops an active turn for lifecycle recovery.
+  `runtime.RunInterrupted` distinguishes this state from operator cancellation;
+  `Start` continues the durable conversation.
 - Web theme control with System, Light, and Dark settings. The browser saves
   the choice and keeps it across live view updates.
 - Web assistant text streams before the durable reply. Transient text is escaped
@@ -42,13 +45,24 @@ proven in production. Do not use it for work whose loss would hurt.
 - **Web DOM compatibility:** custom integrations must use
   `#application[data-view]` instead of `body[data-view]`. Live connection IDs
   are view-specific. No exported API is removed and no signature changes.
+- **Run-state compatibility:** clients must handle the new `interrupted` state.
+  It is terminal for active execution but permits continuation with `Start`.
+  NATS shutdown and connection loss interrupt turns instead of recording an
+  operator cancellation.
 
 ### Fixed
 
 - Open the live connection before sending the first message, so the first turn
   can stream. Disconnects and view changes release their subscriptions.
-- Correct the root README's stale statement that web updates exclude transient
-  model text.
+- Preserve the admitted local JetStream attempt and run identity on redelivery
+  after interruption. Retry fetch errors during transport recovery.
+- Check only the interrupted turn for a saved user prompt. An identical prompt
+  in an earlier turn no longer hides unsaved input. Recovery keeps caller-supplied
+  attachments when the input was not saved.
+- Reject external schedule triggers without both an occurrence ID and scheduled
+  time before contacting the server.
+- Correct the root README's stale statements about transient model text and
+  JetStream interruption recovery.
 - Prepare the Docker test image before parallel CI tests, with bounded retries
   and a public mirror fallback. Image download failures retain full diagnostics;
   Docker tests are not skipped.
@@ -134,7 +148,8 @@ proven in production. Do not use it for work whose loss would hurt.
   process failure can lose delivery. Interrupted tasks and result publication are
   not retried automatically. Ordinary subscribers each receive a copy.
 - **JetStream delivery is at least once.** Another worker can repeat execution;
-  interrupted tasks start fresh attempts. Broker deduplication is bounded. Each
+  redelivery to the same worker reuses its saved local attempt and run. Recovery
+  needs the original journal and sandbox data. Broker deduplication is bounded. Each
   worker needs a unique stable identity, journal, and sandbox data with one owner.
   Waiting runs need their original worker. There is no global attempt lookup.
   Consumer changes can replay retained messages; shared consumers divide work.

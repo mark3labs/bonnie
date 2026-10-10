@@ -601,16 +601,16 @@ func (r *Runner) startAcquired(turnCtx context.Context, act *activeTurn, runID s
 		return nil, err
 	}
 	s.SetTurnContext(in.Context)
-	// The interrupted turn's user prompt is already durable. Continue it without
-	// adding the supplied prompt a second time.
+	// Continue an interrupted turn without adding input that is already durable.
 	if state == RunInterrupted {
 		// Kit may have been interrupted before it appended the user message.
 		// Reuse the caller input only when replay confirms it is not durable.
 		prompt := ""
+		var files []kit.LLMFilePart
 		if !hasUserMessage(turnCtx, r.journal, runID, in.Text) {
-			prompt = in.Text
+			prompt, files = in.Text, in.Files
 		}
-		return r.turn(turnCtx, act, s, prompt, nil, true)
+		return r.turn(turnCtx, act, s, prompt, files, true)
 	}
 	return r.turn(turnCtx, act, s, in.Text, in.Files, false)
 }
@@ -620,12 +620,21 @@ func hasUserMessage(ctx context.Context, journal Journal, runID, text string) bo
 	if err != nil {
 		return false
 	}
+	// Only the latest turn can establish that this input was durably added.
+	// An equal prompt in an older turn does not mean this turn's prompt exists.
+	turnStarted := false
+	found := false
 	for _, rec := range recs {
-		if rec.Kind == RecordMessage && rec.Role == "user" && rec.Text == text {
-			return true
+		if rec.Kind == RecordTurn {
+			turnStarted = true
+			found = false
+			continue
+		}
+		if turnStarted && rec.Kind == RecordMessage && rec.Role == "user" && rec.Text == text {
+			found = true
 		}
 	}
-	return false
+	return found
 }
 
 // Resume delivers input to a suspended run and continues it. The run may have

@@ -42,6 +42,9 @@ func scheduleRead(defaultURL, use, short string, named bool) *cobra.Command {
 func scheduleTrigger(defaultURL string) *cobra.Command {
 	var base, token, id, at, kind string
 	cmd := &cobra.Command{Use: "trigger <name>", Short: "Trigger a schedule", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+		if (kind != "manual" || id != "") && (at == "" || strings.TrimSpace(id) == "") {
+			return fmt.Errorf("external triggers require --scheduled-at and --id")
+		}
 		t := time.Now().UTC()
 		if at != "" {
 			parsed, err := time.Parse(time.RFC3339Nano, at)
@@ -49,8 +52,6 @@ func scheduleTrigger(defaultURL string) *cobra.Command {
 				return fmt.Errorf("--scheduled-at must be RFC3339: %w", err)
 			}
 			t = parsed
-		} else if kind != "manual" || id != "" {
-			return fmt.Errorf("external triggers require --scheduled-at and --id")
 		}
 		return scheduleRequest(cmd, base, token, http.MethodPost, "/"+url.PathEscape(args[0])+"/trigger", map[string]any{"id": id, "scheduled_at": t, "kind": kind}, false)
 	}}
