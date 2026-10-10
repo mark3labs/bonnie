@@ -23,7 +23,8 @@ const (
 )
 
 // RequestCancel durably requests cancellation of the current turn, including
-// a turn parked for human input. expectedTurnID, when set, protects a later
+// a turn parked for human input, interrupted, or left running by a dead owner.
+// expectedTurnID, when set, protects a later
 // turn from an old command. Unknown and idle runs are harmless no-ops.
 // Execution is cooperative; external effects cannot be undone. Like Start,
 // this method requires one Runner owner per run. It does not route commands
@@ -33,7 +34,7 @@ func (r *Runner) RequestCancel(ctx context.Context, runID, expectedTurnID string
 	r.mu.Lock()
 	act, active := r.active[runID]
 	if !active {
-		// Reserve the run while withdrawing a parked request. Resume and Start
+		// Reserve the run while cancelling an inactive turn. Resume and Start
 		// must not pass the state check while this command is being written.
 		var err error
 		ctx, act, err = r.acquireLocked(ctx, runID)
@@ -76,7 +77,7 @@ func (r *Runner) RequestCancel(ctx context.Context, runID, expectedTurnID string
 		out.Status = CancelStale
 		return out, nil
 	}
-	if act.finished || (!active && state != RunWaiting && !requested) {
+	if act.finished || (!active && state != RunWaiting && state != RunInterrupted && state != RunRunning && !requested) {
 		return out, nil
 	}
 	if !requested {

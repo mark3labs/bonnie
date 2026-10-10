@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	kit "github.com/mark3labs/kit/pkg/kit"
@@ -113,5 +114,92 @@ func TestCancellationCommandRecovery(t *testing.T) {
 	run, err := r.Start(ctx, "r", Input{Text: "next"})
 	if err != nil || run.State != RunCompleted {
 		t.Fatalf("next: %+v %v", run, err)
+	}
+}
+
+// A new owner can cancel a stopped turn without executing its saved work.
+func TestCancelInactiveTurnAcrossRunnerBoundary(t *testing.T) {
+	t.Parallel()
+	for _, state := range []RunState{RunInterrupted, RunRunning, RunWaiting} {
+		t.Run(string(state), func(t *testing.T) {
+			t.Parallel()
+			ctx := t.Context()
+			j := NewMemoryJournal()
+			for _, rec := range []Record{{RunID: "r", Kind: RecordTurn, Text: "old"}, {RunID: "r", Kind: RecordState, State: state}} {
+				if _, err := j.Append(ctx, rec); err != nil {
+					t.Fatal(err)
+				}
+			}
+			factory, _ := fakeFactory()
+			r := NewRunner(j, factory)
+			stale, err := r.RequestCancel(ctx, "r", "older")
+			if err != nil || stale.Status != CancelStale {
+				t.Fatalf("stale: %+v %v", stale, err)
+			}
+			result, err := r.RequestCancel(ctx, "r", "old")
+			if err != nil || result.Status != CancelRequested {
+				t.Fatalf("cancel: %+v %v", result, err)
+			}
+			second := NewRunner(j, factory)
+			run, err := second.Snapshot(ctx, "r")
+			if err != nil || run.State != RunCancelled || run.TurnID != "old" {
+				t.Fatalf("snapshot: %+v %v", run, err)
+			}
+			repeat, err := second.RequestCancel(ctx, "r", "old")
+			if err != nil || repeat.Status != CancelNotActive {
+				t.Fatalf("repeat: %+v %v", repeat, err)
+			}
+		})
+	}
+}
+
+// Retrying admitted input must not undo cancellation, even if its owner died
+// before the cancelled checkpoint. New input can still start a later turn.
+func TestStartRetryHonorsCancellation(t *testing.T) {
+	t.Parallel()
+	for _, checkpointed := range []bool{false, true} {
+		t.Run(fmt.Sprint(checkpointed), func(t *testing.T) {
+			t.Parallel()
+			ctx := t.Context()
+			j, err := OpenSQLiteJournal(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = j.Close() }()
+			recs := []Record{{RunID: "r", Kind: RecordTurn, Text: "old"}, {RunID: "r", Kind: RecordState, State: RunInterrupted}, {RunID: "r", Kind: RecordCancel, Text: "old"}}
+			if checkpointed {
+				recs = append(recs, Record{RunID: "r", Kind: RecordState, State: RunCancelled})
+			}
+			for _, rec := range recs {
+				if _, err := j.Append(ctx, rec); err != nil {
+					t.Fatal(err)
+				}
+			}
+			factory, agent := fakeFactory(&kit.TurnResult{Response: "new"})
+			r := NewRunner(j, factory)
+			run, err := r.StartRetry(ctx, "r", Input{Text: "work"})
+			if err != nil || run.State != RunCancelled || run.TurnID != "old" || agent.call != 0 {
+				t.Fatalf("retry: %+v %v calls=%d", run, err, agent.call)
+			}
+			state, err := j.State(ctx, "r")
+			if err != nil || state != RunCancelled {
+				t.Fatalf("durable state: %s %v", state, err)
+			}
+			run, err = r.Start(ctx, "r", Input{Text: "new"})
+			if err != nil || run.State != RunCompleted || run.TurnID == "old" || agent.call != 1 {
+				t.Fatalf("new input: %+v %v calls=%d", run, err, agent.call)
+			}
+		})
+	}
+}
+
+// A retry that has not been cancelled can admit work as usual.
+func TestStartRetryNewInput(t *testing.T) {
+	t.Parallel()
+	factory, agent := fakeFactory(&kit.TurnResult{Response: "done"})
+	r := NewRunner(NewMemoryJournal(), factory)
+	run, err := r.StartRetry(t.Context(), "r", Input{Text: "work"})
+	if err != nil || run.State != RunCompleted || agent.call != 1 {
+		t.Fatalf("retry: %+v %v", run, err)
 	}
 }

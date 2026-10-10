@@ -564,7 +564,7 @@ func (c *Channel) handleJetStream(ctx context.Context, msg *gonats.Msg) {
 			}
 			if err == nil {
 				run, err = c.turn(ctx, runID, func() (*runtime.Run, error) {
-					return ref.Send(ctx, task.Text, channel.SendOptions{Context: task.Context, Kind: "task", TurnPolicy: channel.PolicyQueue})
+					return ref.SendRetry(ctx, task.Text, channel.SendOptions{Context: task.Context, Kind: "task"})
 				})
 			}
 		}

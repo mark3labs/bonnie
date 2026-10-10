@@ -571,6 +571,32 @@ func (r *Runner) Start(ctx context.Context, runID string, in Input) (*Run, error
 	return r.startAcquired(turnCtx, act, runID, in)
 }
 
+// StartRetry retries previously admitted input. It returns a cancelled snapshot
+// instead of starting a new turn if the current turn was explicitly cancelled.
+// The cancellation check and start share one run reservation. Like Start, this
+// method requires one Runner owner per run; it does not provide a process lease.
+// Use Start for new input that can continue a cancelled conversation.
+func (r *Runner) StartRetry(ctx context.Context, runID string, in Input) (*Run, error) {
+	turnCtx, act, err := r.acquire(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	if err := r.recoverCancellation(turnCtx, runID); err != nil {
+		r.release(runID)
+		return nil, err
+	}
+	state, err := r.journal.State(turnCtx, runID)
+	if err != nil && !errors.Is(err, ErrRunNotFound) {
+		r.release(runID)
+		return nil, err
+	}
+	if state == RunCancelled {
+		defer r.release(runID)
+		return r.Snapshot(turnCtx, runID)
+	}
+	return r.startAcquired(turnCtx, act, runID, in)
+}
+
 func (r *Runner) startAcquired(turnCtx context.Context, act *activeTurn, runID string, in Input) (*Run, error) {
 	defer r.release(runID)
 	if err := r.recoverCancellation(turnCtx, runID); err != nil {
