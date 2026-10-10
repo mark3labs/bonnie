@@ -514,6 +514,17 @@ func (s *Ref) RunID(ctx context.Context) (string, error) {
 // guessed: the same misspelling must not mean "wait" on one transport and
 // "interrupt" on another.
 func (s *Ref) Send(ctx context.Context, text string, opts channel.SendOptions) (*runtime.Run, error) {
+	return s.send(ctx, text, opts, false)
+}
+
+// SendRetry retries previously admitted input without restarting a cancelled
+// turn. It queues behind other sends and does not steer an active turn.
+func (s *Ref) SendRetry(ctx context.Context, text string, opts channel.SendOptions) (*runtime.Run, error) {
+	opts.TurnPolicy = channel.PolicyQueue
+	return s.send(ctx, text, opts, true)
+}
+
+func (s *Ref) send(ctx context.Context, text string, opts channel.SendOptions, retry bool) (*runtime.Run, error) {
 	policy := opts.TurnPolicy
 	if policy == "" {
 		policy = s.core.policy
@@ -546,7 +557,11 @@ func (s *Ref) Send(ctx context.Context, text string, opts channel.SendOptions) (
 
 	unlock := s.core.locks.Lock(runID)
 	defer unlock()
-	return s.core.runner.Start(ctx, runID, runtime.Input{
+	start := s.core.runner.Start
+	if retry {
+		start = s.core.runner.StartRetry
+	}
+	return start(ctx, runID, runtime.Input{
 		Text:    text,
 		Context: opts.Context,
 		Title:   opts.Title,

@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Durable cancellation accepts inactive interrupted turns and running turns
+  left by a dead owner. JetStream task retries keep cancelled admissions
+  cancelled, including a crash before the cancellation checkpoint. Turn scope
+  and the single-owner requirement remain unchanged; external effects cannot
+  be undone. New input can still continue a cancelled conversation.
 - Interrupted runs use Kit's saved-conversation continuation API instead of
   adding an empty or repeated user prompt. Repeated restarts keep the original
   input once, including during completion checks. Tool recovery rules are unchanged.
