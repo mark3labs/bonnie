@@ -287,8 +287,9 @@ func TestDevRestartCompletesParkedRun(t *testing.T) {
 }
 
 // TestRunBuildDryRun prints the discovery plan without writing or building.
+// It must run serially: captureStdout replaces os.Stdout, which Cobra and
+// other tests read. A parallel test would cause a data race.
 func TestRunBuildDryRun(t *testing.T) {
-	t.Parallel()
 	root := buildHermeticTree(t)
 	// A dry run does not require the module to resolve; it only discovers.
 

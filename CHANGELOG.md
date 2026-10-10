@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   managed agent. Interrupted runs can recover through targeted JetStream
   redelivery without a repeated or empty user prompt. Agents without this
   capability return `runtime.ErrContinuationUnsupported` (#18).
+- Run the build dry-run test serially because its stdout capture changes
+  `os.Stdout`. This prevents a data race with parallel CLI tests in CI.
 
 ## [0.22.0] — 2026-10-10
 
