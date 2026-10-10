@@ -163,7 +163,7 @@ func addCompletionUsage(a, b *kit.LLMUsage) *kit.LLMUsage {
 
 // completionTurn runs the model/check loop. Suspension returns to the existing
 // turn classifier. Resume replaces its pending prompt but keeps the budget.
-func (r *Runner) completionTurn(ctx context.Context, s *Session, agent Agent, prompt string, files []kit.LLMFilePart, c *completionRecord, resumed bool) (*kit.TurnResult, error) {
+func (r *Runner) completionTurn(ctx context.Context, s *Session, agent Agent, prompt string, files []kit.LLMFilePart, c *completionRecord, resumed, continueSaved bool) (*kit.TurnResult, error) {
 	hook := r.completionHook
 	if hook == nil {
 		if capable, ok := agent.(CompletionAgent); ok {
@@ -171,12 +171,24 @@ func (r *Runner) completionTurn(ctx context.Context, s *Session, agent Agent, pr
 		}
 	}
 	if c == nil && hook == nil {
-		return promptCompletion(ctx, agent, prompt, files)
+		return generateCompletion(ctx, agent, prompt, files, continueSaved)
 	}
 	book := context.WithoutCancel(ctx)
 	if c != nil && !resumed {
 		// Recovery owns its stored prompt, not new Start input or attachments.
 		files = nil
+		// A pending continuation can have persisted its input before a crash.
+		// Do not submit it again, even if it differs from the initial input.
+		recs, err := r.journal.Replay(ctx, s.runID)
+		if err != nil {
+			return nil, fmt.Errorf("bonnie: inspect completion input: %w", err)
+		}
+		continueSaved = false
+		for _, rec := range recs {
+			if rec.Seq > c.MessageSeq && rec.Kind == RecordMessage && rec.Role == "user" && rec.Text == c.Prompt {
+				continueSaved = true
+			}
+		}
 	}
 	if c == nil {
 		c = &completionRecord{Phase: "pending", Prompt: prompt, MessageSeq: s.LastMessageSeq()}
@@ -198,7 +210,8 @@ func (r *Runner) completionTurn(ctx context.Context, s *Session, agent Agent, pr
 				if err := r.saveCompletion(book, s, c); err != nil {
 					return nil, err
 				}
-				res, err := promptCompletion(ctx, agent, c.Prompt, files)
+				res, err := generateCompletion(ctx, agent, c.Prompt, files, continueSaved)
+				continueSaved = false
 				files = nil
 				if err != nil {
 					return res, err
@@ -243,6 +256,7 @@ func (r *Runner) completionTurn(ctx context.Context, s *Session, agent Agent, pr
 			if c.Candidate.ContinuationsUsed >= r.completionLimit {
 				return nil, ErrContinuationLimit
 			}
+			continueSaved = false
 			c.Candidate.ContinuationsUsed++
 			c.Prompt = c.Feedback.ContinueWith
 			c.MessageSeq = s.LastMessageSeq()
@@ -254,6 +268,17 @@ func (r *Runner) completionTurn(ctx context.Context, s *Session, agent Agent, pr
 			return &kit.TurnResult{Response: c.Candidate.Response, TotalUsage: c.Usage}, nil
 		}
 	}
+}
+
+func generateCompletion(ctx context.Context, agent Agent, prompt string, files []kit.LLMFilePart, continueSaved bool) (*kit.TurnResult, error) {
+	if continueSaved {
+		capable, ok := agent.(ContinuationAgent)
+		if !ok {
+			return nil, fmt.Errorf("%w: %T", ErrContinuationUnsupported, agent)
+		}
+		return capable.ContinueResult(ctx)
+	}
+	return promptCompletion(ctx, agent, prompt, files)
 }
 
 func promptCompletion(ctx context.Context, agent Agent, prompt string, files []kit.LLMFilePart) (*kit.TurnResult, error) {

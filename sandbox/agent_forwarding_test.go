@@ -27,12 +27,17 @@ func (a *forwardingAgent) PromptResultWithFiles(ctx context.Context, prompt stri
 	return a.result, a.err
 }
 
+func (a *forwardingAgent) ContinueResult(ctx context.Context) (*kit.TurnResult, error) {
+	a.ctx = ctx
+	return a.result, a.err
+}
+
 func (a *forwardingAgent) Subscribe(listener kit.EventListener) func() {
 	a.listener = listener
 	return func() { a.unsubscribed = true }
 }
 
-// File forwarding must preserve the arguments, result, and error. Event
+// File and continuation forwarding must preserve the arguments, result, and error. Event
 // forwarding must pass the listener and return the agent's cleanup function.
 func TestAgentWithSandboxCloseForwardsFilesAndEvents(t *testing.T) {
 	t.Parallel()
@@ -48,6 +53,10 @@ func TestAgentWithSandboxCloseForwardsFilesAndEvents(t *testing.T) {
 		}
 		if base.ctx != ctx || base.prompt != "read this" || !reflect.DeepEqual(base.files, files) {
 			t.Fatal("file prompt arguments changed")
+		}
+		result, err = a.ContinueResult(ctx)
+		if result != base.result || err != promptErr || base.ctx != ctx {
+			t.Fatal("continuation arguments, result, or error changed")
 		}
 		called := false
 		unsubscribe := a.Subscribe(func(kit.Event) { called = true })
@@ -73,6 +82,10 @@ func TestAgentWithSandboxCloseOptionalFallbacks(t *testing.T) {
 	result, err := a.PromptResultWithFiles(context.Background(), "read this", []kit.LLMFilePart{{MediaType: "text/plain", Data: []byte("file")}})
 	if result != nil || !errors.Is(err, runtime.ErrFilesUnsupported) {
 		t.Fatalf("result = %+v, error = %v", result, err)
+	}
+	result, err = a.ContinueResult(context.Background())
+	if result != nil || !errors.Is(err, runtime.ErrContinuationUnsupported) {
+		t.Fatalf("continuation result = %+v, error = %v", result, err)
 	}
 	unsubscribe := a.Subscribe(func(kit.Event) { t.Error("unsupported listener called") })
 	unsubscribe()

@@ -39,6 +39,18 @@ type Agent interface {
 	Close() error
 }
 
+// ContinuationAgent can resume generation from the restored conversation without
+// adding a user message. Agents need this interface to recover durable input.
+// The factory must resolve pending tool calls before continuation.
+type ContinuationAgent interface {
+	ContinueResult(context.Context) (*kit.TurnResult, error)
+}
+
+// ErrContinuationUnsupported means an agent cannot continue saved input safely.
+var ErrContinuationUnsupported = errors.New("bonnie: agent does not support saved conversation continuation")
+
+var _ ContinuationAgent = (*kit.Kit)(nil)
+
 // Compile-time proof that the real Kit satisfies the seam. If Kit changes one
 // of these signatures, the build breaks here rather than at a call site.
 var _ Agent = (*kit.Kit)(nil)
@@ -607,12 +619,13 @@ func (r *Runner) startAcquired(turnCtx context.Context, act *activeTurn, runID s
 		// Reuse the caller input only when replay confirms it is not durable.
 		prompt := ""
 		var files []kit.LLMFilePart
-		if !hasUserMessage(turnCtx, r.journal, runID, in.Text) {
+		continueSaved := hasUserMessage(turnCtx, r.journal, runID, in.Text)
+		if !continueSaved {
 			prompt, files = in.Text, in.Files
 		}
-		return r.turn(turnCtx, act, s, prompt, files, true)
+		return r.turn(turnCtx, act, s, prompt, files, false, continueSaved)
 	}
-	return r.turn(turnCtx, act, s, in.Text, in.Files, false)
+	return r.turn(turnCtx, act, s, in.Text, in.Files, false, false)
 }
 
 func hasUserMessage(ctx context.Context, journal Journal, runID, text string) bool {
@@ -620,15 +633,17 @@ func hasUserMessage(ctx context.Context, journal Journal, runID, text string) bo
 	if err != nil {
 		return false
 	}
-	// Only the latest turn can establish that this input was durably added.
-	// An equal prompt in an older turn does not mean this turn's prompt exists.
+	// Interruptions create new execution turns, but do not close the logical
+	// input. Only a terminal state or clear starts a new input boundary.
 	turnStarted := false
 	found := false
 	for _, rec := range recs {
+		if rec.Kind == RecordClear || (rec.Kind == RecordState && (rec.State == RunCompleted || rec.State == RunFailed || rec.State == RunCancelled || rec.State == RunRetired)) {
+			turnStarted = false
+			found = false
+		}
 		if rec.Kind == RecordTurn {
 			turnStarted = true
-			found = false
-			continue
 		}
 		if turnStarted && rec.Kind == RecordMessage && rec.Role == "user" && rec.Text == text {
 			found = true
@@ -682,7 +697,7 @@ func (r *Runner) Resume(ctx context.Context, runID string, responses []InputResp
 		return nil, err
 	}
 	r.bus.Publish(Event{RunID: runID, Type: EventResume, Seq: seq, Text: answer})
-	return r.turn(turnCtx, act, s, answer, nil, true)
+	return r.turn(turnCtx, act, s, answer, nil, true, false)
 }
 
 // Cancel stops the turn a run is executing now. Completed steps stay in the
@@ -794,7 +809,7 @@ func (r *Runner) Snapshot(ctx context.Context, runID string) (*Run, error) {
 }
 
 // turn runs one agent turn and classifies the outcome.
-func (r *Runner) turn(ctx context.Context, act *activeTurn, s *Session, prompt string, files []kit.LLMFilePart, resumed bool) (*Run, error) {
+func (r *Runner) turn(ctx context.Context, act *activeTurn, s *Session, prompt string, files []kit.LLMFilePart, resumed, continueSaved bool) (*Run, error) {
 	runID := s.runID
 	// Terminal bookkeeping must outlive a cancelled turn, or a cancel would
 	// leave the run stuck in "running" for ever.
@@ -848,7 +863,7 @@ func (r *Runner) turn(ctx context.Context, act *activeTurn, s *Session, prompt s
 	stop := forwardAgentEvents(agent, r.bus, runID, act.turnID)
 	defer stop()
 
-	res, err := r.completionTurn(ctx, s, agent, prompt, files, completion, resumed)
+	res, err := r.completionTurn(ctx, s, agent, prompt, files, completion, resumed, continueSaved)
 	if err == nil && res != nil {
 		if _, parked := suspensionFrom(res); !parked {
 			err = r.WaitChildren(ctx, runID)
