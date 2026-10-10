@@ -177,12 +177,13 @@ func (c *Channel) startJetStream(ctx context.Context, nc *gonats.Conn) error {
 					if workCtx.Err() != nil {
 						return
 					}
-					if errors.Is(err, gonats.ErrTimeout) || errors.Is(err, context.DeadlineExceeded) {
+					if errors.Is(err, gonats.ErrTimeout) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, gonats.ErrConnectionClosed) || errors.Is(err, gonats.ErrDisconnected) {
 						continue
 					}
-					c.report("JetStream fetch failed")
-					stop()
-					return
+					// A reconnect can invalidate the outstanding fetch inbox. Retry
+					// without poisoning shutdown with a transient transport error.
+					time.Sleep(100 * time.Millisecond)
+					continue
 				}
 				for _, msg := range msgs {
 					c.handleJetStream(workCtx, msg)
@@ -230,6 +231,32 @@ func (c *Channel) cacheKey(kind string, ids ...string) string {
 	}
 	sum := sha256.Sum256([]byte(key))
 	return runtime.ReservedRunPrefix + "nats.sha256." + hex.EncodeToString(sum[:])
+}
+
+// admittedTask binds a delivered stream sequence to its stable local attempt before execution.
+type admittedTask struct {
+	Result Result `json:"result"`
+	RunID  string `json:"run_id"`
+}
+
+func (c *Channel) loadTaskAdmission(ctx context.Context, key string) (*admittedTask, error) {
+	records, err := c.core.Runner().Journal().Replay(ctx, key)
+	if errors.Is(err, runtime.ErrRunNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	for _, record := range records {
+		if record.ExtType == "nats_task_attempt_admitted" {
+			var admission admittedTask
+			if err := json.Unmarshal(record.Payload, &admission); err != nil {
+				return nil, err
+			}
+			return &admission, nil
+		}
+	}
+	return nil, nil
 }
 
 // admittedAnswer records the accepted input before Resume can change the run.
@@ -427,12 +454,25 @@ func (c *Channel) handleJetStream(ctx context.Context, msg *gonats.Msg) {
 		}
 	}
 	result := Result{Version: 1, TaskID: task.TaskID, WorkerID: c.cfg.WorkerID, AnswerSubject: c.answerRoute()}
-	attempt := make([]byte, 16)
-	if _, randomErr := rand.Read(attempt); randomErr != nil {
-		c.report("attempt identity failed")
-		return
+	var taskAdmission *admittedTask
+	if err == nil && !isAnswer {
+		taskAdmission, loadErr = c.loadTaskAdmission(ctx, key)
+		if loadErr != nil {
+			c.report("task admission read failed")
+			return
+		}
+		if taskAdmission != nil {
+			result = taskAdmission.Result
+		}
 	}
-	result.AttemptID = hex.EncodeToString(attempt)
+	if taskAdmission == nil {
+		attempt := make([]byte, 16)
+		if _, randomErr := rand.Read(attempt); randomErr != nil {
+			c.report("attempt identity failed")
+			return
+		}
+		result.AttemptID = hex.EncodeToString(attempt)
+	}
 	if err == nil && !validID(task.TaskID) {
 		err = errors.New("invalid task_id")
 	}
@@ -498,14 +538,28 @@ func (c *Channel) handleJetStream(ctx context.Context, msg *gonats.Msg) {
 		if strings.TrimSpace(task.Text) == "" {
 			err = errors.New("text is required")
 		} else {
-			// Never send again to an uncertain original run: create a fresh address.
+			// Reuse the durable mapping on redelivery so Runner continues the same attempt.
 			ref := c.core.From("js/" + result.AttemptID)
 			var runID string
-			runID, err = ref.RunID(ctx)
-			if err == nil {
-				if err := c.admitTask(ctx, result, runID); err != nil {
-					c.report("task admission save failed")
-					return
+			if taskAdmission != nil {
+				runID = taskAdmission.RunID
+			} else {
+				runID, err = ref.RunID(ctx)
+				if err == nil {
+					taskAdmission = &admittedTask{Result: result, RunID: runID}
+					data, encodeErr := json.Marshal(taskAdmission)
+					if encodeErr != nil {
+						c.report("task admission encode failed")
+						return
+					}
+					if _, saveErr := c.core.Runner().Journal().Append(ctx, runtime.Record{RunID: key, Kind: runtime.RecordExtensionData, ExtType: "nats_task_attempt_admitted", Payload: data}); saveErr != nil {
+						c.report("task admission save failed")
+						return
+					}
+					if err := c.admitTask(ctx, result, runID); err != nil {
+						c.report("task admission index save failed")
+						return
+					}
 				}
 			}
 			if err == nil {
@@ -516,6 +570,11 @@ func (c *Channel) handleJetStream(ctx context.Context, msg *gonats.Msg) {
 		}
 	}
 	if ctx.Err() != nil {
+		return
+	}
+	// An interrupted turn is deliberately neither cached nor acknowledged: the
+	// broker redelivery must re-enter Runner with the admitted attempt identity.
+	if run != nil && run.State == runtime.RunInterrupted {
 		return
 	}
 	if run != nil {

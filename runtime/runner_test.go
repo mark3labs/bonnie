@@ -23,16 +23,16 @@ type fakeAgent struct {
 	// journalled, such as the tool call and result of a halting tool.
 	onPrompt func(*Session) error
 
-	mu      sync.Mutex
-	steers  []string
-	block   chan struct{}
-	started chan struct{}
+	mu        sync.Mutex
+	steers    []string
+	block     chan struct{}
+	started   chan struct{}
+	startOnce sync.Once
 }
 
 func (f *fakeAgent) PromptResult(ctx context.Context, msg string) (*kit.TurnResult, error) {
 	if f.started != nil {
-		close(f.started)
-		f.started = nil
+		f.startOnce.Do(func() { close(f.started) })
 	}
 	if f.block != nil {
 		select {

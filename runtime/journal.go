@@ -24,6 +24,9 @@ const (
 	RunCompleted RunState = "completed"
 	// RunFailed means the run ended with an error.
 	RunFailed RunState = "failed"
+	// RunInterrupted means the host stopped execution to recover later. It is
+	// distinct from an explicit operator cancellation and can be continued with Start.
+	RunInterrupted RunState = "interrupted"
 	// RunCancelled means an operator stopped the turn before it ended.
 	// Completed steps stay in the journal, so a cancelled run is resumable
 	// with [Runner.Start] — unlike [RunFailed], which records a turn that
@@ -41,7 +44,7 @@ const (
 // own. A terminal run other than [RunRetired] can still be revived by
 // [Runner.Start], which appends a new turn to the replayed conversation.
 func (s RunState) IsTerminal() bool {
-	return s == RunCompleted || s == RunFailed || s == RunCancelled || s == RunRetired
+	return s == RunCompleted || s == RunFailed || s == RunCancelled || s == RunInterrupted || s == RunRetired
 }
 
 // RecordKind classifies a [Record] in the journal.

@@ -242,6 +242,7 @@ type activeTurn struct {
 	control   sync.Mutex
 	turnID    string
 	finished  bool
+	interrupt bool
 	ready     chan struct{}
 	readyOnce sync.Once
 
@@ -268,7 +269,7 @@ func (a *activeTurn) steer(msg string) bool {
 // ErrRunActive is returned when a run is already executing.
 var ErrRunActive = errors.New("bonnie: run already active")
 
-// ErrRunNotActive is returned when Cancel or Steer targets a run that this
+// ErrRunNotActive is returned when Cancel, Interrupt, or Steer targets a run that this
 // Runner is not currently executing.
 var ErrRunNotActive = errors.New("bonnie: run is not active")
 
@@ -600,7 +601,31 @@ func (r *Runner) startAcquired(turnCtx context.Context, act *activeTurn, runID s
 		return nil, err
 	}
 	s.SetTurnContext(in.Context)
+	// The interrupted turn's user prompt is already durable. Continue it without
+	// adding the supplied prompt a second time.
+	if state == RunInterrupted {
+		// Kit may have been interrupted before it appended the user message.
+		// Reuse the caller input only when replay confirms it is not durable.
+		prompt := ""
+		if !hasUserMessage(turnCtx, r.journal, runID, in.Text) {
+			prompt = in.Text
+		}
+		return r.turn(turnCtx, act, s, prompt, nil, true)
+	}
 	return r.turn(turnCtx, act, s, in.Text, in.Files, false)
+}
+
+func hasUserMessage(ctx context.Context, journal Journal, runID, text string) bool {
+	recs, err := journal.Replay(ctx, runID)
+	if err != nil {
+		return false
+	}
+	for _, rec := range recs {
+		if rec.Kind == RecordMessage && rec.Role == "user" && rec.Text == text {
+			return true
+		}
+	}
+	return false
 }
 
 // Resume delivers input to a suspended run and continues it. The run may have
@@ -670,6 +695,26 @@ func (r *Runner) Cancel(runID string) error {
 	if act.finished {
 		return fmt.Errorf("%w: %s", ErrRunNotActive, runID)
 	}
+	act.cancel()
+	return nil
+}
+
+// Interrupt stops an active turn for lifecycle recovery. Unlike Cancel, it
+// does not record an explicit cancellation. Start can continue from the durable
+// conversation. It returns ErrRunNotActive if this Runner does not own the run.
+func (r *Runner) Interrupt(runID string) error {
+	r.mu.Lock()
+	act, ok := r.active[runID]
+	r.mu.Unlock()
+	if !ok {
+		return fmt.Errorf("%w: %s", ErrRunNotActive, runID)
+	}
+	act.control.Lock()
+	defer act.control.Unlock()
+	if act.finished {
+		return fmt.Errorf("%w: %s", ErrRunNotActive, runID)
+	}
+	act.interrupt = true
 	act.cancel()
 	return nil
 }
@@ -768,10 +813,22 @@ func (r *Runner) turn(ctx context.Context, act *activeTurn, s *Session, prompt s
 	agent, err := r.factory(ctx, s)
 	if err != nil {
 		if ctx.Err() != nil {
-			if cerr := r.checkpoint(book, runID, RunCancelled); cerr != nil {
+			state := RunCancelled
+			act.control.Lock()
+			if act.interrupt {
+				state = RunInterrupted
+			}
+			if recs, replayErr := r.journal.Replay(book, runID); replayErr == nil {
+				_, _, requested := cancellationState(recs)
+				if requested {
+					state = RunCancelled
+				}
+			}
+			act.control.Unlock()
+			if cerr := r.checkpoint(book, runID, state); cerr != nil {
 				return nil, cerr
 			}
-			return &Run{ID: runID, TurnID: act.turnID, State: RunCancelled}, nil
+			return &Run{ID: runID, TurnID: act.turnID, State: state}, nil
 		}
 		_ = r.checkpoint(book, runID, RunFailed)
 		return nil, err
@@ -810,10 +867,14 @@ func (r *Runner) turn(ctx context.Context, act *activeTurn, s *Session, prompt s
 	}
 	if err != nil {
 		if cerr := ctx.Err(); cerr != nil {
-			if cerr := r.checkpoint(book, runID, RunCancelled); cerr != nil {
+			state := RunCancelled
+			if act.interrupt {
+				state = RunInterrupted
+			}
+			if cerr := r.checkpoint(book, runID, state); cerr != nil {
 				return nil, cerr
 			}
-			return &Run{ID: runID, TurnID: act.turnID, State: RunCancelled}, nil
+			return &Run{ID: runID, TurnID: act.turnID, State: state}, nil
 		}
 		if _, ok := errors.AsType[*completionWriteError](err); ok {
 			return &Run{ID: runID, State: RunRunning, Err: err}, err

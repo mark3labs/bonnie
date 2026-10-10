@@ -616,25 +616,36 @@ func (c *Channel) publish(ctx context.Context, result Result) {
 	}
 }
 
-// turn bridges the lifecycle to Runner.Cancel. Runner intentionally detaches
-// its turn context. Retry cancellation until the entry has acquired the run;
-// a single Cancel can arrive before acquire and miss the turn.
+// turn interrupts a detached runner turn when its owning channel lifecycle ends.
 func (c *Channel) turn(ctx context.Context, runID string, execute func() (*runtime.Run, error)) (*runtime.Run, error) {
 	finished := make(chan struct{})
 	watched := make(chan struct{})
 	go func() {
 		defer close(watched)
-		select {
-		case <-finished:
-			return
-		case <-ctx.Done():
+		connection := time.NewTicker(100 * time.Millisecond)
+		defer connection.Stop()
+	watch:
+		for {
+			select {
+			case <-finished:
+				return
+			case <-ctx.Done():
+				break watch
+			case <-connection.C:
+				c.mu.Lock()
+				nc := c.conn
+				c.mu.Unlock()
+				if nc != nil && !nc.IsConnected() {
+					break watch
+				}
+			}
 		}
 		timer := time.NewTicker(time.Millisecond)
 		defer timer.Stop()
 		for {
-			err := c.core.Runner().Cancel(runID)
+			err := c.core.Runner().Interrupt(runID)
 			if err != nil && !errors.Is(err, runtime.ErrRunNotActive) {
-				c.report("turn cancellation failed")
+				c.report("turn interruption failed")
 			}
 			select {
 			case <-finished:
