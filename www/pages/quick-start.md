@@ -108,5 +108,5 @@ The binary embeds instructions, tools, skills, and context files. It does not em
 - [Core concepts](/concepts): what a run preserves and what can repeat.
 - [Agent trees](/guides/agent-trees): discovery, generated wiring, and shared directories.
 - [Tools and skills](/guides/tools-and-skills): add capabilities.
-- [Channels](/channels/overview): connect a bot or task worker.
+- [Channels](/channels/overview): connect a bot or task agent.
 - [Deployment](/guides/deployment): isolate tools, authenticate requests, and back up state.

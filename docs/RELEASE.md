@@ -289,7 +289,7 @@ External effects are not exactly once, and chat retry can repeat them.
 - [x] `CHANGELOG.md` has a dated `[0.14.0]` section in Keep-a-Changelog shape;
       release-note extraction passes, and the `[Unreleased]` heading is removed
 - [x] Published notes state the three claims and the current README limits,
-      including status delivery, worker controls, and independent stream ordering.
+      including status delivery, agent controls, and independent stream ordering.
       The notes match the changelog section except for trailing blank lines
 - [x] Annotated tag pushed after human confirmation; `release.yml` run
       `37492722109` succeeded
@@ -309,7 +309,7 @@ by name and identifies Landlock and Local as the alternatives. NATS status and
 control behaviour has automated tests; this release did not prove it with a
 live model from the artifact. It did not run integration-tag live-model tests
 or execute the arm64 binary. Status delivery is at least once. Queries and
-cancellation are request/reply, not durable queued commands. Workers do not
+cancellation are request/reply, not durable queued commands. Agents do not
 share run state, and cancellation does not undo external effects.
 
 ### `v0.13.0`, 2026-10-06 — every box confirmed
@@ -363,7 +363,7 @@ exactly once.
       release-note extraction passes. The published 0.11.0 section matches
       its tagged text; the later authentication entries belong to 0.12.0
 - [x] Published notes state the three claims and the current README limits,
-      including authentication, NATS delivery, and worker-state limits.
+      including authentication, NATS delivery, and agent-state limits.
       The notes match the changelog section except for trailing blank lines
 - [x] Annotated tag pushed after human confirmation; `release.yml` run
       `37451844000` succeeded
@@ -382,7 +382,7 @@ by name and identifies Landlock and Local as the alternatives. Authentication
 is covered by automated real-broker tests, not a live-model run from the
 artifact. This release did not run the integration-tag live-model tests or
 execute the arm64 binary. Authentication does not make Core NATS durable or
-JetStream execution exactly once, and workers still do not share run state.
+JetStream execution exactly once, and agents still do not share run state.
 
 ### `v0.11.0`, 2026-10-06 — every box confirmed
 
@@ -396,7 +396,7 @@ JetStream execution exactly once, and workers still do not share run state.
 - [x] `CHANGELOG.md` has a dated `[0.11.0]` section in Keep-a-Changelog shape;
       `task release-notes TAG=v0.11.0` passes
 - [x] Published notes state the three claims and the current README limits,
-      including NATS delivery and worker-state limits. The notes match the
+      including NATS delivery and agent-state limits. The notes match the
       changelog section except for trailing blank lines
 - [x] Annotated tag pushed; `release.yml` run `37445426894` succeeded
 - [x] Three artifacts published; both downloaded archive checksums verify.
@@ -413,8 +413,8 @@ wire types, a typed `client/nats`, and stable consumer-name helpers.
 by name and identifies Landlock and Local as the alternatives. The real-broker
 NATS tests ran in the local quality checks. This release did not run the
 integration-tag live-model tests or prove NATS execution from the downloaded
-CLI. JetStream delivery is at least once, not exactly once; another worker
-can execute a task again, and a waiting run needs its original worker state.
+CLI. JetStream delivery is at least once, not exactly once; another agent
+can execute a task again, and a waiting run needs its original agent state.
 
 ### `v0.10.0`, 2026-10-05 — every box confirmed
 

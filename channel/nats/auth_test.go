@@ -59,7 +59,7 @@ func TestTokenAndUserPasswordAuthentication(t *testing.T) {
 				t.Cleanup(nc.Close)
 				cfg.URL = s.ClientURL()
 				if jetstream {
-					cfg.Stream, cfg.WorkerID, cfg.CreateStream = "TASKS", "worker-1", true
+					cfg.Stream, cfg.AgentID, cfg.CreateStream = "TASKS", "agent-1", true
 					js, err := nc.JetStream()
 					if err != nil {
 						t.Fatal(err)

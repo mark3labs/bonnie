@@ -41,8 +41,8 @@ func main() {
 				os.Exit(1)
 			}
 			return
-		case "worker":
-			worker(os.Args[2], os.Args[3], os.Args[4], os.Args[5])
+		case "agent":
+			agent(os.Args[2], os.Args[3], os.Args[4], os.Args[5])
 			return
 		}
 	}
@@ -72,19 +72,19 @@ func broker(store, readyFile string) error {
 	return nil
 }
 
-func worker(id, journal, url, readyFile string) {
+func agent(id, journal, url, readyFile string) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	must(err)
 	defer func() { _ = listener.Close() }()
 	httpURL := "http://" + listener.Addr().String()
 	nc, err := gnats.Connect(url)
 	must(err)
-	reg, err := presencenats.New(context.Background(), nc, presencenats.Config{Bucket: "smokeworkers", TTL: 3 * time.Second, Create: true})
+	reg, err := presencenats.New(context.Background(), nc, presencenats.Config{Bucket: "smokeagents", TTL: 3 * time.Second, Create: true})
 	must(err)
-	fmt.Printf("WORKER READY id=%s\n", id)
+	fmt.Printf("AGENT READY id=%s\n", id)
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
-	a := bonnie.New(bonnie.WithListener(listener), bonnie.WithJournal(journal), bonnie.WithContextFiles(""), bonnie.WithAgentFactory(func(context.Context, *runtime.Session) (runtime.Agent, error) { return fake{}, nil }), bonnie.WithNATS(nats.Config{Conn: nc, RootSubject: "smoke", WorkerID: id, TargetedTasks: true, CreateStream: true}), bonnie.WithPresence(bonnie.PresenceConfig{Registry: reg, WorkerID: id, RefreshInterval: 500 * time.Millisecond, Endpoints: []presence.Endpoint{{Channel: "http", Address: httpURL + "/bonnie/v1/runs", Input: true, Delivery: true}, {Channel: "nats", Address: "smoke.worker." + id, Input: true, Delivery: true}}}))
+	a := bonnie.New(bonnie.WithListener(listener), bonnie.WithJournal(journal), bonnie.WithContextFiles(""), bonnie.WithAgentFactory(func(context.Context, *runtime.Session) (runtime.Agent, error) { return fake{}, nil }), bonnie.WithNATS(nats.Config{Conn: nc, RootSubject: "smoke", AgentID: id, TargetedTasks: true, CreateStream: true}), bonnie.WithPresence(bonnie.PresenceConfig{Registry: reg, AgentID: id, RefreshInterval: 500 * time.Millisecond, Endpoints: []presence.Endpoint{{Channel: "http", Address: httpURL + "/bonnie/v1/runs", Input: true, Delivery: true}, {Channel: "nats", Address: "smoke.agent." + id, Input: true, Delivery: true}}}))
 	if err := os.WriteFile(readyFile, []byte(httpURL), 0600); err != nil {
 		panic(err)
 	}
@@ -127,9 +127,9 @@ func orchestrate() (retErr error) {
 	if err := broker.Start(); err != nil {
 		return err
 	}
-	var workers []*exec.Cmd
+	var agents []*exec.Cmd
 	defer func() {
-		for _, child := range append(workers, broker) {
+		for _, child := range append(agents, broker) {
 			if child.Process == nil || child.ProcessState != nil {
 				continue
 			}
@@ -163,19 +163,19 @@ func orchestrate() (retErr error) {
 		return err
 	}
 	defer nc.Close()
-	reg, err := presencenats.New(ctx, nc, presencenats.Config{Bucket: "smokeworkers", TTL: 3 * time.Second, Create: true})
+	reg, err := presencenats.New(ctx, nc, presencenats.Config{Bucket: "smokeagents", TTL: 3 * time.Second, Create: true})
 	if err != nil {
 		return err
 	}
-	workerURLs := map[string]string{}
+	agentURLs := map[string]string{}
 	for _, id := range []string{"w1", "w2"} {
-		c := exec.Command(exe, "worker", id, filepath.Join(tmp, id), url, filepath.Join(tmp, id+".http"))
+		c := exec.Command(exe, "agent", id, filepath.Join(tmp, id), url, filepath.Join(tmp, id+".http"))
 		c.Stdout = os.Stdout
 		c.Stderr = os.Stderr
 		if err := c.Start(); err != nil {
 			return err
 		}
-		workers = append(workers, c)
+		agents = append(agents, c)
 	}
 	var records []presence.Record
 	for {
@@ -185,7 +185,7 @@ func orchestrate() (retErr error) {
 		}
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("expected two workers, found %d: %v", len(records), err)
+			return fmt.Errorf("expected two agents, found %d: %v", len(records), err)
 		case <-time.After(time.Second):
 		}
 	}
@@ -193,11 +193,11 @@ func orchestrate() (retErr error) {
 	for _, id := range []string{"w1", "w2"} {
 		b, err := os.ReadFile(filepath.Join(tmp, id+".http"))
 		if err != nil {
-			return fmt.Errorf("worker %s HTTP endpoint not ready: %w", id, err)
+			return fmt.Errorf("agent %s HTTP endpoint not ready: %w", id, err)
 		}
-		workerURLs[id] = string(b)
+		agentURLs[id] = string(b)
 	}
-	if err := httpPresenceSmoke(ctx, records, workerURLs); err != nil {
+	if err := httpPresenceSmoke(ctx, records, agentURLs); err != nil {
 		return err
 	}
 	snap, changes, err := reg.Watch(ctx, presence.Filter{})
@@ -205,7 +205,7 @@ func orchestrate() (retErr error) {
 		return err
 	}
 	if len(snap) != 2 {
-		return fmt.Errorf("watch snapshot has %d workers, want 2", len(snap))
+		return fmt.Errorf("watch snapshot has %d agents, want 2", len(snap))
 	}
 	events := make(chan presence.Event, 16)
 	watchErr := make(chan error, 1)
@@ -257,33 +257,33 @@ func orchestrate() (retErr error) {
 			return fmt.Errorf("task %s outcome invalid: %+v", id, o)
 		}
 	}
-	if got["shared"].WorkerID != "w1" && got["shared"].WorkerID != "w2" {
-		return fmt.Errorf("shared task worker invalid: %+v", got["shared"])
+	if got["shared"].AgentID != "w1" && got["shared"].AgentID != "w2" {
+		return fmt.Errorf("shared task agent invalid: %+v", got["shared"])
 	}
-	if got["targeted"].WorkerID != "w2" {
-		return fmt.Errorf("targeted task worker=%q want w2", got["targeted"].WorkerID)
+	if got["targeted"].AgentID != "w2" {
+		return fmt.Errorf("targeted task agent=%q want w2", got["targeted"].AgentID)
 	}
-	fmt.Printf("PASS task outcomes: shared worker=%s targeted worker=%s\n", got["shared"].WorkerID, got["targeted"].WorkerID)
-	if err := workers[0].Process.Kill(); err != nil {
+	fmt.Printf("PASS task outcomes: shared agent=%s targeted agent=%s\n", got["shared"].AgentID, got["targeted"].AgentID)
+	if err := agents[0].Process.Kill(); err != nil {
 		return err
 	}
-	if err := workers[0].Wait(); err == nil {
+	if err := agents[0].Wait(); err == nil {
 		return fmt.Errorf("expected killed w1 Wait error")
 	}
 	if err := awaitDeletion(ctx, events, watchErr, "w1"); err != nil {
 		return err
 	}
 	fmt.Println("PASS watch deletion: w1")
-	if err := workers[1].Process.Signal(os.Interrupt); err != nil {
+	if err := agents[1].Process.Signal(os.Interrupt); err != nil {
 		return err
 	}
-	if err := workers[1].Wait(); err != nil {
+	if err := agents[1].Wait(); err != nil {
 		return fmt.Errorf("graceful w2 shutdown: %w", err)
 	}
 	if err := awaitDeletion(ctx, events, watchErr, "w2"); err != nil {
 		return err
 	}
-	if err := verifyHTTPStopped(ctx, workerURLs["w2"]); err != nil {
+	if err := verifyHTTPStopped(ctx, agentURLs["w2"]); err != nil {
 		return err
 	}
 	fmt.Println("PASS graceful shutdown removal: w2")
@@ -293,7 +293,7 @@ func orchestrate() (retErr error) {
 func httpPresenceSmoke(ctx context.Context, records []presence.Record, urls map[string]string) error {
 	client := &http.Client{Timeout: 5 * time.Second}
 	for _, rec := range records {
-		id := rec.Identity.Worker
+		id := rec.Identity.Agent
 		var endpoint *presence.Endpoint
 		for i := range rec.Endpoints {
 			if rec.Endpoints[i].Channel == "http" {
@@ -302,7 +302,7 @@ func httpPresenceSmoke(ctx context.Context, records []presence.Record, urls map[
 			}
 		}
 		if endpoint == nil || endpoint.Address != urls[id]+"/bonnie/v1/runs" || !endpoint.Input || !endpoint.Delivery || !endpoint.Ready {
-			return fmt.Errorf("worker %s HTTP presence endpoint invalid: %+v", id, endpoint)
+			return fmt.Errorf("agent %s HTTP presence endpoint invalid: %+v", id, endpoint)
 		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.Address, bytes.NewBufferString(`{"text":"presence HTTP smoke"}`))
 		if err != nil {
@@ -311,7 +311,7 @@ func httpPresenceSmoke(ctx context.Context, records []presence.Record, urls map[
 		req.Header.Set("Content-Type", "application/json")
 		resp, err := client.Do(req)
 		if err != nil {
-			return fmt.Errorf("POST worker %s HTTP endpoint: %w", id, err)
+			return fmt.Errorf("POST agent %s HTTP endpoint: %w", id, err)
 		}
 		var body struct {
 			RunID    string           `json:"run_id"`
@@ -326,7 +326,7 @@ func httpPresenceSmoke(ctx context.Context, records []presence.Record, urls map[
 			return decodeErr
 		}
 		if resp.StatusCode != http.StatusOK || body.RunID == "" || body.State != runtime.RunCompleted || body.Response != "smoke complete" {
-			return fmt.Errorf("worker %s HTTP response invalid: status=%d body=%+v", id, resp.StatusCode, body)
+			return fmt.Errorf("agent %s HTTP response invalid: status=%d body=%+v", id, resp.StatusCode, body)
 		}
 	}
 	fmt.Println("PASS HTTP presence: discovered endpoints accepted POSTs and completed runs")
@@ -337,7 +337,7 @@ func awaitDeletion(ctx context.Context, events <-chan presence.Event, watchErr <
 	for {
 		select {
 		case event := <-events:
-			if event.Record.Identity.Worker == id && event.Deleted {
+			if event.Record.Identity.Agent == id && event.Deleted {
 				return nil
 			}
 		case err := <-watchErr:
@@ -355,7 +355,7 @@ func verifyHTTPStopped(ctx context.Context, endpoint string) error {
 		}
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
-			fmt.Println("PASS HTTP shutdown: graceful worker endpoint stopped accepting requests")
+			fmt.Println("PASS HTTP shutdown: graceful agent endpoint stopped accepting requests")
 			return nil
 		}
 		if err := resp.Body.Close(); err != nil {

@@ -9,7 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Live web updates, theme control, and interruption recovery.**
 This is a MINOR release because it adds public event and interruption APIs
-and new web features. BONNIE remains early and experimental. No release is
+and new web features, and changes identity APIs and wire formats under its
+pre-1.0 minor-release convention. BONNIE remains early and experimental. No release is
 proven in production. Do not use it for work whose loss would hurt.
 
 ### The claims
@@ -20,7 +21,7 @@ proven in production. Do not use it for work whose loss would hurt.
   not blind replay. Execution is not exactly once; callbacks can run again.
 - **A run parks indefinitely.** A human-input wait needs no live agent process
   or running sandbox compute. Resume supplies the answer after restart. Keep
-  the journal and sandbox data. JetStream waits need their original worker.
+  the journal and sandbox data. JetStream waits need their original agent.
 - **A run is reachable over HTTP.** Routes under `/bonnie/v1` expose runs,
   snapshots, events, durable submissions, and owned child runs. The optional
   `/web` interface uses the same HTTP channel and run executor.
@@ -38,13 +39,26 @@ proven in production. Do not use it for work whose loss would hurt.
 
 ### Changed
 
+- **Breaking: agent terminology replaces the former identity names.** Public
+  configuration and protocol fields use `AgentID`; the optional channel interface
+  and method use `AgentIdentity`. Presence identity and filter fields use `Agent`.
+  There are no deprecated aliases. BONNIE is an agent framework; task execution
+  is one use, not the definition of an agent.
+- **Breaking: NATS and presence formats change.** Identity JSON uses `agent_id`
+  in NATS and `agent` in presence. Targeted task subjects use
+  `<task-subject>.agent.<agent-id>` and presence KV keys use the `a_` prefix.
+  Upgrade clients, publishers, stream subjects, and broker permissions together.
+  Drain the old deployment and back up journals before upgrade. Old persisted
+  NATS result, admission, and status payloads need an explicit offline migration
+  that preserves run data, or a new journal for new work. Re-register presence
+  after old instances stop. Do not delete journals with unfinished runs.
 - Web views use event-driven Datastar SSE patches instead of snapshot polling.
   Navigation, trace filters, and first-message run creation do not reload the
   document. View changes release live subscriptions; idle streams do not read
   the journal.
 - **Web DOM compatibility:** custom integrations must use
   `#application[data-view]` instead of `body[data-view]`. Live connection IDs
-  are view-specific. No exported API is removed and no signature changes.
+  are view-specific.
 - **Run-state compatibility:** clients must handle the new `interrupted` state.
   It is terminal for active execution but permits continuation with `Start`.
   NATS shutdown and connection loss interrupt turns instead of recording an
@@ -147,15 +161,15 @@ proven in production. Do not use it for work whose loss would hurt.
 - **Core NATS can lose tasks and results.** Offline subscribers, overflow, and
   process failure can lose delivery. Interrupted tasks and result publication are
   not retried automatically. Ordinary subscribers each receive a copy.
-- **JetStream delivery is at least once.** Another worker can repeat execution;
-  redelivery to the same worker reuses its saved local attempt and run. Recovery
+- **JetStream delivery is at least once.** Another agent can repeat execution;
+  redelivery to the same agent reuses its saved local attempt and run. Recovery
   needs the original journal and sandbox data. Broker deduplication is bounded. Each
-  worker needs a unique stable identity, journal, and sandbox data with one owner.
-  Waiting runs need their original worker. There is no global attempt lookup.
+  agent needs a unique stable identity, journal, and sandbox data with one owner.
+  Waiting runs need their original agent. There is no global attempt lookup.
   Consumer changes can replay retained messages; shared consumers divide work.
-- **Targeted tasks have no fallback.** Enable them on both client and worker.
+- **Targeted tasks have no fallback.** Enable them on both client and agent.
   Retention limits bound offline storage. Existing streams and permissions need
-  the worker subjects. Task IDs deduplicate per route, not across routes.
+  the agent subjects. Task IDs deduplicate per route, not across routes.
 - **A publish receipt confirms storage, not execution.** Provision streams or
   permit creation; existing resources are not changed. Result handlers must
   filter task IDs and respect cancellation. Invalid messages need correction.
@@ -170,7 +184,7 @@ proven in production. Do not use it for work whose loss would hurt.
 - **Schedule delivery and callbacks can repeat.** Posts, thread creation, and
   multipart delivery have duplicate windows. Delivery retries saved results.
   Only mounted tracked Slack, Telegram, Discord, and GitHub receivers are supported,
-  not scheduled files or NATS. Execution has 16 active occurrence workers.
+  not scheduled files or NATS. Execution has 16 active occurrence executions.
   Preparation and `Definition.Run` are trusted host code and must be safe to
   repeat; unsaved callback results repeat with the same fire ID. Manual and HTTP
   triggers need a separate trigger authorizer. Background work grants no approval.
@@ -191,7 +205,7 @@ proven in production. Do not use it for work whose loss would hurt.
 
 ## [0.20.0] — 2026-10-09
 
-**Worker presence and operator commands in deployed agents.**
+**Agent presence and operator commands in deployed agents.**
 This is a MINOR release because it adds public presence APIs and agent commands.
 The pre-1.0 command surface changes; check custom command names before upgrading.
 BONNIE remains early and experimental. No release is proven in production.
@@ -207,7 +221,7 @@ Do not use it for work whose loss would hurt.
 - **A run parks indefinitely.** A human-input wait needs no live agent process
   or running sandbox compute. Resume supplies the answer after restart. Keep
   the journal and sandbox data. Cleanup skips waiting runs; queued inputs remain
-  parked until the human wait ends. JetStream waits need their original worker.
+  parked until the human wait ends. JetStream waits need their original agent.
 - **A run is reachable over HTTP.** Routes under `/bonnie/v1` expose runs,
   snapshots, an NDJSON event stream, durable submissions, and owned child runs.
   The optional `/web` interface uses the same HTTP channel and run executor.
@@ -223,7 +237,7 @@ Do not use it for work whose loss would hurt.
 - Branded 1200 × 630 social preview image with the BONNIE logo, plus page-specific
   Open Graph and Twitter card metadata on the documentation site. Build checks
   verify the image and tags without an optional renderer.
-- Optional worker presence with stable worker and process instance identities,
+- Optional agent presence with stable agent and process instance identities,
   labels, endpoint capabilities, and discovery watches.
 - NATS JetStream KV registry with TTL expiry and revision-checked ownership.
 - `WithPresence` host lifecycle integration and presence endpoint reporting for
@@ -321,14 +335,14 @@ Do not use it for work whose loss would hurt.
 - **Core NATS can lose tasks and results.** Offline subscribers, overflow, and
   process failure can lose delivery. Interrupted tasks and result publication are
   not retried automatically. Ordinary subscribers each receive a copy.
-- **JetStream delivery is at least once.** Another worker can repeat execution;
+- **JetStream delivery is at least once.** Another agent can repeat execution;
   interrupted tasks start fresh attempts. Broker deduplication is bounded. Each
-  worker needs a unique stable identity, journal, and sandbox data with one owner.
-  Waiting runs need their original worker. There is no global attempt lookup.
+  agent needs a unique stable identity, journal, and sandbox data with one owner.
+  Waiting runs need their original agent. There is no global attempt lookup.
   Consumer changes can replay retained messages; shared consumers divide work.
-- **Targeted tasks have no fallback.** Enable them on both client and worker.
+- **Targeted tasks have no fallback.** Enable them on both client and agent.
   Retention limits bound offline storage. Existing streams and permissions need
-  the worker subjects. Task IDs deduplicate per route, not across routes.
+  the agent subjects. Task IDs deduplicate per route, not across routes.
 - **A publish receipt confirms storage, not execution.** Provision streams or
   permit creation; existing resources are not changed. Result handlers must
   filter task IDs and respect cancellation. Invalid messages need correction.
@@ -343,7 +357,7 @@ Do not use it for work whose loss would hurt.
 - **Schedule delivery and callbacks can repeat.** Posts, thread creation, and
   multipart delivery have duplicate windows. Delivery retries saved results.
   Only mounted tracked Slack, Telegram, Discord, and GitHub receivers are supported,
-  not scheduled files or NATS. Execution has 16 active occurrence workers.
+  not scheduled files or NATS. Execution has 16 active occurrence executions.
   Preparation and `Definition.Run` are trusted host code and must be safe to
   repeat; unsaved callback results repeat with the same fire ID. Manual and HTTP
   triggers need a separate trigger authorizer. Background work grants no approval.
@@ -379,7 +393,7 @@ Do not use it for work whose loss would hurt.
 - **A run parks indefinitely.** A human-input wait needs no live agent process
   or running sandbox compute. Resume supplies the answer after restart. Keep
   the journal and sandbox data. Cleanup skips waiting runs; queued inputs remain
-  parked until the human wait ends. JetStream waits need their original worker.
+  parked until the human wait ends. JetStream waits need their original agent.
 - **A run is reachable over HTTP.** Routes under `/bonnie/v1` expose runs,
   snapshots, an NDJSON event stream, durable submissions, and owned child runs.
   The optional `/web` interface uses the same HTTP channel and run executor.
@@ -522,14 +536,14 @@ Do not use it for work whose loss would hurt.
 - **Core NATS can lose tasks and results.** Offline subscribers, overflow, and
   process failure can lose delivery. Interrupted tasks and result publication are
   not retried automatically. Ordinary subscribers each receive a copy.
-- **JetStream delivery is at least once.** Another worker can repeat execution;
+- **JetStream delivery is at least once.** Another agent can repeat execution;
   interrupted tasks start fresh attempts. Broker deduplication is bounded. Each
-  worker needs a unique stable identity, journal, and sandbox data with one owner.
-  Waiting runs need their original worker. There is no global attempt lookup.
+  agent needs a unique stable identity, journal, and sandbox data with one owner.
+  Waiting runs need their original agent. There is no global attempt lookup.
   Consumer changes can replay retained messages; shared consumers divide work.
-- **Targeted tasks have no fallback.** Enable them on both client and worker.
+- **Targeted tasks have no fallback.** Enable them on both client and agent.
   Retention limits bound offline storage. Existing streams and permissions need
-  the worker subjects. Task IDs deduplicate per route, not across routes.
+  the agent subjects. Task IDs deduplicate per route, not across routes.
 - **A publish receipt confirms storage, not execution.** Provision streams or
   permit creation; existing resources are not changed. Result handlers must
   filter task IDs and respect cancellation. Invalid messages need correction.
@@ -544,7 +558,7 @@ Do not use it for work whose loss would hurt.
 - **Schedule delivery and callbacks can repeat.** Posts, thread creation, and
   multipart delivery have duplicate windows. Delivery retries saved results.
   Only mounted tracked Slack, Telegram, Discord, and GitHub receivers are supported,
-  not scheduled files or NATS. Execution has 16 active occurrence workers.
+  not scheduled files or NATS. Execution has 16 active occurrence executions.
   Preparation and `Definition.Run` are trusted host code and must be safe to
   repeat; unsaved callback results repeat with the same fire ID. Manual and HTTP
   triggers need a separate trigger authorizer. Background work grants no approval.
@@ -572,7 +586,7 @@ Do not use it for work whose loss would hurt.
 - **A run parks indefinitely.** A waiting run needs no live agent process or
   running sandbox compute. Resume supplies the answer after a restart. Keep its
   journal and sandbox data. Cleanup skips waiting runs. A waiting JetStream run
-  needs its original worker and stored state.
+  needs its original agent and stored state.
 - **A run is reachable over HTTP.** Routes under `/bonnie/v1` expose durable
   runs, conversation snapshots, and an NDJSON event stream. The optional NATS
   transport uses the same run executor.
@@ -693,24 +707,24 @@ offline deployment and supply the runtime yourself.
   interrupted tasks or result publication. Use one owner per task namespace;
   ordinary subscribers each receive a copy and can repeat the work.
 - **NATS payloads do not verify identity.** Connection authentication does not
-  replace broker permissions. Restrict publishers, subscribers, worker routes,
+  replace broker permissions. Restrict publishers, subscribers, agent routes,
   reply inboxes, and stream administration. Answer route validation does not
-  authenticate a worker.
+  authenticate an agent.
 - **JetStream delivery is at least once, not exactly once.** Redelivery to
-  another worker can execute a task again. Interrupted tasks start fresh
+  another agent can execute a task again. Interrupted tasks start fresh
   attempts. Broker deduplication has a bounded window. Make external effects
   and result handlers safe to repeat, and track task, attempt, and run IDs.
-- **JetStream workers do not share run state.** Each needs a unique, stable
-  WorkerID and its own journal and sandbox data, with one live owner. A waiting
-  run needs its original worker to answer. There is no global attempt lookup.
+- **JetStream agents do not share run state.** Each needs a unique, stable
+  AgentID and its own journal and sandbox data, with one live owner. A waiting
+  run needs its original agent to answer. There is no global attempt lookup.
   Changing consumer names can replay retained tasks, results, or statuses.
   Shared consumers divide work; separate consumers are required for applications
   that each need all outcomes or statuses.
 - **Targeted tasks have no fallback.** Enable `TargetedTasks` on both client and
-  worker. Offline tasks remain only within stream retention limits. Add
-  `<task-subject>.worker.*` to existing input streams and permit the routes in
+  agent. Offline tasks remain only within stream retention limits. Add
+  `<task-subject>.agent.*` to existing input streams and permit the routes in
   broker permissions. Task IDs are deduplicated per route: the same ID sent to
-  shared work or another worker is a separate submission and can execute again.
+  shared work or another agent is a separate submission and can execute again.
 - **A publish receipt confirms broker storage, not execution.** Provision the
   required streams, or explicitly permit their creation. Root configuration
   needs JetStream and stream administration permissions for creation. Existing
@@ -721,7 +735,7 @@ offline deployment and supply the runtime yourself.
   a saved attempt mapping, not execution. Statuses and results use independent
   streams; do not assume ordering between them.
 - **Status queries and cancellation are not durable queued commands.** They
-  use worker-routed request/reply. A timeout does not prove task failure.
+  use agent-routed request/reply. A timeout does not prove task failure.
   A saved running state with `Active: false` means interruption, not execution.
   `CancelRequested` confirms only the request; the final state arrives separately.
   Parked turns can be cancelled; finished runs are harmless no-ops. Cancellation
@@ -737,7 +751,7 @@ offline deployment and supply the runtime yourself.
   also have duplicate windows. Delivery retries use saved results with backoff.
   Only mounted tracked Slack, Telegram, Discord, and GitHub receivers are supported;
   scheduled files and NATS destinations are not. Execution is limited to 16 active
-  occurrence workers; excess accepted work stays in the journal.
+  occurrence executions; excess accepted work stays in the journal.
 - **Schedule callbacks are trusted host code.** Preparation can repeat before its
   output is saved. Callbacks must be safe to repeat and observe context cancellation.
   Manual and external HTTP triggers need a configured trigger authorizer, separate
@@ -768,7 +782,7 @@ Do not use it for work whose loss would hurt.
 - **A run parks indefinitely.** A waiting run needs no live agent process or
   running sandbox compute. Resume supplies the answer, also after a restart.
   Keep its journal and sandbox data. Automatic cleanup skips waiting runs.
-  A waiting JetStream run needs its original worker and stored state.
+  A waiting JetStream run needs its original agent and stored state.
 - **A run is reachable over HTTP.** Routes under `/bonnie/v1` expose durable
   runs, conversation snapshots, and an NDJSON event stream. The optional NATS
   transport uses the same run executor.
@@ -883,24 +897,24 @@ comments. Schedules and cancellation do not make external effects exactly once.
   interrupted tasks or result publication. Use one owner per task namespace;
   ordinary subscribers each receive a copy and can repeat the work.
 - **NATS payloads do not verify identity.** Connection authentication does not
-  replace broker permissions. Restrict publishers, subscribers, worker routes,
+  replace broker permissions. Restrict publishers, subscribers, agent routes,
   reply inboxes, and stream administration. Answer route validation does not
-  authenticate a worker.
+  authenticate an agent.
 - **JetStream delivery is at least once, not exactly once.** Redelivery to
-  another worker can execute a task again. Interrupted tasks start fresh
+  another agent can execute a task again. Interrupted tasks start fresh
   attempts. Broker deduplication has a bounded window. Make external effects
   and result handlers safe to repeat, and track task, attempt, and run IDs.
-- **JetStream workers do not share run state.** Each needs a unique, stable
-  WorkerID and its own journal and sandbox data, with one live owner. A waiting
-  run needs its original worker to answer. There is no global attempt lookup.
+- **JetStream agents do not share run state.** Each needs a unique, stable
+  AgentID and its own journal and sandbox data, with one live owner. A waiting
+  run needs its original agent to answer. There is no global attempt lookup.
   Changing consumer names can replay retained tasks, results, or statuses.
   Shared consumers divide work; separate consumers are required for applications
   that each need all outcomes or statuses.
 - **Targeted tasks have no fallback.** Enable `TargetedTasks` on both client and
-  worker. Offline tasks remain only within stream retention limits. Add
-  `<task-subject>.worker.*` to existing input streams and permit the routes in
+  agent. Offline tasks remain only within stream retention limits. Add
+  `<task-subject>.agent.*` to existing input streams and permit the routes in
   broker permissions. Task IDs are deduplicated per route: the same ID sent to
-  shared work or another worker is a separate submission and can execute again.
+  shared work or another agent is a separate submission and can execute again.
 - **A publish receipt confirms broker storage, not execution.** Provision the
   required streams, or explicitly permit their creation. Root configuration
   needs JetStream and stream administration permissions for creation. Existing
@@ -911,7 +925,7 @@ comments. Schedules and cancellation do not make external effects exactly once.
   a saved attempt mapping, not execution. Statuses and results use independent
   streams; do not assume ordering between them.
 - **Status queries and cancellation are not durable queued commands.** They
-  use worker-routed request/reply. A timeout does not prove task failure.
+  use agent-routed request/reply. A timeout does not prove task failure.
   A saved running state with `Active: false` means interruption, not execution.
   `CancelRequested` confirms only the request; the final state arrives separately.
   Parked turns can be cancelled; finished runs are harmless no-ops. Cancellation
@@ -927,7 +941,7 @@ comments. Schedules and cancellation do not make external effects exactly once.
   also have duplicate windows. Delivery retries use saved results with backoff.
   Only mounted tracked Slack, Telegram, Discord, and GitHub receivers are supported;
   scheduled files and NATS destinations are not. Execution is limited to 16 active
-  occurrence workers; excess accepted work stays in the journal.
+  occurrence executions; excess accepted work stays in the journal.
 - **Schedule callbacks are trusted host code.** Preparation can repeat before its
   output is saved. Callbacks must be safe to repeat and observe context cancellation.
   Manual and external HTTP triggers need a configured trigger authorizer, separate
@@ -957,7 +971,7 @@ Do not use it for work whose loss would hurt.
 - **A run parks indefinitely.** A waiting run needs no live agent process or
   running sandbox compute. Resume supplies the answer, also after a restart.
   Keep its journal and sandbox data. Automatic cleanup skips waiting runs.
-  A waiting JetStream run needs its original worker and stored state.
+  A waiting JetStream run needs its original agent and stored state.
 - **A run is reachable over HTTP.** Routes under `/bonnie/v1` expose durable
   runs, conversation snapshots, and an NDJSON event stream. The optional NATS
   transport uses the same run executor.
@@ -1087,24 +1101,24 @@ comments. Schedules and cancellation do not make external effects exactly once.
   interrupted tasks or result publication. Use one owner per task namespace;
   ordinary subscribers each receive a copy and can repeat the work.
 - **NATS payloads do not verify identity.** Connection authentication does not
-  replace broker permissions. Restrict publishers, subscribers, worker routes,
+  replace broker permissions. Restrict publishers, subscribers, agent routes,
   reply inboxes, and stream administration. Answer route validation does not
-  authenticate a worker.
+  authenticate an agent.
 - **JetStream delivery is at least once, not exactly once.** Redelivery to
-  another worker can execute a task again. Interrupted tasks start fresh
+  another agent can execute a task again. Interrupted tasks start fresh
   attempts. Broker deduplication has a bounded window. Make external effects
   and result handlers safe to repeat, and track task, attempt, and run IDs.
-- **JetStream workers do not share run state.** Each needs a unique, stable
-  WorkerID and its own journal and sandbox data, with one live owner. A waiting
-  run needs its original worker to answer. There is no global attempt lookup.
+- **JetStream agents do not share run state.** Each needs a unique, stable
+  AgentID and its own journal and sandbox data, with one live owner. A waiting
+  run needs its original agent to answer. There is no global attempt lookup.
   Changing consumer names can replay retained tasks, results, or statuses.
   Shared consumers divide work; separate consumers are required for applications
   that each need all outcomes or statuses.
 - **Targeted tasks have no fallback.** Enable `TargetedTasks` on both client and
-  worker. Offline tasks remain only within stream retention limits. Add
-  `<task-subject>.worker.*` to existing input streams and permit the routes in
+  agent. Offline tasks remain only within stream retention limits. Add
+  `<task-subject>.agent.*` to existing input streams and permit the routes in
   broker permissions. Task IDs are deduplicated per route: the same ID sent to
-  shared work or another worker is a separate submission and can execute again.
+  shared work or another agent is a separate submission and can execute again.
 - **A publish receipt confirms broker storage, not execution.** Provision the
   required streams, or explicitly permit their creation. Root configuration
   needs JetStream and stream administration permissions for creation. Existing
@@ -1115,7 +1129,7 @@ comments. Schedules and cancellation do not make external effects exactly once.
   a saved attempt mapping, not execution. Statuses and results use independent
   streams; do not assume ordering between them.
 - **Status queries and cancellation are not durable queued commands.** They
-  use worker-routed request/reply. A timeout does not prove task failure.
+  use agent-routed request/reply. A timeout does not prove task failure.
   A saved running state with `Active: false` means interruption, not execution.
   `CancelRequested` confirms only the request; the final state arrives separately.
   Parked turns can be cancelled; finished runs are harmless no-ops. Cancellation
@@ -1131,7 +1145,7 @@ comments. Schedules and cancellation do not make external effects exactly once.
   also have duplicate windows. Delivery retries use saved results with backoff.
   Only mounted tracked Slack, Telegram, Discord, and GitHub receivers are supported;
   scheduled files and NATS destinations are not. Execution is limited to 16 active
-  occurrence workers; excess accepted work stays in the journal.
+  occurrence executions; excess accepted work stays in the journal.
 - **Schedule callbacks are trusted host code.** Preparation can repeat before its
   output is saved. Callbacks must be safe to repeat and observe context cancellation.
   Manual and external HTTP triggers need a configured trigger authorizer, separate
@@ -1161,7 +1175,7 @@ Do not use it for work whose loss would hurt.
 - **A run parks indefinitely.** A waiting run needs no live agent process or
   running sandbox compute. Resume supplies the answer, also after a restart.
   Keep its journal and sandbox data. Automatic cleanup skips waiting runs.
-  A waiting JetStream run needs its original worker and stored state.
+  A waiting JetStream run needs its original agent and stored state.
 - **A run is reachable over HTTP.** Routes under `/bonnie/v1` expose durable
   runs, conversation snapshots, and an NDJSON event stream. The optional NATS
   transport uses the same run executor.
@@ -1177,7 +1191,7 @@ Do not use it for work whose loss would hurt.
   never fall back when the selected backend is unavailable.
 - Add opt-in NATS targeted task delivery with channel and client configuration
   `TargetedTasks`, `client/nats.Client.SubmitTo`, and
-  `channel/nats.ValidateTargetedSubjects`. Workers read shared tasks and their
+  `channel/nats.ValidateTargetedSubjects`. Agents read shared tasks and their
   own durable task route. Reject overlapping protocol routes. Offline targets
   retain tasks within stream limits, without fallback.
 - Use the full terminal width in chat, with resize support and an
@@ -1194,8 +1208,8 @@ Do not use it for work whose loss would hurt.
   scripted tool calls to use the new name. Prefer Bash inside the sandbox, with `sh` as a
   fallback when Bash is absent. Keep lazy startup and report the selected shell
   in each result. Never retry a failed command under another shell.
-- Require an explicit, stable `WorkerID` in JetStream channel configuration.
-  Existing input streams must include `<task-subject>.worker.*` before targeted
+- Require an explicit, stable `AgentID` in JetStream channel configuration.
+  Existing input streams must include `<task-subject>.agent.*` before targeted
   delivery is enabled; BONNIE does not change existing streams.
 - Record the confirmed v0.14.0 release and pin both examples to v0.14.0.
   The examples will move to v0.15.0 after this tag is published.
@@ -1287,24 +1301,24 @@ comments. New task routes do not make external effects exactly once.
   interrupted tasks or result publication. Use one owner per task namespace;
   ordinary subscribers each receive a copy and can repeat the work.
 - **NATS payloads do not verify identity.** Connection authentication does not
-  replace broker permissions. Restrict publishers, subscribers, worker routes,
+  replace broker permissions. Restrict publishers, subscribers, agent routes,
   reply inboxes, and stream administration. Answer route validation does not
-  authenticate a worker.
+  authenticate an agent.
 - **JetStream delivery is at least once, not exactly once.** Redelivery to
-  another worker can execute a task again. Interrupted tasks start fresh
+  another agent can execute a task again. Interrupted tasks start fresh
   attempts. Broker deduplication has a bounded window. Make external effects
   and result handlers safe to repeat, and track task, attempt, and run IDs.
-- **JetStream workers do not share run state.** Each needs a unique, stable
-  WorkerID and its own journal and sandbox data, with one live owner. A waiting
-  run needs its original worker to answer. There is no global attempt lookup.
+- **JetStream agents do not share run state.** Each needs a unique, stable
+  AgentID and its own journal and sandbox data, with one live owner. A waiting
+  run needs its original agent to answer. There is no global attempt lookup.
   Changing consumer names can replay retained tasks, results, or statuses.
   Shared consumers divide work; separate consumers are required for applications
   that each need all outcomes or statuses.
 - **Targeted tasks have no fallback.** Enable `TargetedTasks` on both client and
-  worker. Offline tasks remain only within stream retention limits. Add
-  `<task-subject>.worker.*` to existing input streams and permit the routes in
+  agent. Offline tasks remain only within stream retention limits. Add
+  `<task-subject>.agent.*` to existing input streams and permit the routes in
   broker permissions. Task IDs are deduplicated per route: the same ID sent to
-  shared work or another worker is a separate submission and can execute again.
+  shared work or another agent is a separate submission and can execute again.
 - **A publish receipt confirms broker storage, not execution.** Provision the
   required streams, or explicitly permit their creation. Root configuration
   needs JetStream and stream administration permissions for creation. Existing
@@ -1315,7 +1329,7 @@ comments. New task routes do not make external effects exactly once.
   a saved attempt mapping, not execution. Statuses and results use independent
   streams; do not assume ordering between them.
 - **Status queries and cancellation are not durable queued commands.** They
-  use worker-routed request/reply. A timeout does not prove task failure.
+  use agent-routed request/reply. A timeout does not prove task failure.
   A saved running state with `Active: false` means interruption, not execution.
   `CancelRequested` confirms only the request; the final state arrives separately.
   Waiting and finished runs return not-active. Cancellation does not undo
@@ -1324,7 +1338,7 @@ comments. New task routes do not make external effects exactly once.
 
 ## [0.14.0] — 2026-10-06
 
-**Durable NATS statuses, worker controls, and root-subject defaults.**
+**Durable NATS statuses, agent controls, and root-subject defaults.**
 This is a MINOR release because it adds public NATS channel and client APIs.
 BONNIE remains early and experimental. No release is proven in production.
 Do not use it for work whose loss would hurt.
@@ -1340,7 +1354,7 @@ Do not use it for work whose loss would hurt.
 - **A run parks indefinitely.** A waiting run needs no live agent process or
   running sandbox compute. Resume supplies the answer, also after a restart.
   Keep its journal and sandbox data. Automatic cleanup skips waiting runs.
-  A waiting JetStream run needs its original worker and stored state.
+  A waiting JetStream run needs its original agent and stored state.
 - **A run is reachable over HTTP.** Routes under `/bonnie/v1` expose durable
   runs, conversation snapshots, and an NDJSON event stream. The optional NATS
   transport uses the same run executor.
@@ -1360,7 +1374,7 @@ Do not use it for work whose loss would hurt.
   states, and journal cursors, not internal agent activity or response text.
   Add `EventSubject`, `EventStream`, and client `EventConsumer` configuration,
   `client/nats.DefaultEventConsumerName`, and `Client.ConsumeEvents`.
-- Add worker-routed status queries and active-turn cancellation through
+- Add agent-routed status queries and active-turn cancellation through
   `QuerySubject` and `CommandSubject`. Expose channel `Target`, `StatusEvent`,
   `StatusRequest`, `CancelRequest`, and `Status`, with client aliases for
   `Target`, `StatusEvent`, and `Status`. Add `Client.Status` and `Client.Cancel`
@@ -1449,16 +1463,16 @@ API documentation. NATS statuses do not provide exactly-once external effects.
   interrupted tasks or result publication. Use one owner per task namespace;
   ordinary subscribers each receive a copy and can repeat the work.
 - **NATS payloads do not verify identity.** Connection authentication does not
-  replace broker permissions. Restrict publishers, subscribers, worker routes,
+  replace broker permissions. Restrict publishers, subscribers, agent routes,
   reply inboxes, and stream administration. Answer route validation does not
-  authenticate a worker.
+  authenticate an agent.
 - **JetStream delivery is at least once, not exactly once.** Redelivery to
-  another worker can execute a task again. Interrupted tasks start fresh
+  another agent can execute a task again. Interrupted tasks start fresh
   attempts. Broker deduplication has a bounded window. Make external effects
   and result handlers safe to repeat, and track task, attempt, and run IDs.
-- **JetStream workers do not share run state.** Each needs a unique, stable
-  WorkerID and its own journal and sandbox data, with one live owner. A waiting
-  run needs its original worker to answer. There is no global attempt lookup.
+- **JetStream agents do not share run state.** Each needs a unique, stable
+  AgentID and its own journal and sandbox data, with one live owner. A waiting
+  run needs its original agent to answer. There is no global attempt lookup.
   Changing consumer names can replay retained tasks, results, or statuses.
   Shared consumers divide work; separate consumers are required for applications
   that each need all outcomes or statuses.
@@ -1472,7 +1486,7 @@ API documentation. NATS statuses do not provide exactly-once external effects.
   a saved attempt mapping, not execution. Statuses and results use independent
   streams; do not assume ordering between them.
 - **Status queries and cancellation are not durable queued commands.** They
-  use worker-routed request/reply. A timeout does not prove task failure.
+  use agent-routed request/reply. A timeout does not prove task failure.
   A saved running state with `Active: false` means interruption, not execution.
   `CancelRequested` confirms only the request; the final state arrives separately.
   Waiting and finished runs return not-active. Cancellation does not undo
@@ -1497,7 +1511,7 @@ Do not use it for work whose loss would hurt.
 - **A run parks indefinitely.** A waiting run needs no live agent process or
   running sandbox compute. Resume supplies the answer, also after a restart.
   Keep its journal and sandbox data. Automatic cleanup skips waiting runs.
-  A waiting JetStream run needs its original worker and stored state.
+  A waiting JetStream run needs its original agent and stored state.
 - **A run is reachable over HTTP.** Routes under `/bonnie/v1` expose durable
   runs, conversation snapshots, and an NDJSON event stream. The optional NATS
   transport uses the same run executor.
@@ -1629,14 +1643,14 @@ API documentation. New options do not provide exactly-once external effects.
   ordinary subscribers each receive a copy and can repeat the work.
 - **NATS payloads do not verify identity.** Connection authentication does not
   replace broker permissions. Restrict publishers, subscribers, and stream
-  administration. Answer route validation does not authenticate a worker.
+  administration. Answer route validation does not authenticate an agent.
 - **JetStream delivery is at least once, not exactly once.** Redelivery to
-  another worker can execute a task again. Interrupted tasks start fresh
+  another agent can execute a task again. Interrupted tasks start fresh
   attempts. Broker deduplication has a bounded window. Make external effects
   and result handlers safe to repeat, and track task, attempt, and run IDs.
-- **JetStream workers do not share run state.** Each needs a unique, stable
-  WorkerID and its own journal and sandbox data. A waiting run needs its
-  original worker to answer. Changing consumer names can replay retained
+- **JetStream agents do not share run state.** Each needs a unique, stable
+  AgentID and its own journal and sandbox data. A waiting run needs its
+  original agent to answer. Changing consumer names can replay retained
   tasks or results. Shared consumers divide work; separate consumers are
   required for applications that each need all outcomes.
 - **A publish receipt confirms broker storage, not execution.** Provision the
@@ -1661,7 +1675,7 @@ Do not use it for work whose loss would hurt.
 - **A run parks indefinitely.** A waiting run needs no live agent process or
   running sandbox compute. Resume supplies the answer, also after a restart.
   Keep its journal and sandbox data. A waiting JetStream run needs its original
-  worker and stored state; lost worker state requires a new task.
+  agent and stored state; lost agent state requires a new task.
 - **A run is reachable over HTTP.** Routes under `/bonnie/v1` expose durable
   runs, conversation snapshots, and an NDJSON event stream. The optional NATS
   transport uses the same run executor.
@@ -1752,14 +1766,14 @@ section. Authentication does not change the delivery or sandbox guarantees.
   ordinary subscribers each receive a copy and can repeat the work.
 - **NATS payloads do not verify identity.** Connection authentication does not
   replace broker permissions. Restrict publishers, subscribers, and stream
-  administration. Answer route validation does not authenticate a worker.
+  administration. Answer route validation does not authenticate an agent.
 - **JetStream delivery is at least once, not exactly once.** Redelivery to
-  another worker can execute a task again. Interrupted tasks start fresh
+  another agent can execute a task again. Interrupted tasks start fresh
   attempts. Broker deduplication has a bounded window. Make external effects
   and result handlers safe to repeat, and track task, attempt, and run IDs.
-- **JetStream workers do not share run state.** Each needs a unique, stable
-  WorkerID and its own journal and sandbox data. A waiting run needs its
-  original worker to answer. Changing consumer names can replay retained
+- **JetStream agents do not share run state.** Each needs a unique, stable
+  AgentID and its own journal and sandbox data. A waiting run needs its
+  original agent to answer. Changing consumer names can replay retained
   tasks or results. Shared consumers divide work; separate consumers are
   required for applications that each need all outcomes.
 - **A publish receipt confirms broker storage, not execution.** Provision the
@@ -1784,7 +1798,7 @@ Do not use it for work whose loss would hurt.
 - **A run parks indefinitely.** A waiting run needs no live agent process or
   running sandbox compute. Resume supplies the answer, also after a restart.
   Keep its journal and sandbox data. A waiting JetStream run needs its original
-  worker and stored state; lost worker state requires a new task.
+  agent and stored state; lost agent state requires a new task.
 - **A run is reachable over HTTP.** Routes under `/bonnie/v1` expose durable
   runs, conversation snapshots, and an NDJSON event stream. The new NATS
   transport is optional and uses the same run executor.
@@ -1794,15 +1808,15 @@ Do not use it for work whose loss would hurt.
 - Default the NATS client's result stream and consumer to stable names derived
   from ResultSubject, with explicit overrides and opt-in stream creation.
 - Default the JetStream task consumer to a stable subject-derived name. Keep
-  explicit Consumer overrides for existing consumers and separate worker groups.
+  explicit Consumer overrides for existing consumers and separate agent groups.
 - Add optional JetStream delivery with shared durable task consumers,
-  worker-specific answer routes, acknowledgement progress, and confirmed result
+  agent-specific answer routes, acknowledgement progress, and confirmed result
   publication before input acknowledgement. Save local outcomes for publication
   retry, and record answer admission before resume. Delivery is at least once;
-  another worker can start a new attempt with its own journal.
+  another agent can start a new attempt with its own journal.
 - Add `client/nats` with typed Submit, Consume, and Answer operations. Confirm
   input storage and acknowledge results only after handler success. Share the
-  versioned wire types with the channel, and validate worker answer routes.
+  versioned wire types with the channel, and validate agent answer routes.
 - Add real-broker JetStream tests and a typed-client live test with
   `opencode/kimi-k3` and Landlock.
 - Add a Core NATS task channel and `WithNATS`. Each task ID starts an
@@ -1879,14 +1893,14 @@ These limits come from the current `README.md`, including its NATS section.
   ordinary subscribers each receive a copy and can repeat the work.
 - **NATS payloads do not verify identity.** Use broker permissions to restrict
   publishers, subscribers, and stream administration. Answer route validation
-  does not authenticate a worker.
+  does not authenticate an agent.
 - **JetStream delivery is at least once, not exactly once.** Redelivery to
-  another worker can execute a task again. Interrupted tasks start fresh
+  another agent can execute a task again. Interrupted tasks start fresh
   attempts. Broker deduplication has a bounded window. Make external effects
   and result handlers safe to repeat, and track task, attempt, and run IDs.
-- **JetStream workers do not share run state.** Each needs a unique, stable
-  WorkerID and its own journal and sandbox data. A waiting run needs its
-  original worker to answer. Changing consumer names can replay retained
+- **JetStream agents do not share run state.** Each needs a unique, stable
+  AgentID and its own journal and sandbox data. A waiting run needs its
+  original agent to answer. Changing consumer names can replay retained
   tasks or results. Shared consumers divide work; separate consumers are
   required for applications that each need all outcomes.
 - **A publish receipt confirms broker storage, not execution.** Provision the

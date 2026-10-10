@@ -3,12 +3,12 @@
 This package uses JetStream only. The caller supplies and owns the NATS
 connection. The client does not execute agents or store run state.
 
-For targeted delivery, set `TargetedTasks: true` on both client and worker,
-then call `c.SubmitTo(ctx, "worker-id", task)`. `Submit` still sends shared
-work. The input stream must retain `<task-subject>.worker.*`; root-based
+For targeted delivery, set `TargetedTasks: true` on both client and agent,
+then call `c.SubmitTo(ctx, "agent-id", task)`. `Submit` still sends shared
+work. The input stream must retain `<task-subject>.agent.*`; root-based
 creation includes it when opted in. Existing streams must be updated by the
 operator. Offline targets retain tasks within stream limits, with no fallback
-to another worker. Deduplication is per task route. See the
+to another agent. Deduplication is per task route. See the
 [targeted delivery setup](../../README.md#targeted-task-delivery).
 
 ```go
@@ -70,11 +70,11 @@ return c.ConsumeEvents(ctx, func(ctx context.Context, event bonnienats.StatusEve
 
 Status events contain acceptance and run-state changes only, not agent activity.
 Delivery is at least once. Discard duplicate EventID values and order each run by
-Seq. The worker recovers unpublished state records after restart. Events and
+Seq. The agent recovers unpublished state records after restart. Events and
 results have no cross-stream ordering. Status returns the durable state, cursor,
 Active flag, and waiting suspension. A running state with Active false is not
-proof of execution. Keep worker identities and journals stable, with one live
-owner per identity. Task lookup across workers is not provided.
+proof of execution. Keep agent identities and journals stable, with one live
+owner per identity. Task lookup across agents is not provided.
 
 `Cancel(ctx, target)` requests cancellation of an active turn. Check the reply's
 Error and CancelRequested fields; the cancelled state is a separate event. Idle
@@ -110,7 +110,7 @@ failures also return without discarding the result. An operator must correct
 invalid messages to stop repeated failures. Handlers must respect context
 cancellation; the client cannot stop a handler that ignores its context.
 
-Delivery is at least once. Results can repeat. Separate workers can execute the
+Delivery is at least once. Results can repeat. Separate agents can execute the
 same task again. Use TaskID, AttemptID, RunID, and suspension ToolCallID to track
 the required application state. A successful publish receipt confirms broker
 storage, not execution. Broker errors are returned to the caller.
@@ -118,7 +118,7 @@ storage, not execution. Broker errors are returned to the caller.
 Reuse TaskID on the same TaskSubject only to retry the same task. Task publish
 headers use a fixed prefix and a SHA-256 digest of TaskSubject and TaskID.
 Answers use a deterministic identity from the full answer route (base and
-WorkerID), RunID, and ToolCallID. These identities keep separate routes distinct
+AgentID), RunID, and ToolCallID. These identities keep separate routes distinct
 when they share a stream, because broker deduplication applies across the stream.
 The first answer for that suspension and route wins within the stream duplicate
 window; changing response text does not create a new answer. Broker deduplication
@@ -131,11 +131,11 @@ Outcome is an alias of Result. Task uses `task_id` (Go field `TaskID`), not `id`
 All messages use JSON version 1. Submit accepts Task.Version 0 or 1 and stores
 version 1 without changing the caller's Task. It rejects all other versions.
 Raw publishers must set version 1. Tasks go to TaskSubject; results go to
-ResultSubject. Answers go only to `AnswerSubject + "." + WorkerID`. Answer checks
-that WorkerID is a safe single token and that the result's answer_subject equals
+ResultSubject. Answers go only to `AnswerSubject + "." + AgentID`. Answer checks
+that AgentID is a safe single token and that the result's answer_subject equals
 that exact route. It also requires a waiting run and its suspension tool-call
 ID. No reply subject or arbitrary route from a result is used.
 
-These checks do not authenticate a worker. Use NATS permissions to restrict
+These checks do not authenticate an agent. Use NATS permissions to restrict
 publishers, consumers, and stream administration. Result errors, including
 rejected input, are delivered to the handler as outcomes, not Consume errors.

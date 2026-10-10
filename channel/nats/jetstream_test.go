@@ -39,8 +39,8 @@ func jsServer(t *testing.T) (*gonats.Conn, gonats.JetStreamContext) {
 	return nc, js
 }
 
-func jsConfig(nc *gonats.Conn, worker string) Config {
-	return Config{Conn: nc, Subject: "tasks", AnswerSubject: "answers", ResultSubject: "results", Stream: "INPUT", Consumer: "workers", WorkerID: worker, CreateStream: true, Concurrency: 1}
+func jsConfig(nc *gonats.Conn, agent string) Config {
+	return Config{Conn: nc, Subject: "tasks", AnswerSubject: "answers", ResultSubject: "results", Stream: "INPUT", Consumer: "agents", AgentID: agent, CreateStream: true, Concurrency: 1}
 }
 
 func resultStream(t *testing.T, js gonats.JetStreamContext) {
@@ -55,7 +55,7 @@ func inputStream(t *testing.T, js gonats.JetStreamContext, wait time.Duration) {
 	if _, err := js.AddStream(&gonats.StreamConfig{Name: "INPUT", Subjects: []string{"tasks", "answers.*"}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := js.AddConsumer("INPUT", &gonats.ConsumerConfig{Durable: "workers", FilterSubject: "tasks", AckPolicy: gonats.AckExplicitPolicy, AckWait: wait, MaxAckPending: 2}); err != nil {
+	if _, err := js.AddConsumer("INPUT", &gonats.ConsumerConfig{Durable: "agents", FilterSubject: "tasks", AckPolicy: gonats.AckExplicitPolicy, AckWait: wait, MaxAckPending: 2}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -85,7 +85,7 @@ func jsChannel(t *testing.T, r *runtime.Runner, cfg Config) *Channel {
 }
 
 // Separate journals can share one task consumer. Each result identifies its
-// worker, run, and independent attempt; no task is broadcast to both workers.
+// agent, run, and independent attempt; no task is broadcast to both agents.
 func TestJetStreamDistribution(t *testing.T) {
 	t.Parallel()
 	nc, js := jsServer(t)
@@ -98,9 +98,9 @@ func TestJetStreamDistribution(t *testing.T) {
 	for i := range replies {
 		replies[i] = fakemodel.Say("done")
 	}
-	for _, worker := range []string{"one", "two"} {
-		cfg := jsConfig(nc, worker)
-		cfg.Consumer = "" // Both workers must resolve the same durable default.
+	for _, agent := range []string{"one", "two"} {
+		cfg := jsConfig(nc, agent)
+		cfg.Consumer = "" // Both agents must resolve the same durable default.
 		ch := jsChannel(t, testRunner(fakemodel.New(replies...)), cfg)
 		if ch.cfg.Consumer != DefaultConsumerName(cfg.Subject) {
 			t.Fatalf("consumer = %q", ch.cfg.Consumer)
@@ -110,21 +110,21 @@ func TestJetStreamDistribution(t *testing.T) {
 		jsSend(t, js, "tasks", Task{Version: 1, TaskID: fmt.Sprint(i), Text: "work"})
 	}
 	seen := map[string]bool{}
-	workers := map[string]bool{}
+	agents := map[string]bool{}
 	for range 12 {
 		result := receive(t, sub)
-		if result.Error != "" || result.Version != 1 || result.AttemptID == "" || result.AnswerSubject != "answers."+result.WorkerID || seen[result.TaskID] {
+		if result.Error != "" || result.Version != 1 || result.AttemptID == "" || result.AnswerSubject != "answers."+result.AgentID || seen[result.TaskID] {
 			t.Fatalf("result: %+v", result)
 		}
 		seen[result.TaskID] = true
-		workers[result.WorkerID] = true
+		agents[result.AgentID] = true
 	}
-	if len(workers) != 2 {
-		t.Fatalf("workers: %v", workers)
+	if len(agents) != 2 {
+		t.Fatalf("agents: %v", agents)
 	}
 }
 
-// A waiting input is acknowledged. Answers use its worker route and exact
+// A waiting input is acknowledged. Answers use its agent route and exact
 // run/tool identity. Repeated answer identities do not resume a second time.
 func TestJetStreamAnswerRouting(t *testing.T) {
 	t.Parallel()
@@ -141,7 +141,7 @@ func TestJetStreamAnswerRouting(t *testing.T) {
 	if waiting.Suspend == nil || waiting.State != runtime.RunWaiting {
 		t.Fatalf("waiting: %+v", waiting)
 	}
-	answer := Answer{Version: 1, MessageID: "first", TaskID: "a", RunID: waiting.RunID, WorkerID: "one", ToolCallID: waiting.Suspend.ToolCallID, Responses: []runtime.InputResponse{{Text: "here"}}}
+	answer := Answer{Version: 1, MessageID: "first", TaskID: "a", RunID: waiting.RunID, AgentID: "one", ToolCallID: waiting.Suspend.ToolCallID, Responses: []runtime.InputResponse{{Text: "here"}}}
 	wrong := answer
 	wrong.MessageID = "wrong"
 	wrong.ToolCallID = "old"
@@ -182,8 +182,8 @@ func slowRunner(j runtime.Journal, calls *atomic.Int32, delay time.Duration) *ru
 	})
 }
 
-// Processing longer than AckWait does not allow another worker to execute
-// the same input while the first worker sends progress acknowledgements.
+// Processing longer than AckWait does not allow another agent to execute
+// the same input while the first agent sends progress acknowledgements.
 func TestJetStreamProgress(t *testing.T) {
 	t.Parallel()
 	nc, js := jsServer(t)
@@ -257,7 +257,7 @@ func TestJetStreamSavedResultRecovery(t *testing.T) {
 func TestJetStreamInvalidConfig(t *testing.T) {
 	t.Parallel()
 	nc, js := jsServer(t)
-	for _, change := range []func(*Config){func(c *Config) { c.WorkerID = "a.b" }, func(c *Config) { c.Consumer = "a_b" }, func(c *Config) { c.Stream = "" }, func(c *Config) { c.ResultSubject = "answers.one" }} {
+	for _, change := range []func(*Config){func(c *Config) { c.AgentID = "a.b" }, func(c *Config) { c.Consumer = "a_b" }, func(c *Config) { c.Stream = "" }, func(c *Config) { c.ResultSubject = "answers.one" }} {
 		cfg := jsConfig(nc, "one")
 		change(&cfg)
 		if _, err := New(testRunner(fakemodel.New()), cfg); err == nil {
@@ -265,10 +265,10 @@ func TestJetStreamInvalidConfig(t *testing.T) {
 		}
 	}
 	inputStream(t, js, time.Second)
-	if err := js.DeleteConsumer("INPUT", "workers"); err != nil {
+	if err := js.DeleteConsumer("INPUT", "agents"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := js.AddConsumer("INPUT", &gonats.ConsumerConfig{Durable: "workers", FilterSubject: "tasks", AckPolicy: gonats.AckNonePolicy}); err != nil {
+	if _, err := js.AddConsumer("INPUT", &gonats.ConsumerConfig{Durable: "agents", FilterSubject: "tasks", AckPolicy: gonats.AckNonePolicy}); err != nil {
 		t.Fatal(err)
 	}
 	c, err := New(testRunner(fakemodel.New()), jsConfig(nc, "one"))

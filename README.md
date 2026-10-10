@@ -56,7 +56,7 @@ does not do a side effect a second time.
 
 - [Install](#install) · [Scaffold an agent](#scaffold-an-agent) · [Use the library](#use-the-library) · [Park and resume](#park-and-resume)
 - [Your own tools](#your-own-tools) · [Sandboxes](#sandboxes) · [HTTP API](#http-api) · [Chat channels](#chat-channels)
-- [Worker presence](#host-worker-presence) · [CLI](#cli) · [Journal](#journal) · [Events](#events) · [Session controls](#session-controls)
+- [Agent presence](#host-agent-presence) · [CLI](#cli) · [Journal](#journal) · [Events](#events) · [Session controls](#session-controls)
 - [Run states](#run-states) · [How it works](#how-it-works) · [Limits](#limits) · [Docs](#documentation)
 
 ## Install
@@ -755,14 +755,14 @@ The same address always resolves to the same run.
 `POST /bonnie/v1/runs/{id}` is the opposite: it targets one exact run, and
 returns `404` instead of making a run.
 
-## Host worker presence
+## Host agent presence
 
-A host can advertise a worker in a `presence.Registry` after all channel lifecycles have started. Registration and refresh failures fail `Agent.Run`; shutdown publishes `draining` and unregisters using a bounded context.
+A host can advertise an agent in a `presence.Registry` after all channel lifecycles have started. Registration and refresh failures fail `Agent.Run`; shutdown publishes `draining` and unregisters using a bounded context.
 
 ```go
 bonnie.New(
     bonnie.WithPresence(bonnie.PresenceConfig{
-        Registry: registry, WorkerID: "support-agent",
+        Registry: registry, AgentID: "support-agent",
         Labels: map[string]string{"region": "eu-west"},
         // Set externally advertised URLs explicitly; bind addresses are not URLs.
         Endpoints: []presence.Endpoint{{Channel: "http", Address: "https://agent.example.com/bonnie/v1/runs", Input: true, Delivery: true}},
@@ -770,7 +770,7 @@ bonnie.New(
 ).Serve()
 ```
 
-`WorkerID` and `Registry` are required. `InstanceID` is generated randomly when
+`AgentID` and `Registry` are required. `InstanceID` is generated randomly when
 omitted, and `RefreshInterval` defaults to 10 seconds. Negative intervals are
 refused. If the registry implements `presence.TTLStore`, the interval must be
 less than its TTL. When `Endpoints` is omitted, mounted channels implementing
@@ -784,15 +784,15 @@ Use a caller-owned NATS connection with JetStream enabled:
 ```go
 // Import presencenats "github.com/mark3labs/bonnie/presence/nats".
 registry, err := presencenats.New(ctx, nc, presencenats.Config{
-    Bucket: "workers", Create: true, // Explicit permission to create resources.
+    Bucket: "agents", Create: true, // Explicit permission to create resources.
 })
 if err != nil { return err }
-// Pass registry to WithPresence. Use the same WorkerID in WithNATS.
-workers, err := registry.Discover(ctx, presence.Filter{
+// Pass registry to WithPresence. Use the same AgentID in WithNATS.
+agents, err := registry.Discover(ctx, presence.Filter{
     Labels: map[string]string{"region": "eu-west"},
 })
 if err != nil { return err }
-_ = workers
+_ = agents
 snapshot, changes, err := registry.Watch(ctx, presence.Filter{})
 if err != nil { return err }
 _ = snapshot
@@ -807,7 +807,7 @@ buckets must match the requested TTL. Watches poll at `min(TTL/3, one second)`;
 they include an initial snapshot and report expired records as deletions.
 This is current-state discovery, not a durable history of every join and leave.
 Protect registration and discovery with NATS permissions. Labels are not
-authorization claims. A different live instance cannot replace a worker record.
+authorization claims. A different live instance cannot replace an agent record.
 
 All built-in channels report input and delivery capabilities separately. NATS
 also reports connection readiness; the webhook channels report local configured
@@ -818,9 +818,9 @@ published. Presence expiry is not proof that task execution stopped and must
 not trigger automatic reassignment. Scheduling, claims, and failover remain
 outside this feature.
 
-See the [deployment guide](https://go-bonnie.dev/guides/deployment#advertise-worker-presence)
+See the [deployment guide](https://go-bonnie.dev/guides/deployment#advertise-agent-presence)
 for registry ownership, watch error handling, and memory-store limits, and the
-[option reference](https://go-bonnie.dev/reference/options#worker-presence)
+[option reference](https://go-bonnie.dev/reference/options#agent-presence)
 for all `PresenceConfig` fields.
 
 ## Chat channels
@@ -1254,8 +1254,9 @@ nats pub agents.review.answers '{"task_id":"review-42","tool_call_id":"CALL_ID_F
 ```
 
 A repeated task is rejected, not interpreted as an answer. Answers must match
-the current suspension. Workers and buffers are bounded; `Concurrency` defaults
-to 4 and `Buffer` to 64. Shutdown interrupts active turns and waits for workers.
+the current suspension. Active task executions and buffers are bounded;
+`Concurrency` defaults to 4 and `Buffer` to 64. Shutdown interrupts active turns
+and waits for their execution to stop.
 Connection loss also interrupts active turns. The saved `interrupted` state is
 not an operator cancellation; `Runner.Start` can continue it.
 
@@ -1274,13 +1275,13 @@ Use a root subject to enable JetStream and derive all protocol subjects:
 ```go
 bonnie.WithNATS(natschannel.Config{
     RootSubject: "agents.review",
-    WorkerID: "review-1",
+    AgentID: "review-1",
     CreateStream: true,
 })
 ```
 
 The defaults are `<root>.tasks`, `.results`, `.events`, `.answers`, `.commands`,
-and `.queries`. Answers, commands, and queries append `.<worker_id>`. Explicit
+and `.queries`. Answers, commands, and queries append `.<agent_id>`. Explicit
 subject fields override individual defaults. Any literal root is valid, including
 `tasks` or `company.team.agents.review`; no wildcard or empty token is permitted.
 Root configuration creates stable input, result, and event stream names.
@@ -1302,7 +1303,7 @@ c, err := natsclient.New(nc, natsclient.Config{
 events. State values include pending, running, waiting, completed, failed, and
 cancelled. Acceptance confirms a saved task/attempt/run mapping, not execution.
 Events contain IDs, timestamps, and journal cursors, not agent text or tool
-activity. The worker recovers unpublished states from its journal after restart.
+activity. The agent recovers unpublished states from its journal after restart.
 Delivery is at least once: discard duplicate `event_id` values and order each
 run by `seq`. Results remain on `.results` and retain responses and input requests.
 Events and results are independent streams; do not assume cross-stream ordering.
@@ -1310,29 +1311,29 @@ Separate applications need separate `EventConsumer` and `ResultConsumer` names
 when each needs all messages. Stream retention limits can remove old events.
 
 Use `c.Status(ctx, event.Target)` to query an exact attempt and
-`c.Cancel(ctx, event.Target)` to request cancellation. These are worker-routed
+`c.Cancel(ctx, event.Target)` to request cancellation. These are agent-routed
 NATS request/reply calls, not durable queued commands. A reply's `Error` reports
 rejection; a Go error reports transport or decoding failure. `CancelRequested`
 confirms the request only. The final state arrives separately. Cancellation stops
 an active turn; waiting and finished runs return not-active. External effects
-are not undone. A timeout does not prove task failure. Keep each worker's identity
+are not undone. A timeout does not prove task failure. Keep each agent's identity
 and journal stable, and run only one live owner of that identity.
 
 Status queries include `Active`: a saved running state with `Active: false`
 indicates interruption, not current execution. Querying an unknown attempt returns
-an error. There is no global task lookup across separate worker journals. Protect
-worker routes and reply inboxes with NATS permissions. Replies use `_INBOX.*`
+an error. There is no global task lookup across separate agent journals. Protect
+agent routes and reply inboxes with NATS permissions. Replies use `_INBOX.*`
 subjects; custom inbox prefixes are not supported.
 
 ### Targeted task delivery
 
 Enable `TargetedTasks: true` on both the NATS channel and typed client. This
-requires JetStream. A worker reads shared tasks and tasks for its own `WorkerID`.
+requires JetStream. An agent reads shared tasks and tasks for its own `AgentID`.
 
 ```go
 bonnie.WithNATS(natschannel.Config{
     RootSubject: "agents.review",
-    WorkerID: "review-1",
+    AgentID: "review-1",
     TargetedTasks: true,
     CreateStream: true,
 })
@@ -1350,22 +1351,22 @@ _, err = c.SubmitTo(ctx, "review-1", natsclient.Task{
 ```
 
 `Submit` still sends shared work. `SubmitTo` stores work on
-`<task-subject>.worker.<worker-id>`. Each worker has a separate durable targeted
+`<task-subject>.agent.<agent-id>`. Each agent has a separate durable targeted
 consumer. An offline target's task stays in JetStream within retention limits;
-it never falls back to another worker. Keep one live owner per worker identity.
+it never falls back to another agent. Keep one live owner per agent identity.
 Answers and results use their existing routes. Delivery remains at least once.
 
-New input streams include `<task-subject>.worker.*`. For an existing stream,
+New input streams include `<task-subject>.agent.*`. For an existing stream,
 add that subject explicitly before enabling targeted delivery. BONNIE does not
 change existing streams. Update NATS permissions to permit these routes. Task
 IDs are deduplicated per route: sending the same ID to shared work or another
-worker is a separate submission and can execute again.
+agent is a separate submission and can execute again.
 
 ### JetStream and the typed client
 
 Set `Stream` to enable JetStream. Leave `Consumer` empty to share tasks through
-a stable consumer derived from the task subject. Each worker must have a unique,
-stable `WorkerID` and its own journal and sandbox data. Workers do not exchange
+a stable consumer derived from the task subject. Each agent must have a unique,
+stable `AgentID` and its own journal and sandbox data. Agents do not exchange
 run state. Set `Consumer` explicitly for separate processing groups or to bind
 an existing consumer. Changing its name can replay retained tasks.
 `natschannel.DefaultConsumerName(subject)` gives the derived name for operators.
@@ -1374,17 +1375,17 @@ an existing consumer. Changing its name can replay retained tasks.
 bonnie.WithNATS(natschannel.Config{
     Subject: "agents.review.tasks", AnswerSubject: "agents.review.answers",
     ResultSubject: "agents.review.results",
-    Stream: "REVIEW-TASKS", WorkerID: "review-1",
+    Stream: "REVIEW-TASKS", AgentID: "review-1",
     CreateStream: true,
 })
 ```
 
 `CreateStream` explicitly permits input stream creation. Provision a result
-stream before workers start, or use the typed client's `CreateStream` option.
+stream before agents start, or use the typed client's `CreateStream` option.
 Existing streams and consumers are validated, not changed. Input streams must
 retain the task subject and `agents.review.answers.*` with limits retention.
-The worker creates or binds durable pull consumers. Answers use a separate
-consumer for each worker.
+The agent creates or binds durable pull consumers. Answers use a separate
+consumer for each agent.
 
 The main service can use [`client/nats`](client/nats/README.md) instead of raw JSON:
 
@@ -1412,24 +1413,24 @@ Stream creation still requires `CreateStream: true`.
 Import `natsclient "github.com/mark3labs/bonnie/client/nats"`. `Submit` confirms
 broker storage, not execution. `Consume` acknowledges only after handler success.
 Call `c.Answer(ctx, outcome, responses)` for a waiting outcome; the client checks
-and selects its worker route. The service does not construct subjects or JSON.
+and selects its agent route. The service does not construct subjects or JSON.
 Raw publishers use protocol version 1; the typed client supplies it for tasks.
 
-Workers send acknowledgement progress while executing and publish a confirmed
+Agents send acknowledgement progress while executing and publish a confirmed
 result before acknowledging each input. A waiting result also releases the
-input. Outcomes are saved locally so redelivery to the same worker can retry
+input. Outcomes are saved locally so redelivery to the same agent can retry
 publication without repeating completed execution. An admitted answer can
 recover a completed or new-waiting outcome after restart. An interrupted answer
 that cannot be safely continued returns an explicit failure instead of guessing.
 Oversized outcomes return a bounded error; full run data stays in the journal.
 
-**Delivery is at least once, not exactly once.** Redelivery to another worker
-can execute the task again. Redelivery to the same worker reuses its saved local
+**Delivery is at least once, not exactly once.** Redelivery to another agent
+can execute the task again. Redelivery to the same agent reuses its saved local
 attempt and run after interruption. Keep the original journal and sandbox data;
 recovery does not make external effects exactly once. Track
 `task_id`, `attempt_id`, and `run_id`, and make external effects and result
 handlers safe to repeat. Broker deduplication has a bounded window. A waiting
-run needs its original worker and stored state to answer; lost worker state
+run needs its original agent and stored state to answer; lost agent state
 requires a new task. Use separate task consumers for intentional agent fan-out,
 and separate result consumers for applications that each need all outcomes.
 

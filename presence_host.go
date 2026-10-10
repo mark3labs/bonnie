@@ -13,14 +13,14 @@ import (
 	"github.com/mark3labs/bonnie/presence"
 )
 
-// PresenceConfig configures optional worker registration during [Agent.Run].
+// PresenceConfig configures optional agent registration during [Agent.Run].
 // Presence is advisory; it does not assign work or coordinate execution.
 type PresenceConfig struct {
 	// Registry is required. The host does not close it.
 	Registry presence.Registry
-	// WorkerID is the required stable worker name. It must match each mounted
-	// channel's non-empty [channel.WorkerIdentity].
-	WorkerID string
+	// AgentID is the required stable agent name. It must match each mounted
+	// channel's non-empty [channel.AgentIdentity].
+	AgentID string
 	// InstanceID distinguishes process instances. When empty, the host generates
 	// a random ID for each Run. Do not reuse it across simultaneous instances.
 	InstanceID string
@@ -36,8 +36,8 @@ type PresenceConfig struct {
 	Endpoints []presence.Endpoint
 }
 
-// WithPresence enables worker presence registration after channel startup.
-// WorkerID and Registry are required; InstanceID is generated when omitted.
+// WithPresence enables agent presence registration after channel startup.
+// AgentID and Registry are required; InstanceID is generated when omitted.
 // It copies labels and endpoints. Endpoint overrides replace provider endpoints.
 // Registration and refresh failures stop [Agent.Run]. Shutdown attempts to publish
 // draining and unregister with a context bounded by [WithShutdownTimeout].
@@ -48,8 +48,8 @@ func WithPresence(cfg PresenceConfig) Option {
 }
 
 func (p PresenceConfig) identity() (presence.Identity, error) {
-	if p.Registry == nil || p.WorkerID == "" {
-		return presence.Identity{}, errors.New("bonnie: presence requires Registry and WorkerID")
+	if p.Registry == nil || p.AgentID == "" {
+		return presence.Identity{}, errors.New("bonnie: presence requires Registry and AgentID")
 	}
 	if p.RefreshInterval == 0 {
 		p.RefreshInterval = 10 * time.Second
@@ -64,7 +64,7 @@ func (p PresenceConfig) identity() (presence.Identity, error) {
 		}
 		p.InstanceID = hex.EncodeToString(b)
 	}
-	return presence.Identity{Worker: p.WorkerID, Instance: p.InstanceID}, nil
+	return presence.Identity{Agent: p.AgentID, Instance: p.InstanceID}, nil
 }
 
 type presenceLifecycle struct {
@@ -85,8 +85,8 @@ func newPresenceLifecycle(cfg PresenceConfig, channels []Channel) (*presenceLife
 		return nil, fmt.Errorf("bonnie: presence refresh interval %s must be less than registry TTL %s", cfg.RefreshInterval, ttl.TTL())
 	}
 	for _, ch := range channels {
-		if worker, ok := ch.(channel.WorkerIdentity); ok && worker.WorkerIdentity() != "" && worker.WorkerIdentity() != cfg.WorkerID {
-			return nil, fmt.Errorf("bonnie: channel %q worker identity differs from presence WorkerID", ch.Name())
+		if agent, ok := ch.(channel.AgentIdentity); ok && agent.AgentIdentity() != "" && agent.AgentIdentity() != cfg.AgentID {
+			return nil, fmt.Errorf("bonnie: channel %q agent identity differs from presence AgentID", ch.Name())
 		}
 	}
 	return &presenceLifecycle{cfg: cfg, id: id, channels: channels}, nil

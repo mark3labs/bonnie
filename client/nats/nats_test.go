@@ -81,7 +81,7 @@ func TestEndToEnd(t *testing.T) {
 		o.DisableCoreTools = true
 		o.Quiet = true
 	}, kit.WithTools(runtime.AskTool())))
-	ch, err := transport.New(r, transport.Config{Conn: nc, Subject: "tasks", ResultSubject: "results", AnswerSubject: "answers", Stream: "INPUT", Consumer: "workers", WorkerID: "one", CreateStream: true, Concurrency: 1})
+	ch, err := transport.New(r, transport.Config{Conn: nc, Subject: "tasks", ResultSubject: "results", AnswerSubject: "answers", Stream: "INPUT", Consumer: "agents", AgentID: "one", CreateStream: true, Concurrency: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,11 +255,11 @@ func TestValidationAndBrokerErrors(t *testing.T) {
 			t.Fatalf("accepted %+v", task)
 		}
 	}
-	waiting := Outcome{Version: 1, TaskID: "a", RunID: "run", WorkerID: "one", AnswerSubject: "answers.one", State: runtime.RunWaiting, Suspend: &runtime.SuspendRequest{ToolCallID: "call"}}
+	waiting := Outcome{Version: 1, TaskID: "a", RunID: "run", AgentID: "one", AnswerSubject: "answers.one", State: runtime.RunWaiting, Suspend: &runtime.SuspendRequest{ToolCallID: "call"}}
 	for _, mutate := range []func(*Outcome){
 		func(o *Outcome) { o.AnswerSubject = "tasks" },
-		func(o *Outcome) { o.WorkerID = "one.other"; o.AnswerSubject = "answers.one.other" },
-		func(o *Outcome) { o.WorkerID = "*"; o.AnswerSubject = "answers.*" },
+		func(o *Outcome) { o.AgentID = "one.other"; o.AnswerSubject = "answers.one.other" },
+		func(o *Outcome) { o.AgentID = "*"; o.AnswerSubject = "answers.*" },
 		func(o *Outcome) { o.State = runtime.RunCompleted },
 	} {
 		bad := waiting
@@ -340,7 +340,7 @@ func TestSubmitSharedStream(t *testing.T) {
 }
 
 // Answers with the same run and tool IDs must remain distinct across routes.
-// Each route includes both the configured base and the worker token.
+// Each route includes both the configured base and the agent token.
 func TestAnswerSharedStream(t *testing.T) {
 	t.Parallel()
 	nc, js := broker(t)
@@ -349,14 +349,14 @@ func TestAnswerSharedStream(t *testing.T) {
 	}
 	ctx := deadline(t)
 	ids := make(map[string]bool)
-	for _, route := range []struct{ base, worker string }{{"answers", "one"}, {"answers", "two"}, {"other", "one"}} {
+	for _, route := range []struct{ base, agent string }{{"answers", "one"}, {"answers", "two"}, {"other", "one"}} {
 		cfg := config()
 		cfg.AnswerSubject = route.base
 		c, err := New(nc, cfg)
 		if err != nil {
 			t.Fatal(err)
 		}
-		waiting := Outcome{Version: 1, TaskID: "same", RunID: "run", WorkerID: route.worker, AnswerSubject: route.base + "." + route.worker, State: runtime.RunWaiting, Suspend: &runtime.SuspendRequest{ToolCallID: "call"}}
+		waiting := Outcome{Version: 1, TaskID: "same", RunID: "run", AgentID: route.agent, AnswerSubject: route.base + "." + route.agent, State: runtime.RunWaiting, Suspend: &runtime.SuspendRequest{ToolCallID: "call"}}
 		first, err := c.Answer(ctx, waiting, []runtime.InputResponse{{Text: "yes"}})
 		if err != nil || first.Duplicate || first.Stream != "INPUT" {
 			t.Fatalf("%s first %+v: %v", waiting.AnswerSubject, first, err)
@@ -374,7 +374,7 @@ func TestAnswerSharedStream(t *testing.T) {
 			t.Fatal(err)
 		}
 		id := msg.Header.Get(gonats.MsgIdHdr)
-		if id == "" || ids[id] || stored.MessageID != id || msg.Subject != waiting.AnswerSubject || stored.WorkerID != route.worker || stored.RunID != waiting.RunID || stored.ToolCallID != waiting.Suspend.ToolCallID || len(stored.Responses) != 1 || stored.Responses[0].Text != "yes" {
+		if id == "" || ids[id] || stored.MessageID != id || msg.Subject != waiting.AnswerSubject || stored.AgentID != route.agent || stored.RunID != waiting.RunID || stored.ToolCallID != waiting.Suspend.ToolCallID || len(stored.Responses) != 1 || stored.Responses[0].Text != "yes" {
 			t.Fatalf("stored %s %+v, identity %q", msg.Subject, stored, id)
 		}
 		ids[id] = true

@@ -219,9 +219,9 @@ func (r *Runner) RunScheduler(ctx context.Context) error {
 	r.scheduling = true
 	r.workMu.Unlock()
 	defer func() { r.workMu.Lock(); r.scheduling = false; r.workMu.Unlock() }()
-	workerCtx, cancel := context.WithCancel(ctx)
-	var workers sync.WaitGroup
-	defer workers.Wait()
+	taskCtx, cancel := context.WithCancel(ctx)
+	var tasks sync.WaitGroup
+	defer tasks.Wait()
 	defer cancel()
 	busy := sync.Map{}
 	failures := make(chan error, 1)
@@ -242,16 +242,16 @@ func (r *Runner) RunScheduler(ctx context.Context) error {
 			if _, loaded := busy.LoadOrStore(id, true); loaded {
 				continue
 			}
-			workers.Go(func() {
+			tasks.Go(func() {
 				defer busy.Delete(id)
-				if err := r.recoverOwnedCancellation(workerCtx, id); err != nil {
+				if err := r.recoverOwnedCancellation(taskCtx, id); err != nil {
 					select {
 					case failures <- err:
 					default:
 					}
 					return
 				}
-				if err := r.deliverSubmission(workerCtx, id); err != nil {
+				if err := r.deliverSubmission(taskCtx, id); err != nil {
 					select {
 					case failures <- err:
 					default:

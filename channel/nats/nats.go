@@ -3,9 +3,9 @@
 // Core delivery and deduplication are process-local and can lose messages.
 // JetStream delivery is at least once. A completed outcome is saved in the
 // local journal before publication; input is acknowledged only after the
-// result broker acknowledges publication. An interrupted task starts a new
-// independent attempt. Redelivery to another worker with a separate journal
-// can execute again. This is not an exactly-once execution guarantee.
+// result broker acknowledges publication. An interrupted task recovers its
+// saved local identity on redelivery. A separate agent with a separate journal
+// can execute it again. This is not an exactly-once execution guarantee.
 //
 // Only explicit answers with the current run and tool-call IDs can resume a
 // waiting run. Use NATS permissions to restrict publishers and subscribers.
@@ -51,7 +51,7 @@ type Config struct {
 	// They select provisioned streams; existing resources are never changed.
 	ResultStream string
 	EventStream  string
-	// CommandSubject and QuerySubject are worker-routed control bases.
+	// CommandSubject and QuerySubject are agent-routed control bases.
 	CommandSubject string
 	QuerySubject   string
 	// URL is one NATS server URL. It is required unless Conn is supplied.
@@ -73,30 +73,30 @@ type Config struct {
 	// Password is the password for Username. Keep it secret.
 	Password string
 	// Subject receives Task JSON. AnswerSubject receives Answer JSON in Core
-	// mode. In JetStream it is a base; answers use base+"."+WorkerID.
+	// mode. In JetStream it is a base; answers use base+"."+AgentID.
 	// ResultSubject receives Result JSON. These must be distinct literal subjects.
 	Subject       string
 	AnswerSubject string
 	ResultSubject string
-	// Concurrency is the worker limit (default 4, maximum 1024).
+	// Concurrency is the active task execution limit (default 4, maximum 1024).
 	Concurrency int
 	// Buffer is the pending message limit per subscription and work queue
 	// (default 64, maximum 65536). Core NATS drops excess messages.
 	Buffer int
 	// Stream enables JetStream when nonempty. There is no separate mode flag.
 	Stream string
-	// TargetedTasks enables tasks on Subject+".worker."+WorkerID in addition
+	// TargetedTasks enables tasks on Subject+".agent."+AgentID in addition
 	// to shared tasks. JetStream is required. The input stream must also
-	// retain Subject+".worker.*"; existing streams are never changed.
+	// retain Subject+".agent.*"; existing streams are never changed.
 	TargetedTasks bool
 	// Consumer is the shared durable task pull consumer. When empty in
 	// JetStream mode, DefaultConsumerName(Subject) supplies a stable name.
 	// Set it explicitly for separate processing groups or existing consumers.
 	Consumer string
-	// WorkerID is required in JetStream mode. It identifies this worker and
+	// AgentID is required in JetStream mode. It identifies this agent and
 	// its local journal. Use a stable, unique token (letters, digits, hyphen)
-	// and keep the same journal when this worker restarts.
-	WorkerID string
+	// and keep the same journal when this agent restarts.
+	AgentID string
 	// CreateStream permits creation of the input stream. With RootSubject it
 	// also provisions result and status streams. Existing resources are never
 	// changed. Without a root, the result stream remains operator-owned.
@@ -117,9 +117,9 @@ type Answer struct {
 	// Version is 1 in JetStream. MessageID is a stable answer identity.
 	Version   int    `json:"version,omitempty"`
 	MessageID string `json:"message_id,omitempty"`
-	// RunID and WorkerID select the waiting attempt in JetStream.
+	// RunID and AgentID select the waiting attempt in JetStream.
 	RunID      string                  `json:"run_id,omitempty"`
-	WorkerID   string                  `json:"worker_id,omitempty"`
+	AgentID    string                  `json:"agent_id,omitempty"`
 	TaskID     string                  `json:"task_id"`
 	ToolCallID string                  `json:"tool_call_id"`
 	Responses  []runtime.InputResponse `json:"responses"`
@@ -132,8 +132,8 @@ type Result struct {
 	// attempt and stays the same when an answer resumes that attempt.
 	Version   int    `json:"version,omitempty"`
 	AttemptID string `json:"attempt_id,omitempty"`
-	WorkerID  string `json:"worker_id,omitempty"`
-	// AnswerSubject is the worker route. Clients must check it against their
+	AgentID   string `json:"agent_id,omitempty"`
+	// AnswerSubject is the agent route. Clients must check it against their
 	// configured answer base before publishing an answer.
 	AnswerSubject string                  `json:"answer_subject,omitempty"`
 	TaskID        string                  `json:"task_id"`
@@ -254,7 +254,7 @@ func New(r *runtime.Runner, cfg Config) (*Channel, error) {
 }
 
 // DefaultConsumerName returns the stable task consumer name for a subject.
-// It uses "bonnie-" and the full SHA-256 digest of the exact subject. Workers
+// It uses "bonnie-" and the full SHA-256 digest of the exact subject. Agents
 // on the same stream and subject share this consumer unless Consumer is set.
 // It does not validate the subject; New performs that check.
 func DefaultConsumerName(subject string) string {
@@ -301,13 +301,13 @@ func (c *Channel) PresenceEndpoints() []presence.Endpoint {
 	ready := c.conn != nil && c.conn.IsConnected() && !c.stopped
 	address := c.cfg.Subject
 	if c.cfg.TargetedTasks {
-		address += ".worker." + c.cfg.WorkerID
+		address += ".agent." + c.cfg.AgentID
 	}
 	return []presence.Endpoint{{Channel: c.Name(), Address: address, Input: true, Delivery: true, Ready: ready}}
 }
 
-// WorkerIdentity implements [channel.WorkerIdentity].
-func (c *Channel) WorkerIdentity() string { return c.cfg.WorkerID }
+// AgentIdentity implements [channel.AgentIdentity].
+func (c *Channel) AgentIdentity() string { return c.cfg.AgentID }
 
 // Routes implements channel.Channel; NATS has no HTTP routes.
 func (c *Channel) Routes() []channel.Route { return nil }

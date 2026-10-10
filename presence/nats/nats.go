@@ -17,7 +17,7 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 )
 
-// ErrConflict reports ownership by another live worker instance.
+// ErrConflict reports ownership by another live agent instance.
 // It is the transport-independent presence conflict sentinel.
 var ErrConflict = presence.ErrConflict
 
@@ -80,15 +80,15 @@ func New(ctx context.Context, conn *nats.Conn, cfg Config) (*Store, error) {
 	}
 	return &Store{kv: kv, ttl: cfg.TTL}, nil
 }
-func hash(v string) string      { h := sha256.Sum256([]byte(v)); return hex.EncodeToString(h[:]) }
-func workerKey(w string) string { return "w_" + hash(w) }
+func hash(v string) string     { h := sha256.Sum256([]byte(v)); return hex.EncodeToString(h[:]) }
+func agentKey(w string) string { return "a_" + hash(w) }
 func decode(e nats.KeyValueEntry) (presence.Record, error) {
 	var r presence.Record
 	err := json.Unmarshal(e.Value(), &r)
 	return r, err
 }
 
-// Register claims a worker key with the complete record. Revision checks make
+// Register claims an agent key with the complete record. Revision checks make
 // ownership and refresh atomic; expired KV entries can be claimed by a new instance.
 func (s *Store) Register(ctx context.Context, r presence.Record) error {
 	if err := ctx.Err(); err != nil {
@@ -103,7 +103,7 @@ func (s *Store) Register(ctx context.Context, r presence.Record) error {
 	if err != nil {
 		return err
 	}
-	k := workerKey(r.Identity.Worker)
+	k := agentKey(r.Identity.Agent)
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -131,12 +131,12 @@ func (s *Store) Register(ctx context.Context, r presence.Record) error {
 	}
 }
 
-// Unregister removes the record only if the current worker key still belongs to id.
+// Unregister removes the record only if the current agent key still belongs to id.
 func (s *Store) Unregister(ctx context.Context, id presence.Identity) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	k := workerKey(id.Worker)
+	k := agentKey(id.Agent)
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -166,7 +166,7 @@ func (s *Store) Unregister(ctx context.Context, id presence.Identity) error {
 	}
 }
 
-// Discover returns live records in worker, then instance, order.
+// Discover returns live records in agent, then instance, order.
 func (s *Store) Discover(ctx context.Context, f presence.Filter) ([]presence.Record, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -183,7 +183,7 @@ func (s *Store) Discover(ctx context.Context, f presence.Filter) ([]presence.Rec
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if !strings.HasPrefix(k, "w_") {
+		if !strings.HasPrefix(k, "a_") {
 			continue
 		}
 		e, err := s.kv.Get(k)
@@ -202,15 +202,15 @@ func (s *Store) Discover(ctx context.Context, f presence.Filter) ([]presence.Rec
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {
-		if out[i].Identity.Worker != out[j].Identity.Worker {
-			return out[i].Identity.Worker < out[j].Identity.Worker
+		if out[i].Identity.Agent != out[j].Identity.Agent {
+			return out[i].Identity.Agent < out[j].Identity.Agent
 		}
 		return out[i].Identity.Instance < out[j].Identity.Instance
 	})
 	return out, nil
 }
 func matches(r presence.Record, f presence.Filter) bool {
-	if f.Worker != "" && r.Identity.Worker != f.Worker || f.Instance != "" && r.Identity.Instance != f.Instance || f.State != "" && r.State != f.State {
+	if f.Agent != "" && r.Identity.Agent != f.Agent || f.Instance != "" && r.Identity.Instance != f.Instance || f.State != "" && r.State != f.State {
 		return false
 	}
 	for k, v := range f.Labels {

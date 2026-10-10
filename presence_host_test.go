@@ -12,14 +12,14 @@ import (
 	"github.com/mark3labs/bonnie/presence"
 )
 
-type presenceTestChannel struct{ worker string }
+type presenceTestChannel struct{ agent string }
 
 func (c presenceTestChannel) From(string) channel.SessionRef   { return nil }
 func (c presenceTestChannel) Attach(string) channel.SessionRef { return nil }
 
 func (c presenceTestChannel) Name() string            { return "test" }
 func (c presenceTestChannel) Routes() []channel.Route { return nil }
-func (c presenceTestChannel) WorkerIdentity() string  { return c.worker }
+func (c presenceTestChannel) AgentIdentity() string   { return c.agent }
 func (c presenceTestChannel) PresenceEndpoints() []presence.Endpoint {
 	return []presence.Endpoint{{Channel: "test", Address: "tasks", Input: true, Ready: true}}
 }
@@ -33,8 +33,8 @@ func (failingPresenceRegistry) Unregister(context.Context, presence.Identity) er
 
 func TestPresenceIdentityAndReadiness(t *testing.T) {
 	t.Parallel()
-	cfg := PresenceConfig{Registry: presence.NewMemoryStore(), WorkerID: "worker"}
-	p, err := newPresenceLifecycle(cfg, []Channel{presenceTestChannel{"worker"}})
+	cfg := PresenceConfig{Registry: presence.NewMemoryStore(), AgentID: "agent"}
+	p, err := newPresenceLifecycle(cfg, []Channel{presenceTestChannel{"agent"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,13 +52,13 @@ func TestPresenceIdentityAndReadiness(t *testing.T) {
 		t.Fatal("draining endpoint must not be ready")
 	}
 	if _, err := newPresenceLifecycle(cfg, []Channel{presenceTestChannel{"other"}}); err == nil {
-		t.Fatal("accepted mismatched worker identity")
+		t.Fatal("accepted mismatched agent identity")
 	}
 }
 
 func TestPresenceRefreshFailureReturns(t *testing.T) {
 	t.Parallel()
-	p, err := newPresenceLifecycle(PresenceConfig{Registry: failingPresenceRegistry{}, WorkerID: "worker", RefreshInterval: time.Millisecond}, nil)
+	p, err := newPresenceLifecycle(PresenceConfig{Registry: failingPresenceRegistry{}, AgentID: "agent", RefreshInterval: time.Millisecond}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +71,7 @@ func TestPresenceRefreshFailureReturns(t *testing.T) {
 
 func TestPresenceInvalidConfiguration(t *testing.T) {
 	t.Parallel()
-	for _, cfg := range []PresenceConfig{{}, {Registry: presence.NewMemoryStore()}, {Registry: presence.NewMemoryStore(), WorkerID: "worker", RefreshInterval: -1}} {
+	for _, cfg := range []PresenceConfig{{}, {Registry: presence.NewMemoryStore()}, {Registry: presence.NewMemoryStore(), AgentID: "agent", RefreshInterval: -1}} {
 		if _, err := newPresenceLifecycle(cfg, nil); err == nil {
 			t.Fatal("invalid configuration accepted")
 		}
@@ -114,7 +114,7 @@ func TestPresenceHostShutdownOrder(t *testing.T) {
 		registry.events = append(registry.events, "channel stopped")
 		return nil
 	}}
-	a := lifecycleAgent(t, WithAddr("127.0.0.1:0"), WithPresence(PresenceConfig{Registry: registry, WorkerID: "worker"}), WithChannel(func(*runtime.Runner) (Channel, error) { return ch, nil }))
+	a := lifecycleAgent(t, WithAddr("127.0.0.1:0"), WithPresence(PresenceConfig{Registry: registry, AgentID: "agent"}), WithChannel(func(*runtime.Runner) (Channel, error) { return ch, nil }))
 	if err := a.Run(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +133,7 @@ func TestPresenceHostShutdownOrder(t *testing.T) {
 func TestPresenceHostRefreshErrorDoesNotDeadlock(t *testing.T) {
 	t.Parallel()
 	registry := &recordingPresenceRegistry{failRefresh: true}
-	a := lifecycleAgent(t, WithAddr("127.0.0.1:0"), WithPresence(PresenceConfig{Registry: registry, WorkerID: "worker", RefreshInterval: time.Millisecond}))
+	a := lifecycleAgent(t, WithAddr("127.0.0.1:0"), WithPresence(PresenceConfig{Registry: registry, AgentID: "agent", RefreshInterval: time.Millisecond}))
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	done := make(chan error, 1)
@@ -151,7 +151,7 @@ func TestPresenceHostStartupFailureDoesNotAdvertise(t *testing.T) {
 	t.Parallel()
 	registry := &recordingPresenceRegistry{}
 	ch := &lifecycleChannel{name: "test", start: func(context.Context) error { return errors.New("startup failed") }, shutdown: func(context.Context) error { return nil }}
-	a := lifecycleAgent(t, WithAddr("127.0.0.1:0"), WithPresence(PresenceConfig{Registry: registry, WorkerID: "worker"}), WithChannel(func(*runtime.Runner) (Channel, error) { return ch, nil }))
+	a := lifecycleAgent(t, WithAddr("127.0.0.1:0"), WithPresence(PresenceConfig{Registry: registry, AgentID: "agent"}), WithChannel(func(*runtime.Runner) (Channel, error) { return ch, nil }))
 	if err := a.Run(context.Background()); err == nil {
 		t.Fatal("startup failure hidden")
 	}

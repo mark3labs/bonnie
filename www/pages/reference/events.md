@@ -119,6 +119,6 @@ Replayed events are not logged again. Logging works across channels, including N
 
 ## NATS task status is a separate protocol
 
-NATS JetStream task status events are not the runtime NDJSON stream. They use durable `task_accepted` and `run_state` notifications with task, attempt, worker, and event identities. They do not contain agent text or tool activity. Deduplicate by `event_id`, order a run by Seq, and expect at-least-once broker delivery within retention limits. Result and event streams are independent; do not assume cross-stream ordering.
+NATS JetStream task status events are not the runtime NDJSON stream. They use durable `task_accepted` and `run_state` notifications with task, attempt, agent, and event identities. They do not contain agent text or tool activity. Deduplicate by `event_id`, order a run by Seq, and expect at-least-once broker delivery within retention limits. Result and event streams are independent; do not assume cross-stream ordering.
 
-See [Channels](/channels/overview) for transport selection and [Deployment](/guides/deployment) for stable worker ownership.
+See [Channels](/channels/overview) for transport selection and [Deployment](/guides/deployment) for stable agent ownership.

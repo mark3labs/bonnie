@@ -51,7 +51,7 @@ func TestJetStreamAdmittedAnswerRecovery(t *testing.T) {
 			nc, js := jsServer(t)
 			resultStream(t, js)
 			inputStream(t, js, 100*time.Millisecond)
-			if _, err := js.AddConsumer("INPUT", &gonats.ConsumerConfig{Durable: "workers_one", FilterSubject: "answers.one", AckPolicy: gonats.AckExplicitPolicy, AckWait: 100 * time.Millisecond, MaxAckPending: 2}); err != nil {
+			if _, err := js.AddConsumer("INPUT", &gonats.ConsumerConfig{Durable: "agents_one", FilterSubject: "answers.one", AckPolicy: gonats.AckExplicitPolicy, AckWait: 100 * time.Millisecond, MaxAckPending: 2}); err != nil {
 				t.Fatal(err)
 			}
 			sub, err := nc.SubscribeSync("results")
@@ -73,7 +73,7 @@ func TestJetStreamAdmittedAnswerRecovery(t *testing.T) {
 			if first.Suspend == nil {
 				t.Fatalf("first: %+v", first)
 			}
-			answer := Answer{Version: 1, MessageID: "answer", TaskID: "a", RunID: first.RunID, WorkerID: "one", ToolCallID: first.Suspend.ToolCallID, Responses: []runtime.InputResponse{{Text: "here"}}}
+			answer := Answer{Version: 1, MessageID: "answer", TaskID: "a", RunID: first.RunID, AgentID: "one", ToolCallID: first.Suspend.ToolCallID, Responses: []runtime.InputResponse{{Text: "here"}}}
 			j.fail.Store(true)
 			jsSend(t, js, first.AnswerSubject, answer)
 			select {
@@ -170,7 +170,7 @@ func TestJetStreamOutputHeaderLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := jsChannel(t, testRunner(fakemodel.New()), jsConfig(nc, "one"))
-	result := Result{Version: 1, TaskID: "task", WorkerID: "one", Response: strings.Repeat("x", 8080)}
+	result := Result{Version: 1, TaskID: "task", AgentID: "one", Response: strings.Repeat("x", 8080)}
 	data, err := json.Marshal(result)
 	if err != nil {
 		t.Fatal(err)

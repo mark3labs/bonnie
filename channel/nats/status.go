@@ -13,12 +13,12 @@ import (
 	"github.com/mark3labs/bonnie/runtime"
 )
 
-// Target selects an exact attempt on its owning worker. All fields are required.
+// Target selects an exact attempt on its owning agent. All fields are required.
 type Target struct {
 	TaskID    string `json:"task_id"`
 	AttemptID string `json:"attempt_id"`
 	RunID     string `json:"run_id"`
-	WorkerID  string `json:"worker_id"`
+	AgentID   string `json:"agent_id"`
 }
 
 // StatusEvent reports durable acceptance or a journalled run-state change.
@@ -76,7 +76,7 @@ func (c *Channel) admitTask(ctx context.Context, result Result, runID string) er
 	if c.cfg.EventSubject == "" && c.cfg.QuerySubject == "" && c.cfg.CommandSubject == "" {
 		return nil
 	}
-	target := Target{TaskID: result.TaskID, AttemptID: result.AttemptID, RunID: runID, WorkerID: c.cfg.WorkerID}
+	target := Target{TaskID: result.TaskID, AttemptID: result.AttemptID, RunID: runID, AgentID: c.cfg.AgentID}
 	data, err := json.Marshal(taskAdmission{Target: target, Time: time.Now().UTC()})
 	if err != nil {
 		return err
@@ -189,7 +189,7 @@ func (c *Channel) saveStatusCursor(ctx context.Context, runID string, seq int) e
 
 func (c *Channel) inspect(ctx context.Context, req StatusRequest, cancel bool) Status {
 	out := Status{Version: 1, Target: req.Target}
-	if req.Version != 1 || !validID(req.TaskID) || !validID(req.RunID) || !validID(req.AttemptID) || req.WorkerID != c.cfg.WorkerID {
+	if req.Version != 1 || !validID(req.TaskID) || !validID(req.RunID) || !validID(req.AttemptID) || req.AgentID != c.cfg.AgentID {
 		out.Error = "invalid target or version"
 		return out
 	}
@@ -257,7 +257,7 @@ func (c *Channel) startStatusControls(ctx context.Context, nc *gonats.Conn) erro
 		if route.base == "" {
 			continue
 		}
-		sub, err := nc.Subscribe(route.base+"."+c.cfg.WorkerID, func(msg *gonats.Msg) {
+		sub, err := nc.Subscribe(route.base+"."+c.cfg.AgentID, func(msg *gonats.Msg) {
 			// Control routes are request/reply only. Never publish to a caller-selected
 			// route unless it is a NATS inbox. Use permissions to protect these routes.
 			if !validSubject(msg.Reply) || len(msg.Reply) < 7 || msg.Reply[:7] != "_INBOX." {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -36,18 +37,30 @@ func testStore(t *testing.T, ttl time.Duration) (*Store, *natsgo.Conn) {
 	return store, conn
 }
 
-func record(worker, instance string) presence.Record {
-	return presence.Record{Identity: presence.Identity{Worker: worker, Instance: instance}, State: "ready"}
+func record(agent, instance string) presence.Record {
+	return presence.Record{Identity: presence.Identity{Agent: agent, Instance: instance}, State: "ready"}
+}
+
+func TestPresenceKeyUsesAgentPrefix(t *testing.T) {
+	t.Parallel()
+	store, _ := testStore(t, time.Second)
+	if err := store.Register(context.Background(), record("agent", "instance")); err != nil {
+		t.Fatal(err)
+	}
+	keys, err := store.kv.Keys()
+	if err != nil || len(keys) != 1 || !strings.HasPrefix(keys[0], "a_") {
+		t.Fatalf("keys = %v, %v", keys, err)
+	}
 }
 
 func TestOwnershipConflictAndRefresh(t *testing.T) {
 	s, _ := testStore(t, 2*time.Second)
 	ctx := context.Background()
-	a := record("worker", "one")
+	a := record("agent", "one")
 	if err := s.Register(ctx, a); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Register(ctx, record("worker", "two")); !errors.Is(err, presence.ErrConflict) {
+	if err := s.Register(ctx, record("agent", "two")); !errors.Is(err, presence.ErrConflict) {
 		t.Fatalf("Register conflict = %v", err)
 	}
 	before, err := s.Discover(ctx, presence.Filter{})
@@ -67,14 +80,14 @@ func TestOwnershipConflictAndRefresh(t *testing.T) {
 func TestOldInstanceCannotDeleteReplacement(t *testing.T) {
 	s, _ := testStore(t, 2*time.Second)
 	ctx := context.Background()
-	old := record("worker", "old")
+	old := record("agent", "old")
 	if err := s.Register(ctx, old); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Unregister(ctx, old.Identity); err != nil {
 		t.Fatal(err)
 	}
-	newer := record("worker", "new")
+	newer := record("agent", "new")
 	if err := s.Register(ctx, newer); err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +103,7 @@ func TestOldInstanceCannotDeleteReplacement(t *testing.T) {
 func TestTTLExpiryAllowsReplacement(t *testing.T) {
 	s, _ := testStore(t, 150*time.Millisecond)
 	ctx := context.Background()
-	if err := s.Register(ctx, record("worker", "one")); err != nil {
+	if err := s.Register(ctx, record("agent", "one")); err != nil {
 		t.Fatal(err)
 	}
 	deadline := time.Now().Add(5 * time.Second)
@@ -108,7 +121,7 @@ func TestTTLExpiryAllowsReplacement(t *testing.T) {
 	if err != nil || len(got) != 0 {
 		t.Fatalf("expired record remains: %v %v", got, err)
 	}
-	if err := s.Register(ctx, record("worker", "two")); err != nil {
+	if err := s.Register(ctx, record("agent", "two")); err != nil {
 		t.Fatalf("replacement register: %v", err)
 	}
 }
@@ -117,7 +130,7 @@ func TestWatchSnapshotDeleteIdentityAndCancel(t *testing.T) {
 	s, _ := testStore(t, 3*time.Second)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	initial := record("worker", "one")
+	initial := record("agent", "one")
 	if err := s.Register(context.Background(), initial); err != nil {
 		t.Fatal(err)
 	}

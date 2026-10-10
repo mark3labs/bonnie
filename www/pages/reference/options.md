@@ -135,14 +135,14 @@ Explicit non-empty fields win. Missing required platform verification credential
 
 For NATS, select only one authentication method, including environment fallbacks. NKey seeds are values, not file paths. A supplied `Conn` disables connection environment fallback; the caller owns that connection. `Stream` or `RootSubject` enables JetStream. Core NATS does not retain tasks or retry result delivery. See [Channels](/channels/overview) for transport selection and delivery limits.
 
-## Worker presence
+## Agent presence
 
-`WithPresence(cfg PresenceConfig)` enables optional worker registration during `Agent.Run` or `Agent.Serve`. Without it, the host does not register. It adds no CLI flags or HTTP discovery routes.
+`WithPresence(cfg PresenceConfig)` enables optional agent registration during `Agent.Run` or `Agent.Serve`. Without it, the host does not register. It adds no CLI flags or HTTP discovery routes.
 
 | `PresenceConfig` field | Type | Default and contract |
 | --- | --- | --- |
 | `Registry` | `presence.Registry` | Required. Provides `Register(context.Context, presence.Record) error` and `Unregister(context.Context, presence.Identity) error`. The host does not close it. |
-| `WorkerID` | `string` | Required stable worker name. Must match any mounted channel's non-empty `channel.WorkerIdentity()`. |
+| `AgentID` | `string` | Required stable agent name. Must match any mounted channel's non-empty `channel.AgentIdentity()`. |
 | `InstanceID` | `string` | Random 16-byte value encoded as hex when omitted. Distinguishes process instances; do not reuse it across simultaneous instances. |
 | `Labels` | `map[string]string` | Optional discovery metadata. Copied when the option is set; not authorization claims. |
 | `RefreshInterval` | `time.Duration` | Zero selects 10 seconds. Negative values fail. Must be less than the registry TTL when it implements `presence.TTLStore`. |
@@ -152,7 +152,7 @@ Endpoint fields are `Channel string`, `Address string`, and `Ready`, `Input`, `D
 
 Initial registration occurs after channel startup. Registration and refresh failures stop the host. Shutdown attempts a draining update and unregister with the bounded shutdown context. Presence is advisory: expiry does not prove execution stopped or permit automatic task reassignment.
 
-See [Deployment](/guides/deployment#advertise-worker-presence) for a NATS KV registry example, discovery watches, ownership conflicts, and memory-store limits.
+See [Deployment](/guides/deployment#advertise-agent-presence) for a NATS KV registry example, discovery watches, ownership conflicts, and memory-store limits.
 
 ## Schedules
 

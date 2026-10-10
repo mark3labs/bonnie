@@ -533,13 +533,13 @@ func TestConcurrentExecIsRaceClean(t *testing.T) {
 		var wg sync.WaitGroup
 		for i := range 4 {
 			wg.Go(func() {
-				res, err := sb.Exec(ctx, Shell(fmt.Sprintf("echo worker-%d", i)))
+				res, err := sb.Exec(ctx, Shell(fmt.Sprintf("echo agent-%d", i)))
 				if err != nil {
 					t.Errorf("Exec: %v", err)
 					return
 				}
-				if !strings.Contains(res.Stdout, fmt.Sprintf("worker-%d", i)) {
-					t.Errorf("worker %d got %q", i, res.Stdout)
+				if !strings.Contains(res.Stdout, fmt.Sprintf("agent-%d", i)) {
+					t.Errorf("agent %d got %q", i, res.Stdout)
 				}
 			})
 		}

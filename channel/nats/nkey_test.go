@@ -57,7 +57,7 @@ func TestNKeySeedAuthentication(t *testing.T) {
 			defer nc.Close()
 			cfg := Config{URL: s.ClientURL(), NKeySeed: string(seed), Subject: "tasks", AnswerSubject: "answers", ResultSubject: "results"}
 			if jetstream {
-				cfg.Stream, cfg.WorkerID, cfg.CreateStream = "TASKS", "worker-1", true
+				cfg.Stream, cfg.AgentID, cfg.CreateStream = "TASKS", "agent-1", true
 				js, err := nc.JetStream()
 				if err != nil {
 					t.Fatal(err)

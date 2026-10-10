@@ -197,6 +197,6 @@ Human-input tools remain enabled for background jobs. An approval request leaves
 
 BONNIE saves prepared dispatches, run results, and delivery progress. Delivery is **at least once**, not exactly once. A crash after a successful post but before saving its receipt can repeat the post. Platform thread creation and multipart delivery also have duplicate risks.
 
-Failed delivery retries the saved result with exponential backoff from 2 to 256 seconds. It does not start another model turn. Preparation or execution failure does not automatically get a fresh agent retry. The engine limits active occurrence workers to 16; excess accepted work remains in the journal.
+Failed delivery retries the saved result with exponential backoff from 2 to 256 seconds. It does not start another model turn. Preparation or execution failure does not automatically get a fresh agent retry. The engine limits active occurrence executions to 16; excess accepted work remains in the journal.
 
 Monitor schedule history, waiting runs, failed occurrences, and repeated delivery errors. Make callbacks and downstream effects safe to repeat. See [Deployment](/guides/deployment), [Troubleshooting](/guides/troubleshooting), and the [schedule godoc](https://pkg.go.dev/github.com/mark3labs/bonnie/schedule).

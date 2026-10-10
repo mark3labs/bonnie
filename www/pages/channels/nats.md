@@ -1,6 +1,6 @@
 ---
 title: NATS channel
-description: Configure Core NATS and JetStream tasks, worker-routed answers, status queries, cancellation, and broker security.
+description: Configure Core NATS and JetStream tasks, agent-routed answers, status queries, cancellation, and broker security.
 ---
 
 # NATS channel
@@ -15,7 +15,7 @@ The NATS channel receives JSON tasks from a broker. It has no HTTP webhook. Core
 | Task routing | Ordinary subscription; each server receives a copy | Shared durable pull consumer |
 | Input retention | None | Broker stream, within its retention limits |
 | Results | Core publish and connection flush | Journal result, broker-confirmed publish, then input ACK |
-| Answers | Literal `AnswerSubject` | `AnswerSubject + "." + WorkerID` |
+| Answers | Literal `AnswerSubject` | `AnswerSubject + "." + AgentID` |
 | Versions | 0 or 1 | 1 only |
 | Recovery | Explicit; input or output can be lost | Cached result reuse or a fresh independent attempt |
 | Status and cancel protocol | Not supported | Optional; enabled by root-derived subjects |
@@ -87,8 +87,8 @@ A `Result` contains:
 | `error` | Failed execution or rejected input |
 | `version` | 1 for JetStream; normally omitted in Core output |
 | `attempt_id` | JetStream independent attempt identity |
-| `worker_id` | Owning JetStream worker |
-| `answer_subject` | JetStream worker answer route |
+| `agent_id` | Owning JetStream agent |
+| `answer_subject` | JetStream agent answer route |
 
 Do not infer success only from `state`; check `error` too. A validation error can have no run ID or state. All task and answer results go to the configured `ResultSubject`, never `Msg.Reply` or a publisher-supplied destination. `reply_to` is not a supported JSON field.
 
@@ -96,7 +96,7 @@ Do not infer success only from `state`; check `error` too. A validation error ca
 
 Each task creates an independent run bound to local address `task_id`, saved as `nats/TASK_ID`. A duplicate ID is rejected if a binding exists or the process-local 4,096-entry deduplication cache remembers it. This does not return the earlier result. Existing bindings survive restart, but failed admission cache entries do not. Do not reuse IDs for new work.
 
-Core subscriptions are not queue subscriptions. Two BONNIE servers on the same subjects can each execute the task. Use one Core owner, or use JetStream for shared-worker routing. Do not concurrently mutate NATS-owned tasks through `From(taskID)` or another runner.
+Core subscriptions are not queue subscriptions. Two BONNIE servers on the same subjects can each execute the task. Use one Core owner, or use JetStream for shared-agent routing. Do not concurrently mutate NATS-owned tasks through `From(taskID)` or another runner.
 
 To answer a Core waiting result, copy its `suspend.tool_call_id` and send:
 
@@ -105,7 +105,7 @@ nats --server "$NATS_URL" pub ops.answers \
   '{"version":1,"task_id":"review-42","tool_call_id":"CURRENT_TOOL_CALL_ID","responses":[{"turn_id":"CURRENT_SUSPEND_TURN_ID","text":"Use staging only.","approved":true}]}'
 ```
 
-`responses` uses `runtime.InputResponse`: `text`, optional `turn_id`, and optional `approved`. Omit `approved` for a text question. Explicit `false` is rejection; absence is not rejection. Include the current suspension turn ID when available. The adapter requires a waiting run, matching tool-call ID, and a nonempty response list. Unknown tasks and stale answers produce error results. Core does not use `run_id`, `worker_id`, or `message_id` to route or deduplicate answers.
+`responses` uses `runtime.InputResponse`: `text`, optional `turn_id`, and optional `approved`. Omit `approved` for a text question. Explicit `false` is rejection; absence is not rejection. Include the current suspension turn ID when available. The adapter requires a waiting run, matching tool-call ID, and a nonempty response list. Unknown tasks and stale answers produce error results. Core does not use `run_id`, `agent_id`, or `message_id` to route or deduplicate answers.
 
 Core input and output can be lost if no subscriber is present, buffers overflow, the broker disconnects, or shutdown interrupts publication. The result flush confirms connection progress, not subscriber receipt. There is no durable result-publication retry. A saved task is not automatically resumed after a crash.
 
@@ -116,7 +116,7 @@ Enable JetStream on the broker, for example with `nats-server -js` for local tes
 ```go
 natschannel.Config{
     RootSubject: "ops.agent",
-    WorkerID: "worker-1",
+    AgentID: "agent-1",
     CreateStream: true,
 }
 ```
@@ -134,9 +134,9 @@ This derives the complete protocol:
 
 Explicit nonempty subjects override derived values. Setting a root enables JetStream; it cannot select Core mode. A root also fills empty status/control bases. For JetStream without those features, omit the root and set `Stream` plus task, answer, and result subjects explicitly.
 
-`WorkerID` is required in JetStream. Keep it stable, unique among live workers, and attached to the same local journal across restarts. Stream, consumer, and worker config names must contain only letters, digits, and hyphens, at most 128 bytes. Do not run two processes with the same worker identity and journal. A worker ID identifies ownership; it is not an authentication credential.
+`AgentID` is required in JetStream. Keep it stable, unique among live agents, and attached to the same local journal across restarts. Stream, consumer, and agent config names must contain only letters, digits, and hyphens, at most 128 bytes. Do not run two processes with the same agent identity and journal. An agent ID identifies ownership; it is not an authentication credential.
 
-`DefaultConsumerName(Subject)` returns `bonnie-` plus the full SHA-256 hex digest of the task subject. Workers on the same stream and subject share that durable task consumer unless you set `Consumer`. Different consumer names are separate processing groups and can each execute retained tasks.
+`DefaultConsumerName(Subject)` returns `bonnie-` plus the full SHA-256 hex digest of the task subject. Agents on the same stream and subject share that durable task consumer unless you set `Consumer`. Different consumer names are separate processing groups and can each execute retained tasks.
 
 The input stream name is derived with `DefaultInputStreamName(Subject)` when a root is set. Output names use `DefaultResultStreamName(ResultSubject)` and `DefaultEventStreamName(EventSubject)`. You can override `Stream`, `ResultStream`, and `EventStream`.
 
@@ -144,11 +144,11 @@ The input stream name is derived with `DefaultInputStreamName(Subject)` when a r
 
 `CreateStream: true` permits creation of a missing input stream. With a root it also permits creation of the result stream; an enabled event subject permits creation of the event stream. Created streams use file storage and limits retention. Existing resources are never changed. Configure retention, disk limits, replicas, and access rules as an operator; automatic creation is not a production capacity policy.
 
-The input stream must explicitly list the task subject and `AnswerSubject + ".*"`, with limits retention. If targeted tasks are enabled, it must also list `Subject + ".worker.*"`. A broad `>` entry alone does not satisfy these checks. Root-derived result and event streams must explicitly contain their output subject and use limits retention.
+The input stream must explicitly list the task subject and `AnswerSubject + ".*"`, with limits retention. If targeted tasks are enabled, it must also list `Subject + ".agent.*"`. A broad `>` entry alone does not satisfy these checks. Root-derived result and event streams must explicitly contain their output subject and use limits retention.
 
 Without a root, the result stream is operator-owned: provision a stream that retains `ResultSubject`. Results require a JetStream publication ACK. A Core-only result subscriber cannot replace that stream. If no result stream exists, publication fails and input stays unacknowledged.
 
-Missing pull consumers are created independently of `CreateStream`. The shared task consumer filters `Subject`; the answer consumer filters the owning worker's answer route and has name `Consumer + "_" + WorkerID`. Consumers use explicit ACK, deliver-all, instant replay, default 30-second ACK wait, unlimited deliveries, and default `MaxAckPending` equal to concurrency. Existing consumers must be compatible and are explicitly bound, never changed or deleted by this adapter. Finite `MaxDeliver`, backoff, push delivery, multiple filters, headers-only delivery, and inactivity expiry are rejected. See source for all compatibility checks before pre-provisioning consumers.
+Missing pull consumers are created independently of `CreateStream`. The shared task consumer filters `Subject`; the answer consumer filters the owning agent's answer route and has name `Consumer + "_" + AgentID`. Consumers use explicit ACK, deliver-all, instant replay, default 30-second ACK wait, unlimited deliveries, and default `MaxAckPending` equal to concurrency. Existing consumers must be compatible and are explicitly bound, never changed or deleted by this adapter. Finite `MaxDeliver`, backoff, push delivery, multiple filters, headers-only delivery, and inactivity expiry are rejected. See source for all compatibility checks before pre-provisioning consumers.
 
 ### Publish and observe
 
@@ -183,24 +183,24 @@ The JetStream publish ACK is input storage confirmation, not the agent result. R
 
 ## JetStream attempts and recovery
 
-A task creates a random `attempt_id` and independent run at local address `js/ATTEMPT_ID`, not a chat binding at `task_id`. Correlate work with `task_id`, `attempt_id`, `run_id`, and `worker_id`, not task ID alone. Publishing the same task again as a new stream message can start another attempt. Use broker publication deduplication with a stable `Nats-Msg-Id` when appropriate, but its deduplication window is finite.
+A task creates a random `attempt_id` and independent run at local address `js/ATTEMPT_ID`, not a chat binding at `task_id`. Correlate work with `task_id`, `attempt_id`, `run_id`, and `agent_id`, not task ID alone. Publishing the same task again as a new stream message can start another attempt. Use broker publication deduplication with a stable `Nats-Msg-Id` when appropriate, but its deduplication window is finite.
 
 The adapter sends in-progress heartbeats at one third of the effective ACK wait while it reads the journal, waits for locks, executes, and publishes. It saves a bounded result locally before publishing it with a stable `Nats-Msg-Id`. Only after the broker confirms the result does it synchronously acknowledge input. A waiting result also completes this input-delivery transaction; an explicit answer is a separate message.
 
-If the same input is redelivered to the same worker with its journal, a cached result is republished without another model turn. A crash after execution but before saving that result leaves an uncertain attempt. Task redelivery starts a fresh independent attempt, not automatic continuation of the uncertain run. Another worker with a separate journal can also execute the task again. Tool effects can repeat. Preserve journals and make external operations safe to repeat.
+If the same input is redelivered to the same agent with its journal, a cached result is republished without another model turn. A crash after execution but before saving that result leaves an uncertain attempt. Task redelivery starts a fresh independent attempt, not automatic continuation of the uncertain run. Another agent with a separate journal can also execute the task again. Tool effects can repeat. Preserve journals and make external operations safe to repeat.
 
 Result publication or ACK failure leaves input eligible for redelivery. Stream retention limits can still expire or remove input. Broker deduplication can suppress repeated output only within its configured window. This is not distributed exactly-once execution or delivery.
 
 ## JetStream answers
 
-Copy the worker route and identities from the waiting result. Check `answer_subject` against your configured answer base and expected worker before publishing; do not publish to an arbitrary subject received in JSON.
+Copy the agent route and identities from the waiting result. Check `answer_subject` against your configured answer base and expected agent before publishing; do not publish to an arbitrary subject received in JSON.
 
 ```sh
-nats --server "$NATS_URL" pub ops.agent.answers.worker-1 \
-  '{"version":1,"message_id":"answer-42-1","task_id":"review-42","run_id":"RUN_ID_FROM_RESULT","worker_id":"worker-1","tool_call_id":"CURRENT_TOOL_CALL_ID","responses":[{"turn_id":"CURRENT_SUSPEND_TURN_ID","text":"Proceed in staging.","approved":true}]}'
+nats --server "$NATS_URL" pub ops.agent.answers.agent-1 \
+  '{"version":1,"message_id":"answer-42-1","task_id":"review-42","run_id":"RUN_ID_FROM_RESULT","agent_id":"agent-1","tool_call_id":"CURRENT_TOOL_CALL_ID","responses":[{"turn_id":"CURRENT_SUSPEND_TURN_ID","text":"Proceed in staging.","approved":true}]}'
 ```
 
-For a storage ACK, publish the answer with the JetStream client API shown above, using the answer route and JSON instead. All identities in this example must match the waiting result. `message_id` is a stable answer identity: retry the same logical answer with the same ID. Do not reuse it for a different answer. The adapter checks the owning worker, saved task/run association, current waiting state, and tool-call ID. The attempt ID stays the same when an answer resumes it.
+For a storage ACK, publish the answer with the JetStream client API shown above, using the answer route and JSON instead. All identities in this example must match the waiting result. `message_id` is a stable answer identity: retry the same logical answer with the same ID. Do not reuse it for a different answer. The adapter checks the owning agent, saved task/run association, current waiting state, and tool-call ID. The attempt ID stays the same when an answer resumes it.
 
 Accepted answer content and suspension are journalled before resume. A retry uses that saved content, not changed input. A saved answer result is republished without resume. If resume completed before its result was saved, the adapter can recover the completed or next-waiting snapshot. Failed, cancelled, or interrupted admitted resumes are not automatically repeated: the result reports that safe automatic continuation is unavailable. Inspect the run and resolve external effects before manual recovery.
 
@@ -208,16 +208,16 @@ Accepted answer content and suspension are journalled before resume. A retry use
 
 These are JetStream-only features. A root enables all three subjects; without a root, configure each needed base explicitly.
 
-`StatusEvent` contains `version: 1`, the four target identities, stable `event_id`, `type`, journal cursor `seq`, `time`, and `state`. Types are `task_accepted` and `run_state`. Acceptance has sequence zero. Events are read from durable journal records, not the live activity bus. They contain no prompt, tool arguments, response text, or model deltas. Deduplicate by event ID. Publication is at least once, including after restart with the same worker and journal.
+`StatusEvent` contains `version: 1`, the four target identities, stable `event_id`, `type`, journal cursor `seq`, `time`, and `state`. Types are `task_accepted` and `run_state`. Acceptance has sequence zero. Events are read from durable journal records, not the live activity bus. They contain no prompt, tool arguments, response text, or model deltas. Deduplicate by event ID. Publication is at least once, including after restart with the same agent and journal.
 
-Queries and cancellation commands use Core NATS request/reply on worker routes, even in JetStream mode. They are not retained commands:
+Queries and cancellation commands use Core NATS request/reply on agent routes, even in JetStream mode. They are not retained commands:
 
 ```sh
-nats --server "$NATS_URL" request ops.agent.queries.worker-1 \
-  '{"version":1,"task_id":"review-42","attempt_id":"ATTEMPT_ID","run_id":"RUN_ID","worker_id":"worker-1"}'
+nats --server "$NATS_URL" request ops.agent.queries.agent-1 \
+  '{"version":1,"task_id":"review-42","attempt_id":"ATTEMPT_ID","run_id":"RUN_ID","agent_id":"agent-1"}'
 
-nats --server "$NATS_URL" request ops.agent.commands.worker-1 \
-  '{"version":1,"task_id":"review-42","attempt_id":"ATTEMPT_ID","run_id":"RUN_ID","worker_id":"worker-1","turn_id":"OBSERVED_TURN_ID"}'
+nats --server "$NATS_URL" request ops.agent.commands.agent-1 \
+  '{"version":1,"task_id":"review-42","attempt_id":"ATTEMPT_ID","run_id":"RUN_ID","agent_id":"agent-1","turn_id":"OBSERVED_TURN_ID"}'
 ```
 
 All four `Target` fields are required and must match a locally admitted attempt. A control request needs a valid `_INBOX.` reply subject. Other reply routes are ignored. The command is cancellation; there is no separate action field. Optional `turn_id` protects against cancelling a later turn.
@@ -226,22 +226,30 @@ All four `Target` fields are required and must match a locally admitted attempt.
 
 ## Targeted tasks
 
-Set `TargetedTasks: true` to also accept tasks on `Subject + ".worker." + WorkerID`, for example `ops.agent.tasks.worker.worker-1`. JetStream is required. Existing input streams must already list `Subject + ".worker.*"`; the adapter does not update them. Each worker has a separate stable targeted pull consumer. Targeted routing is useful when the chosen journal must own the task, but does not make side effects exactly once.
+Set `TargetedTasks: true` to also accept tasks on `Subject + ".agent." + AgentID`, for example `ops.agent.tasks.agent.agent-1`. JetStream is required. Existing input streams must already list `Subject + ".agent.*"`; the adapter does not update them. Each agent has a separate stable targeted pull consumer. Targeted routing is useful when the chosen journal must own the task, but does not make side effects exactly once.
 
 ## Presence registry
 
-Worker discovery is opt-in and separate from the task protocol. Use `bonnie.WithPresence` with the JetStream KV store in `github.com/mark3labs/bonnie/presence/nats`. Use the same `WorkerID` in the presence and channel configurations. A presence bucket defines discovery scope independently of task streams and consumers; enabling a NATS channel does not create a registry.
+Agent discovery is opt-in and separate from the task protocol. Use `bonnie.WithPresence` with the JetStream KV store in `github.com/mark3labs/bonnie/presence/nats`. Use the same `AgentID` in the presence and channel configurations. A presence bucket defines discovery scope independently of task streams and consumers; enabling a NATS channel does not create a registry.
 
-The channel advertises its task subject, or its worker-targeted subject when `TargetedTasks` is enabled. Readiness follows the connection state and becomes false when the channel stops. Discovery does not submit tasks or guarantee that a selected worker can execute them. Expiry must not trigger automatic reassignment. See [Deployment](/guides/deployment#advertise-worker-presence) for KV creation, TTL, ownership, and watch behavior.
+The channel advertises its task subject, or its agent-targeted subject when `TargetedTasks` is enabled. Readiness follows the connection state and becomes false when the channel stops. Discovery does not submit tasks or guarantee that a selected agent can execute them. Expiry must not trigger automatic reassignment. See [Deployment](/guides/deployment#advertise-agent-presence) for KV creation, TTL, ownership, and watch behavior.
+
+## Migration from the old terminology
+
+This release changes public names and wire fields. Update code and every publisher, subscriber, query client, answer client, and ACL together. There are no compatibility aliases, and old persisted NATS result, admission, and status JSON is not decoded compatibly.
+
+Rename `WorkerID` to `AgentID` and `channel.WorkerIdentity` to `channel.AgentIdentity`. Presence records now use `presence.Identity.Agent`, and filters use `presence.Filter.Agent`. Rename JSON `worker_id` to `agent_id` and `worker` to `agent`. Agent-targeted subjects use `.agent.<id>` (and stream filters use `.agent.*`); update pre-provisioned stream subjects and subject permissions. Presence storage keys now start with `a_` instead of `w_`.
+
+For a safe rollout, drain and stop the old deployment before starting the new one. Back up each local journal and the NATS task cache. Register presence again with the new identity, and provision streams, consumer filters, and ACLs for the new subjects before sending traffic. Upgrade publishers and clients in the same rollout window. For local task-cache or journal data with old NATS JSON, use a clean local cache/journal or perform an explicit offline migration that preserves run data. Do not delete a journal blindly: it can contain durable runs and conversation history.
 
 ## Resource and security limits
 
-- `Concurrency` defaults to 4 and must be 1–1,024. JetStream workers fetch one message when an execution slot is free and alternate task and answer consumers.
+- `Concurrency` defaults to 4 and must be 1–1,024. JetStream fetches one message for each free execution slot and alternates task and answer consumers.
 - `Buffer` defaults to 64 and must be 1–65,536. It bounds Core pending messages per subscription and the work queue. Core can drop excess messages. It is not a JetStream retention setting.
 - JSON input is capped at 1 MiB. JetStream result JSON is bounded by that limit and by broker/stream limits, with 512 bytes reserved for headers and framing. If too large, the transport returns `state: "failed"`, `error: "result too large"`, and omits response and suspension. This does not change the journalled run state. Suspensions are never truncated for delivery. Inspect the saved run if needed.
-- Tasks and answers have no `auth` field and create no verified publisher principal. Broker authentication and subject ACLs are the trust boundary. A payload's `worker_id` is a route, not proof of identity.
+- Tasks and answers have no `auth` field and create no verified publisher principal. Broker authentication and subject ACLs are the trust boundary. A payload's `agent_id` is a route, not proof of identity.
 - Restrict task publishers, answer publishers, cancellation callers, and result/status readers separately. Results and query replies can contain private text or questions even though status events do not.
-- Workers need the required JetStream API, pull-consumer, ACK, publication, subscription, and request-inbox permissions. Pre-provision resources if workers must not create streams or consumers. Do not grant broad broker administration merely to make setup succeed.
+- Agents need the required JetStream API, pull-consumer, ACK, publication, subscription, and request-inbox permissions. Pre-provision resources if agents must not create streams or consumers. Do not grant broad broker administration merely to make setup succeed.
 - Keep NKey seeds, tokens, passwords, and credential files out of prompts, journals, source, and sandbox environment settings. A supplied authenticated connection remains a host resource.
 - NATS has no shared chat text controls: `/cancel` in task text is model input, not a transport cancellation command. It also has no file-upload protocol, proactive `Receiver`, or tracked schedule destination. Protect the separately mounted [HTTP API](/channels/http#authentication-and-authorization).
 

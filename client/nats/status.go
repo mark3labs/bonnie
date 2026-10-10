@@ -12,7 +12,7 @@ import (
 	protocol "github.com/mark3labs/bonnie/channel/nats"
 )
 
-// Target selects an exact task attempt and its worker.
+// Target selects an exact task attempt and its agent.
 type Target = protocol.Target
 
 // StatusEvent is a durable acceptance or run-state event, without agent activity.
@@ -69,7 +69,7 @@ func (c *Client) ConsumeEvents(ctx context.Context, handler func(context.Context
 	})
 }
 
-// Status queries the owning worker. A timeout means the worker did not reply,
+// Status queries the owning agent. A timeout means the agent did not reply,
 // not that the task failed. The target is obtained from an event or result.
 func (c *Client) Status(ctx context.Context, target Target) (Status, error) {
 	return c.requestStatus(ctx, c.cfg.QuerySubject, target)
@@ -83,7 +83,7 @@ func (c *Client) Cancel(ctx context.Context, target Target) (Status, error) {
 }
 
 func validTarget(t Target) bool {
-	return validID(t.TaskID) && validID(t.RunID) && validID(t.AttemptID) && safeToken(t.WorkerID)
+	return validID(t.TaskID) && validID(t.RunID) && validID(t.AttemptID) && safeToken(t.AgentID)
 }
 
 // CancelTurn requests cancellation of one observed turn, including pending input.
@@ -103,7 +103,7 @@ func (c *Client) requestTurnStatus(ctx context.Context, base string, target Targ
 	if err != nil {
 		return Status{}, fmt.Errorf("bonnie: client/nats: encode request: %w", err)
 	}
-	msg, err := c.nc.RequestWithContext(ctx, base+"."+target.WorkerID, data)
+	msg, err := c.nc.RequestWithContext(ctx, base+"."+target.AgentID, data)
 	if err != nil {
 		return Status{}, fmt.Errorf("bonnie: client/nats: request: %w", err)
 	}

@@ -13,7 +13,7 @@ import (
 	"github.com/mark3labs/bonnie/runtime"
 )
 
-// A target can be offline at publication. Other workers must not take its
+// A target can be offline at publication. Other agents must not take its
 // task. Shared work still runs, and deduplication is separate for each route.
 func TestTargetedDelivery(t *testing.T) {
 	t.Parallel()
@@ -30,14 +30,14 @@ func TestTargetedDelivery(t *testing.T) {
 	if err := nc.Flush(); err != nil {
 		t.Fatal(err)
 	}
-	start := func(worker string) {
+	start := func(agent string) {
 		t.Helper()
-		model := fakemodel.New(fakemodel.Say(worker), fakemodel.Say(worker))
+		model := fakemodel.New(fakemodel.Say(agent), fakemodel.Say(agent))
 		r := runtime.NewRunner(runtime.NewMemoryJournal(), runtime.KitAgent(model.Option(), func(o *kit.Options) {
 			o.SkipConfig, o.NoContextFiles, o.NoSkills, o.NoExtensions, o.NoAgents = true, true, true, true, true
 			o.DisableCoreTools, o.Quiet = true, true
 		}))
-		ch, err := transport.New(r, transport.Config{Conn: nc, RootSubject: "agent", WorkerID: worker, TargetedTasks: true, Concurrency: 1})
+		ch, err := transport.New(r, transport.Config{Conn: nc, RootSubject: "agent", AgentID: agent, TargetedTasks: true, Concurrency: 1})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -76,25 +76,25 @@ func TestTargetedDelivery(t *testing.T) {
 	if receipt, err := c.Submit(t.Context(), task); err != nil || receipt.Duplicate {
 		t.Fatalf("shared: %+v %v", receipt, err)
 	}
-	if out := read(); out.WorkerID != "one" {
+	if out := read(); out.AgentID != "one" {
 		t.Fatalf("shared went to %+v", out)
 	}
 	if _, err := sub.NextMsg(600 * time.Millisecond); err == nil {
-		t.Fatal("offline target's task was taken by another worker")
+		t.Fatal("offline target's task was taken by another agent")
 	}
 	start("two")
-	if out := read(); out.WorkerID != "two" {
+	if out := read(); out.AgentID != "two" {
 		t.Fatalf("target went to %+v", out)
 	}
 	if receipt, err := c.SubmitTo(t.Context(), "one", task); err != nil || receipt.Duplicate {
 		t.Fatalf("different target: %+v %v", receipt, err)
 	}
-	if out := read(); out.WorkerID != "one" {
+	if out := read(); out.AgentID != "one" {
 		t.Fatalf("target went to %+v", out)
 	}
-	for _, worker := range []string{"", "bad.worker", "*"} {
-		if _, err := c.SubmitTo(t.Context(), worker, task); err == nil {
-			t.Fatalf("accepted worker %q", worker)
+	for _, agent := range []string{"", "bad.agent", "*"} {
+		if _, err := c.SubmitTo(t.Context(), agent, task); err == nil {
+			t.Fatalf("accepted agent %q", agent)
 		}
 	}
 	c.cfg.TargetedTasks = false

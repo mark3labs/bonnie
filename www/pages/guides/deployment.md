@@ -111,11 +111,11 @@ Model calls, custom tools, and callbacks must observe their contexts. A callback
 
 A host that owns its own process lifecycle uses `Agent.Run(ctx)`. That method does not parse flags, install signal handling, or exit the process.
 
-**SQLite integrity is not turn coordination.** SQLite serializes writes and rejects duplicate record sequence numbers, but two servers executing the same run can interleave work. Keep one owner. Schedule locking adds exclusive scheduler ownership; it does not make the rest of the runtime a distributed worker coordinator. Use local storage with working POSIX locks, not an unsafe network filesystem.
+**SQLite integrity is not turn coordination.** SQLite serializes writes and rejects duplicate record sequence numbers, but two servers executing the same run can interleave work. Keep one owner. Schedule locking adds exclusive scheduler ownership; it does not make the rest of the runtime a distributed agent coordinator. Use local storage with working POSIX locks, not an unsafe network filesystem.
 
-## Advertise worker presence
+## Advertise agent presence
 
-Presence is optional current-state discovery. It lets a caller find a worker by identity, labels, state, and endpoint capabilities. It does not assign work, coordinate run execution, or provide failover. Hosts without `WithPresence` keep their existing behavior.
+Presence is optional current-state discovery. It lets a caller find an agent by identity, labels, state, and endpoint capabilities. It does not assign work, coordinate run execution, or provide failover. Hosts without `WithPresence` keep their existing behavior.
 
 Create a registry, then pass it to the host. This example uses a caller-owned authenticated NATS connection `nc` and a host context `ctx`:
 
@@ -123,7 +123,7 @@ Create a registry, then pass it to the host. This example uses a caller-owned au
 // Import time, github.com/mark3labs/bonnie/presence, and
 // presencenats "github.com/mark3labs/bonnie/presence/nats".
 registry, err := presencenats.New(ctx, nc, presencenats.Config{
-    Bucket: "workers",
+    Bucket: "agents",
     TTL:    30 * time.Second,
     Create: true,
 })
@@ -133,7 +133,7 @@ if err != nil {
 agent := bonnie.New(
     bonnie.WithPresence(bonnie.PresenceConfig{
         Registry:        registry,
-        WorkerID:        "report-worker-1",
+        AgentID:        "report-agent-1",
         Labels:          map[string]string{"region": "eu-west"},
         RefreshInterval: 10 * time.Second,
         Endpoints: []presence.Endpoint{{
@@ -149,7 +149,7 @@ return agent.Run(ctx)
 
 The host does not close `nc`. Keep the connection available through shutdown. JetStream must be enabled on the broker. `Bucket` is required and defines the discovery scope. `Create: true` permits creation of a missing file-backed KV bucket; otherwise provision it first. TTL defaults to 30 seconds, must be positive, and must match an existing bucket. Existing buckets keep their storage type and history; the store does not validate these settings. Restrict bucket access with NATS permissions. Labels are metadata, not authorization claims.
 
-`WorkerID` is the stable worker name. Omit `InstanceID` to generate a random ID for each host run. A different live instance cannot claim the same worker name: registration returns `presence.ErrConflict`. Use `errors.Is` to test this error. A refresh updates the same instance's record and renews its TTL. An old instance cannot unregister its replacement. Expiry permits a new instance to register, but does not prove that the old process or its tools stopped.
+`AgentID` is the stable agent name. Omit `InstanceID` to generate a random ID for each host run. A different live instance cannot claim the same agent name: registration returns `presence.ErrConflict`. Use `errors.Is` to test this error. A refresh updates the same instance's record and renews its TTL. An old instance cannot unregister its replacement. Expiry permits a new instance to register, but does not prove that the old process or its tools stopped.
 
 The host registers `ready` after listener binding and channel startup, before HTTP serving starts. Each refresh reads channel endpoint readiness again. Registration or refresh errors stop `Agent.Run` and return an error. During shutdown, the host stops refresh, advertises `draining` with endpoints not ready, shuts down lifecycle channels, and unregisters. These cleanup operations share a context bounded by `WithShutdownTimeout`; errors are returned. A forced kill leaves the KV record until TTL expiry.
 
@@ -162,23 +162,23 @@ When `Endpoints` is omitted, the host collects endpoints from mounted `channel.P
 | HTTP | `/bonnie/v1/runs` | Local input and response delivery |
 | Slack, Discord, Telegram | Configured webhook path, or its default | Local input; delivery when a bot token is configured |
 | GitHub | `/github/events` | Local input; delivery when App ID and private key are configured |
-| NATS | Task subject; with targeted tasks, `Subject + ".worker." + WorkerID` | Input and delivery; ready when connected and not stopped |
+| NATS | Task subject; with targeted tasks, `Subject + ".agent." + AgentID` | Input and delivery; ready when connected and not stopped |
 
-`Input` and `Delivery` are independent capability flags. `Ready` reports current input readiness, not guaranteed execution or remote platform health. Built-in providers do not publish credentials. Keep secrets out of custom labels and endpoint overrides too. A channel's non-empty `channel.WorkerIdentity()` must match `PresenceConfig.WorkerID`; use the same worker ID in `WithNATS`.
+`Input` and `Delivery` are independent capability flags. `Ready` reports current input readiness, not guaranteed execution or remote platform health. Built-in providers do not publish credentials. Keep secrets out of custom labels and endpoint overrides too. A channel's non-empty `channel.AgentIdentity()` must match `PresenceConfig.AgentID`; use the same agent ID in `WithNATS`.
 
-### Discover and watch workers
+### Discover and watch agents
 
-The NATS store implements `presence.Registry`, `presence.Discoverer`, `presence.Watcher`, and `presence.TTLStore`. Discover returns live records in worker, then instance, order. Empty filter fields impose no restriction; labels select exact values.
+The NATS store implements `presence.Registry`, `presence.Discoverer`, `presence.Watcher`, and `presence.TTLStore`. Discover returns live records in agent, then instance, order. Empty filter fields impose no restriction; labels select exact values.
 
 ```go
-workers, err := registry.Discover(ctx, presence.Filter{
+agents, err := registry.Discover(ctx, presence.Filter{
     State:  presence.Ready,
     Labels: map[string]string{"region": "eu-west"},
 })
 if err != nil {
     return err
 }
-_ = workers
+_ = agents
 snapshot, changes, err := registry.Watch(ctx, presence.Filter{})
 if err != nil {
     return err
@@ -197,7 +197,13 @@ Watch polls at `min(TTL/3, one second)`. It emits additions and timestamp update
 
 For process-local tests, `presence.NewMemoryStore()` provides registration, discovery, and a polled watch. It stores an explicitly supplied `Record.ExpiresAt`, but has no default TTL or lease renewal. Host registration does not set expiry for this store. It is not cross-process discovery.
 
-See [Options](/reference/options#worker-presence) for all host fields, [NATS](/channels/nats#targeted-tasks) for targeted submission, and the [presence godoc](https://pkg.go.dev/github.com/mark3labs/bonnie/presence) for custom stores.
+See [Options](/reference/options#agent-presence) for all host fields, [NATS](/channels/nats#targeted-tasks) for targeted submission, and the [presence godoc](https://pkg.go.dev/github.com/mark3labs/bonnie/presence) for custom stores.
+
+## Migrate worker identity names
+
+The worker-to-agent rename changes public API names, presence identity fields, JSON fields, NATS subjects, and presence keys. There are no compatibility aliases. Rename `WorkerID` to `AgentID`, `channel.WorkerIdentity` to `channel.AgentIdentity`, `presence.Identity.Worker` to `presence.Identity.Agent`, and `presence.Filter.Worker` to `presence.Filter.Agent`. Change JSON `worker_id` to `agent_id` and `worker` to `agent`. Update targeted subject publishers from `.worker.<id>` to `.agent.<id>`, and provision the new `.agent.*` stream filters and matching ACLs.
+
+Old persisted NATS result, admission, and status JSON is not decoded compatibly. Drain and stop the old deployment, back up each local journal and NATS task cache, then register presence again under the new identity. Provision stream subjects and permissions, and upgrade publishers and clients together before resuming traffic. Use a clean local NATS task cache/journal or an explicit offline migration that preserves run data. Do not blindly delete a journal; it can hold durable run history. New presence keys use the `a_` prefix instead of `w_`.
 
 ## Verify health and recovery
 

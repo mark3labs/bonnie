@@ -13,7 +13,7 @@ import (
 )
 
 // Subjects contains the literal protocol subjects. Answers, Commands, and
-// Queries are bases whose worker routes append a single worker token.
+// Queries are bases whose agent routes append a single agent token.
 type Subjects struct {
 	Tasks    string
 	Results  string
@@ -62,7 +62,7 @@ func ResolveSubjects(root string, s Subjects) (Subjects, error) {
 // ValidateTargetedSubjects rejects protocol routes inside the targeted task
 // namespace. This prevents a result or answer from being consumed as a task.
 func ValidateTargetedSubjects(s Subjects) error {
-	base := s.Tasks + ".worker"
+	base := s.Tasks + ".agent"
 	for _, subject := range []string{s.Answers, s.Results, s.Events, s.Commands, s.Queries} {
 		if subject == base || strings.HasPrefix(subject, base+".") || (subject != "" && strings.HasPrefix(base, subject+".")) {
 			return errors.New("bonnie: nats: targeted task routes overlap protocol subjects")

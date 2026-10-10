@@ -16,7 +16,7 @@ must observe their execution context. Cancellation is not a forced process kill.
 | Discord | Register `/cancel` with no options; `Config.CancelCommand` changes its name. `/ask` with message `/cancel` also works |
 | Telegram | `/cancel` or `/cancel@botname`, in a private chat or group/topic |
 | GitHub | Comment `@bot /cancel` in the issue, PR, or review conversation; the comment admission rules still apply |
-| NATS | Worker-specific command subject, or `client.CancelTurn(ctx, target, turnID)` |
+| NATS | Agent-specific command subject, or `client.CancelTurn(ctx, target, turnID)` |
 
 Slack does not supply thread identity in slash commands. A public-channel
 command must supply a thread timestamp. BONNIE never guesses the latest thread.
@@ -58,6 +58,6 @@ command first. Snapshot shows the cancelled state and no pending input in this
 interval. A later Start begins a new turn; a stale Resume does not approve work.
 
 One Runner must own execution of a run. Commands do not route to a different
-process executing the same journal. NATS directs controls to the owning worker;
+process executing the same journal. NATS directs controls to the owning agent;
 HTTP deployments must route controls to the execution owner. A shared SQLite
 file is not a distributed cancellation coordinator.

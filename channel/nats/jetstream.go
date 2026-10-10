@@ -36,7 +36,7 @@ func safeToken(s string) bool {
 
 func validateJetStream(cfg Config) error {
 	if cfg.Stream == "" {
-		if cfg.Consumer != "" || cfg.WorkerID != "" || cfg.CreateStream || cfg.TargetedTasks {
+		if cfg.Consumer != "" || cfg.AgentID != "" || cfg.CreateStream || cfg.TargetedTasks {
 			return errors.New("bonnie: channel/nats: Stream is required for JetStream options")
 		}
 		return nil
@@ -46,11 +46,11 @@ func validateJetStream(cfg Config) error {
 			return err
 		}
 	}
-	if cfg.WorkerID == "" {
-		return errors.New("bonnie: channel/nats: WorkerID is required for JetStream")
+	if cfg.AgentID == "" {
+		return errors.New("bonnie: channel/nats: AgentID is required for JetStream")
 	}
-	if !safeToken(cfg.Stream) || !safeToken(cfg.Consumer) || !safeToken(cfg.WorkerID) {
-		return errors.New("bonnie: channel/nats: stream, consumer, and worker must be safe tokens (letters, digits, hyphen)")
+	if !safeToken(cfg.Stream) || !safeToken(cfg.Consumer) || !safeToken(cfg.AgentID) {
+		return errors.New("bonnie: channel/nats: stream, consumer, and agent must be safe tokens (letters, digits, hyphen)")
 	}
 	if strings.HasPrefix(cfg.Subject, cfg.AnswerSubject+".") || strings.HasPrefix(cfg.ResultSubject, cfg.AnswerSubject+".") {
 		return errors.New("bonnie: channel/nats: answer routes overlap task or result subject")
@@ -58,7 +58,7 @@ func validateJetStream(cfg Config) error {
 	return nil
 }
 
-func (c *Channel) answerRoute() string { return c.cfg.AnswerSubject + "." + c.cfg.WorkerID }
+func (c *Channel) answerRoute() string { return c.cfg.AnswerSubject + "." + c.cfg.AgentID }
 
 // startJetStream is called with the lifecycle lock held. Explicit Bind prevents
 // the NATS library from changing or deleting an operator-owned consumer.
@@ -81,12 +81,12 @@ func (c *Channel) startJetStream(ctx context.Context, nc *gonats.Conn) error {
 	}
 	inputSubjects := []string{c.cfg.Subject, c.cfg.AnswerSubject + ".*"}
 	if c.cfg.TargetedTasks {
-		inputSubjects = append(inputSubjects, c.cfg.Subject+".worker.*")
+		inputSubjects = append(inputSubjects, c.cfg.Subject+".agent.*")
 	}
 	info, err := js.StreamInfo(c.cfg.Stream, gonats.Context(ready))
 	if errors.Is(err, gonats.ErrStreamNotFound) && c.cfg.CreateStream {
 		info, err = js.AddStream(&gonats.StreamConfig{Name: c.cfg.Stream, Subjects: inputSubjects, Storage: gonats.FileStorage}, gonats.Context(ready))
-		// Another worker can create the stream at the same time.
+		// Another agent can create the stream at the same time.
 		if err != nil {
 			info, err = js.StreamInfo(c.cfg.Stream, gonats.Context(ready))
 		}
@@ -95,9 +95,9 @@ func (c *Channel) startJetStream(ctx context.Context, nc *gonats.Conn) error {
 		return fmt.Errorf("bonnie: channel/nats: input stream: %w", err)
 	}
 	if !slices.Contains(info.Config.Subjects, c.cfg.Subject) || !slices.Contains(info.Config.Subjects, c.cfg.AnswerSubject+".*") || info.Config.Retention != gonats.LimitsPolicy {
-		return errors.New("bonnie: channel/nats: input stream must retain tasks and worker answer routes with limits retention")
+		return errors.New("bonnie: channel/nats: input stream must retain tasks and agent answer routes with limits retention")
 	}
-	if c.cfg.TargetedTasks && !slices.Contains(info.Config.Subjects, c.cfg.Subject+".worker.*") {
+	if c.cfg.TargetedTasks && !slices.Contains(info.Config.Subjects, c.cfg.Subject+".agent.*") {
 		return errors.New("bonnie: channel/nats: input stream must retain targeted task routes")
 	}
 	if _, err := c.resultLimit(ready, js, nc); err != nil {
@@ -106,12 +106,12 @@ func (c *Channel) startJetStream(ctx context.Context, nc *gonats.Conn) error {
 	var ackWait time.Duration
 	routes := []string{c.cfg.Subject, c.answerRoute()}
 	if c.cfg.TargetedTasks {
-		routes = append(routes, c.cfg.Subject+".worker."+c.cfg.WorkerID)
+		routes = append(routes, c.cfg.Subject+".agent."+c.cfg.AgentID)
 	}
 	for i, subject := range routes {
 		name := c.cfg.Consumer
 		if i == 1 {
-			name += "_" + c.cfg.WorkerID
+			name += "_" + c.cfg.AgentID
 		}
 		if i == 2 {
 			name = streamName("bonnie-target-", c.cfg.Consumer+"."+subject)
@@ -146,7 +146,7 @@ func (c *Channel) startJetStream(ctx context.Context, nc *gonats.Conn) error {
 		return err
 	}
 	c.started, c.cancel, c.done, c.ackWait = true, stop, make(chan struct{}), ackWait
-	// Each worker requests one message only when it has a free execution slot.
+	// Each agent requests one message only when it has a free execution slot.
 	// Alternate consumers so waiting answers cannot be starved by a task backlog.
 	var wg sync.WaitGroup
 	if c.cfg.EventSubject != "" {
@@ -165,9 +165,9 @@ func (c *Channel) startJetStream(ctx context.Context, nc *gonats.Conn) error {
 			}
 		})
 	}
-	for worker := range c.cfg.Concurrency {
+	for agent := range c.cfg.Concurrency {
 		wg.Go(func() {
-			index := worker % len(routes)
+			index := agent % len(routes)
 			for workCtx.Err() == nil {
 				fetchCtx, cancel := context.WithTimeout(workCtx, 250*time.Millisecond)
 				msgs, err := c.subs[index].Fetch(1, gonats.Context(fetchCtx))
@@ -218,7 +218,7 @@ func (c *Channel) cacheKey(kind string, ids ...string) string {
 	b.WriteByte('.')
 	b.WriteString(c.cfg.Consumer)
 	b.WriteByte('.')
-	b.WriteString(c.cfg.WorkerID)
+	b.WriteString(c.cfg.AgentID)
 	b.WriteByte('.')
 	b.WriteString(kind)
 	for _, id := range ids {
@@ -310,7 +310,7 @@ func (c *Channel) resultLimit(ctx context.Context, js gonats.JetStreamContext, n
 	// independently of broker headers.
 	limit = min(int64(maxMessageBytes), limit-512)
 	// Reserve room for maximum-length identities, including JSON escaping.
-	metadata := Result{Version: 1, TaskID: strings.Repeat("<", 256), RunID: strings.Repeat("<", 256), AttemptID: strings.Repeat("a", 32), WorkerID: c.cfg.WorkerID, AnswerSubject: c.answerRoute(), State: runtime.RunFailed, Error: "result too large"}
+	metadata := Result{Version: 1, TaskID: strings.Repeat("<", 256), RunID: strings.Repeat("<", 256), AttemptID: strings.Repeat("a", 32), AgentID: c.cfg.AgentID, AnswerSubject: c.answerRoute(), State: runtime.RunFailed, Error: "result too large"}
 	data, err := json.Marshal(metadata)
 	if err != nil {
 		return 0, err
@@ -441,7 +441,7 @@ func (c *Channel) handleJetStream(ctx context.Context, msg *gonats.Msg) {
 		return
 	}
 	answerKey := ""
-	if err == nil && isAnswer && answer.Version == 1 && answer.WorkerID == c.cfg.WorkerID && validID(answer.RunID) && validID(answer.MessageID) {
+	if err == nil && isAnswer && answer.Version == 1 && answer.AgentID == c.cfg.AgentID && validID(answer.RunID) && validID(answer.MessageID) {
 		answerKey = c.cacheKey("answer", answer.RunID, answer.MessageID)
 		cached, loadErr = c.loadResult(ctx, answerKey)
 		if loadErr != nil {
@@ -453,7 +453,7 @@ func (c *Channel) handleJetStream(ctx context.Context, msg *gonats.Msg) {
 			return
 		}
 	}
-	result := Result{Version: 1, TaskID: task.TaskID, WorkerID: c.cfg.WorkerID, AnswerSubject: c.answerRoute()}
+	result := Result{Version: 1, TaskID: task.TaskID, AgentID: c.cfg.AgentID, AnswerSubject: c.answerRoute()}
 	var taskAdmission *admittedTask
 	if err == nil && !isAnswer {
 		taskAdmission, loadErr = c.loadTaskAdmission(ctx, key)
@@ -481,7 +481,7 @@ func (c *Channel) handleJetStream(ctx context.Context, msg *gonats.Msg) {
 	}
 	var run *runtime.Run
 	if err == nil && isAnswer {
-		if !validID(answer.MessageID) || answer.WorkerID != c.cfg.WorkerID || !validID(answer.RunID) || answer.ToolCallID == "" || len(answer.Responses) == 0 {
+		if !validID(answer.MessageID) || answer.AgentID != c.cfg.AgentID || !validID(answer.RunID) || answer.ToolCallID == "" || len(answer.Responses) == 0 {
 			err = errors.New("invalid answer route or identity")
 		} else {
 			admission, admissionErr := c.loadAdmission(ctx, answerKey)

@@ -266,10 +266,10 @@ type Lifecycle interface {
 	Shutdown(ctx context.Context) error
 }
 
-// WorkerIdentity is an optional capability for channels that process work as
-// a named worker.
-type WorkerIdentity interface {
-	WorkerIdentity() string
+// AgentIdentity is an optional capability for channels that process work as
+// a named agent.
+type AgentIdentity interface {
+	AgentIdentity() string
 }
 
 // PresenceProvider is an optional capability implemented by channels that can

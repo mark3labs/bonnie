@@ -12,7 +12,7 @@ func TestRootSubjectDefaults(t *testing.T) {
 	t.Parallel()
 	nc, _ := jsServer(t)
 	r := runtime.NewRunner(runtime.NewMemoryJournal(), nil)
-	c, err := New(r, Config{Conn: nc, RootSubject: "however.long.i.want", WorkerID: "one", Subject: "custom.tasks"})
+	c, err := New(r, Config{Conn: nc, RootSubject: "however.long.i.want", AgentID: "one", Subject: "custom.tasks"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +30,7 @@ func TestRootSubjectDefaults(t *testing.T) {
 		t.Fatalf("legacy config %+v", legacy.cfg)
 	}
 	for _, root := range []string{"a.*", "a..b", "a.>", " a", "a."} {
-		if _, err := New(r, Config{Conn: nc, RootSubject: root, WorkerID: "one"}); err == nil {
+		if _, err := New(r, Config{Conn: nc, RootSubject: root, AgentID: "one"}); err == nil {
 			t.Fatalf("accepted root %q", root)
 		}
 	}

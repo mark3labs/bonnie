@@ -33,9 +33,9 @@ func (a *blockingAgent) PromptResult(ctx context.Context, _ string) (*kit.TurnRe
 func (*blockingAgent) InjectSteer(string) {}
 func (*blockingAgent) Close() error       { return nil }
 
-// Running and buffered tasks must stop with the lifecycle context. Workers
+// Running and buffered tasks must stop with the lifecycle context. Agents
 // never exceed the configured limit, and Shutdown waits for active agents.
-func TestWorkerBoundAndCancellation(t *testing.T) {
+func TestAgentBoundAndCancellation(t *testing.T) {
 	t.Parallel()
 	nc := testServer(t)
 	var active, peak atomic.Int32
@@ -59,7 +59,7 @@ func TestWorkerBoundAndCancellation(t *testing.T) {
 		select {
 		case <-entered:
 		case <-time.After(5 * time.Second):
-			t.Fatal("worker did not start")
+			t.Fatal("agent did not start")
 		}
 	}
 	cancel()

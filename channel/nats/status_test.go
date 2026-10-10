@@ -18,7 +18,7 @@ func TestStatusRecoveryAcrossRunners(t *testing.T) {
 	t.Parallel()
 	nc, js := jsServer(t)
 	journal := runtime.NewMemoryJournal()
-	cfg := Config{Conn: nc, RootSubject: "factory", WorkerID: "one", CreateStream: true}
+	cfg := Config{Conn: nc, RootSubject: "factory", AgentID: "one", CreateStream: true}
 	first, err := New(runtime.NewRunner(journal, nil), cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -84,7 +84,7 @@ func TestStatusRecoveryAcrossRunners(t *testing.T) {
 
 // Control subscriptions do not share execution slots. Cancellation works when
 // all execution slots are occupied, and its final state is a separate event.
-func TestStatusCancelBusyWorker(t *testing.T) {
+func TestStatusCancelBusyAgent(t *testing.T) {
 	t.Parallel()
 	nc, js := jsServer(t)
 	var active, peak atomic.Int32
@@ -92,7 +92,7 @@ func TestStatusCancelBusyWorker(t *testing.T) {
 	r := runtime.NewRunner(runtime.NewMemoryJournal(), func(context.Context, *runtime.Session) (runtime.Agent, error) {
 		return &blockingAgent{active: &active, peak: &peak, entered: entered}, nil
 	})
-	c := jsChannel(t, r, Config{Conn: nc, RootSubject: "busy", WorkerID: "one", Concurrency: 1, CreateStream: true})
+	c := jsChannel(t, r, Config{Conn: nc, RootSubject: "busy", AgentID: "one", Concurrency: 1, CreateStream: true})
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
 	defer cancel()
 	jsSend(t, js, "busy.tasks", Task{Version: 1, TaskID: "task", Text: "work"})

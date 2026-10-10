@@ -67,7 +67,7 @@ func TestLiveTaskCompleted(t *testing.T) {
 	))
 
 	// The client creates the result stream. The channel creates the input
-	// stream for tasks and worker answers, and uses a durable JS consumer.
+	// stream for tasks and agent answers, and uses a durable JS consumer.
 	nc, _ := broker(t)
 	cfg := config()
 	c, err := New(nc, cfg)
@@ -75,11 +75,11 @@ func TestLiveTaskCompleted(t *testing.T) {
 		t.Fatalf("create client: %v", err)
 	}
 	const inputStream = "INPUT"
-	const workerID = "live-worker"
+	const agentID = "live-agent"
 	ch, err := transport.New(runner, transport.Config{
 		Conn: nc, Subject: cfg.TaskSubject, ResultSubject: cfg.ResultSubject,
-		AnswerSubject: cfg.AnswerSubject, Stream: inputStream, Consumer: "workers",
-		WorkerID: workerID, CreateStream: true, Concurrency: 1,
+		AnswerSubject: cfg.AnswerSubject, Stream: inputStream, Consumer: "agents",
+		AgentID: agentID, CreateStream: true, Concurrency: 1,
 	})
 	if err != nil {
 		t.Fatalf("create channel: %v", err)
@@ -121,7 +121,7 @@ func TestLiveTaskCompleted(t *testing.T) {
 		t.Fatalf("consume live result: %v", err)
 	}
 	if result.Version != 1 || result.TaskID != taskID || result.RunID == "" ||
-		result.WorkerID != workerID || result.Error != "" ||
+		result.AgentID != agentID || result.Error != "" ||
 		result.State != runtime.RunCompleted || result.Suspend != nil {
 		t.Fatalf("want a completed result for %q, got %+v", taskID, result)
 	}

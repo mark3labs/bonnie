@@ -27,7 +27,7 @@ func TestCacheKeysFitSQLite(t *testing.T) {
 	})
 	seen := map[string]bool{}
 	for _, size := range []int{1, 128} {
-		c := &Channel{cfg: Config{Stream: strings.Repeat("s", size), Consumer: strings.Repeat("c", size), WorkerID: strings.Repeat("w", size)}}
+		c := &Channel{cfg: Config{Stream: strings.Repeat("s", size), Consumer: strings.Repeat("c", size), AgentID: strings.Repeat("w", size)}}
 		for _, kind := range []string{"input", "run", "status", "answer"} {
 			ids := []string{strings.Repeat("r", 256)}
 			if kind == "answer" {
@@ -46,8 +46,8 @@ func TestCacheKeysFitSQLite(t *testing.T) {
 			}
 		}
 	}
-	c := &Channel{cfg: Config{Stream: "INPUT", Consumer: "workers", WorkerID: "one"}}
-	want := runtime.ReservedRunPrefix + "nats.INPUT.workers.one.answer." + hex.EncodeToString([]byte("run")) + "." + hex.EncodeToString([]byte("message"))
+	c := &Channel{cfg: Config{Stream: "INPUT", Consumer: "agents", AgentID: "one"}}
+	want := runtime.ReservedRunPrefix + "nats.INPUT.agents.one.answer." + hex.EncodeToString([]byte("run")) + "." + hex.EncodeToString([]byte("message"))
 	if got := c.cacheKey("answer", "run", "message"); got != want {
 		t.Fatalf("legacy key = %q, want %q", got, want)
 	}
@@ -82,7 +82,7 @@ func TestJetStreamLongNamesSQLite(t *testing.T) {
 	if _, err := js.AddStream(&gonats.StreamConfig{Name: cfg.Stream, Subjects: []string{"tasks", "answers.*"}}); err != nil {
 		t.Fatal(err)
 	}
-	for name, subject := range map[string]string{cfg.Consumer: "tasks", cfg.Consumer + "_" + cfg.WorkerID: "answers." + cfg.WorkerID} {
+	for name, subject := range map[string]string{cfg.Consumer: "tasks", cfg.Consumer + "_" + cfg.AgentID: "answers." + cfg.AgentID} {
 		if _, err := js.AddConsumer(cfg.Stream, &gonats.ConsumerConfig{Durable: name, FilterSubject: subject, AckPolicy: gonats.AckExplicitPolicy, AckWait: 100 * time.Millisecond, MaxAckPending: 2}); err != nil {
 			t.Fatal(err)
 		}
@@ -94,7 +94,7 @@ func TestJetStreamLongNamesSQLite(t *testing.T) {
 	if waiting.State != runtime.RunWaiting || waiting.Suspend == nil || waiting.Error != "" {
 		t.Fatalf("waiting: %+v", waiting)
 	}
-	answer := Answer{Version: 1, MessageID: strings.Repeat("m", 256), TaskID: "task", RunID: waiting.RunID, WorkerID: cfg.WorkerID, ToolCallID: waiting.Suspend.ToolCallID, Responses: []runtime.InputResponse{{Text: "here"}}}
+	answer := Answer{Version: 1, MessageID: strings.Repeat("m", 256), TaskID: "task", RunID: waiting.RunID, AgentID: cfg.AgentID, ToolCallID: waiting.Suspend.ToolCallID, Responses: []runtime.InputResponse{{Text: "here"}}}
 	jsSend(t, js, waiting.AnswerSubject, answer)
 	completed := receive(t, sub)
 	if completed.State != runtime.RunCompleted || completed.Error != "" || completed.Response != "done" {

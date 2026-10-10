@@ -31,7 +31,7 @@ func TestRootStatusesAndQueries(t *testing.T) {
 		o.DisableCoreTools = true
 		o.Quiet = true
 	}))
-	ch, err := transport.New(r, transport.Config{Conn: nc, RootSubject: "company.agents.code", WorkerID: "one", CreateStream: true})
+	ch, err := transport.New(r, transport.Config{Conn: nc, RootSubject: "company.agents.code", AgentID: "one", CreateStream: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestRootStatusesAndQueries(t *testing.T) {
 }
 
 // Root subject defaults and individual overrides have the same meaning in the
-// publisher and worker. Invalid roots and overlapping worker routes fail early.
+// publisher and agent. Invalid roots and overlapping agent routes fail early.
 func TestRootValidationAndOverrides(t *testing.T) {
 	t.Parallel()
 	nc, _ := broker(t)
@@ -104,7 +104,7 @@ func TestRootValidationAndOverrides(t *testing.T) {
 	if c.cfg.TaskSubject != "custom.tasks" || c.cfg.AnswerSubject != "tasks.answers" || c.cfg.ResultSubject != "custom.results" {
 		t.Fatalf("config %+v", c.cfg)
 	}
-	if _, err := New(nc, Config{RootSubject: "a", EventSubject: "a.answers.worker", CreateStream: true}); err == nil {
+	if _, err := New(nc, Config{RootSubject: "a", EventSubject: "a.answers.agent", CreateStream: true}); err == nil {
 		t.Fatal("accepted overlap")
 	}
 }

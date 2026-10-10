@@ -117,7 +117,7 @@ func TestParentWaitsForScheduledChild(t *testing.T) {
 		a := &fakeAgent{session: s, turns: []*kit.TurnResult{{Response: "done"}}}
 		if s.RunID() == "parent" {
 			a.onPrompt = func(*Session) error {
-				_, err := r.SpawnChild(ctx, "parent", "worker", Input{Text: "child"}, false)
+				_, err := r.SpawnChild(ctx, "parent", "agent", Input{Text: "child"}, false)
 				return err
 			}
 		}

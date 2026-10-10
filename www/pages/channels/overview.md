@@ -97,11 +97,11 @@ NATS uses broker authentication and subject permissions. Its JSON payloads do no
 
 Ordinary chat delivery is asynchronous and best-effort. A webhook ACK is not a completed turn or a durable delivery receipt. Delivery failures are logged; inspect the saved run with `bonnie runs list` and `bonnie runs show --journal .bonnie RUN_ID`.
 
-## Worker discovery
+## Agent discovery
 
-Optional `bonnie.WithPresence` advertises worker identity, labels, state, and endpoint capabilities. All six built-in transports implement `channel.PresenceProvider`. Custom channels can implement `PresenceEndpoints() []presence.Endpoint` without changing the required channel interface. Channels that expose a named worker can implement `channel.WorkerIdentity`; a non-empty identity must match the host's presence worker ID.
+Optional `bonnie.WithPresence` advertises agent identity, labels, state, and endpoint capabilities. All six built-in transports implement `channel.PresenceProvider`. Custom channels can implement `PresenceEndpoints() []presence.Endpoint` without changing the required channel interface. Channels that expose a named agent can implement `channel.AgentIdentity`; a non-empty identity must match the host's presence agent ID.
 
-Presence is not a routing or scheduling service. Endpoint readiness describes local input readiness, not remote platform health or guaranteed execution. HTTP and webhook addresses are relative paths unless the host replaces the endpoint list with public addresses. See [Deployment](/guides/deployment#advertise-worker-presence) for configuration, discovery watches, and expiry limits.
+Presence is not a routing or scheduling service. Endpoint readiness describes local input readiness, not remote platform health or guaranteed execution. HTTP and webhook addresses are relative paths unless the host replaces the endpoint list with public addresses. See [Deployment](/guides/deployment#advertise-agent-presence) for configuration, discovery watches, and expiry limits.
 
 ## Scheduled channel work
 

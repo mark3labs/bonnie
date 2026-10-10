@@ -207,7 +207,7 @@ func unfinished(o Occurrence) bool {
 	return o.State == Pending || o.State == Running || o.State == Waiting
 }
 func (e *Engine) launchLocked(d Definition, o Occurrence) {
-	// Limit active workers. Accepted excess work stays pending in the journal.
+	// Limit active executions. Accepted excess work stays pending in the journal.
 	if e.closed || e.active[o.Fire.ID] || len(e.active) >= 16 {
 		return
 	}
@@ -536,7 +536,7 @@ func (e *Engine) Start(ctx context.Context) error {
 }
 
 // Shutdown refuses new fires, drains work, then cancels work at the deadline.
-// It waits for cancelled workers before the host closes their journal.
+// It waits for cancelled executions before the host closes their journal.
 func (e *Engine) Shutdown(ctx context.Context) error {
 	e.mu.Lock()
 	e.closed = true

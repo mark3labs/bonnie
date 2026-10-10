@@ -11,15 +11,15 @@ func TestMemoryStoreRegisterDiscoverAndUnregister(t *testing.T) {
 	t.Parallel()
 	store := NewMemoryStore()
 	ctx := context.Background()
-	first := Record{Identity: Identity{Worker: "worker", Instance: "b"}, State: "ready", Endpoints: []Endpoint{{Address: "http://b", Input: true}}, Labels: map[string]string{"zone": "west"}}
-	second := Record{Identity: Identity{Worker: "worker", Instance: "a"}, State: "draining"}
+	first := Record{Identity: Identity{Agent: "agent", Instance: "b"}, State: "ready", Endpoints: []Endpoint{{Address: "http://b", Input: true}}, Labels: map[string]string{"zone": "west"}}
+	second := Record{Identity: Identity{Agent: "agent", Instance: "a"}, State: "draining"}
 	if err := store.Register(ctx, first); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.Register(ctx, second); !errors.Is(err, ErrConflict) {
 		t.Fatalf("expected conflict, got %v", err)
 	}
-	second.Identity.Worker = "other"
+	second.Identity.Agent = "other"
 	if err := store.Register(ctx, second); err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +37,7 @@ func TestMemoryStoreRegisterDiscoverAndUnregister(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(again) != 2 || again[0].Identity.Worker != "other" || again[1].Labels["zone"] != "west" {
+	if len(again) != 2 || again[0].Identity.Agent != "agent" || again[1].Identity.Agent != "other" || again[0].Labels["zone"] != "west" {
 		t.Fatalf("store changed or results unordered: %#v", again)
 	}
 	if err := store.Unregister(ctx, first.Identity); err != nil {
@@ -72,7 +72,7 @@ func TestMemoryWatchDeletionAndCancellation(t *testing.T) {
 	if err := s.Register(ctx, Record{Identity: id}); err != nil {
 		t.Fatal(err)
 	}
-	snapshot, events, err := s.Watch(ctx, Filter{Worker: "watched"})
+	snapshot, events, err := s.Watch(ctx, Filter{Agent: "watched"})
 	if err != nil || len(snapshot) != 1 {
 		t.Fatalf("snapshot %#v, err %v", snapshot, err)
 	}
@@ -106,7 +106,7 @@ func TestRecordValidationAndContext(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := store.Register(ctx, Record{Identity: Identity{Worker: "w", Instance: "i"}}); !errors.Is(err, context.Canceled) {
+	if err := store.Register(ctx, Record{Identity: Identity{Agent: "w", Instance: "i"}}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected cancellation, got %v", err)
 	}
 	if _, err := store.Discover(ctx, Filter{}); !errors.Is(err, context.Canceled) {

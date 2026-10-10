@@ -31,7 +31,7 @@ func TestRootWaitingStatusAndResume(t *testing.T) {
 		o.DisableCoreTools = true
 		o.Quiet = true
 	}, kit.WithTools(runtime.AskTool())))
-	ch, err := transport.New(r, transport.Config{Conn: nc, RootSubject: "waiting", WorkerID: "one", CreateStream: true})
+	ch, err := transport.New(r, transport.Config{Conn: nc, RootSubject: "waiting", AgentID: "one", CreateStream: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +54,7 @@ func TestRootWaitingStatusAndResume(t *testing.T) {
 			t.Fatalf("outcome %+v", out)
 		}
 		if out.State == runtime.RunWaiting {
-			target = Target{TaskID: out.TaskID, AttemptID: out.AttemptID, RunID: out.RunID, WorkerID: out.WorkerID}
+			target = Target{TaskID: out.TaskID, AttemptID: out.AttemptID, RunID: out.RunID, AgentID: out.AgentID}
 			status, err := c.Status(ctx, target)
 			if err != nil || status.Error != "" || status.State != runtime.RunWaiting || status.Suspend == nil {
 				t.Fatalf("snapshot %+v %v", status, err)

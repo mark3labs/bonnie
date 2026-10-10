@@ -1,14 +1,14 @@
 // Package nats provides a typed JetStream client for channel/nats.
 //
-// Delivery is at least once. Results can repeat, and separate workers can run
+// Delivery is at least once. Results can repeat, and separate agents can run
 // the same task again. Handlers must tolerate duplicates. This client does not
 // execute agents or keep run state. The caller owns the NATS connection.
 //
 // The raw protocol is JSON: version 1 Task on TaskSubject, Result on
-// ResultSubject, and Answer on AnswerSubject+"."+WorkerID. A broker publish
+// ResultSubject, and Answer on AnswerSubject+"."+AgentID. A broker publish
 // acknowledgement confirms storage, not execution. Nats-Msg-Id suppresses
 // repeats only within the stream's duplicate window. Use NATS permissions to
-// restrict access; result content is not proof of worker identity.
+// restrict access; result content is not proof of agent identity.
 package nats
 
 import (
@@ -47,12 +47,12 @@ type Config struct {
 	RootSubject string
 	// EventSubject receives status-only events. Empty disables status consumption.
 	EventSubject string
-	// CommandSubject and QuerySubject select worker-routed request/reply bases.
+	// CommandSubject and QuerySubject select agent-routed request/reply bases.
 	CommandSubject string
 	QuerySubject   string
 	// InputStream selects the input stream for root-based provisioning.
 	InputStream string
-	// TargetedTasks enables SubmitTo and includes TaskSubject+".worker.*"
+	// TargetedTasks enables SubmitTo and includes TaskSubject+".agent.*"
 	// when provisioning root inputs. Existing streams are never changed.
 	TargetedTasks bool
 	// EventStream and EventConsumer select durable status resources.
@@ -62,7 +62,7 @@ type Config struct {
 	EventConsumer string
 	TaskSubject   string
 	ResultSubject string
-	// AnswerSubject is a base. Answers go only to base+"."+WorkerID.
+	// AnswerSubject is a base. Answers go only to base+"."+AgentID.
 	AnswerSubject string
 	// ResultStream defaults to DefaultResultStreamName(ResultSubject).
 	// Set it to use an operator-provisioned stream with a different name.
@@ -148,7 +148,7 @@ func New(nc *gonats.Conn, cfg Config) (*Client, error) {
 	if cfg.RootSubject != "" {
 		inputs := []string{cfg.TaskSubject, cfg.AnswerSubject + ".*"}
 		if cfg.TargetedTasks {
-			inputs = append(inputs, cfg.TaskSubject+".worker.*")
+			inputs = append(inputs, cfg.TaskSubject+".agent.*")
 		}
 		if err := protocol.EnsureStream(ctx, js, cfg.InputStream, inputs, cfg.CreateStream); err != nil {
 			return nil, err
@@ -240,18 +240,18 @@ func (c *Client) Submit(ctx context.Context, task Task) (Receipt, error) {
 	return c.submit(ctx, c.cfg.TaskSubject, task)
 }
 
-// SubmitTo stores a task for one worker. TargetedTasks must be enabled on
-// the client and worker. An offline worker's task remains in JetStream until
+// SubmitTo stores a task for one agent. TargetedTasks must be enabled on
+// the client and agent. An offline agent's task remains in JetStream until
 // retention limits remove it. It never falls back to the shared task route.
-// Reuse TaskID only for retries on the same worker route.
-func (c *Client) SubmitTo(ctx context.Context, workerID string, task Task) (Receipt, error) {
+// Reuse TaskID only for retries on the same agent route.
+func (c *Client) SubmitTo(ctx context.Context, agentID string, task Task) (Receipt, error) {
 	if !c.cfg.TargetedTasks {
 		return Receipt{}, errors.New("bonnie: client/nats: TargetedTasks is required for SubmitTo")
 	}
-	if !safeToken(workerID) {
-		return Receipt{}, errors.New("bonnie: client/nats: invalid target worker ID")
+	if !safeToken(agentID) {
+		return Receipt{}, errors.New("bonnie: client/nats: invalid target agent ID")
 	}
-	return c.submit(ctx, c.cfg.TaskSubject+".worker."+workerID, task)
+	return c.submit(ctx, c.cfg.TaskSubject+".agent."+agentID, task)
 }
 
 func (c *Client) submit(ctx context.Context, subject string, task Task) (Receipt, error) {
@@ -267,17 +267,17 @@ func (c *Client) submit(ctx context.Context, subject string, task Task) (Receipt
 // Answer stores responses for the exact waiting run and tool call. Retries of
 // that suspension on the same answer route use the same message identity,
 // even if responses change.
-// The outcome route must equal the configured base plus a safe worker token.
+// The outcome route must equal the configured base plus a safe agent token.
 func (c *Client) Answer(ctx context.Context, outcome Outcome, responses []runtime.InputResponse) (Receipt, error) {
-	if outcome.Version != 1 || !validID(outcome.TaskID) || !validID(outcome.RunID) || !safeToken(outcome.WorkerID) || outcome.State != runtime.RunWaiting || outcome.Suspend == nil || outcome.Suspend.ToolCallID == "" || len(responses) == 0 || outcome.Error != "" {
+	if outcome.Version != 1 || !validID(outcome.TaskID) || !validID(outcome.RunID) || !safeToken(outcome.AgentID) || outcome.State != runtime.RunWaiting || outcome.Suspend == nil || outcome.Suspend.ToolCallID == "" || len(responses) == 0 || outcome.Error != "" {
 		return Receipt{}, errors.New("bonnie: client/nats: invalid waiting outcome")
 	}
-	route := c.cfg.AnswerSubject + "." + outcome.WorkerID
+	route := c.cfg.AnswerSubject + "." + outcome.AgentID
 	if outcome.AnswerSubject != route {
 		return Receipt{}, errors.New("bonnie: client/nats: invalid answer route")
 	}
 	id := messageID("answer", route, outcome.RunID, outcome.Suspend.ToolCallID)
-	answer := Answer{Version: 1, MessageID: id, TaskID: outcome.TaskID, RunID: outcome.RunID, WorkerID: outcome.WorkerID, ToolCallID: outcome.Suspend.ToolCallID, Responses: responses}
+	answer := Answer{Version: 1, MessageID: id, TaskID: outcome.TaskID, RunID: outcome.RunID, AgentID: outcome.AgentID, ToolCallID: outcome.Suspend.ToolCallID, Responses: responses}
 	return c.publish(ctx, route, outcome.TaskID, id, answer)
 }
 
