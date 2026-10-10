@@ -12,13 +12,22 @@ import (
 
 // agentWithSandboxClose lets Runner's per-turn Agent.Close release a lazily
 // opened sandbox. Embedding forwards runtime.Agent methods unchanged; explicit
-// methods forward the optional file and event interfaces.
+// methods forward the optional file, continuation, and event interfaces.
 type agentWithSandboxClose struct {
 	runtime.Agent
 	closeSandbox func() error
 }
 
 var _ runtime.FileAgent = (*agentWithSandboxClose)(nil)
+var _ runtime.ContinuationAgent = (*agentWithSandboxClose)(nil)
+
+func (a *agentWithSandboxClose) ContinueResult(ctx context.Context) (*kit.TurnResult, error) {
+	capable, ok := a.Agent.(runtime.ContinuationAgent)
+	if !ok {
+		return nil, runtime.ErrContinuationUnsupported
+	}
+	return capable.ContinueResult(ctx)
+}
 
 func (a *agentWithSandboxClose) PromptResultWithFiles(ctx context.Context, prompt string, files []kit.LLMFilePart) (*kit.TurnResult, error) {
 	capable, ok := a.Agent.(runtime.FileAgent)

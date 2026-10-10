@@ -30,6 +30,12 @@ the human answer as a prompt and keeps the count and known usage. A durable
 resume record also keeps this answer if the process stops before the next
 completion record.
 
+When a pending prompt is already durable, recovery uses `ContinuationAgent`
+to generate from the saved conversation without adding user input. Kit
+v0.126.0 implements this with `ContinueResult`. A custom agent without this
+interface returns `ErrContinuationUnsupported`. Factory tool recovery still
+runs before generation; completed external effects must not be repeated.
+
 An orchestration write error leaves the run running and returns an error.
 This lets a later Runner restore pending work instead of silently starting
 a new budget. Hook errors and model errors fail the turn. Cancellation
