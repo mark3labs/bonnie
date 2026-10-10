@@ -10,8 +10,7 @@ import (
 	"github.com/mark3labs/bonnie/runtime"
 )
 
-// An interrupted input has no saved outcome. A new Runner must create a new
-// run, not append the original task text again to the interrupted run.
+// Redelivery after interruption resumes the admitted attempt/run without a cached outcome.
 func TestJetStreamInterruptedAttempt(t *testing.T) {
 	t.Parallel()
 	nc, js := jsServer(t)
@@ -50,7 +49,7 @@ func TestJetStreamInterruptedAttempt(t *testing.T) {
 	}
 	jsChannel(t, slowRunner(journal, &calls, 0), jsConfig(nc, "one"))
 	result := receive(t, sub)
-	if result.Error != "" || result.RunID == original || result.RunID == "" {
+	if result.Error != "" || result.RunID != original || result.AttemptID == "" {
 		t.Fatalf("attempt: %+v original %s", result, original)
 	}
 	if calls.Load() != 2 {
