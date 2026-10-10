@@ -24,6 +24,12 @@ jobs:
       - name: Vet
         run: go vet ./...
 
+      # The runner has Docker, but may not have the sandbox image. Pull once
+      # before parallel tests; report registry errors here, not in container creation.
+      - name: Prepare Docker test image
+        timeout-minutes: 5
+        run: bash scripts/ci-docker-image.sh
+
       # Keep the failing browser tests available locally, but exclude them
       # from CI. All other tests still run with the race detector.
       - name: Test

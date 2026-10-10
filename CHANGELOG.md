@@ -49,6 +49,9 @@ proven in production. Do not use it for work whose loss would hurt.
   can stream. Disconnects and view changes release their subscriptions.
 - Correct the root README's stale statement that web updates exclude transient
   model text.
+- Prepare the Docker test image before parallel CI tests, with bounded retries
+  and a public mirror fallback. Image download failures retain full diagnostics;
+  Docker tests are not skipped.
 
 ### Known limits
 
