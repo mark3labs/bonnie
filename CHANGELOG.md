@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- JetStream shutdown no longer reports a cancelled result-size lookup as a
+  channel failure. Unacknowledged input remains available for redelivery.
 - `WithCompletionHook` now forwards saved-conversation continuation to the
   managed agent. Interrupted runs can recover through targeted JetStream
   redelivery without a repeated or empty user prompt. Agents without this

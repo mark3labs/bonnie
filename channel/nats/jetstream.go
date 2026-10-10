@@ -588,7 +588,9 @@ func (c *Channel) handleJetStream(ctx context.Context, msg *gonats.Msg) {
 	}
 	result, err = c.boundResult(ctx, result)
 	if err != nil {
-		c.report("result size check failed")
+		if ctx.Err() == nil {
+			c.report("result size check failed")
+		}
 		return
 	}
 	if result.RunID != "" {
@@ -616,7 +618,11 @@ func (c *Channel) publishJetStream(ctx context.Context, input *gonats.Msg, resul
 	}
 	result, err := c.boundResult(ctx, result)
 	if err != nil {
-		c.report("result size check failed")
+		// Shutdown can cancel the broker lookup after the earlier context check.
+		// Leave input unacknowledged for redelivery without recording a failure.
+		if ctx.Err() == nil {
+			c.report("result size check failed")
+		}
 		return
 	}
 	data, err := json.Marshal(result)
