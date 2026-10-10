@@ -5,7 +5,28 @@ All notable changes to BONNIE are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.22.1] — 2026-10-10
+
+**Completion-hook recovery fixes.**
+This is a PATCH release: saved-conversation continuation and JetStream shutdown
+fixes restore existing behaviour without changing public signatures. The custom
+agent continuation requirement is unchanged from v0.22.0. BONNIE remains early
+and experimental. No release is proven in production. Do not use it for work
+whose loss would hurt.
+
+### The claims
+
+- **A run survives process death.** Another process restores the journalled
+  conversation, including typed tool calls and results. SQLite commits each
+  tool-calling step atomically. Saved input continues without an empty or repeated
+  user message. Uncertain external effects need verification, not blind replay.
+  Execution is not exactly once; callbacks can run again.
+- **A run parks indefinitely.** A human-input wait needs no live agent process
+  or running sandbox compute. Resume supplies the answer after restart. Keep
+  the journal and sandbox data. JetStream waits need their original agent.
+- **A run is reachable over HTTP.** Routes under `/bonnie/v1` expose runs,
+  snapshots, events, durable submissions, and owned child runs. The optional
+  `/web` interface uses the same HTTP channel and run executor.
 
 ### Fixed
 
@@ -17,6 +38,138 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   capability return `runtime.ErrContinuationUnsupported` (#18).
 - Run the build dry-run test serially because its stdout capture changes
   `os.Stdout`. This prevents a data race with parallel CLI tests in CI.
+
+### Changed
+
+- Both example trees pin the published v0.22.0 release. They move to v0.22.1
+  only after publication.
+
+### Known limits
+
+- **Linux only.** Releases support linux/amd64 and linux/arm64, not macOS or
+  Windows. The default needs kernel 5.13 or newer with Landlock enabled.
+  Without it, BONNIE refuses to start; select `--sandbox docker` instead.
+- **The default sandbox is containment, not isolation.** Landlock confines
+  filesystem access, not the network, and shares the host kernel. Do not run
+  BONNIE as a user in the `docker` group: access to `/var/run/docker.sock` permits
+  a full host escape. Docker uses namespaces, not a separate kernel. Use
+  microsandbox for hostile code; it is verified on Linux with KVM.
+- **Sandbox egress is open** until a policy is set. Landlock refuses a policy
+  it cannot enforce. Microsandbox policy is fixed at creation; a different
+  policy on reattachment returns `ErrPolicyMismatch`. Local provides no isolation.
+  Automatic runtime installation needs network access when the runtime is absent;
+  it does not upgrade existing installations or remove the Linux/KVM requirement.
+- **A halt stops the turn, not the step.** A sibling tool call in the same step
+  as `request_approval` still runs. Approval gates the next step. Omitting built-in
+  human-input tools does not change permissions or custom tools.
+- **A skill's bundled files stay on the host.** Sandbox tools cannot open the
+  host paths named by activation. Put required text in the skill body and files
+  in `context/`.
+- **HTTP authentication is opt-in.** Configure `WithHTTPAuthenticator` or
+  authenticate in front of BONNIE. Health remains public; `operation_id` is
+  refused without verified ownership. Web CSRF checks do not replace caller
+  authentication. Chat webhooks verify the platform, not the person, and require
+  verification credentials.
+- **Run ownership is per host.** Use one process and one submission scheduler
+  per journal. SQLite protects transactions, not turn coordination or external
+  execution. Do not mix direct `Start` with scheduler delivery to the same run.
+  Network filesystems are unsafe because SQLite needs working POSIX locks.
+- **Events are journal-anchored.** Durable events replay after restart;
+  live-only deltas do not. Web SSE shows transient assistant text as well as durable
+  records. Reconnects do not replay transient text; reasoning deltas are not shown.
+  Direct journal writes from another process do not publish live events in this host.
+- **Cleanup is opt-in and deletes files, not history.** CLI `serve` does not
+  sweep sandboxes. Waiting runs are kept. Publish output before completion;
+  later turns on cleaned-up runs start without earlier files. Locks are local
+  to one Runner and deletion callbacks must be safe to repeat. Shared directories
+  and custom agent factories cannot use automatic cleanup.
+- **Shared directories do not coordinate separate processes.** Only Landlock
+  and Local support them. One provider rejects overlapping opens; use one server.
+  Do not combine them with `WithContextFiles`. Pruning keeps shared directories.
+- **Tool recovery is not exactly once.** No tool is replay-safe by default.
+  Both saved and current policies must permit replay. Replay calls implementations
+  directly, without interactive Kit approval hooks; tools must enforce their own
+  authorization and external idempotency. Unknown actions with the same tool and
+  arguments are blocked until verified, but different arguments can evade that
+  block. An outcome saved before its step retains only the hook's text projection,
+  not media. Custom factories need their own recovery.
+- **Submission deduplication covers admission, not external effects.** Human
+  waits park queued inputs. Failed work is not retried automatically. Recovery
+  resumes recorded submissions, not older synchronous runs. Steering supports
+  text only. Atomic delivery markers and child creation need `runtime.StepJournal`.
+  Background children do not keep parents busy; cancellation cannot undo effects.
+- **Completion callbacks are trusted host code.** Use `RunScope.Exec` for sandbox
+  commands. Closure state is not durable; interrupted checks can repeat. Keep
+  policy and limits stable after restart. Usage can be undercounted, unsaved
+  initial attachments are lost, and accepted response events can repeat. Checks
+  skip suspension and model failure. Drafts can appear before acceptance. Managed
+  setup and completion options cannot be combined with `WithAgentFactory`.
+- **Activity logs can contain sensitive data.** Info includes final responses;
+  Debug includes prompts, arguments, results, and reasoning. Logging is synchronous
+  and can delay runs. Replay does not log events again.
+- **Agent authoring needs Go and public module access.** The static agent needs
+  neither Go nor BONNIE installed, but its sandbox can need a separate runtime.
+  Scoped command operations own their resources; do not retain them after return.
+- **Cancellation is cooperative, not rollback or forced isolation.** Models,
+  tools, and callbacks must observe context cancellation. Local and Landlock stop
+  a process group; a child that creates a new session can escape it. Completed
+  effects remain. Route controls to the execution owner. Legacy text answers
+  cannot identify the question shown to a delayed client.
+- **Chat retry is a new turn.** `/retry` can repeat effects; `/new` keeps the old
+  run. Stop an active turn first. Interrupted synchronous HTTP operations still
+  need explicit recovery; `address` and `operation_id` cannot be combined.
+- **NATS credentials and routes need protection.** Use TLS, broker permissions,
+  and one authentication method. Payloads do not verify identity. JWT and other
+  connection options need a caller-supplied authenticated connection.
+- **Core NATS can lose tasks and results.** Offline subscribers, overflow, and
+  process failure can lose delivery. Interrupted tasks and result publication are
+  not retried automatically. Ordinary subscribers each receive a copy.
+- **JetStream delivery is at least once.** Another agent can repeat execution;
+  redelivery to the same agent reuses its saved local attempt and run. Recovery
+  needs the original journal and sandbox data. Broker deduplication is bounded. Each
+  agent needs a unique stable identity, journal, and sandbox data with one owner.
+  Waiting runs need their original agent. There is no global attempt lookup.
+  Consumer changes can replay retained messages; shared consumers divide work.
+- **Targeted tasks have no fallback.** Enable them on both client and agent.
+  Retention limits bound offline storage. Existing streams and permissions need
+  the agent subjects. Task IDs deduplicate per route, not across routes.
+- **A publish receipt confirms storage, not execution.** Provision streams or
+  permit creation; existing resources are not changed. Result handlers must
+  filter task IDs and respect cancellation. Invalid messages need correction.
+- **Statuses can repeat and expire.** Deduplicate `event_id` and order by `seq`.
+  Statuses and results have no cross-stream ordering. Queries and cancellation
+  use request/reply, not durable commands. Timeouts do not prove failure;
+  `CancelRequested` is not a final state. Custom reply inbox prefixes are unsupported.
+- **Schedules have one journal owner.** A file lock refuses another scheduler.
+  Definitions are code; change `Revision` when instructions or callback behaviour
+  change. Waiting work blocks default overlap. Latest catch-up needs prior cron
+  history and does not replay every missed occurrence.
+- **Schedule delivery and callbacks can repeat.** Posts, thread creation, and
+  multipart delivery have duplicate windows. Delivery retries saved results.
+  Only mounted tracked Slack, Telegram, Discord, and GitHub receivers are supported,
+  not scheduled files or NATS. Execution has 16 active occurrence executions.
+  Preparation and `Definition.Run` are trusted host code and must be safe to
+  repeat; unsaved callback results repeat with the same fire ID. Manual and HTTP
+  triggers need a separate trigger authorizer. Background work grants no approval.
+- **Browser validation is incomplete.** CI excludes `TestBrowserLiveState` and
+  `TestBrowserEndToEnd` because they fail there. Browser tests require Chromium
+  and Node WebSocket support and otherwise skip. CI green does not prove these
+  flows, other browser engines, or a production authentication deployment.
+
+- **Presence is advisory, not execution ownership.** Discovery watches poll and
+  can miss short-lived changes. Expiry or deletion does not prove a process or
+  its tools stopped; do not reassign work automatically. Presence adds no
+  scheduler, task routing, or failover. Protect the registry with NATS permissions;
+  labels are not authorization claims. The caller owns the NATS connection and
+  must keep it available through shutdown. Existing buckets must match the TTL,
+  but storage type and history are not validated. The memory store is local to
+  one process and has no default lease renewal. Endpoint readiness is not remote
+  platform health; provide public URLs through explicit endpoint overrides.
+
+- **Saved-input continuation needs agent support.** Custom agents must implement
+  `runtime.ContinuationAgent`, and their factories must resolve pending tool
+  calls first. Retry APIs preserve cancellation only under the single-owner
+  requirement; they do not provide a process lease or undo completed effects.
 
 ## [0.22.0] — 2026-10-10
 
