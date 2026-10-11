@@ -73,6 +73,9 @@ func (a *Agent) serveCommand(fs *flag.FlagSet) *cobra.Command {
 	serve.Flags().AddGoFlagSet(fs)
 	serve.Flags().Lookup("sandbox").Usage = cmd.Flags().Lookup("sandbox").Usage
 	cmd.AddCommand(serve)
+	if !a.cfg.noAuthCommand {
+		cmd.AddCommand(agentcmd.NewAuthCommand())
+	}
 	if !a.cfg.noChatCommand {
 		cmd.AddCommand(agentcmd.NewChatCommand(a.cfg.addr))
 	}

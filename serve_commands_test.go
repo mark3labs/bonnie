@@ -15,7 +15,7 @@ func TestPackagedCommands(t *testing.T) {
 	t.Parallel()
 	journal := filepath.Join(t.TempDir(), "journal")
 	a := New(WithJournal(journal), WithAddr(":9090"), WithInstructions("missing.md"))
-	for _, args := range [][]string{{"chat", "--help"}, {"runs", "list", "--help"}, {"runs", "show", "--help"}, {"runs", "inspect", "--help"}, {"schedules", "list", "--help"}, {"schedules", "show", "--help"}, {"schedules", "history", "--help"}, {"schedules", "trigger", "--help"}, {"serve", "--help"}, {"version"}} {
+	for _, args := range [][]string{{"auth", "--help"}, {"auth", "login", "openai", "--help"}, {"auth", "status", "--help"}, {"auth", "logout", "openai", "--help"}, {"chat", "--help"}, {"runs", "list", "--help"}, {"runs", "show", "--help"}, {"runs", "inspect", "--help"}, {"schedules", "list", "--help"}, {"schedules", "show", "--help"}, {"schedules", "history", "--help"}, {"schedules", "trigger", "--help"}, {"serve", "--help"}, {"version"}} {
 		cmd := a.serveCommand(flag.NewFlagSet(t.Name(), flag.ContinueOnError))
 		var out bytes.Buffer
 		cmd.SetOut(&out)
@@ -68,11 +68,45 @@ func TestExplicitServe(t *testing.T) {
 // Code options remove commands but do not affect the default serve action.
 func TestPackagedCommandsDisabled(t *testing.T) {
 	t.Parallel()
-	a := New(WithChatCommand(false), WithRunsCommand(false), WithSchedulesCommand(false), WithVersionCommand(false))
+	a := New(WithAuthCommand(false), WithChatCommand(false), WithRunsCommand(false), WithSchedulesCommand(false), WithVersionCommand(false))
 	cmd := a.serveCommand(flag.NewFlagSet(t.Name(), flag.ContinueOnError))
 	commands := cmd.Commands()
 	if len(commands) != 1 || commands[0].Name() != "serve" || cmd.RunE == nil {
 		t.Fatalf("commands = %v", commands)
+	}
+}
+
+// The auth option must remove only auth and permit a later option to enable it.
+func TestPackagedAuthCommandOption(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		opts []Option
+		want bool
+	}{
+		{"default", nil, true},
+		{"disabled", []Option{WithAuthCommand(false)}, false},
+		{"enabled again", []Option{WithAuthCommand(false), WithAuthCommand(true)}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cmd := New(tc.opts...).serveCommand(flag.NewFlagSet(t.Name(), flag.ContinueOnError))
+			found := false
+			for _, child := range cmd.Commands() {
+				if child.Name() == "auth" {
+					found = true
+				}
+			}
+			if found != tc.want {
+				t.Fatalf("auth present = %v, want %v", found, tc.want)
+			}
+			for _, name := range []string{"chat", "runs", "schedules", "version", "serve"} {
+				child, _, err := cmd.Find([]string{name})
+				if err != nil || child.Name() != name {
+					t.Fatalf("%s command changed: %v", name, err)
+				}
+			}
+		})
 	}
 }
 

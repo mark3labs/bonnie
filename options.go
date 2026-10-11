@@ -40,6 +40,7 @@ type ChannelFunc func(*runtime.Runner) (Channel, error)
 // default from the scaffolded layout; an [Option] replaces one.
 type config struct {
 	commands            []func(*cobra.Command, *Agent)
+	noAuthCommand       bool
 	noChatCommand       bool
 	noRunsCommand       bool
 	noSchedulesCommand  bool
@@ -114,6 +115,13 @@ func defaults() *config {
 // the registration callbacks, but does not run pre-run hooks or open resources.
 func WithCommand(fn func(*cobra.Command, *Agent)) Option {
 	return func(c *config) { c.commands = append(c.commands, fn) }
+}
+
+// WithAuthCommand controls the provider login commands in [Agent.Serve].
+// They are enabled by default. Disabling them does not prevent Kit from loading
+// stored credentials or remove their dependencies from the binary.
+func WithAuthCommand(enabled bool) Option {
+	return func(c *config) { c.noAuthCommand = !enabled }
 }
 
 // WithChatCommand controls the chat command in [Agent.Serve]. It is enabled

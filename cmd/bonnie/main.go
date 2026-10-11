@@ -20,6 +20,8 @@ import (
 
 	"github.com/charmbracelet/fang"
 	"github.com/spf13/cobra"
+
+	"github.com/mark3labs/bonnie/internal/agentcmd"
 )
 
 // version is set by the linker at release time.
@@ -52,6 +54,7 @@ binary at all. This CLI exists for local development and for inspecting
 durable runs.
 
 Commands:
+  auth     manage provider login credentials
   serve    serve a generic agent over HTTP
   dev      run an agent tree with hot reload and the built-in TUI
   chat     interact with a running agent in a terminal
@@ -67,7 +70,7 @@ Planned:
 			return cmd.Help()
 		},
 	}
-	root.AddCommand(newServeCmd(), newRunsCmd(), newSchedulesCmd(), newSandboxCmd(), newInitCmd(), newBuildCmd(), newDevCmd(), newChatCmd(), newVersionCmd())
+	root.AddCommand(agentcmd.NewAuthCommand(), newServeCmd(), newRunsCmd(), newSchedulesCmd(), newSandboxCmd(), newInitCmd(), newBuildCmd(), newDevCmd(), newChatCmd(), newVersionCmd())
 	return root
 }
 

@@ -15,7 +15,7 @@ require (
 	github.com/indaco/herald v0.13.0
 	github.com/indaco/herald-md v0.3.0
 	github.com/landlock-lsm/go-landlock v0.10.1
-	github.com/mark3labs/kit v0.126.0
+	github.com/mark3labs/kit v0.127.0
 	github.com/nats-io/nats-server/v2 v2.12.0
 	github.com/nats-io/nats.go v1.47.0
 	github.com/nats-io/nkeys v0.4.11

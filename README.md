@@ -98,7 +98,8 @@ With Nix. This gives you the CLI, and the microsandbox CLI (`msb`) on its PATH:
 nix profile add github:mark3labs/bonnie   # or: nix run github:mark3labs/bonnie
 ```
 
-Set a provider key. BONNIE uses the provider that Kit is configured for:
+Set a provider key, or use [provider login](#provider-login) for OpenAI
+ChatGPT/Codex. BONNIE uses the provider that Kit is configured for:
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...   # or OPENAI_API_KEY, or GEMINI_API_KEY
@@ -258,6 +259,9 @@ seed files. It serves on a host that has no Go and no BONNIE installation.
 The agent binary also includes its operator commands:
 
 ```bash
+./my-agent auth login openai          # log in with ChatGPT/Codex
+./my-agent auth status
+./my-agent auth logout openai
 ./my-agent serve                      # same action as ./my-agent
 ./my-agent chat --run production      # connect to a running HTTP server
 ./my-agent runs list                  # read the configured local journal
@@ -273,10 +277,11 @@ accepts `--journal` to select another local journal. Inspection works when
 the server is stopped. No command starts a server except the default action
 and `serve`.
 
-Use `WithChatCommand(false)`, `WithRunsCommand(false)`,
+Use `WithAuthCommand(false)`, `WithChatCommand(false)`, `WithRunsCommand(false)`,
 `WithSchedulesCommand(false)`, or `WithVersionCommand(false)` in `main.go`
 to disable individual commands. These options control command availability,
-not access to HTTP routes or journal files, and do not promise smaller binaries.
+not access to stored credentials, HTTP routes, or journal files, and do not
+promise smaller binaries.
 The same commands are included when you compile the agent with `go build`.
 `Agent.Run` remains terminal-free. Development and sandbox provisioning
 commands remain in the BONNIE CLI.
@@ -902,6 +907,7 @@ and each adapter below it.
 ## CLI
 
 ```
+bonnie auth     Manage provider login credentials
 bonnie init     Scaffold an agent tree
 bonnie dev      Run an agent tree with hot reload and the built-in TUI
 bonnie build    Compile an agent tree into one static binary
@@ -948,6 +954,59 @@ agent tree with `bonnie.WithGitHub`.
 
 `runs` reads the journal directly, thus it works while the server is stopped —
 which is when you need it.
+
+### Provider login
+
+Use the shared `auth` command to manage Kit's provider credentials:
+
+```bash
+bonnie auth login openai
+bonnie auth status
+bonnie auth logout openai
+```
+
+Compiled agents include the same commands: replace `bonnie` with
+`./my-agent`. These commands do not start the agent's HTTP server.
+`WithAuthCommand(false)` removes them from the compiled agent, but does not
+stop Kit from loading stored credentials.
+
+With Kit v0.127.0, only `openai` login is supported. This OAuth login is for
+OpenAI ChatGPT/Codex access, not the general OpenAI API. Use `OPENAI_API_KEY`
+for general API access. Stored credentials can take precedence over environment
+keys; remove stored OpenAI OAuth credentials if you want to switch to an API key.
+Login does not select a model. Select an accessible OpenAI model in `main.go`:
+
+```go
+bonnie.New(bonnie.WithModel("openai/gpt-5.4")).Serve()
+```
+
+`auth status` lists stored providers and credential types. It does not show
+secrets, refresh tokens, test account access, or report environment keys.
+`auth logout` removes stored credentials from the shared Kit store. It does
+not revoke the account grant, remove environment keys, or change providers
+already loaded by running agents.
+
+Kit stores credentials at `$XDG_CONFIG_HOME/.kit/credentials.json`. When
+`XDG_CONFIG_HOME` is not set, the default is `~/.config/.kit/credentials.json`.
+Use the same user and configuration directory for login and the agent.
+Keep the store writable so Kit can save refreshed tokens. In a container or
+remote deployment, use persistent storage. Protect the file and its directory
+from other users, and do not put credentials in source control or sandbox
+working files.
+
+Login uses a loopback callback on port **1455**. For a remote host, forward
+this port to the host where the login command runs. For example, run this on
+your local machine before you start login on the remote host:
+
+```bash
+ssh -L 1455:127.0.0.1:1455 user@remote-host
+```
+
+Login prints the URL; it does not open a browser. There is no manual code-entry
+fallback. Login ends after at most five minutes and can be cancelled with Ctrl+C.
+Open the login URL in your local browser. Do not expose the callback port on
+a public interface. After login, restart running agents to load the new
+credentials.
 
 ## Journal
 

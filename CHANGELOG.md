@@ -5,6 +5,15 @@ All notable changes to BONNIE are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Shared `auth` commands in the BONNIE CLI and compiled agents for OpenAI
+  ChatGPT/Codex login, credential status, and logout. `WithAuthCommand(false)`
+  removes the commands from compiled agents. The README explains the Kit
+  credential store, remote callback forwarding, and agent restart requirements.
+
 ## [0.22.1] — 2026-10-10
 
 **Completion-hook recovery fixes.**
