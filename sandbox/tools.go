@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	kit "github.com/mark3labs/kit/pkg/kit"
 
@@ -98,6 +99,9 @@ func lazyOpener(p Provider, s *runtime.Session) (Opener, func() error) {
 func Tools(open Opener) []kit.Tool {
 	return []kit.Tool{
 		shellTool(open),
+		shellStatusTool(open),
+		shellWaitTool(open),
+		shellCancelTool(open),
 		readFileTool(open),
 		writeFileTool(open),
 		listFilesTool(open),
@@ -108,14 +112,19 @@ func Tools(open Opener) []kit.Tool {
 // Detection stays lazy and repeats on each call, because tools can install Bash.
 func shellTool(open Opener) kit.Tool {
 	type input struct {
-		Command string `json:"command" description:"The shell command to run."`
-		Dir     string `json:"dir,omitempty" description:"Working directory, relative to /workspace."`
+		Command     string `json:"command" description:"The shell command to run."`
+		Dir         string `json:"dir,omitempty" description:"Working directory, relative to /workspace."`
+		WaitSeconds int    `json:"wait_seconds,omitempty" description:"Seconds to wait for completion (0 means 30; maximum 30)."`
 	}
 	return kit.NewTool("shell",
 		"Run a shell command inside the isolated sandbox. Prefer Bash; if Bash is "+
-			"not available, use sh (POSIX syntax). Each result reports the selected shell. "+
-			"The working directory is /workspace. Returns stdout, stderr, and the exit code.",
+			"not available, use sh (POSIX syntax). "+
+			"The working directory is /workspace. Returns stdout, stderr, and the exit code. "+
+			"On job-capable sandboxes, commands run as jobs and may still be running when this call returns; use shell_status or shell_wait with the returned job ID to check progress. The default wait is 30 seconds, not an execution deadline. Use shell_cancel to stop a job without stopping the sandbox.",
 		func(ctx context.Context, in input) (kit.ToolOutput, error) {
+			if in.WaitSeconds < 0 || in.WaitSeconds > 30 {
+				return kit.ErrorResult("wait_seconds must be between 0 and 30"), nil
+			}
 			sb, err := open(ctx)
 			if err != nil {
 				return unavailable(err), nil
@@ -134,6 +143,17 @@ func shellTool(open Opener) kit.Tool {
 				shell, label = "sh", "Shell: sh (Bash unavailable)"
 			}
 			cmd := Command{Args: []string{shell, "-lc", in.Command}, Dir: in.Dir}
+			if jobs, ok := sb.(JobSandbox); ok {
+				id, err := jobs.StartJob(ctx, cmd)
+				if err != nil {
+					return kit.ErrorResult(fmt.Sprintf("sandbox error: start job: %v", err)), nil
+				}
+				wait := in.WaitSeconds
+				if wait == 0 {
+					wait = 30
+				}
+				return waitJob(ctx, sb, jobs, id, time.Duration(wait)*time.Second)
+			}
 
 			res, err := sb.Exec(ctx, cmd)
 			if err != nil {

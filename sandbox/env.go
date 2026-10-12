@@ -31,9 +31,8 @@ import (
 //
 // Like [Seeded], the wrapper forwards the optional provider interfaces
 // [Networked], [ExistenceChecker], [RunDeleter], [RunCleanupValidator], [WorkingDirReporter], and
-// [Imaged], and forwards the [Sandbox]-level [Deleter] when the backend
-// supports it, so wrapping never narrows what a caller can do with the
-// provider.
+// [Imaged], and forwards the [Sandbox]-level [Deleter] and [JobSandbox] only
+// when the backend supports them, so wrapping never widens what a caller can do.
 func EnvInjected(p Provider, env map[string]string) Provider {
 	kv := make([]string, 0, len(env))
 	for k, v := range env {
@@ -55,10 +54,9 @@ func EnvInjected(p Provider, env map[string]string) Provider {
 	return e
 }
 
-// envProvider is the [EnvInjected] wrapper.
 type envProvider struct {
 	p   Provider
-	env []string // precomputed "KEY=value", sorted
+	env []string
 }
 
 var _ Provider = (*envProvider)(nil)
@@ -113,9 +111,7 @@ func (e *envProvider) DeleteRun(ctx context.Context, runID string) (bool, error)
 
 // ValidateRunCleanup implements [RunCleanupValidator]. It checks the wrapped
 // backend's deletion capability and forwards its mode check when present.
-func (e *envProvider) ValidateRunCleanup() error {
-	return validateRunCleanup(e.p)
-}
+func (e *envProvider) ValidateRunCleanup() error { return validateRunCleanup(e.p) }
 
 // WorkingDir forwards to the wrapped provider so the system prompt still names
 // the directory the tools really use. A provider that runs at [WorkDir]
@@ -160,28 +156,68 @@ func (s *envSandbox) Exec(ctx context.Context, cmd Command) (*Result, error) {
 	return s.Sandbox.Exec(ctx, cmd)
 }
 
-// envDeleterSandbox is an [envSandbox] whose backend can delete itself. It
-// exists so a wrapped sandbox still satisfies a `sb.(Deleter)` type assertion:
-// embedding the interface would forward Delete, but only a backend that has it
-// should advertise it, so the wrapper mirrors the backend's own capability.
-type envDeleterSandbox struct {
-	*envSandbox
-}
+type envDeleterSandbox struct{ *envSandbox }
 
 var _ Deleter = (*envDeleterSandbox)(nil)
 
-// Delete implements [Deleter] by forwarding to the wrapped sandbox.
 func (s *envDeleterSandbox) Delete(ctx context.Context) error {
 	return s.Sandbox.(Deleter).Delete(ctx)
 }
 
-// newEnvSandbox wraps inner so its commands carry env. It advertises [Deleter]
-// only when inner does, so the wrapper neither hides nor invents the ability
-// to destroy the sandbox.
+type envJobSandbox struct {
+	*envSandbox
+	jobs JobSandbox
+}
+
+var _ JobSandbox = (*envJobSandbox)(nil)
+
+func (s *envJobSandbox) StartJob(ctx context.Context, cmd Command) (string, error) {
+	merged := make([]string, 0, len(cmd.Env)+len(s.env))
+	merged = append(merged, cmd.Env...)
+	merged = append(merged, s.env...)
+	cmd.Env = merged
+	return s.jobs.StartJob(ctx, cmd)
+}
+func (s *envJobSandbox) JobStatus(ctx context.Context, id string) (*JobStatus, error) {
+	return s.jobs.JobStatus(ctx, id)
+}
+func (s *envJobSandbox) CancelJob(ctx context.Context, id string) error {
+	return s.jobs.CancelJob(ctx, id)
+}
+
+type envDeleterJobSandbox struct{ *envJobSandbox }
+
+var _ interface {
+	Deleter
+	JobSandbox
+} = (*envDeleterJobSandbox)(nil)
+
+func (s *envDeleterJobSandbox) Delete(ctx context.Context) error {
+	return s.Sandbox.(Deleter).Delete(ctx)
+}
+
 func newEnvSandbox(inner Sandbox, env []string) Sandbox {
 	base := &envSandbox{Sandbox: inner, env: env}
-	if _, ok := inner.(Deleter); ok {
+	_, deleter := inner.(Deleter)
+	jobs, hasJobs := inner.(JobSandbox)
+	_, reader := inner.(JobOutputReader)
+	jobBase := &envJobSandbox{envSandbox: base, jobs: jobs}
+	switch {
+	case hasJobs && deleter && reader:
+		return &envJobDeleterReaderSandbox{jobBase}
+	case hasJobs && deleter:
+		return &envJobDeleterSandbox{jobBase}
+	case hasJobs && reader:
+		return &envJobReaderSandbox{jobBase}
+	case hasJobs:
+		return &envJobOnlySandbox{jobBase}
+	case deleter && reader:
+		return &envOutputDeleterSandbox{&envOutputSandbox{base}}
+	case reader:
+		return &envOutputSandbox{base}
+	case deleter:
 		return &envDeleterSandbox{base}
+	default:
+		return base
 	}
-	return base
 }

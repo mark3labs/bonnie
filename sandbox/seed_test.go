@@ -212,7 +212,7 @@ func TestSeededEmptyDirectoryIsANoOp(t *testing.T) {
 		t.Fatalf("Open: %v", err)
 	}
 	defer func() { _ = sb.Close() }()
-	entries, err := os.ReadDir(filepath.Join(sb.(*localSandbox).dir))
+	entries, err := os.ReadDir(filepath.Join(p.(WorkingDirReporter).WorkingDir("run-seed-empty")))
 	if err != nil {
 		t.Fatal(err)
 	}

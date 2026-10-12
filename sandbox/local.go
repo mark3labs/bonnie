@@ -30,6 +30,7 @@ type LocalProvider struct {
 	mu      sync.Mutex
 	opened  map[string]*localSandbox
 	cleanup bool
+	jobs    map[string]*hostJobs
 }
 
 var _ Provider = (*LocalProvider)(nil)
@@ -125,7 +126,13 @@ func (p *LocalProvider) Open(_ context.Context, runID string) (Sandbox, error) {
 	if p.shared {
 		p.sharedActive = true
 	}
-	sb := &localSandbox{id: runID, dir: dir, cleanup: p.cleanup, release: func() { p.mu.Lock(); p.sharedActive = false; p.mu.Unlock() }}
+	if p.jobs == nil {
+		p.jobs = make(map[string]*hostJobs)
+	}
+	if p.jobs[runID] == nil {
+		p.jobs[runID] = &hostJobs{}
+	}
+	sb := &localSandbox{id: runID, dir: dir, cleanup: p.cleanup, jobs: p.jobs[runID], release: func() { p.mu.Lock(); p.sharedActive = false; p.mu.Unlock() }}
 	p.opened[runID] = sb
 	return sb, nil
 }
@@ -140,6 +147,7 @@ type localSandbox struct {
 
 	mu     sync.RWMutex
 	closed bool
+	jobs   *hostJobs
 }
 
 var (
@@ -197,6 +205,30 @@ func (s *localSandbox) Exec(ctx context.Context, cmd Command) (*Result, error) {
 	return runChild(ctx, c, cmd)
 }
 
+// StartJob starts a host process that outlives the request context.
+func (s *localSandbox) StartJob(ctx context.Context, cmd Command) (string, error) {
+	if s.isClosed() {
+		return "", ErrClosed
+	}
+	return s.jobs.start(ctx, cmd, func(c *exec.Cmd) error { configureProcess(c); return nil }, s.host, nil)
+}
+
+// JobStatus returns the current state of a job.
+func (s *localSandbox) JobStatus(ctx context.Context, id string) (*JobStatus, error) {
+	if s.isClosed() {
+		return nil, ErrClosed
+	}
+	return s.jobs.status(ctx, id, s.host(WorkDir), nil)
+}
+
+// CancelJob terminates a running job.
+func (s *localSandbox) CancelJob(ctx context.Context, id string) error {
+	if s.isClosed() {
+		return ErrClosed
+	}
+	return s.jobs.cancel(ctx, id)
+}
+
 // ReadFile implements [Sandbox].
 func (s *localSandbox) ReadFile(_ context.Context, p string) ([]byte, error) {
 	if s.isClosed() {
@@ -227,9 +259,8 @@ func (s *localSandbox) WriteFile(_ context.Context, p string, data []byte) error
 	return nil
 }
 
-// Stop implements [Sandbox]. The local backend holds no compute between
-// commands, so there is nothing to release and the work directory is untouched.
-func (s *localSandbox) Stop(context.Context) error { return nil }
+// Stop implements [Sandbox]. It cancels tracked jobs and keeps the work directory.
+func (s *localSandbox) Stop(ctx context.Context) error { return s.jobs.stop(ctx) }
 
 // Close implements [Sandbox].
 func (s *localSandbox) Close() error {
@@ -249,10 +280,14 @@ func (s *localSandbox) Close() error {
 // Delete implements [Deleter]. It removes the work directory only when the provider
 // was built with [WithLocalCleanup], because deleting a developer's files by
 // surprise is worse than leaving them.
-func (s *localSandbox) Delete(context.Context) error {
+func (s *localSandbox) Delete(ctx context.Context) error {
+	err := s.jobs.stop(ctx)
 	_ = s.Close()
 	if !s.cleanup {
-		return nil
+		return err
+	}
+	if err != nil {
+		return err
 	}
 	if err := os.RemoveAll(s.dir); err != nil {
 		return fmt.Errorf("bonnie: sandbox: delete work directory: %w", err)

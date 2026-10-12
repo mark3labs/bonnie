@@ -7,7 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Asynchronous shell jobs for Local, Landlock, Docker, and microsandbox.
+  Shell calls return after a bounded wait without stopping active commands.
+  New status, wait, and cancel tools expose saved output and targeted cancellation.
+  Completed host-job results survive reopening with a fresh provider; unfinished
+  host jobs report an unknown outcome rather than repeat the command.
+
 ### Fixed
+
+- Environment-injected and seeded sandboxes preserve the optional `JobSandbox`
+  capability. Environment values also apply to asynchronous jobs; unsupported
+  backends do not advertise job support.
 
 - Web chat keeps text and tool parts in their original order and rejects queued
   text already covered by a newer snapshot. Equal-cursor live text still streams.

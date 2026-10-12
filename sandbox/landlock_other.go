@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"runtime"
 )
 
@@ -17,6 +18,10 @@ import (
 func landlockSupported() error {
 	return fmt.Errorf("%w: the landlock backend needs Linux, this is %s: use --sandbox docker",
 		ErrUnavailable, runtime.GOOS)
+}
+
+func (s *landlockSandbox) prepareJob(*exec.Cmd, Command, *os.File) error {
+	return landlockSupported()
 }
 
 // execJailed refuses rather than running the command unconfined. A backend

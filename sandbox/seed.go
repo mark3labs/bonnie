@@ -25,7 +25,9 @@ const gitkeep = ".gitkeep"
 // seed and stated here so nobody mistakes it for a bug.
 //
 // The wrapper forwards the optional provider interfaces: [Networked],
-// [ExistenceChecker], [RunDeleter], [RunCleanupValidator], [WorkingDirReporter], and [Imaged]. A
+// [ExistenceChecker], [RunDeleter], [RunCleanupValidator], [WorkingDirReporter],
+// and [Imaged]. Opened sandboxes preserve [Deleter], [JobSandbox], and
+// [JobOutputReader] when the backend supports them. A
 // backend that cannot enforce a network policy still refuses one — the
 // wrapper refuses on its behalf — so wrapping never widens what a caller
 // can request.
@@ -63,7 +65,67 @@ func (s *seeded) Open(ctx context.Context, runID string) (Sandbox, error) {
 	if err := seedInto(ctx, sb, s.dir); err != nil {
 		return nil, fmt.Errorf("bonnie: sandbox: seed work directory: %w", err)
 	}
-	return sb, nil
+	return newSeededJobSandbox(sb), nil
+}
+
+func newSeededJobSandbox(sb Sandbox) Sandbox {
+	if jobs, ok := sb.(JobSandbox); ok {
+		base := &seededJobSandbox{Sandbox: sb, jobs: jobs}
+		_, deleter := sb.(Deleter)
+		_, reader := sb.(JobOutputReader)
+		switch {
+		case deleter && reader:
+			return &seededJobOutputDeleterSandbox{seededJobOutputSandbox{base}}
+		case deleter:
+			return &seededJobDeleterSandbox{base}
+		case reader:
+			return &seededJobOutputSandbox{base}
+		default:
+			return base
+		}
+	}
+	return sb
+}
+
+type seededJobSandbox struct {
+	Sandbox
+	jobs JobSandbox
+}
+
+func (s *seededJobSandbox) StartJob(ctx context.Context, cmd Command) (string, error) {
+	return s.jobs.StartJob(ctx, cmd)
+}
+func (s *seededJobSandbox) JobStatus(ctx context.Context, id string) (*JobStatus, error) {
+	return s.jobs.JobStatus(ctx, id)
+}
+func (s *seededJobSandbox) CancelJob(ctx context.Context, id string) error {
+	return s.jobs.CancelJob(ctx, id)
+}
+
+var _ JobSandbox = (*seededJobSandbox)(nil)
+
+type seededJobDeleterSandbox struct{ *seededJobSandbox }
+
+var _ Deleter = (*seededJobDeleterSandbox)(nil)
+
+func (s *seededJobDeleterSandbox) Delete(ctx context.Context) error {
+	return s.Sandbox.(Deleter).Delete(ctx)
+}
+
+type seededJobOutputSandbox struct{ *seededJobSandbox }
+
+var _ JobOutputReader = (*seededJobOutputSandbox)(nil)
+
+func (s *seededJobOutputSandbox) ReadJobOutput(ctx context.Context, id string, limit int64) (string, string, bool, error) {
+	return s.Sandbox.(JobOutputReader).ReadJobOutput(ctx, id, limit)
+}
+
+type seededJobOutputDeleterSandbox struct{ seededJobOutputSandbox }
+
+var _ Deleter = (*seededJobOutputDeleterSandbox)(nil)
+
+func (s *seededJobOutputDeleterSandbox) Delete(ctx context.Context) error {
+	return s.Sandbox.(Deleter).Delete(ctx)
 }
 
 // SetNetworkPolicy forwards to the wrapped provider. When that provider

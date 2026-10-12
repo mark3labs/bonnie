@@ -568,6 +568,27 @@ including symlink escapes, with `sandbox.ErrOutsideWorkDir`. Docker and
 microsandbox permit absolute paths inside the guest filesystem; their boundary
 is the container or microVM, not only the work directory.
 
+Local, Landlock, Docker, and microsandbox support asynchronous shell jobs.
+`shell` waits up to 30 seconds by default, then returns `status: "running"`
+with a `job_id` and output paths. `wait_seconds` can set a shorter wait (1–30);
+zero selects the default. Reaching this wait limit does not stop the command
+or sandbox. Use `shell_status`, `shell_wait`, and `shell_cancel` to observe,
+wait for, or cancel that job. Output returned to the model is bounded to 32 KiB
+per stream; the output files do not have a disk-use limit.
+
+Jobs continue after a sandbox handle closes. Local and Landlock share active
+job ownership between handles from the same provider. A fresh provider can
+recover saved completed results, but reports an unfinished host job as unknown.
+Docker and microsandbox use guest job files and process identity to reconnect.
+Stopping a sandbox need not preserve running processes. Process-group
+cancellation cannot contain children that deliberately detach. Local and
+Landlock accept `Command.Timeout` for an execution deadline; asynchronous CLI
+jobs reject that setting rather than silently ignore it.
+
+Job support is optional for custom backends. A backend without `JobSandbox`
+keeps synchronous shell execution. `EnvInjected` and `Seeded` preserve job
+support, and `EnvInjected` adds environment values to launched jobs.
+
 The `shell` tool checks for Bash inside the sandbox on each call. It uses
 Bash when available and falls back to `sh` otherwise. Each result names the
 selected shell. A failed command is never retried under another shell.

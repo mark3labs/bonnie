@@ -17,6 +17,7 @@ type cliSandbox struct {
 	name    string
 	bin     string
 	backend string
+	jobsDir string
 
 	// execArgs builds the CLI arguments that run argv inside the sandbox.
 	execArgs func(c *cliSandbox, argv []string, cmd Command) []string
@@ -42,8 +43,9 @@ type cliSandbox struct {
 }
 
 var (
-	_ Sandbox = (*cliSandbox)(nil)
-	_ Deleter = (*cliSandbox)(nil)
+	_ Sandbox    = (*cliSandbox)(nil)
+	_ Deleter    = (*cliSandbox)(nil)
+	_ JobSandbox = (*cliSandbox)(nil)
 )
 
 // ID implements [Sandbox].

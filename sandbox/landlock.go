@@ -105,6 +105,7 @@ type LandlockProvider struct {
 	mu      sync.Mutex
 	opened  map[string]*landlockSandbox
 	cleanup bool
+	jobs    map[string]*hostJobs
 }
 
 var _ Provider = (*LandlockProvider)(nil)
@@ -236,7 +237,13 @@ func (p *LandlockProvider) Open(_ context.Context, runID string) (Sandbox, error
 	// Keep both directory identities open for the child restriction.
 	tmp := filepath.Join(filepath.Dir(dir), tmpRel)
 
-	sb := &landlockSandbox{id: runID, dir: dir, tmp: tmp, root: root, scratch: scratch, cleanup: p.cleanup, release: func() { p.mu.Lock(); p.sharedActive = false; p.mu.Unlock() }}
+	if p.jobs == nil {
+		p.jobs = make(map[string]*hostJobs)
+	}
+	if p.jobs[runID] == nil {
+		p.jobs[runID] = &hostJobs{}
+	}
+	sb := &landlockSandbox{id: runID, dir: dir, tmp: tmp, root: root, scratch: scratch, cleanup: p.cleanup, jobs: p.jobs[runID], release: func() { p.mu.Lock(); p.sharedActive = false; p.mu.Unlock() }}
 	if p.shared {
 		p.sharedActive = true
 	}
@@ -257,6 +264,7 @@ type landlockSandbox struct {
 
 	mu     sync.RWMutex
 	closed bool
+	jobs   *hostJobs
 }
 
 var (
@@ -275,6 +283,14 @@ func (s *landlockSandbox) isClosed() bool {
 
 // relative maps a file-tool path into os.Root. The root checks symlinks during
 // the operation, including missing targets and concurrent path changes.
+func (s *landlockSandbox) hostPath(p string) string {
+	rel, err := s.relative(p)
+	if err != nil {
+		return filepath.Join(s.dir, "..", "invalid-job-path")
+	}
+	return filepath.Join(s.dir, rel)
+}
+
 func (s *landlockSandbox) relative(p string) (string, error) {
 	resolved := Resolve(p)
 	if resolved == WorkDir {
@@ -420,6 +436,42 @@ func runChild(ctx context.Context, c *exec.Cmd, cmd Command) (*Result, error) {
 	return res, nil
 }
 
+// StartJob starts a confined host process that outlives the request context.
+func (s *landlockSandbox) StartJob(ctx context.Context, cmd Command) (string, error) {
+	if s.isClosed() {
+		return "", ErrClosed
+	}
+	rel, err := s.relative(cmd.workdir())
+	if err != nil {
+		return "", err
+	}
+	if err := s.root.MkdirAll(rel, 0o700); err != nil {
+		return "", rootError(rel, err)
+	}
+	dir, err := s.root.Open(rel)
+	if err != nil {
+		return "", rootError(rel, err)
+	}
+	defer func() { _ = dir.Close() }()
+	return s.jobs.start(ctx, cmd, func(c *exec.Cmd) error { return s.prepareJob(c, cmd, dir) }, s.hostPath, s.root)
+}
+
+// JobStatus returns the current state of a job.
+func (s *landlockSandbox) JobStatus(ctx context.Context, id string) (*JobStatus, error) {
+	if s.isClosed() {
+		return nil, ErrClosed
+	}
+	return s.jobs.status(ctx, id, s.hostPath(WorkDir), s.root)
+}
+
+// CancelJob terminates a running job.
+func (s *landlockSandbox) CancelJob(ctx context.Context, id string) error {
+	if s.isClosed() {
+		return ErrClosed
+	}
+	return s.jobs.cancel(ctx, id)
+}
+
 // ReadFile implements [Sandbox].
 func (s *landlockSandbox) ReadFile(_ context.Context, p string) ([]byte, error) {
 	if s.isClosed() {
@@ -457,10 +509,8 @@ func (s *landlockSandbox) WriteFile(_ context.Context, p string, data []byte) er
 	return nil
 }
 
-// Stop implements [Sandbox]. A jailed command is an ordinary child process
-// that has already exited, so nothing is held between commands and the
-// work directory is untouched.
-func (s *landlockSandbox) Stop(context.Context) error { return nil }
+// Stop implements [Sandbox]. It cancels tracked jobs and keeps the work directory.
+func (s *landlockSandbox) Stop(ctx context.Context) error { return s.jobs.stop(ctx) }
 
 // Close implements [Sandbox].
 func (s *landlockSandbox) Close() error {
@@ -484,8 +534,12 @@ func (s *landlockSandbox) Close() error {
 // Delete implements [Deleter]. It removes the work directory only when the
 // provider was built with [WithLandlockCleanup], because deleting a
 // developer's files by surprise is worse than leaving them.
-func (s *landlockSandbox) Delete(context.Context) error {
+func (s *landlockSandbox) Delete(ctx context.Context) error {
+	err := s.jobs.stop(ctx)
 	_ = s.Close()
+	if err != nil {
+		return err
+	}
 	if !s.cleanup {
 		return nil
 	}

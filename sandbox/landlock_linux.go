@@ -144,6 +144,35 @@ func landlockSupported() error {
 // The child is this same binary: os.Executable resolves it once, and the
 // init hook above is what turns it into a jail. The parent stays
 // unrestricted, which it must — it owns the journal.
+func (s *landlockSandbox) prepareJob(c *exec.Cmd, cmd Command, dir *os.File) error {
+	self, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("bonnie: sandbox: locate this binary: %w", err)
+	}
+	workDir, err := s.root.Open(".")
+	if err != nil {
+		return rootError(".", err)
+	}
+	scratch, err := s.scratch.Open(".")
+	if err != nil {
+		_ = workDir.Close()
+		return rootError("scratch", err)
+	}
+	spec := jailSpec{rw: []string{"/proc/self/fd/3", "/proc/self/fd/4"}, ro: systemPaths, argv: cmd.Args}
+	control, err := spec.env()
+	if err != nil {
+		_ = workDir.Close()
+		_ = scratch.Close()
+		return err
+	}
+	c.Path = self
+	c.Args = []string{self}
+	c.Dir = fmt.Sprintf("/proc/%d/fd/%d", os.Getpid(), dir.Fd())
+	c.ExtraFiles = []*os.File{workDir, scratch}
+	c.Env = append(s.childEnv(cmd.Env), control...)
+	return nil
+}
+
 func (s *landlockSandbox) execJailed(ctx context.Context, cmd Command, dir *os.File) (*Result, error) {
 	self, err := os.Executable()
 	if err != nil {
