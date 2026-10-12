@@ -138,7 +138,7 @@ func (c *cliSandbox) CancelJob(ctx context.Context, id string) error {
 		return err
 	}
 	dir := c.jobsRoot() + "/" + id
-	script := "d=" + shellQuote(dir) + "; [ -d \"$d\" ] || exit 3; p=$(cat \"$d/pid\" 2>/dev/null) || exit 0; [ \"$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)\" = \"$(cat \"$d/boot\" 2>/dev/null)\" ] || exit 0; [ \"$(sed 's/^.*) //' /proc/$p/stat 2>/dev/null | awk '{print $20}')\" = \"$(cat \"$d/start\" 2>/dev/null)\" ] || exit 0; kill -TERM -- \"-$p\" 2>/dev/null || exit 0; i=0; while kill -0 \"$p\" 2>/dev/null && [ $i -lt 20 ]; do sleep .1; i=$((i+1)); done; if [ \"$(sed 's/^.*) //' /proc/$p/stat 2>/dev/null | awk '{print $20}')\" = \"$(cat \"$d/start\" 2>/dev/null)\" ]; then kill -KILL -- \"-$p\" 2>/dev/null || true; fi"
+	script := "d=" + shellQuote(dir) + "; [ -d \"$d\" ] || exit 3; p=$(cat \"$d/pid\" 2>/dev/null) || exit 0; [ \"$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)\" = \"$(cat \"$d/boot\" 2>/dev/null)\" ] || exit 0; [ \"$(sed 's/^.*) //' /proc/$p/stat 2>/dev/null | awk '{print $20}')\" = \"$(cat \"$d/start\" 2>/dev/null)\" ] || exit 0; kill -TERM \"-$p\" 2>/dev/null || exit 0; i=0; while kill -0 \"$p\" 2>/dev/null && [ $i -lt 20 ]; do sleep .1; i=$((i+1)); done; if [ \"$(sed 's/^.*) //' /proc/$p/stat 2>/dev/null | awk '{print $20}')\" = \"$(cat \"$d/start\" 2>/dev/null)\" ]; then kill -KILL \"-$p\" 2>/dev/null || true; fi"
 	_, stderr, code, err := runCLIRaw(ctx, nil, c.bin, c.execArgs(c, []string{"sh", "-c", script}, Command{})...)
 	if err != nil {
 		return err

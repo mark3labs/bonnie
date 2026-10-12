@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -65,6 +66,15 @@ func TestCLIJobCancelKeepsOtherJob(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	c := protocolSandbox(t, filepath.Join(dir, "jobs"))
+	// Model shells whose kill builtin rejects the non-portable `--` option.
+	// Keep the command in this shell so the function intercepts the cancel script.
+	c.execArgs = func(_ *cliSandbox, argv []string, _ Command) []string {
+		if len(argv) >= 3 && argv[0] == "sh" && argv[1] == "-c" && strings.Contains(argv[2], "kill -TERM") {
+			wrapper := `kill() { for arg do [ "$arg" != -- ] || return 2; done; command kill "$@"; }; eval "$1"`
+			return []string{"-c", `exec "$@"`, "test", "sh", "-c", wrapper, "test", argv[2]}
+		}
+		return append([]string{"-c", `exec "$@"`, "test"}, argv...)
+	}
 	ctx := context.Background()
 	id, err := c.StartJob(ctx, Command{Args: []string{"sh", "-c", "sleep 60 & wait"}, Dir: dir})
 	if err != nil {
