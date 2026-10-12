@@ -99,7 +99,12 @@ bonnie serve --addr 127.0.0.1:8080 \
   --model anthropic/claude-sonnet-4-5
 ```
 
-Generic serve has no GitHub, NATS, HTTP authentication, automatic cleanup, or schedule-definition flags. Configure these through code in a tree or a library host. Do not expose unauthenticated HTTP to untrusted callers. See [HTTP](/channels/http), [Slack](/channels/slack), and [Sandboxes](/guides/sandboxes).
+Generic serve has no Iroh, GitHub, NATS, HTTP authentication, automatic cleanup, or schedule-definition flags. Configure these through code in a tree or a library host. Do not expose unauthenticated HTTP to untrusted callers. See [HTTP](/channels/http), [Slack](/channels/slack), and [Sandboxes](/guides/sandboxes).
+
+Iroh is configured in an agent tree with `bonnie.WithIroh`, not with a CLI
+flag. `bonnie chat` does not accept Iroh tickets. Pairing is programmatic;
+there is no built-in `bonnie pair` command. See [Iroh](/channels/iroh) for
+peer approval, stable keys, and the Go client.
 
 ## Compiled-agent flags
 

@@ -132,9 +132,15 @@ Without an HTTP authenticator, the API verifies no caller. Use an authenticator 
 | `WithDiscord(cfg discord.Config)` | `DISCORD_BOT_TOKEN`, `DISCORD_PUBLIC_KEY`, optional `DISCORD_API_URL` |
 | `WithTelegram(cfg telegram.Config)` | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, optional `TELEGRAM_API_URL` |
 | `WithGitHub(cfg github.Config)` | `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_WEBHOOK_SECRET`, optional `GITHUB_INSTALLATION_ID` and `GITHUB_API_URL` |
+| `WithIroh(cfg irohchannel.Config)` | None; supply endpoint options and approved peer IDs in code |
 | `WithNATS(cfg natschannel.Config)` | `NATS_URL`, `NATS_NKEY_SEED`, `NATS_TOKEN`, `NATS_USERNAME`, `NATS_PASSWORD` |
 
 Explicit non-empty fields win. Missing required platform verification credentials fail startup. GitHub webhook events carry installation identity; hand-offs need a configured installation ID. A non-numeric `GITHUB_INSTALLATION_ID` fails validation. The GitHub bot name is a code setting, not an environment fallback.
+
+`WithIroh` serves the HTTP-compatible API on Iroh streams, beside TCP HTTP.
+An empty `Peers` list denies all Iroh requests, including health. Pairing grants
+operator access to all runs; it does not authenticate TCP HTTP. See
+[Iroh](/channels/iroh) for stable keys, tickets, and process-local pairing.
 
 For NATS, select only one authentication method, including environment fallbacks. NKey seeds are values, not file paths. A supplied `Conn` disables connection environment fallback; the caller owns that connection. `Stream` or `RootSubject` enables JetStream. Core NATS does not retain tasks or retry result delivery. See [Channels](/channels/overview) for transport selection and delivery limits.
 

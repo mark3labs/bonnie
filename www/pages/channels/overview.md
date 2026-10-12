@@ -1,6 +1,6 @@
 ---
 title: Channels
-description: Connect durable BONNIE runs to HTTP, chat platforms, and NATS tasks.
+description: Connect durable BONNIE runs to HTTP, Iroh, chat platforms, and NATS tasks.
 ---
 
 # Channels
@@ -12,6 +12,7 @@ A channel receives input, maps a conversation to a durable run, and delivers the
 | Channel | Input | Default endpoint | Conversation key |
 | --- | --- | --- | --- |
 | [HTTP](/channels/http) | JSON requests and NDJSON streams | `/bonnie/v1` | Caller-selected address or exact run ID |
+| [Iroh](/channels/iroh) | HTTP/1.1 requests and NDJSON over QUIC | `/bonnie/v1` on Iroh streams, no TCP route | Iroh-local address or exact run ID |
 | [Slack](/channels/slack) | Events API and a cancel slash command | `/slack/events` | Channel/thread timestamp, or channel/DM |
 | [Discord](/channels/discord) | Slash commands and button interactions | `/discord/interactions` | Channel or thread ID |
 | [Telegram](/channels/telegram) | Bot webhook messages | `/telegram` | Chat ID, optionally a forum topic |
@@ -93,13 +94,18 @@ Webhook checks prove the platform sent the request. They do not grant a reposito
 
 HTTP has no verifier by default. Configure `bonnie.WithHTTPAuthenticator` or protect it at the network boundary. An HTTP authenticator verifies identity; the channel does not supply a per-run ownership access policy. Do not expose the default HTTP API just because a platform webhook has a signature check.
 
+Iroh requires local approval of authenticated endpoint IDs. Paired peers have
+operator access to all runs, not per-run ownership. Tickets provide reachability,
+not permission. Pairing is programmatic; there is no built-in pairing CLI. It does
+not protect the default TCP HTTP listener. See [Iroh](/channels/iroh).
+
 NATS uses broker authentication and subject permissions. Its JSON payloads do not prove a publisher's identity. Keep credentials out of prompts, journals, logs, and sandbox environment settings.
 
 Ordinary chat delivery is asynchronous and best-effort. A webhook ACK is not a completed turn or a durable delivery receipt. Delivery failures are logged; inspect the saved run with `bonnie runs list` and `bonnie runs show --journal .bonnie RUN_ID`.
 
 ## Agent discovery
 
-Optional `bonnie.WithPresence` advertises agent identity, labels, state, and endpoint capabilities. All six built-in transports implement `channel.PresenceProvider`. Custom channels can implement `PresenceEndpoints() []presence.Endpoint` without changing the required channel interface. Channels that expose a named agent can implement `channel.AgentIdentity`; a non-empty identity must match the host's presence agent ID.
+Optional `bonnie.WithPresence` advertises agent identity, labels, state, and endpoint capabilities. The six HTTP, webhook, and NATS transports implement `channel.PresenceProvider`. Iroh does not implement presence advertisement; supply explicit endpoints if needed. Custom channels can implement `PresenceEndpoints() []presence.Endpoint` without changing the required channel interface. Channels that expose a named agent can implement `channel.AgentIdentity`; a non-empty identity must match the host's presence agent ID.
 
 Presence is not a routing or scheduling service. Endpoint readiness describes local input readiness, not remote platform health or guaranteed execution. HTTP and webhook addresses are relative paths unless the host replaces the endpoint list with public addresses. See [Deployment](/guides/deployment#advertise-agent-presence) for configuration, discovery watches, and expiry limits.
 
