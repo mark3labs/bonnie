@@ -143,6 +143,23 @@ run IDs still refer to the same journal. Failed delivery does not prove that a
 turn did not run. Use the HTTP API's verified `operation_id` contract for
 [idempotent starts](/channels/http#idempotent-starts) where required; do not blindly retry uncertain mutations.
 
+## Troubleshoot a connection
+
+| Symptom | Check and action |
+| --- | --- |
+| HTTP 401 with `unpaired peer` | Verify the client endpoint ID through a trusted path, then approve it with `Config.Peers` or `Pair`. A server ticket alone does not grant access. |
+| Access fails after a restart | Check that both secret keys are stable and that the host loaded the saved peer IDs into `Config.Peers`. Live pairing changes are not saved by the channel. |
+| `Ticket()` reports `not running` | Wait for successful channel startup before requesting a ticket. A stopped channel cannot supply a ticket. |
+| Connection times out | Check the ticket's addresses and the endpoint's relay and discovery options. A loopback-only ticket cannot connect from another machine. Client dialing is bounded to 30 seconds; a shorter request context can end it sooner. |
+| TCP HTTP works but Iroh fails | These are separate listeners. TCP health does not test Iroh reachability or peer approval. Use the Iroh HTTP client to check `/bonnie/v1/health`. |
+
+`curl` and `bonnie chat --addr` connect over TCP HTTP, not Iroh. Use the Go
+client above for Iroh requests. There are no built-in Iroh flags or pairing
+commands in the developer CLI. See the [CLI reference](/reference/cli) and
+[Agent Commands](/guides/agent-commands) for custom commands in a compiled
+agent. A custom pairing command must verify the peer ID and save approvals in
+trusted host storage; it must not grant access from model input.
+
 ## Validation limits
 
 Tests use real loopback Iroh connections and a scripted agent, without relay
