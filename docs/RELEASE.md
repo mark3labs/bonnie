@@ -76,6 +76,34 @@ indefinitely**, **reachable over HTTP**. State the limits from the current
 
 ## History
 
+### `v0.23.0`, 2026-10-12 — publication verified
+
+- [x] `task release-check`, `task release-snapshot`, `task check`, and `task ci`
+      pass. The clean snapshot at `a492fdd` builds both Linux targets, verifies
+      both archive checksums, and prints `0.22.1-SNAPSHOT-a492fdd` on amd64.
+- [x] `test`, `examples`, and `lint` pass on `master` at tagged commit
+      `a492fdd255cb612ffa90affeeef370ffca088b3b` (CI run `38237018653`).
+- [x] The dated `[0.23.0]` changelog section states claims, limits, public APIs,
+      and shell compatibility changes. Note extraction passes.
+- [x] Annotated tag pushed after human approval. Release run `38237881796`
+      succeeds and publishes three artifacts.
+- [x] Both downloaded archive checksums verify. The statically linked amd64
+      binary prints `bonnie version 0.23.0`.
+- [x] Both example trees pin v0.23.0 after publication; `task examples` passes.
+
+**Version choice.** MINOR under the pre-1.0 convention: optional job APIs and
+provider login commands are added; shell calls can now return running jobs.
+
+**CI blocker corrected.** The original commit failed guest job cancellation:
+Dash's `kill` builtin rejects `--`. Portable process-group signals fix it.
+The regression test rejects that option and fails with the original commands;
+ten race-enabled repetitions pass with the fix.
+
+**Validation limits.** Many local package results were cached. CI excludes the
+Chromium live-state and end-to-end tests. Neither the arm64 binary nor live-model
+behaviour was executed. Output files have no disk-use limit; external effects
+are not exactly once, and detached children can escape process-group cancellation.
+
 `v0.1.0` was tagged at `15e1727` and published on 2026-09-12; `release.yml`
 completed successfully. Verified post-publish, not assumed: a downloaded
 `linux_amd64` artifact prints `bonnie 0.1.0` (the injected version, not
