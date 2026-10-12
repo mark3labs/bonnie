@@ -1,6 +1,7 @@
 package iroh_test
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -165,6 +166,30 @@ func TestWirePairing(t *testing.T) {
 	request("POST", "/runs/"+id, `{"text":"again"}`, 200)
 	request("POST", "/runs/"+id+"/cancel", `{}`, 200)
 	request("GET", "/runs/missing", "", 404)
+	// The existing NDJSON stream must flush headers and replay events over QUIC.
+	streamCtx, stopStream := context.WithCancel(ctx)
+	req, err := http.NewRequestWithContext(streamCtx, "GET", "http://iroh/bonnie/v1/runs/"+id+"/stream", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream, err := hc.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stream.StatusCode != 200 || stream.Header.Get("Content-Type") != "application/x-ndjson" {
+		t.Fatal("bad stream response")
+	}
+	line, err := bufio.NewReader(stream.Body).ReadBytes('\n')
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !json.Valid(line) {
+		t.Fatalf("invalid event: %s", line)
+	}
+	stopStream()
+	if err := stream.Body.Close(); err != nil {
+		t.Fatal(err)
+	}
 	c.Unpair(ep.ID())
 	request("GET", "/runs/"+id, "", 401)
 	request("GET", "/health", "", 401)
