@@ -80,6 +80,7 @@ import (
 // Channel is the HTTP transport. It implements [channel.Channel] and
 // [channel.Inbound].
 type Channel struct {
+	namespace   string
 	runner      *runtime.Runner
 	core        *chat.Core
 	policy      channel.TurnPolicy
@@ -96,6 +97,12 @@ var (
 
 // Option configures a [Channel].
 type Option func(*Channel)
+
+// WithNamespace sets the address namespace used by an HTTP-compatible transport.
+// It does not change the HTTP route paths. The default is "http".
+func WithNamespace(name string) Option {
+	return func(c *Channel) { c.namespace = name }
+}
 
 // WithTurnPolicy sets the policy used when a message arrives while a turn is
 // already running. The default is [channel.PolicySteer].
@@ -187,11 +194,11 @@ type healthResponse struct {
 
 // New returns an HTTP channel over a runner.
 func New(r *runtime.Runner, opts ...Option) *Channel {
-	c := &Channel{policy: channel.PolicySteer, runner: r}
+	c := &Channel{policy: channel.PolicySteer, runner: r, namespace: "http"}
 	for _, opt := range opts {
 		opt(c)
 	}
-	c.core = chat.NewCore(r, c.Name(), c.policy, c.idGen...)
+	c.core = chat.NewCore(r, c.namespace, c.policy, c.idGen...)
 	if c.info.Version == "" {
 		c.info.Version = moduleVersion()
 	}

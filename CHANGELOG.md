@@ -5,6 +5,15 @@ All notable changes to BONNIE are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Iroh channel using go-iroh. It serves the HTTP wire API over authenticated
+  QUIC streams, with explicit programmatic peer pairing and revocation.
+  `WithIroh` mounts it; `client/iroh` connects the existing Go wire client.
+  Pairing grants operator access to all runs. See `docs/IROH.md`.
+
 ## [0.24.0] — 2026-10-12
 
 **Scoped custom tools and readable web payloads.**

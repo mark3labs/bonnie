@@ -15,6 +15,7 @@ import (
 	"github.com/mark3labs/bonnie/channel/discord"
 	"github.com/mark3labs/bonnie/channel/github"
 	bonniehttp "github.com/mark3labs/bonnie/channel/http"
+	irohchannel "github.com/mark3labs/bonnie/channel/iroh"
 	natschannel "github.com/mark3labs/bonnie/channel/nats"
 	"github.com/mark3labs/bonnie/channel/slack"
 	"github.com/mark3labs/bonnie/channel/telegram"
@@ -455,6 +456,14 @@ func WithScheduleTriggerAuthorizer(fn func(*http.Request) error) Option {
 // for how it refuses one.
 func WithHTTPAuthenticator(fn bonniehttp.Authenticator) Option {
 	return func(c *config) { c.auth = fn }
+}
+
+// WithIroh mounts the HTTP-compatible Iroh channel. Only explicitly paired
+// endpoint IDs can access it. Pairing grants operator access to all runs.
+func WithIroh(cfg irohchannel.Config) Option {
+	return WithChannel(func(r *runtime.Runner) (Channel, error) {
+		return irohchannel.New(r, cfg)
+	})
 }
 
 // WithNATS mounts an asynchronous NATS task channel. NATS_URL fills an

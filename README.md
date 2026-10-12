@@ -1584,6 +1584,11 @@ They skip, and never fail, when no key is present. One rule is above the rest:
 **BONNIE uses the public Kit SDK only**. See
 [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
+### Iroh transport
+
+Serve the HTTP wire API over Iroh with `bonnie.WithIroh`. Only explicitly
+paired peers have access. See [Iroh setup and programmatic pairing](docs/IROH.md).
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
