@@ -121,6 +121,26 @@ func (c *config) managedFactory(provider sandbox.Provider, opts []kit.Option) ru
 					}
 					return sb.Exec(ctx, cmd)
 				}}
+				factories := make([]ToolFactory, 0, len(c.toolFactories)+1)
+				if discovered := Registered().ToolFactory; discovered != nil {
+					factories = append(factories, discovered)
+				}
+				factories = append(factories, c.toolFactories...)
+				for _, factory := range factories {
+					if factory == nil {
+						return fmt.Errorf("bonnie: nil tool factory")
+					}
+					tools, err := factory(ctx, ToolScope{RunScope: scope, Kit: k})
+					if err != nil {
+						return fmt.Errorf("bonnie: create scoped tools: %w", err)
+					}
+					for _, tool := range tools {
+						if tool == nil {
+							return fmt.Errorf("bonnie: tool factory returned nil tool")
+						}
+					}
+					k.AddTools(tools...)
+				}
 				for _, setup := range c.kitSetup {
 					if setup == nil {
 						return fmt.Errorf("bonnie: nil Kit setup callback")

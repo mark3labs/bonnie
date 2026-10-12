@@ -72,8 +72,11 @@ const (
 // uses the embedded copies only as a fallback. A binary from `bonnie build`
 // has no tree beside it, so the embedded copies are all it has.
 type Tree struct {
-	// Tools are the tools discovered under tools/, one per directory.
+	// Tools are the tools discovered under tools/ that need no run scope.
 	Tools []kit.Tool
+
+	// ToolFactory builds discovered scoped tools for each Start or Resume.
+	ToolFactory ToolFactory
 
 	// Instructions is the embedded copy of the tree's instructions file.
 	Instructions string

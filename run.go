@@ -610,6 +610,8 @@ func (c *config) agentConflicts() string {
 		return "WithTools"
 	case len(c.kitOpts) > 0:
 		return "WithKit"
+	case len(c.toolFactories) > 0:
+		return "WithToolFactory"
 	case len(c.kitSetup) > 0:
 		return "WithKitSetup"
 	case c.completion != nil:

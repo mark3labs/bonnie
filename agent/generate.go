@@ -34,8 +34,8 @@ import (
 
 // This file is BONNIE's L2 codegen: the build-time half of discovery. A tree's
 // code — its custom tools — resolves here, because Go compiles. The generator
-// walks tools/<name>/*.go, requires each directory to export func Tool()
-// kit.Tool, and emits the one file BONNIE owns: bonnie_gen.go.
+// walks tools/<name>/*.go, requires each directory to export Tool returning
+// kit.Tool with an optional bonnie.ToolScope, and emits bonnie_gen.go.
 //
 // The generator emits only imports it is allowed to (the tool packages,
 // kit/pkg/kit, and embed) — it cannot emit a boundary violation, because it
@@ -58,6 +58,9 @@ type Tool struct {
 	// builds the tool through a helper, it is empty and no false positive is
 	// reported.
 	DeclaredName string
+
+	// Scoped reports that Tool accepts bonnie.ToolScope.
+	Scoped bool
 }
 
 // Plan is a discovery of one agent tree: what codegen found and what it will
@@ -104,7 +107,7 @@ var (
 	ErrDuplicateTool = errors.New("bonnie: agent: duplicate tool name")
 
 	// ErrToolMissingToolFunc means a tools/<name>/ directory does not export
-	// func Tool() kit.Tool, which codegen requires.
+	// Tool returning kit.Tool with an optional bonnie.ToolScope.
 	ErrToolMissingToolFunc = errors.New("bonnie: agent: tool does not export Tool()")
 )
 
@@ -206,12 +209,12 @@ func discoverTool(root, module, name string) (Tool, error) {
 		ImportPath: module + "/tools/" + name,
 	}
 
-	// At least one non-test .go file defining func Tool() kit.Tool is
-	// required. A missing function is a generator error naming the
-	// directory; the compiler backstop would catch it, but discovery should
-	// not wait for the build to fail.
+	// At least one non-test .go file defining func Tool() kit.Tool or
+	// func Tool(bonnie.ToolScope) kit.Tool is required. A missing function is
+	// a generator error naming the directory.
 	fset := token.NewFileSet()
 	sawToolFunc := false
+	scoped := false
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return tool, fmt.Errorf("bonnie: agent: read tool %s: %w", name, err)
@@ -225,20 +228,43 @@ func discoverTool(root, module, name string) (Tool, error) {
 		if err != nil {
 			return tool, fmt.Errorf("bonnie: agent: parse %s: %w", path, err)
 		}
+		bonnieAlias := ""
+		for _, imp := range astFile.Imports {
+			if imp.Path.Value == `"github.com/mark3labs/bonnie"` {
+				bonnieAlias = "bonnie"
+				if imp.Name != nil {
+					bonnieAlias = imp.Name.Name
+				}
+			}
+		}
 		for _, decl := range astFile.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
-			if !ok || fn.Recv != nil || fn.Name.Name != "Tool" || fn.Type.Params.NumFields() != 0 || fn.Type.Results.NumFields() != 1 {
+			if !ok || fn.Recv != nil || fn.Name.Name != "Tool" || fn.Type.Results.NumFields() != 1 {
 				continue
 			}
-			sawToolFunc = true
+			switch fn.Type.Params.NumFields() {
+			case 0:
+				sawToolFunc = true
+			case 1:
+				field := fn.Type.Params.List[0]
+				if sel, ok := field.Type.(*ast.SelectorExpr); ok && sel.Sel.Name == "ToolScope" {
+					if pkg, ok := sel.X.(*ast.Ident); ok && pkg.Name == bonnieAlias {
+						scoped = true
+					}
+				}
+			}
 		}
 		if declared := declaredToolName(astFile); declared != "" && tool.DeclaredName == "" {
 			tool.DeclaredName = declared
 		}
 	}
-	if !sawToolFunc {
-		return tool, fmt.Errorf("%w: %s: want func Tool() kit.Tool", ErrToolMissingToolFunc, dir)
+	if !sawToolFunc && !scoped {
+		return tool, fmt.Errorf("%w: %s: want func Tool() kit.Tool or func Tool(bonnie.ToolScope) kit.Tool", ErrToolMissingToolFunc, dir)
 	}
+	if sawToolFunc && scoped {
+		return tool, fmt.Errorf("bonnie: agent: %s: cannot define both scoped and unscoped Tool functions", dir)
+	}
+	tool.Scoped = scoped
 	return tool, nil
 }
 
@@ -391,7 +417,7 @@ func (p *Plan) Render() ([]byte, error) {
 //
 // bonnie_gen.go is disposable: delete it and regenerate. Every other file in
 // this tree is authored and BONNIE never rewrites it. Discovery walks
-// tools/<name>/tool.go; each directory exports func Tool() kit.Tool and the
+// tools/<name>/tool.go; each directory exports Tool with an optional scope and the
 // directory name is the tool's name.
 package main
 
@@ -405,6 +431,9 @@ import (
 	}
 	if len(p.Tools) > 0 {
 		b.WriteString("\n")
+	}
+	if hasScopedTools(p.Tools) {
+		b.WriteString("\t\"context\"\n")
 	}
 	b.WriteString(`	kit "github.com/mark3labs/kit/pkg/kit"
 )
@@ -437,26 +466,56 @@ import (
 
 	b.WriteString(`// init hands the tree's discovered code and embedded data to the runtime
 // before main runs, so main.go never has to name a tool or an embed. Each
-// tools/<name>/tool.go exports func Tool() kit.Tool.
+// tools/<name>/tool.go exports Tool with an optional bonnie.ToolScope.
 func init() {
 	bonnie.Register(bonnie.Tree{
 		Instructions: _instructions,
 		Skills:       _skills,
 		ContextFiles: _contextFiles,
-		Tools: []kit.Tool{
 `)
-	for i := range p.Tools {
-		fmt.Fprintf(&b, "\t\t\ttool%d.Tool(),\n", i)
+	if hasScopedTools(p.Tools) {
+		b.WriteString("\t\tToolFactory: _bonnieToolFactory,\n")
+	}
+	b.WriteString(`		Tools: []kit.Tool{
+`)
+	for i, t := range p.Tools {
+		if !t.Scoped {
+			fmt.Fprintf(&b, "\t\t\ttool%d.Tool(),\n", i)
+		}
 	}
 	b.WriteString(`		},
 	})
 }
 `)
+	if hasScopedTools(p.Tools) {
+		b.WriteString(`
+func _bonnieToolFactory(ctx context.Context, scope bonnie.ToolScope) ([]kit.Tool, error) {
+	tools := []kit.Tool{
+`)
+		for i, t := range p.Tools {
+			if t.Scoped {
+				fmt.Fprintf(&b, "\t\ttool%d.Tool(scope),\n", i)
+			}
+		}
+		b.WriteString(`	}
+	return tools, nil
+}
+`)
+	}
 	out, err := format.Source([]byte(b.String()))
 	if err != nil {
 		return nil, fmt.Errorf("bonnie: agent: format generated file: %w", err)
 	}
 	return out, nil
+}
+
+func hasScopedTools(tools []Tool) bool {
+	for _, tool := range tools {
+		if tool.Scoped {
+			return true
+		}
+	}
+	return false
 }
 
 // String is the --dry-run report: the files found, the tools generated, and

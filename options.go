@@ -71,6 +71,7 @@ type config struct {
 	tools               []kit.Tool
 	kitOpts             []kit.Option
 	kitSetup            []KitSetup
+	toolFactories       []ToolFactory
 	completion          *CompletionPolicy
 	completionDuplicate bool
 	channels            []ChannelFunc
@@ -371,7 +372,8 @@ func WithKit(opts ...kit.Option) Option {
 //
 // It cannot be combined with the options that configure the agent BONNIE
 // would have built ([WithModel], [WithSystemPrompt], [WithSandbox], [WithSandboxes],
-// [WithSandboxEnv], [WithNetwork], [WithTools], [WithKit], [WithoutHumanInput]): the factory owns
+// [WithSandboxEnv], [WithNetwork], [WithTools], [WithToolFactory], [WithKit],
+// [WithKitSetup], [WithCompletionHook], [WithoutHumanInput]): the factory owns
 // the agent, so those settings would be accepted and ignored. [Agent.Run]
 // refuses instead, naming both.
 //

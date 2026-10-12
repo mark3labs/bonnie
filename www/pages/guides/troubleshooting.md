@@ -27,7 +27,7 @@ Record the BONNIE version, Linux kernel version, selected backend, journal path,
 |---|---|
 | Init refuses existing files | This is overwrite protection. Use a new directory or inspect the existing tree. Do not delete authored files without a backup. |
 | Discovery says no Go module | Run from the tree with `go.mod`, or pass its directory to dev/build. Use `go mod tidy` after scaffolding. |
-| Tool does not export `Tool()` | Each `tools/<name>/` package needs `func Tool() kit.Tool` in a non-test Go file. Check imports and the compiler error. |
+| Tool does not export `Tool()` | Each `tools/<name>/` package needs `func Tool() kit.Tool` or `func Tool(scope bonnie.ToolScope) kit.Tool` in a non-test Go file. Check imports and the compiler error. |
 | Duplicate tool name | Use unique runtime names and keep each name aligned with its directory. Do not register generated tools a second time. |
 | Instructions cannot be read | Check `instructions.md`, the process working directory, and whether build embedded it. A tree's missing prompt is refused, not silently omitted. |
 | Provider or model error | Check the selected `provider/name`, provider credentials, and Kit provider settings. An exported variable wins over `.env`. |

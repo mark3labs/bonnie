@@ -61,9 +61,69 @@ go test ./...
 bonnie build
 ```
 
-Each immediate tool directory must export `func Tool() kit.Tool` in non-test Go code. The generator imports these packages into `bonnie_gen.go`. Do not add the same tree tool to `main.go` again. Discovery rejects missing factories and detectable duplicate literal names; it is not a complete analysis of names produced by helper functions. Keep names unique yourself.
+Each immediate tool directory must export `func Tool() kit.Tool` or `func Tool(scope bonnie.ToolScope) kit.Tool` in non-test Go code. The generator imports these packages into `bonnie_gen.go`. Do not add the same tree tool to `main.go` again. Discovery rejects missing factories and detectable duplicate literal names; it is not a complete analysis of names produced by helper functions. Keep names unique yourself.
 
 For a host that constructs tools directly, use `bonnie.WithTools(myTool)`. For a low-level sandbox agent, use `kit.WithExtraTools(myTool)` with `sandbox.Agent`. Kit's `Tools` option replaces a tool set; `ExtraTools` adds to it. Do not replace the set or re-enable host core tools without examining the security effect.
+
+## Call a model from a tool
+
+Use a scoped tool when its callback needs the current agent or run. This avoids a global agent pointer and gives each Start or Resume its own tool instance. Create `tools/review/tool.go`:
+
+```go
+package review
+
+import (
+    "context"
+    "fmt"
+
+    "github.com/mark3labs/bonnie"
+    kit "github.com/mark3labs/kit/pkg/kit"
+)
+
+type input struct {
+    Text string `json:"text" description:"Text to review."`
+}
+
+// Tool returns a review tool bound to the current execution.
+func Tool(scope bonnie.ToolScope) kit.Tool {
+    return kit.NewTool("review", "Review text with a child agent.",
+        func(ctx context.Context, in input) (kit.ToolOutput, error) {
+            if len(in.Text) == 0 || len(in.Text) > 8192 {
+                return kit.ErrorResult("text must contain 1 to 8192 bytes"), nil
+            }
+            result, err := scope.Kit.Subagent(ctx, kit.SubagentConfig{
+                Prompt:    "Review this text:\n\n" + in.Text,
+                NoSession: true,
+                Tools:     []kit.Tool{}, // Do not give the child tools.
+            })
+            if err != nil {
+                return kit.ToolOutput{}, fmt.Errorf("bonnie: review text: %w", err)
+            }
+            return kit.TextResult(result.Response), nil
+        })
+}
+```
+
+Run `bonnie dev` or `bonnie build` to generate the scoped registration. Do not register the tree tool again in `main.go`. Existing zero-argument tools need no change.
+
+`scope.Kit` is the current `*kit.Kit`. The embedded `RunScope` supplies `RunID`, `Session`, and `Exec`. Use `scope.Exec` for sandbox commands. Do not retain the scope after execution ends. Use `Kit.Subagent`, not `Kit.Prompt`, from an active tool: the child has a separate agent loop and conversation. With no `Model` override, it uses the parent's model and provider settings. Set `SubagentConfig.Model` to select another model. An explicit empty `Tools` slice prevents tool use; omitted tools use Kit's inherited default tool set.
+
+**Child calls are not durable BONNIE runs.** `NoSession: true` prevents a child session file; it does not add crash recovery. The outer tool result enters BONNIE's journal, but unfinished child work does not. An interrupted outer tool can cause another model call and another charge. Pass the tool context to the child and make any external effects safe to repeat.
+
+For tools constructed by a host application, register a factory:
+
+```go
+// Import the review package from your application's module.
+bonnie.New(
+    bonnie.WithToolFactory(func(ctx context.Context, scope bonnie.ToolScope) ([]kit.Tool, error) {
+        return []kit.Tool{review.Tool(scope)}, nil
+    }),
+).Serve()
+```
+
+BONNIE calls discovered factories first, then application factories in registration order, then `WithKitSetup` callbacks. Each factory runs before the first prompt on every Start or Resume. Factory errors, a nil factory, or a nil returned tool stop agent construction. A nil or empty tool slice is permitted. Keep tool names unique across static and scoped registrations.
+
+Use `WithTools` for tools that need no run scope. Keep `WithKitSetup` for hooks and other advanced setup. `WithToolFactory` cannot be combined with `WithAgentFactory`. See [Options](/reference/options#managed-setup-and-completion) for the exact types and callback contracts.
 
 ## Make effects safe to repeat
 

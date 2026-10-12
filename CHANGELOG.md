@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Scoped custom tools through `ToolScope` and `WithToolFactory`. Discovered
+  tools can export `Tool(bonnie.ToolScope) kit.Tool` to access the current Kit
+  instance and run. Factories run again on Start or Resume. Child model calls
+  are not durable BONNIE runs.
+
 ### Changed
 
 - Web chat tool blocks show formatted, syntax-colored JSON and separate shell

@@ -88,6 +88,53 @@ func TestGenerateContextFilesOnly(t *testing.T) {
 	}
 }
 
+// Scoped tools must compile and register a factory, not an init-time instance.
+func TestCodegenSupportsScopedTool(t *testing.T) {
+	t.Parallel()
+	root := scaffoldTools(t)
+	dir := filepath.Join(root, "tools", "scoped")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source := `package scoped
+import (
+ "context"
+ "github.com/mark3labs/bonnie"
+ kit "github.com/mark3labs/kit/pkg/kit"
+)
+func Tool(scope bonnie.ToolScope) kit.Tool { return kit.NewTool("scoped", "scoped", func(context.Context, struct{}) (kit.ToolOutput, error) { return kit.TextResult("ok"), nil }) }
+`
+	if err := os.WriteFile(filepath.Join(dir, "tool.go"), []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := Discover(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var scoped bool
+	for _, tool := range plan.Tools {
+		if tool.Name == "scoped" {
+			scoped = tool.Scoped
+		}
+	}
+	if !scoped {
+		t.Fatal("scoped tool not detected")
+	}
+	code, err := plan.Render()
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(code)
+	if !strings.Contains(text, "tool1.Tool(scope)") || !strings.Contains(text, "ToolFactory:  _bonnieToolFactory") || !strings.Contains(text, "func _bonnieToolFactory(ctx context.Context, scope bonnie.ToolScope)") {
+		t.Fatalf("scoped factory missing from generated code:\n%s", text)
+	}
+	if err := os.WriteFile(filepath.Join(root, "bonnie_gen.go"), code, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	treetest.LinkToCheckout(t, root)
+	treetest.Compile(t, root, nil)
+}
+
 // Codegen twice over the same tree must be byte-identical (invariant 12).
 func TestCodegenIsIdempotent(t *testing.T) {
 	t.Parallel()

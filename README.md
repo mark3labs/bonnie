@@ -488,9 +488,26 @@ In an agent tree, `bonnie init --tools` writes one sample tool. A tool there is
 the tool's name. `bonnie dev` and `bonnie build` generate the wiring again,
 thus `main.go` never names a tool.
 
+A tool that needs the current agent can instead export
+`func Tool(scope bonnie.ToolScope) kit.Tool`. BONNIE constructs it for each
+Start or Resume, before the first prompt. Existing zero-argument tools need
+no change. The scoped form avoids a global agent pointer and permits child
+model calls through `scope.Kit.Subagent`.
+
+For tools registered in application code, use
+`bonnie.WithToolFactory(func(context.Context, bonnie.ToolScope) ([]kit.Tool, error))`.
+The scope also provides `RunID`, `Session`, and `Exec` for sandbox commands.
+Factories run before `WithKitSetup` callbacks. Do not retain a scope after its
+execution ends or call `Kit.Prompt` from an active tool on the same Kit instance.
+Child calls are not durable BONNIE runs and can repeat after interruption.
+Custom Go tool code runs on the host; use `scope.Exec` for sandbox commands.
+See [Tools and Skills](https://go-bonnie.dev/guides/tools-and-skills#call-a-model-from-a-tool)
+for a complete tree tool and application factory example.
+
 ## Sandboxes
 
-Each tool call runs in a sandbox. There is no unsandboxed mode. `WithSandbox`
+Built-in file and command tools run in a sandbox. Custom Go tool code runs on
+the host. There is no unsandboxed mode for the built-in tools. `WithSandbox`
 **selects** a backend, it does not enable one. If you do not call it, you get
 `sandbox.Landlock()`, and not your process.
 

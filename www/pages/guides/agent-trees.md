@@ -99,7 +99,7 @@ This has two effects:
 
 Use a new run when you test changed seed data. Dev does not watch `context/`; restart dev after seed changes, or build again before deployment. Never put a secret in `context/`: the model can read it, and build embeds it in the binary.
 
-Use [Tools and Skills](/guides/tools-and-skills) to add capabilities. Tools resolve at build time. There is no runtime plugin loader. Each tool directory must export `func Tool() kit.Tool`. Discovery rejects missing factories and detectable duplicate declared tool names. Keep the directory name and the name passed to `kit.NewTool` the same; use a unique runtime name.
+Use [Tools and Skills](/guides/tools-and-skills) to add capabilities. Tools resolve at build time. There is no runtime plugin loader. Each tool directory must export `func Tool() kit.Tool` or `func Tool(scope bonnie.ToolScope) kit.Tool`. The scoped form is constructed for each Start or Resume and can use the current Kit instance for child model calls. Existing zero-argument tools need no change. Discovery rejects missing factories and detectable duplicate declared tool names. Keep the directory name and the name passed to `kit.NewTool` the same; use a unique runtime name.
 
 ## Work with dev
 

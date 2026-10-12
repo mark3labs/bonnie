@@ -41,7 +41,7 @@ Most scalar options replace an earlier value. Additive options and options with 
 
 A skill can be a `.md` or `.txt` file with YAML frontmatter, or a subdirectory with `SKILL.md`. Kit adds the skill name and description to the prompt. The body arrives when the model calls `activate_skill`. Bundled scripts, references, and assets remain on the host. Put required instructions in the body and files the model must open in `context/`.
 
-Generated `bonnie_gen.go` calls `Register(Tree)` from `init`. `Tree` holds `Tools`, embedded `Instructions`, `Skills`, and `ContextFiles`. Disk data takes precedence when present; embedded data is the fallback for a deployed binary. `Registered()` returns that tree. Call it from `main` or later, not from a package-level variable initialized before generated `init` runs.
+Generated `bonnie_gen.go` calls `Register(Tree)` from `init`. `Tree` holds static `Tools`, a scoped `ToolFactory`, embedded `Instructions`, `Skills`, and `ContextFiles`. Zero-argument tree tools are constructed during `init`; scoped tree tools are constructed for each Start or Resume. Disk data takes precedence when present; embedded data is the fallback for a deployed binary. `Registered()` returns that tree. Call it from `main` or later, not from a package-level variable initialized before generated `init` runs.
 
 Custom Go tool callbacks run on the host. Registration does not confine them to the sandbox. See [Tools and Skills](/guides/tools-and-skills).
 
@@ -71,10 +71,13 @@ Injected credentials are not encrypted or hidden from sandbox commands. A comman
 
 | Exact API | Behavior |
 | --- | --- |
+| `WithToolFactory(factory ToolFactory)` | Appends factories that build tools with the current Kit instance and run scope. Runs after discovered factories and before setup callbacks on each Start or Resume. |
 | `WithKitSetup(setup KitSetup)` | Appends setup callbacks in registration order. Runs after BONNIE installs its session and hooks, before the first prompt, on each Start or Resume. |
 | `WithCompletionHook(policy CompletionPolicy)` | Installs one policy that checks a normal model response before BONNIE publishes a final outcome. |
 
-`KitSetup` has signature `func(context.Context, *kit.Kit, RunScope) error`. `RunScope` provides `RunID` and `Exec func(context.Context, sandbox.Command) (*sandbox.Result, error)`. `Exec` opens the sandbox lazily and shares the tools' handle. BONNIE owns cleanup. Do not retain `Exec` after execution ends. Callback code itself runs on the host.
+`ToolFactory` has signature `func(context.Context, ToolScope) ([]kit.Tool, error)`. `ToolScope` embeds `RunScope` and adds `Kit *kit.Kit`. Factories run before the first prompt, after BONNIE installs its session and checkpoint hooks. A nil factory, a returned error, or a nil returned tool stops construction. A nil or empty tool slice is permitted. Closure state is local to the execution, not durable. Do not retain the scope after execution ends. Use `Kit.Subagent`, not `Kit.Prompt`, for calls from an active tool. Child calls are not durable BONNIE runs. See [Tools and Skills](/guides/tools-and-skills#call-a-model-from-a-tool) for examples.
+
+`KitSetup` has signature `func(context.Context, *kit.Kit, RunScope) error`. `RunScope` provides `RunID string`, `Session *runtime.Session`, and `Exec func(context.Context, sandbox.Command) (*sandbox.Result, error)`. `Exec` opens the sandbox lazily and shares the tools' handle. BONNIE owns cleanup. Do not retain `Exec` after execution ends. Callback code itself runs on the host.
 
 `CompletionPolicy` has:
 
@@ -89,7 +92,7 @@ The hook is skipped on suspension and model failure. Hook errors fail the run. A
 
 `WithAgentFactory(f runtime.AgentFactory)` replaces the managed model agent. The factory receives the restored session and builds a `runtime.Agent` for each execution.
 
-It cannot be combined with `WithModel`, `WithSystemPrompt`, `WithSandbox`, `WithSandboxes`, `WithSandboxEnv`, `WithNetwork`, `WithTools`, `WithKit`, `WithoutHumanInput`, `WithKitSetup`, `WithCompletionHook`, or `WithRunSandboxCleanup`. BONNIE refuses agent settings that it would otherwise ignore.
+It cannot be combined with `WithModel`, `WithSystemPrompt`, `WithSandbox`, `WithSandboxes`, `WithSandboxEnv`, `WithNetwork`, `WithTools`, `WithToolFactory`, `WithKit`, `WithoutHumanInput`, `WithKitSetup`, `WithCompletionHook`, or `WithRunSandboxCleanup`. BONNIE refuses agent settings that it would otherwise ignore.
 
 Tree instructions, skills, and generated tools do not automatically reach the custom factory. Use `Registered()` if the host needs them. BONNIE still owns journal storage, working files, channels, and shutdown. The host owns its agent's isolation.
 
