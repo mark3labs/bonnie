@@ -5,7 +5,7 @@ description: Start, inspect, answer, and control durable runs through the BONNIE
 
 # HTTP channel
 
-HTTP is the default channel for agent trees and the `bonnie serve` command. It accepts JSON and streams newline-delimited JSON (NDJSON), not server-sent events.
+HTTP is the default channel for agent trees and the `bonnie serve` command. It accepts JSON and streams newline-delimited JSON (NDJSON), not server-sent events. The [Iroh channel](/channels/iroh) serves the same run API over authenticated QUIC streams with local peer approval.
 
 ```sh
 bonnie serve --addr 127.0.0.1:8080 --journal .bonnie \
