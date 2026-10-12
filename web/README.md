@@ -38,12 +38,18 @@ The interface provides:
 - Answers to questions, and explicit approval or rejection.
 - Cancel, compact, clear, and reset actions.
 - Current-branch conversation content, with safe Markdown for assistant messages
-  and closed disclosures for full message JSON. User messages remain plain text.
+  and closed disclosures for full message JSON. Message content uses JSON syntax
+  colors, body-text contrast, and a separate card background. User messages remain
+  plain text.
 - Compact tool activity rows from Kit message parts. Calls show the tool name and
   a command, path, query, action, or URL when present. Other arguments stay in
   details. Results use the call name from the selected branch and a bounded text
-  summary. Unknown names show **Tool result**. Expand a row for arguments or the
-  result payload. These are durable records, not live tool progress.
+  summary. Unknown names show **Tool result**. Expand a row for formatted arguments
+  or output. Valid JSON has syntax colors. Shell stdout and stderr show separate
+  text blocks, with JSON metadata below them. Each block can be collapsed. Long
+  blocks scroll without losing indentation. A closed **Raw payload** disclosure
+  retains the full result message. Open states survive live updates. These are
+  durable records, not live tool progress.
 - A composer footer with the real run state. **Send** is disabled while a run is
   pending, running, waiting for input, or retired. **Stop** cancels a pending or
   running turn through the existing channel action, with CSRF and turn ID fields.
@@ -75,7 +81,8 @@ host header is trusted by the CSRF check. The CSP permits `unsafe-eval` for
 Datastar expressions, but not inline scripts. Goldmark renders assistant
 Markdown with its safe defaults: raw HTML is omitted and dangerous link schemes
 are blocked. Do not enable its unsafe renderer option. Other model and journal
-text is escaped by templ; no model HTML is trusted.
+text is escaped by templ. Tool syntax spans use fixed classes and escaped source
+text; no model HTML is trusted.
 
 ## Colors and palette source
 

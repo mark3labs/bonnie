@@ -332,10 +332,14 @@ const browserE2E = `
   if (!await evaluate('document.querySelectorAll(".tool-activity").length>=2 && [...document.querySelectorAll(".tool-activity")].every(d=>!d.open) && document.querySelector(".tool-activity summary").textContent.includes("request_approval") && document.querySelector(".tool-activity summary").textContent.includes("publish the report")')) throw new Error('Tool summaries failed');
   await evaluate('document.querySelector(".tool-activity summary").click()');
   const toolID=await evaluate('document.querySelector(".tool-activity").id');
+  if (!await evaluate('document.querySelector(".tool-section").open && !!document.querySelector(".tool-section .syntax-key")')) throw new Error('Formatted tool arguments missing');
+  const sectionID=await evaluate('document.querySelector(".tool-section").id');
+  await evaluate('document.querySelector(".tool-section summary").click()');
   await evaluate('document.querySelector(".waiting select").value="approve";document.querySelector(".waiting [name=text]").value="browser approval note"');
   await submit('respond');
   await wait('document.querySelector("#live-panel").innerText.includes("Approved report.") && !document.querySelector(".waiting")', 'approval resume');
   if (!await evaluate('document.getElementById('+JSON.stringify(toolID)+')?.open')) throw new Error('Tool expansion lost on resume');
+  if (!await evaluate('document.getElementById('+JSON.stringify(sectionID)+')?.open === false')) throw new Error('Tool section collapse lost on resume');
   await submit('send', 'stop browser turn');
   await wait('!!document.querySelector("#stop-form")', 'active turn Stop');
   if (!await evaluate('document.querySelector("#send-form button").disabled && document.querySelector(".composer-state").textContent.includes("running")')) throw new Error('Active controls failed');

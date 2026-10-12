@@ -290,7 +290,7 @@ templ panel(v view) {
 										<pre class="text">{ part.Text }</pre>
 									}
 								}
-								<details class="message-payload" id={ messageDetailID(i, msg) } data-preserve-attr="open"><summary>Message content</summary><pre>{ msg.Payload }</pre></details>
+								<details class="message-payload" id={ messageDetailID(i, msg) } data-preserve-attr="open"><summary>Message content</summary><pre><code>@templ.Raw(newToolSection("", msg.Payload).HTML)</code></pre></details>
 							</article>
 						}
 						if len(v.Messages) == 0 {
@@ -405,7 +405,20 @@ templ composerFooter(v view) {
 templ toolActivityView(id string, index int, tool toolActivity) {
 	<details class="tool-activity" id={ fmt.Sprintf("%s-tool-%d", id, index) } data-preserve-attr="open">
 		<summary><code class="tool-name">{ tool.Name }</code><span class="tool-kind">{ tool.Kind }</span><span class="tool-summary">{ tool.Summary }</span></summary>
-		<pre>{ tool.Detail }</pre>
+		<div class="tool-content">
+			for n, section := range tool.Sections {
+				<details class="tool-section" id={ fmt.Sprintf("%s-tool-%d-section-%d", id, index, n) } open data-preserve-attr="open">
+					<summary>{ section.Label }</summary>
+					<pre><code>@templ.Raw(section.HTML)</code></pre>
+				</details>
+			}
+			if tool.Kind == "result" {
+				<details class="tool-raw" id={ fmt.Sprintf("%s-tool-%d-raw", id, index) } data-preserve-attr="open">
+					<summary>Raw payload</summary>
+					<pre><code>@templ.Raw(newToolSection("", tool.Detail).HTML)</code></pre>
+				</details>
+			}
+		</div>
 	</details>
 }
 

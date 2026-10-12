@@ -200,6 +200,7 @@ body[data-view=chat] #live-panel{flex:1;min-height:0;display:flex;flex-direction
 .chat .message[data-role=user] .message-role::before{content:">"}
 .chat .message[data-role=user] pre.text{background:transparent;padding:0;margin:.2rem 0}
 .chat .message details{font-size:.78rem;color:var(--muted)}
+.message-payload>pre{background:var(--card);color:var(--text);border-color:var(--control-border)}
 .chat .message[data-role=tool]{padding:.1rem 0}
 .chat .markdown:empty{display:none}
 .tool-activity{margin:.25rem 0;border:1px solid var(--border);background:var(--card)}
@@ -207,7 +208,16 @@ body[data-view=chat] #live-panel{flex:1;min-height:0;display:flex;flex-direction
 .tool-activity summary{display:flex;align-items:center;gap:.25rem;padding:.3rem .6rem;overflow-wrap:anywhere;list-style:none;overflow-x:auto}
 .tool-activity summary::-webkit-details-marker{display:none}
 .tool-activity summary::before{content:"+";color:var(--success);margin-right:.4rem;font-weight:700}
-.tool-activity[open] summary::before{content:"-"}
+.tool-activity[open]>summary::before{content:"-"}
+.tool-content{padding:0 .6rem .6rem}
+.tool-content details{margin:.4rem 0}
+.tool-content summary{font-size:.75rem;font-weight:700;color:var(--muted)}
+.tool-content details[open]>summary::before{content:"-"}
+.tool-content pre{margin:.25rem 0 0;max-height:28rem;overflow:auto;color:var(--text);white-space:pre;overflow-wrap:normal}
+.syntax-key{color:var(--link)}
+.syntax-string{color:var(--success)}
+.syntax-number{color:var(--warning)}
+.syntax-literal{color:var(--brand)}
 .tool-activity>pre{margin:0 .6rem .6rem}
 .tool-name{color:var(--link);white-space:nowrap;flex:none;min-width:max-content}.tool-kind{margin:0 .5rem;font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);flex:none}.tool-summary{color:var(--muted);min-width:0;overflow:hidden;text-overflow:ellipsis}
 @media(max-width:420px){.tool-activity summary{flex-wrap:wrap}.tool-activity .tool-summary{flex-basis:100%;padding-left:1.25rem;white-space:normal;overflow-wrap:anywhere}}

@@ -5,6 +5,16 @@ All notable changes to BONNIE are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Web chat tool blocks show formatted, syntax-colored JSON and separate shell
+  stdout, stderr, and metadata. Output sections can be collapsed and long blocks
+  scroll. A separate disclosure keeps the raw result payload available.
+- Web chat Message content disclosures use JSON syntax colors and stronger
+  foreground, background, and border contrast.
+
 ## [0.23.0] — 2026-10-12
 
 **Asynchronous shell jobs and provider login.**

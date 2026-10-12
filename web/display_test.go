@@ -15,7 +15,7 @@ import (
 	"github.com/mark3labs/bonnie/runtime"
 )
 
-// Only Markdown renderer output can reach templ.Raw. Raw HTML, event handlers,
+// Markdown renderer output must be safe for templ.Raw. Raw HTML, event handlers,
 // and executable URLs must not reach it, including encoded URL schemes.
 func TestMarkdown(t *testing.T) {
 	t.Parallel()
@@ -102,7 +102,7 @@ func TestRenderedConversationAndFilteredTools(t *testing.T) {
 	}
 	w := request(h, "GET", "/web/?run=markdown&filter=unique", nil, nil)
 	html := w.Body.String()
-	for _, want := range []string{"<strong>Rendered answer</strong>", "**plain user text**", `data-preserve-attr="open"`, `data-ignore-morph`, "connection-status"} {
+	for _, want := range []string{"<strong>Rendered answer</strong>", "**plain user text**", `data-preserve-attr="open"`, `data-ignore-morph`, "connection-status", `<span class="syntax-key">&#34;role&#34;</span>`} {
 		if !strings.Contains(html, want) {
 			t.Errorf("missing %s", want)
 		}
@@ -189,7 +189,7 @@ func TestChatTools(t *testing.T) {
 			t.Errorf("missing %s in %s", want, html)
 		}
 	}
-	if strings.Contains(html, ` open`) {
+	if regexp.MustCompile(`<details class="tool-activity"[^>]*\sopen(?:[ =>])`).MatchString(html) {
 		t.Fatal("tool details start open")
 	}
 }
@@ -224,7 +224,7 @@ func TestChatStructureAndState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, rule := range []string{"white-space:nowrap;flex:none;min-width:max-content", "list-style:none;overflow-x:auto", "@media(max-width:420px){.tool-activity summary{flex-wrap:wrap}"} {
+	for _, rule := range []string{".message-payload>pre{background:var(--card);color:var(--text);border-color:var(--control-border)}", "white-space:nowrap;flex:none;min-width:max-content", "list-style:none;overflow-x:auto", "@media(max-width:420px){.tool-activity summary{flex-wrap:wrap}"} {
 		if !strings.Contains(string(css), rule) {
 			t.Errorf("missing narrow tool layout rule %q", rule)
 		}

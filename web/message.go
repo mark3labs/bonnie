@@ -11,4 +11,10 @@ type messagePart struct {
 	Tool       *toolActivity
 }
 
-type toolActivity struct{ Name, Kind, Summary, Detail string }
+type toolActivity struct {
+	Name, Kind, Summary, Detail string
+	Sections                    []toolSection
+}
+
+// HTML contains only escaped text and fixed syntax-color spans.
+type toolSection struct{ Label, Text, HTML string }

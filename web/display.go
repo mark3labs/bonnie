@@ -83,7 +83,7 @@ func projectMessage(msg kit.LLMMessage, names map[string]string) (message, error
 			}
 		case kit.LLMToolCallPart:
 			names[p.ToolCallID] = p.ToolName
-			m.Parts = append(m.Parts, messagePart{Tool: &toolActivity{Name: p.ToolName, Kind: "call", Summary: toolInputSummary(p.Input), Detail: pretty(json.RawMessage(p.Input))}})
+			m.Parts = append(m.Parts, messagePart{Tool: &toolActivity{Name: p.ToolName, Kind: "call", Summary: toolInputSummary(p.Input), Detail: pretty(json.RawMessage(p.Input)), Sections: []toolSection{newToolSection("Arguments", p.Input)}}})
 		case kit.LLMToolResultPart:
 			name := names[p.ToolCallID]
 			if name == "" {
@@ -94,7 +94,23 @@ func projectMessage(msg kit.LLMMessage, names map[string]string) (message, error
 				return message{}, fmt.Errorf("bonnie: web: encode tool result: %w", err)
 			}
 			preview, _ := traceDisplay(runtime.Record{Kind: runtime.RecordMessage, Payload: payload}, names)
-			m.Parts = append(m.Parts, messagePart{Tool: &toolActivity{Name: name, Kind: "result", Summary: preview, Detail: pretty(payload)}})
+			sections := []toolSection{newToolSection("Output", pretty(payload))}
+			switch output := p.Output.(type) {
+			case kit.LLMToolResultOutputContentText:
+				sections = toolOutputSections(output.Text)
+				// A shell result summary should show output, not its JSON wrapper.
+				for _, section := range sections {
+					if section.Label == "stdout" || section.Label == "stderr" {
+						preview = compactPreview(section.Text)
+						break
+					}
+				}
+			case kit.LLMToolResultOutputContentError:
+				if output.Error != nil {
+					sections = []toolSection{newToolSection("Error", output.Error.Error())}
+				}
+			}
+			m.Parts = append(m.Parts, messagePart{Tool: &toolActivity{Name: name, Kind: "result", Summary: preview, Detail: pretty(payload), Sections: sections}})
 		}
 	}
 	if m.Role == "assistant" {
