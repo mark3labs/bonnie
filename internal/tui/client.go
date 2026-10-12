@@ -17,7 +17,6 @@ package tui
 
 import (
 	"context"
-	"net/http"
 
 	"github.com/mark3labs/bonnie/client"
 	"github.com/mark3labs/bonnie/runtime"
@@ -66,22 +65,3 @@ type Client interface {
 // error. It is [client.ErrNotFound]; the alias keeps the TUI's own code
 // reading in its own vocabulary.
 var ErrNotFound = client.ErrNotFound
-
-// HTTP is the wire client the TUI runs against.
-//
-// Deprecated: use [github.com/mark3labs/bonnie/client.Client] directly. The
-// alias remains for callers inside BONNIE.
-type HTTP = client.Client
-
-// NewHTTP returns a client that talks to the channel at base, for example
-// "http://127.0.0.1:8080".
-//
-// Deprecated: use [github.com/mark3labs/bonnie/client.New]. It takes options
-// rather than a bare *http.Client, and reaches the whole wire API instead of
-// the slice the terminal happens to need.
-func NewHTTP(base string, hc *http.Client) *client.Client {
-	if hc == nil {
-		return client.New(base)
-	}
-	return client.New(base, client.WithHTTPClient(hc))
-}

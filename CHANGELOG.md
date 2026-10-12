@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Web chat keeps text and tool parts in their original order and rejects queued
+  text already covered by a newer snapshot. Equal-cursor live text still streams.
+- Tool names stay on one line, with horizontal scrolling for very long names.
+  Action completion no longer enables controls disabled by the run state.
+
+### Changed
+
+- Web views load only the data they display and share one composer template.
+- Removed unused deprecated HTTP client aliases from the internal terminal package.
+
 ### Added
 
 - Shared `auth` commands in the BONNIE CLI and compiled agents for OpenAI

@@ -53,10 +53,15 @@ func TestBrowserLiveState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fixture := fmt.Sprintf(`<!doctype html><body><span id="connection-status"></span><div id="live-connection"></div>%s%s
+	fixture := fmt.Sprintf(`<!doctype html><body><span id="connection-status"></span><div id="live-connection"></div><form class="action" id="action-form" action="/action"><button id="eligible" type="submit">Send</button><button id="ineligible" type="button" disabled>Waiting for answer</button></form>%s%s
 <script src="/web.js"></script>
 <script type="module">
 import '/datastar.js';
+const actionForm = document.getElementById('action-form');
+window.fetch = () => new Promise(resolve => setTimeout(() => resolve({ok: true, status: 200, text: async () => '{}'}), 50));
+actionForm.dispatchEvent(new Event('submit', {bubbles: true, cancelable: true}));
+await new Promise(resolve => setTimeout(resolve, 100));
+const eligibilityKept = document.getElementById('eligible').disabled === false && document.getElementById('ineligible').disabled === true;
 const input = document.getElementById('send-text');
 input.value = 'unfinished draft';
 input.focus();
@@ -78,7 +83,7 @@ emit('retrying');
 const retry = document.getElementById('connection-status').textContent === 'Reconnecting…';
 emit('datastar-patch-elements', {mode: 'outer', elements: %s});
 emit('datastar-patch-elements', {mode: 'outer', elements: %s});
-const ok = approval === document.getElementById('respond-approval') && approval.value === 'approve' && note === document.getElementById('respond-note') && note.value === 'unfinished note' && retry && input === document.getElementById('send-text') && input.value === 'unfinished draft' && input.selectionStart === 3 && input.selectionEnd === 8 && messageDetail === document.querySelector('.message details') && messageDetail.open && document.querySelectorAll('.message').length===2 && trace === document.getElementById('trace-1') && trace.open && filter.value === 'unfinished filter' && document.getElementById('trace-2') && document.getElementById('connection-status').dataset.state === 'connected';
+const ok = eligibilityKept && approval === document.getElementById('respond-approval') && approval.value === 'approve' && note === document.getElementById('respond-note') && note.value === 'unfinished note' && retry && input === document.getElementById('send-text') && input.value === 'unfinished draft' && input.selectionStart === 3 && input.selectionEnd === 8 && messageDetail === document.querySelector('.message details') && messageDetail.open && document.querySelectorAll('.message').length===2 && trace === document.getElementById('trace-1') && trace.open && filter.value === 'unfinished filter' && document.getElementById('trace-2') && document.getElementById('connection-status').dataset.state === 'connected';
 document.body.dataset.testResult = ok ? 'passed' : 'failed';
 </script></body>`, initial.String(), traceHTML, encoded, traceEncoded)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

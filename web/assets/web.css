@@ -204,12 +204,13 @@ body[data-view=chat] #live-panel{flex:1;min-height:0;display:flex;flex-direction
 .chat .markdown:empty{display:none}
 .tool-activity{margin:.25rem 0;border:1px solid var(--border);background:var(--card)}
 .tool-activity:hover,.tool-activity[open]{border-color:var(--control-border)}
-.tool-activity summary{display:flex;align-items:center;gap:.25rem;padding:.3rem .6rem;overflow-wrap:anywhere;list-style:none}
+.tool-activity summary{display:flex;align-items:center;gap:.25rem;padding:.3rem .6rem;overflow-wrap:anywhere;list-style:none;overflow-x:auto}
 .tool-activity summary::-webkit-details-marker{display:none}
 .tool-activity summary::before{content:"+";color:var(--success);margin-right:.4rem;font-weight:700}
 .tool-activity[open] summary::before{content:"-"}
 .tool-activity>pre{margin:0 .6rem .6rem}
-.tool-name{color:var(--link)}.tool-kind{margin:0 .5rem;font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}.tool-summary{color:var(--muted);min-width:0;overflow:hidden;text-overflow:ellipsis}
+.tool-name{color:var(--link);white-space:nowrap;flex:none;min-width:max-content}.tool-kind{margin:0 .5rem;font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);flex:none}.tool-summary{color:var(--muted);min-width:0;overflow:hidden;text-overflow:ellipsis}
+@media(max-width:420px){.tool-activity summary{flex-wrap:wrap}.tool-activity .tool-summary{flex-basis:100%;padding-left:1.25rem;white-space:normal;overflow-wrap:anywhere}}
 .composer{flex:none;display:flex;flex-direction:column;background:var(--card);border:1px solid var(--control-border);border-left:3px solid var(--user);padding:.5rem .75rem .4rem 1rem;margin-bottom:max(.75rem,env(safe-area-inset-bottom))}
 .composer:focus-within{border-color:var(--focus)}
 .composer form{margin:0}

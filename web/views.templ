@@ -63,33 +63,33 @@ templ page(v view) {
 // application replaces the view and its SSE connection without page navigation.
 templ application(v view) {
 	<div id="application" data-view={ v.View } data-location={ liveURL(v) }>
-			<header>
-				<a href="/web/" class="brand"><img class="brand-logo" src="/web/assets/logo-64.png" width="32" height="32" alt=""/>BONNIE</a>
-				<nav aria-label="Views" class="view-nav">
-					@button.Button(button.Props{Href: viewURL("chat", v.ID), Variant: button.VariantOutline, Attributes: templ.Attributes{"aria-current": currentView(v, "chat")}}) {
-						Chat 
-					}
-					@button.Button(button.Props{Href: viewURL("runs", v.ID), Variant: button.VariantOutline, Attributes: templ.Attributes{"aria-current": currentView(v, "runs")}}) {
-						Runs 
-					}
-					@button.Button(button.Props{Href: viewURL("trace", v.ID), Variant: button.VariantOutline, Attributes: templ.Attributes{"aria-current": currentView(v, "trace")}}) {
-						Trace 
-					}
-				</nav>
-				@button.Button(button.Props{Href: "/web/", Variant: button.VariantOutline, Class: "new-chat", Attributes: templ.Attributes{"id": "new-chat"}}) {
-					@icon("M12 5v14M5 12h14")
-					New chat
+		<header>
+			<a href="/web/" class="brand"><img class="brand-logo" src="/web/assets/logo-64.png" width="32" height="32" alt=""/>BONNIE</a>
+			<nav aria-label="Views" class="view-nav">
+				@button.Button(button.Props{Href: viewURL("chat", v.ID), Variant: button.VariantOutline, Attributes: templ.Attributes{"aria-current": currentView(v, "chat")}}) {
+					Chat
 				}
-				@button.Button(button.Props{Type: button.TypeButton, Variant: button.VariantOutline, Attributes: templ.Attributes{"id": "theme-toggle", "aria-label": "Theme: system. Switch to light."}}) {
-					Theme: System
+				@button.Button(button.Props{Href: viewURL("runs", v.ID), Variant: button.VariantOutline, Attributes: templ.Attributes{"aria-current": currentView(v, "runs")}}) {
+					Runs
 				}
-				<span id="connection-status" class="connection" role="status" aria-live="polite" data-state="connecting">Connecting…</span>
-			</header>
-			<main>
-				<div id={ "live-connection-" + liveURL(v) } data-url={ liveURL(v) } data-init={ fmt.Sprintf("@get(%q, {openWhenHidden: true, retry: 'always', requestCancellation: 'cleanup'})", liveURL(v)) }></div>
-				@panel(v)
-				<p id="action-status" role="status" aria-live="polite"></p>
-			</main>
+				@button.Button(button.Props{Href: viewURL("trace", v.ID), Variant: button.VariantOutline, Attributes: templ.Attributes{"aria-current": currentView(v, "trace")}}) {
+					Trace
+				}
+			</nav>
+			@button.Button(button.Props{Href: "/web/", Variant: button.VariantOutline, Class: "new-chat", Attributes: templ.Attributes{"id": "new-chat"}}) {
+				@icon("M12 5v14M5 12h14")
+				New chat
+			}
+			@button.Button(button.Props{Type: button.TypeButton, Variant: button.VariantOutline, Attributes: templ.Attributes{"id": "theme-toggle", "aria-label": "Theme: system. Switch to light."}}) {
+				Theme: System
+			}
+			<span id="connection-status" class="connection" role="status" aria-live="polite" data-state="connecting">Connecting…</span>
+		</header>
+		<main>
+			<div id={ "live-connection-" + liveURL(v) } data-url={ liveURL(v) } data-init={ fmt.Sprintf("@get(%q, {openWhenHidden: true, retry: 'always', requestCancellation: 'cleanup'})", liveURL(v)) }></div>
+			@panel(v)
+			<p id="action-status" role="status" aria-live="polite"></p>
+		</main>
 	</div>
 }
 
@@ -122,10 +122,10 @@ templ panel(v view) {
 							@table.Header() {
 								@table.Row() {
 									@table.Head(table.HeadProps{Attributes: templ.Attributes{"scope": "col"}}) {
-										Run 
+										Run
 									}
 									@table.Head(table.HeadProps{Attributes: templ.Attributes{"scope": "col"}}) {
-										State 
+										State
 									}
 								}
 							}
@@ -172,7 +172,7 @@ templ panel(v view) {
 			if v.ID == "" {
 				@consoleCard("Journal trace", "Select a run to inspect its journal.", true) {
 					@button.Button(button.Props{Href: viewURL("runs", ""), Variant: button.VariantOutline}) {
-						Choose run 
+						Choose run
 					}
 				}
 			} else {
@@ -181,7 +181,7 @@ templ panel(v view) {
 						<input type="hidden" name="run" value={ v.ID }/>
 						<input type="hidden" name="view" value="trace"/>
 						@label.Label(label.Props{For: "trace-filter"}) {
-							Filter 
+							Filter
 						}
 						<div class="filter-row">
 							@input.Input(input.Props{ID: "trace-filter", Name: "filter", Value: v.Filter, Placeholder: "tool, state, error…", Attributes: templ.Attributes{"data-ignore-morph": true}})
@@ -279,16 +279,16 @@ templ panel(v view) {
 								if msg.Role != "tool" {
 									<strong class="message-role">{ msg.Role }</strong>
 								}
-								if msg.Role == "assistant" {
-									<div class="markdown">@templ.Raw(msg.HTML)</div>
-								} else if msg.Text != "" {
-									<pre class="text">{ msg.Text }</pre>
-								}
-								for n, tool := range msg.Tools {
-									<details class="tool-activity" id={ fmt.Sprintf("%s-tool-%d", messageDetailID(i, msg), n) } data-preserve-attr="open">
-										<summary><code class="tool-name">{ tool.Name }</code><span class="tool-kind">{ tool.Kind }</span><span class="tool-summary">{ tool.Summary }</span></summary>
-										<pre>{ tool.Detail }</pre>
-									</details>
+								for n, part := range msg.Parts {
+									if part.Tool != nil {
+										@toolActivityView(messageDetailID(i, msg), n, *part.Tool)
+									} else if msg.Role == "assistant" {
+										<div class="markdown">
+											@templ.Raw(part.HTML)
+										</div>
+									} else if part.Text != "" {
+										<pre class="text">{ part.Text }</pre>
+									}
 								}
 								<details class="message-payload" id={ messageDetailID(i, msg) } data-preserve-attr="open"><summary>Message content</summary><pre>{ msg.Payload }</pre></details>
 							</article>
@@ -306,23 +306,23 @@ templ panel(v view) {
 									<input type="hidden" name="turn" value={ v.Snapshot.Suspend.TurnID }/>
 									if v.Snapshot.Suspend.Kind == "approval" {
 										@label.Label(label.Props{For: "respond-approval"}) {
-											Decision 
+											Decision
 										}
 										@nativeselect.NativeSelect(nativeselect.Props{ID: "respond-approval", Name: "approval", Required: true, Attributes: templ.Attributes{"data-ignore-morph": true}}) {
 											@nativeselect.Option(nativeselect.OptionProps{Value: "reject"}) {
-												Reject 
+												Reject
 											}
 											@nativeselect.Option(nativeselect.OptionProps{Value: "approve"}) {
-												Approve 
+												Approve
 											}
 										}
 										@label.Label(label.Props{For: "respond-note"}) {
-											Note 
+											Note
 										}
 										@input.Input(input.Props{ID: "respond-note", Name: "text", Attributes: templ.Attributes{"data-ignore-morph": true}})
 									} else if len(v.Snapshot.Suspend.Options) > 0 {
 										@label.Label(label.Props{For: "respond-choice"}) {
-											Answer 
+											Answer
 										}
 										@nativeselect.NativeSelect(nativeselect.Props{ID: "respond-choice", Name: "text", Required: true, Attributes: templ.Attributes{"data-ignore-morph": true}}) {
 											for _, option := range v.Snapshot.Suspend.Options {
@@ -333,79 +333,89 @@ templ panel(v view) {
 										}
 									} else {
 										@label.Label(label.Props{For: "respond-answer"}) {
-											Answer 
+											Answer
 										}
 										@textarea.Textarea(textarea.Props{ID: "respond-answer", Name: "text", Attributes: templ.Attributes{"required": true, "data-ignore-morph": true}})
 									}
 									@button.Button(button.Props{Type: button.TypeSubmit}) {
-										Respond 
+										Respond
 									}
 								</form>
 							</section>
 						}
 					}
 				</div>
-				<div class="composer">
-					<div class="composer-state" role="status">
-						if v.ID == "" {
-							<span class="muted">New chat · no run yet</span>
-						} else {
-							<span class="muted">Run: <span data-state={ string(v.Snapshot.State) }>{ string(v.Snapshot.State) }</span></span>
-						}
-						if canStop(v) {
-							<form id="stop-form" method="post" action="/web/actions/cancel" class="action">
-								@hidden(v)
-								<input type="hidden" name="turn" value={ v.Snapshot.TurnID }/>
-								@button.Button(button.Props{Type: button.TypeSubmit, Variant: button.VariantOutline}) {
-									Stop
-								}
-							</form>
-						}
-					</div>
-					if v.ID == "" {
-						<form id="start-form" method="post" action="/web/actions/start" class="action">
-							<input type="hidden" name="csrf" value={ v.Token }/>
-							@label.Label(label.Props{For: "start-text"}) {
-								Message 
-							}
-							@textarea.Textarea(textarea.Props{ID: "start-text", Name: "text", Rows: 2, Placeholder: "Ask the agent a question", Attributes: templ.Attributes{"required": true, "data-ignore-morph": true}})
-							<div class="composer-footer">
-								<span class="muted"><kbd>Ctrl</kbd> + <kbd>Enter</kbd> to send</span>
-								@button.Button(button.Props{Type: button.TypeSubmit, Disabled: !canSend(v)}) {
-									Send
-									@icon("M5 12h14M13 6l6 6-6 6")
-								}
-							</div>
-						</form>
-					} else {
-						<form id="send-form" method="post" action="/web/actions/send" class="action">
-							@hidden(v)
-							@label.Label(label.Props{For: "send-text"}) {
-								Message 
-							}
-							@textarea.Textarea(textarea.Props{ID: "send-text", Name: "text", Rows: 2, Placeholder: "Message the agent", Attributes: templ.Attributes{"required": true, "data-ignore-morph": true}})
-							<div class="composer-footer">
-								<span class="muted"><kbd>Ctrl</kbd> + <kbd>Enter</kbd> to send</span>
-								@button.Button(button.Props{Type: button.TypeSubmit, Disabled: !canSend(v)}) {
-									Send
-									@icon("M5 12h14M13 6l6 6-6 6")
-								}
-							</div>
-						</form>
-					}
-				</div>
+				@composer(v)
 			</section>
 		}
 	</div>
 }
 
+// composer shares the start and follow-up form while keeping their action fields distinct.
+templ composer(v view) {
+	<div class="composer">
+		<div class="composer-state" role="status">
+			if v.ID == "" {
+				<span class="muted">New chat · no run yet</span>
+			} else {
+				<span class="muted">Run: <span data-state={ string(v.Snapshot.State) }>{ string(v.Snapshot.State) }</span></span>
+			}
+			if canStop(v) {
+				<form id="stop-form" method="post" action="/web/actions/cancel" class="action">
+					@hidden(v)
+					<input type="hidden" name="turn" value={ v.Snapshot.TurnID }/>
+					@button.Button(button.Props{Type: button.TypeSubmit, Variant: button.VariantOutline}) {
+						Stop
+					}
+				</form>
+			}
+		</div>
+		if v.ID == "" {
+			<form id="start-form" method="post" action="/web/actions/start" class="action">
+				<input type="hidden" name="csrf" value={ v.Token }/>
+				@label.Label(label.Props{For: "start-text"}) {
+					Message
+				}
+				@textarea.Textarea(textarea.Props{ID: "start-text", Name: "text", Rows: 2, Placeholder: "Ask the agent a question", Attributes: templ.Attributes{"required": true, "data-ignore-morph": true}})
+				@composerFooter(v)
+			</form>
+		} else {
+			<form id="send-form" method="post" action="/web/actions/send" class="action">
+				@hidden(v)
+				@label.Label(label.Props{For: "send-text"}) {
+					Message
+				}
+				@textarea.Textarea(textarea.Props{ID: "send-text", Name: "text", Rows: 2, Placeholder: "Message the agent", Attributes: templ.Attributes{"required": true, "data-ignore-morph": true}})
+				@composerFooter(v)
+			</form>
+		}
+	</div>
+}
+
+templ composerFooter(v view) {
+	<div class="composer-footer">
+		<span class="muted"><kbd>Ctrl</kbd> + <kbd>Enter</kbd> to send</span>
+		@button.Button(button.Props{Type: button.TypeSubmit, Disabled: !canSend(v)}) {
+			Send
+			@icon("M5 12h14M13 6l6 6-6 6")
+		}
+	</div>
+}
+
+templ toolActivityView(id string, index int, tool toolActivity) {
+	<details class="tool-activity" id={ fmt.Sprintf("%s-tool-%d", id, index) } data-preserve-attr="open">
+		<summary><code class="tool-name">{ tool.Name }</code><span class="tool-kind">{ tool.Kind }</span><span class="tool-summary">{ tool.Summary }</span></summary>
+		<pre>{ tool.Detail }</pre>
+	</details>
+}
+
 // streamingMessage is transient and is replaced by the next durable snapshot.
 // Plain text avoids unsafe HTML and incomplete Markdown during a model stream.
 templ streamingMessage(text string) {
- <article id="streaming-message" class={ templ.KV("message", text != "") } data-role="assistant" aria-live="off">
-  if text != "" {
-   <strong class="message-role">assistant · streaming</strong>
-   <pre class="text">{ text }</pre>
-  }
- </article>
+	<article id="streaming-message" class={ templ.KV("message", text != "") } data-role="assistant" aria-live="off">
+		if text != "" {
+			<strong class="message-role">assistant · streaming</strong>
+			<pre class="text">{ text }</pre>
+		}
+	</article>
 }

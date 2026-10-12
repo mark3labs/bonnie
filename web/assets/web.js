@@ -59,8 +59,6 @@ document.addEventListener('submit', async (event) => {
   if ((action === 'clear' || action === 'reset') && !confirm(`${action === 'clear' ? 'Clear model context' : 'Retire this run'}? The journal stays available.`)) return;
   const status = document.getElementById('action-status');
   form.dataset.busy = 'true';
-  const buttons = [...form.querySelectorAll('button')];
-  buttons.forEach(button => { button.disabled = true; });
   status.textContent = 'Working… You can cancel an active turn with the run controls.';
   const message = form.querySelector('textarea[name="text"]');
   const submittedText = message?.value;
@@ -103,7 +101,6 @@ document.addEventListener('submit', async (event) => {
     document.getElementById('action-status').textContent = error.message || 'Request failed. Check the journal before you retry.';
   } finally {
     delete form.dataset.busy;
-    buttons.forEach(button => { button.disabled = false; });
   }
 });
 

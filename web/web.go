@@ -90,11 +90,6 @@ type view struct {
 	Messages                []message
 	Trace                   []traceRow
 }
-type message struct {
-	Role, Text, Payload, HTML string
-	Tools                     []toolActivity
-}
-type toolActivity struct{ Name, Kind, Summary, Detail string }
 
 func (s *server) load(r *http.Request) (view, error) {
 	v := view{ID: r.URL.Query().Get("run"), Filter: r.URL.Query().Get("filter"), View: r.URL.Query().Get("view")}
@@ -104,20 +99,22 @@ func (s *server) load(r *http.Request) (view, error) {
 	if v.View != "chat" && v.View != "runs" && v.View != "trace" {
 		return v, errInvalidView
 	}
-	ids, err := s.journal.Runs(r.Context(), "")
-	if err != nil {
-		return v, err
-	}
-	sort.Strings(ids)
-	for _, id := range ids {
-		if runtime.IsReservedRun(id) {
-			continue
-		}
-		state, err := s.journal.State(r.Context(), id)
+	if v.View == "runs" {
+		ids, err := s.journal.Runs(r.Context(), "")
 		if err != nil {
 			return v, err
 		}
-		v.Runs = append(v.Runs, runRow{id, state})
+		sort.Strings(ids)
+		for _, id := range ids {
+			if runtime.IsReservedRun(id) {
+				continue
+			}
+			state, err := s.journal.State(r.Context(), id)
+			if err != nil {
+				return v, err
+			}
+			v.Runs = append(v.Runs, runRow{id, state})
+		}
 	}
 	if v.ID == "" {
 		return v, nil
@@ -125,44 +122,52 @@ func (s *server) load(r *http.Request) (view, error) {
 	if runtime.IsReservedRun(v.ID) {
 		return v, runtime.ErrRunNotFound
 	}
-	recs, err := s.journal.Replay(r.Context(), v.ID)
-	if err != nil {
-		return v, err
-	}
-	// The channel snapshot selects the current branch without changing the journal.
-	req := r.Clone(r.Context())
-	req.URL = &url.URL{Path: "/bonnie/v1/runs/" + url.PathEscape(v.ID) + "/snapshot"}
-	req.Method = http.MethodGet
-	req.Body = nil
-	reply := httptest.NewRecorder()
-	s.api.ServeHTTP(reply, req)
-	if reply.Code != http.StatusOK {
-		return v, fmt.Errorf("bonnie: web: snapshot status %d", reply.Code)
-	}
-	if err := json.Unmarshal(reply.Body.Bytes(), &v.Snapshot); err != nil {
-		return v, err
-	}
-	chatToolNames := make(map[string]string)
-	for _, msg := range v.Snapshot.Messages {
-		m := message{Role: string(msg.Role)}
-		for _, part := range msg.Content {
-			if text, ok := part.(kit.LLMTextPart); ok {
-				m.Text += text.Text
-			}
+	if v.View != "trace" {
+		// The channel snapshot selects the current branch without changing the journal.
+		req := r.Clone(r.Context())
+		req.URL = &url.URL{Path: "/bonnie/v1/runs/" + url.PathEscape(v.ID) + "/snapshot"}
+		req.Method = http.MethodGet
+		req.Body = nil
+		reply := httptest.NewRecorder()
+		s.api.ServeHTTP(reply, req)
+		if reply.Code == http.StatusNotFound {
+			return v, runtime.ErrRunNotFound
 		}
-		payload, err := json.MarshalIndent(msg, "", "  ")
-		if err != nil {
+		if reply.Code != http.StatusOK {
+			return v, fmt.Errorf("bonnie: web: snapshot status %d", reply.Code)
+		}
+		if err := json.Unmarshal(reply.Body.Bytes(), &v.Snapshot); err != nil {
 			return v, err
 		}
-		if m.Role == "assistant" {
-			m.HTML, err = renderMarkdown(m.Text)
+	}
+	if v.View == "chat" {
+		chatToolNames := make(map[string]string)
+		for _, msg := range v.Snapshot.Messages {
+			m, err := projectMessage(msg, chatToolNames)
 			if err != nil {
 				return v, err
 			}
+			for _, part := range m.Parts {
+				if part.Tool == nil {
+					m.Text += part.Text
+				} else {
+					m.Tools = append(m.Tools, *part.Tool)
+				}
+			}
+			payload, err := json.MarshalIndent(msg, "", "  ")
+			if err != nil {
+				return v, err
+			}
+			m.Payload = string(payload)
+			v.Messages = append(v.Messages, m)
 		}
-		m.Tools = chatTools(msg, chatToolNames)
-		m.Payload = string(payload)
-		v.Messages = append(v.Messages, m)
+	}
+	if v.View != "trace" {
+		return v, nil
+	}
+	recs, err := s.journal.Replay(r.Context(), v.ID)
+	if err != nil {
+		return v, err
 	}
 	turn := 0
 	toolNames := make(map[string]string)
@@ -345,6 +350,7 @@ func (s *server) live(w http.ResponseWriter, r *http.Request) {
 	heartbeat := time.NewTicker(15 * time.Second)
 	defer heartbeat.Stop()
 	var text string
+	var textSeq int
 	for {
 		select {
 		case <-r.Context().Done():
@@ -365,13 +371,23 @@ func (s *server) live(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			if ev.RunID == v.ID && v.View == "chat" {
+				// A snapshot can include records newer than events already queued
+				// for this subscriber. Keep equal-Seq deltas: Kit publishes them
+				// before the step commit that advances the snapshot cursor.
+				if ev.Seq < v.Snapshot.Cursor {
+					continue
+				}
 				switch ev.Type {
 				case string(kit.EventMessageUpdate):
+					if v.Snapshot.State != runtime.RunRunning || (ev.TurnID != "" && v.Snapshot.TurnID != "" && ev.TurnID != v.Snapshot.TurnID) {
+						continue
+					}
 					var update kit.MessageUpdateEvent
 					if json.Unmarshal(ev.Data, &update) != nil || update.Chunk == "" {
 						continue
 					}
 					text += update.Chunk
+					textSeq = ev.Seq
 					if err := patch(w, r, streamingMessage(text)); err != nil {
 						return
 					}
@@ -396,6 +412,9 @@ func (s *server) live(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			v.Token = c.Value
+			if textSeq < v.Snapshot.Cursor || v.Snapshot.State != runtime.RunRunning {
+				text = ""
+			}
 			if err := patch(w, r, panel(v)); err != nil {
 				return
 			}
@@ -419,7 +438,9 @@ func patch(w http.ResponseWriter, r *http.Request, component templ.Component) er
 	var event strings.Builder
 	event.WriteString("event: datastar-patch-elements\ndata: mode outer\n")
 	for line := range strings.SplitSeq(b.String(), "\n") {
-		event.WriteString("data: elements " + line + "\n")
+		event.WriteString("data: elements ")
+		event.WriteString(line)
+		event.WriteString("\n")
 	}
 	event.WriteString("\n")
 	_, err := io.WriteString(w, event.String())

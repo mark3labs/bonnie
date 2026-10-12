@@ -131,6 +131,23 @@ func TestRenderedConversationAndFilteredTools(t *testing.T) {
 	}
 }
 
+func TestProjectMessagePreservesMixedPartOrder(t *testing.T) {
+	t.Parallel()
+	names := map[string]string{}
+	msg := kit.LLMMessage{Role: "assistant", Content: []kit.LLMMessagePart{
+		kit.LLMTextPart{Text: "before"},
+		kit.LLMToolCallPart{ToolCallID: "call", ToolName: "long_tool_name", Input: `{"path":"a"}`},
+		kit.LLMTextPart{Text: "after"},
+	}}
+	got, err := projectMessage(msg, names)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Parts) != 3 || got.Parts[0].HTML == "" || got.Parts[1].Tool == nil || got.Parts[2].HTML == "" || got.Parts[1].Tool.Name != "long_tool_name" {
+		t.Fatalf("ordered projection: %+v", got.Parts)
+	}
+}
+
 // Tool rows keep arguments and results in closed disclosures. Mixed assistant
 // text remains Markdown, and unknown result names never use another branch.
 func TestChatTools(t *testing.T) {
@@ -202,5 +219,14 @@ func TestChatStructureAndState(t *testing.T) {
 	}
 	if chatTitle(view{}) != "New chat" {
 		t.Fatal("new title")
+	}
+	css, err := assets.ReadFile("assets/web.css")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rule := range []string{"white-space:nowrap;flex:none;min-width:max-content", "list-style:none;overflow-x:auto", "@media(max-width:420px){.tool-activity summary{flex-wrap:wrap}"} {
+		if !strings.Contains(string(css), rule) {
+			t.Errorf("missing narrow tool layout rule %q", rule)
+		}
 	}
 }

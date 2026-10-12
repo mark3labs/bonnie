@@ -70,15 +70,20 @@ func messageDetailID(index int, msg message) string {
 	return fmt.Sprintf("message-%d-%x", index, sha256.Sum256([]byte(msg.Payload)))
 }
 
-// chatTools projects each tool part without changing the snapshot. Names for
-// results come only from calls in this branch; unknown names stay explicit.
-func chatTools(msg kit.LLMMessage, names map[string]string) []toolActivity {
-	var rows []toolActivity
+// projectMessage preserves the order of text and tool parts for chat display.
+func projectMessage(msg kit.LLMMessage, names map[string]string) (message, error) {
+	m := message{Role: string(msg.Role)}
 	for _, part := range msg.Content {
 		switch p := part.(type) {
+		case kit.LLMTextPart:
+			if n := len(m.Parts); n > 0 && m.Parts[n-1].Tool == nil {
+				m.Parts[n-1].Text += p.Text
+			} else {
+				m.Parts = append(m.Parts, messagePart{Text: p.Text})
+			}
 		case kit.LLMToolCallPart:
 			names[p.ToolCallID] = p.ToolName
-			rows = append(rows, toolActivity{Name: p.ToolName, Kind: "call", Summary: toolInputSummary(p.Input), Detail: pretty(json.RawMessage(p.Input))})
+			m.Parts = append(m.Parts, messagePart{Tool: &toolActivity{Name: p.ToolName, Kind: "call", Summary: toolInputSummary(p.Input), Detail: pretty(json.RawMessage(p.Input))}})
 		case kit.LLMToolResultPart:
 			name := names[p.ToolCallID]
 			if name == "" {
@@ -86,11 +91,34 @@ func chatTools(msg kit.LLMMessage, names map[string]string) []toolActivity {
 			}
 			payload, err := json.Marshal(kit.LLMMessage{Role: "tool", Content: []kit.LLMMessagePart{p}})
 			if err != nil {
-				rows = append(rows, toolActivity{Name: name, Kind: "result", Summary: "Cannot decode tool result"})
-				continue
+				return message{}, fmt.Errorf("bonnie: web: encode tool result: %w", err)
 			}
 			preview, _ := traceDisplay(runtime.Record{Kind: runtime.RecordMessage, Payload: payload}, names)
-			rows = append(rows, toolActivity{Name: name, Kind: "result", Summary: preview, Detail: pretty(payload)})
+			m.Parts = append(m.Parts, messagePart{Tool: &toolActivity{Name: name, Kind: "result", Summary: preview, Detail: pretty(payload)}})
+		}
+	}
+	if m.Role == "assistant" {
+		for i := range m.Parts {
+			if m.Parts[i].Tool != nil {
+				continue
+			}
+			html, err := renderMarkdown(m.Parts[i].Text)
+			if err != nil {
+				return message{}, err
+			}
+			m.Parts[i].HTML = html
+		}
+	}
+	return m, nil
+}
+
+// chatTools projects tool parts for callers that need only the activity list.
+func chatTools(msg kit.LLMMessage, names map[string]string) []toolActivity {
+	projected, _ := projectMessage(msg, names)
+	var rows []toolActivity
+	for _, part := range projected.Parts {
+		if part.Tool != nil {
+			rows = append(rows, *part.Tool)
 		}
 	}
 	return rows
