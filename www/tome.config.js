@@ -17,7 +17,7 @@ export default {
   navigation: [
     { group: "Start here", pages: ["index", "installation", "quick-start", "concepts"] },
     { group: "Build an agent", pages: ["guides/agent-trees", "guides/agent-commands", "guides/tools-and-skills", "guides/sandboxes", "guides/scheduling"] },
-    { group: "Connect channels", pages: ["channels/overview", "channels/http", "channels/iroh", "channels/slack", "channels/discord", "channels/telegram", "channels/github", "channels/nats"] },
+    { group: "Connect channels", pages: ["channels/overview", "channels/http", "channels/iroh", "channels/slack", "channels/discord", "channels/telegram", "channels/github", "channels/nats", "channels/nats-api"] },
     { group: "Operate safely", pages: ["guides/deployment", "guides/troubleshooting"] },
     { group: "Reference", pages: ["reference/cli", "reference/options", "reference/runtime", "reference/journal", "reference/events", "reference/testing"] },
   ],

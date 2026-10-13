@@ -29,6 +29,13 @@ loss would hurt.
   The optional `/web` interface uses the same channel and run executor. Iroh
   serves the HTTP wire API over authenticated QUIC streams for approved peers.
 
+### Added
+
+- Optional authenticated run API over agent-specific Core NATS subjects, with
+  the existing Go client, framed NDJSON streams, bounded observers, renewable
+  leases and capability-protected cancellation. Task delivery is unchanged.
+- Explicit `WithHTTPListenerDisabled` for hosts with no TCP API or webhook port.
+
 ### Fixed
 
 - `bonnie chat --run <run-id>` loads the selected run and its saved history.
