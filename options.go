@@ -17,6 +17,7 @@ import (
 	bonniehttp "github.com/mark3labs/bonnie/channel/http"
 	irohchannel "github.com/mark3labs/bonnie/channel/iroh"
 	natschannel "github.com/mark3labs/bonnie/channel/nats"
+	natsapichannel "github.com/mark3labs/bonnie/channel/natsapi"
 	"github.com/mark3labs/bonnie/channel/slack"
 	"github.com/mark3labs/bonnie/channel/telegram"
 	"github.com/mark3labs/bonnie/runtime"
@@ -79,6 +80,7 @@ type config struct {
 	factory             runtime.AgentFactory
 	shutdown            time.Duration
 	listener            net.Listener
+	httpDisabled        bool
 	activityLogger      runtime.ActivityLogger
 	quiet               bool
 	webUI               bool
@@ -615,3 +617,12 @@ func require(name string, creds ...named) error {
 	}
 	return nil
 }
+
+// WithNATSAPI mounts the run API, distinct from the asynchronous task channel.
+func WithNATSAPI(cfg natsapichannel.Config) Option {
+	return WithChannel(func(r *runtime.Runner) (Channel, error) { return natsapichannel.New(r, cfg) })
+}
+
+// WithHTTPListenerDisabled explicitly disables the TCP listener. Web UI,
+// injected listeners and channels with HTTP routes are incompatible.
+func WithHTTPListenerDisabled() Option { return func(c *config) { c.httpDisabled = true } }

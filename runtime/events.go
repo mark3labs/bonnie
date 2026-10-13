@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"encoding/json"
+	"errors"
 	"sync"
 	"time"
 
@@ -243,9 +244,9 @@ func (b *EventBus) SubscribeAll() (<-chan Event, func()) {
 	}
 }
 
-// subscriber owns an unbounded queue in front of a bounded channel. A slow
-// reader therefore costs memory, never lost events — dropping would break the
-// cursor contract that reconnecting clients rely on.
+// subscriber normally owns an unbounded queue. Opt-in bounded subscribers
+// terminate on overflow instead of silently dropping events. Default readers
+// cost memory, never lost events — dropping would break the cursor contract.
 //
 // done is closed by [subscriber.close] and releases a send that no one is
 // reading. A client that goes away mid-event leaves the pump blocked on
@@ -256,9 +257,11 @@ type subscriber struct {
 	wake chan struct{}
 	done chan struct{}
 
-	mu     sync.Mutex
-	queue  []Event
-	closed bool
+	mu                         sync.Mutex
+	queue                      []Event
+	closed                     bool
+	maxEvents, maxBytes, bytes int
+	errors                     chan error
 }
 
 func newSubscriber() *subscriber {
@@ -276,6 +279,18 @@ func (s *subscriber) push(ev Event) {
 	if s.closed {
 		s.mu.Unlock()
 		return
+	}
+	if s.maxEvents > 0 {
+		raw, err := json.Marshal(ev)
+		if err != nil || len(s.queue) >= s.maxEvents || s.bytes+len(raw) > s.maxBytes {
+			s.closed = true
+			s.queue = nil
+			s.errors <- ErrEventOverflow
+			close(s.done)
+			s.mu.Unlock()
+			return
+		}
+		s.bytes += len(raw)
 	}
 	s.queue = append(s.queue, ev)
 	s.mu.Unlock()
@@ -307,7 +322,16 @@ func (s *subscriber) pump() {
 	for {
 		s.mu.Lock()
 		queue := s.queue
-		s.queue = nil
+		if s.maxEvents > 0 && len(queue) > 0 {
+			ev := queue[0]
+			queue = []Event{ev}
+			s.queue[0] = Event{}
+			s.queue = s.queue[1:]
+			raw, _ := json.Marshal(ev)
+			s.bytes -= len(raw)
+		} else {
+			s.queue = nil
+		}
 		closed := s.closed
 		s.mu.Unlock()
 
@@ -323,6 +347,12 @@ func (s *subscriber) pump() {
 		}
 		if closed {
 			return
+		}
+		s.mu.Lock()
+		more := len(s.queue) > 0
+		s.mu.Unlock()
+		if more {
+			continue
 		}
 		select {
 		case <-s.wake:
@@ -359,4 +389,43 @@ func forwardAgentEvents(agent Agent, bus *EventBus, runID string, turnIDs ...str
 		}
 		bus.Publish(Event{RunID: runID, TurnID: turnID, Type: string(ev.EventType()), Data: data})
 	})
+}
+
+// ErrEventOverflow terminates a bounded observer, never the observed run.
+var ErrEventOverflow = errors.New("bonnie: event observer overflow")
+
+// SubscribeBounded is opt-in; existing subscriptions remain lossless/unbounded.
+// The terminal error channel delivers at most one error. Stop is idempotent.
+func (b *EventBus) SubscribeBounded(runID string, after, maxEvents, maxBytes int) (<-chan Event, <-chan error, func()) {
+	b.mu.Lock()
+	s := &subscriber{out: make(chan Event), wake: make(chan struct{}, 1), done: make(chan struct{}), maxEvents: maxEvents, maxBytes: maxBytes, errors: make(chan error, 1)}
+	if maxEvents <= 0 || maxBytes <= 0 {
+		s.closed = true
+		s.errors <- ErrEventOverflow
+		close(s.done)
+	}
+	b.nextSub++
+	id := b.nextSub
+	if b.subs[runID] == nil {
+		b.subs[runID] = make(map[int]*subscriber)
+	}
+	b.subs[runID][id] = s
+	for _, ev := range b.backlog[runID] {
+		if ev.Seq > after {
+			s.push(ev)
+		}
+	}
+	b.mu.Unlock()
+	stop := func() {
+		b.mu.Lock()
+		delete(b.subs[runID], id)
+		if len(b.subs[runID]) == 0 {
+			delete(b.subs, runID)
+		}
+		b.mu.Unlock()
+		s.close()
+	}
+	go func() { <-s.done; stop() }()
+	go s.pump()
+	return s.out, s.errors, stop
 }

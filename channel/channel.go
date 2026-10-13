@@ -286,3 +286,14 @@ type Channel interface {
 	// Routes returns the HTTP surface the channel needs mounted.
 	Routes() []Route
 }
+
+// HostInfo is transport-neutral metadata prepared once all channels exist.
+type HostInfo struct {
+	Agent, Version string
+	Channels       []string
+}
+
+// HostPreparer optionally injects the host outbound registry before Start.
+type HostPreparer interface {
+	PrepareHost(Outbound, HostInfo) error
+}

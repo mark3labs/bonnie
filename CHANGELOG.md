@@ -5,6 +5,16 @@ All notable changes to BONNIE are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Optional Core NATS run API channel and HTTP client transport, separate from
+  the task protocol, with authenticated requests, chunked responses, leases,
+  capability cancellation, ACK flow control and bounded event observers.
+- Explicit `WithHTTPListenerDisabled` host mode and transport-neutral host
+  preparation for metadata and outbound dispatch.
+
 ## [0.25.0] — 2026-10-13
 
 **Paired Iroh transport and reliable guest completion.**

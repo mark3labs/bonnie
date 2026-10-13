@@ -85,6 +85,9 @@ func (a *Agent) Serve() {
 // here is never destructive.
 func (a *Agent) Run(ctx context.Context) (runErr error) {
 	c := a.cfg
+	if c.httpDisabled && (c.listener != nil || c.webUI) {
+		return errors.New("bonnie: disabled HTTP listener conflicts with listener or web UI")
+	}
 	ln := c.listener
 	defer func() {
 		if ln != nil {
@@ -142,11 +145,17 @@ func (a *Agent) Run(ctx context.Context) (runErr error) {
 		if err != nil {
 			return err
 		}
+		if c.httpDisabled && len(ch.Routes()) > 0 {
+			return fmt.Errorf("bonnie: disabled HTTP listener conflicts with channel %q routes", ch.Name())
+		}
 		if err := refuseReserved(ch); err != nil {
 			return err
 		}
 	}
-	info := bonniehttp.Info{Agent: c.name, Channels: []string{"http"}}
+	info := bonniehttp.Info{Agent: c.name}
+	if !c.httpDisabled {
+		info.Channels = []string{"http"}
+	}
 	for _, ch := range channels {
 		info.Channels = append(info.Channels, ch.Name())
 	}
@@ -160,6 +169,13 @@ func (a *Agent) Run(ctx context.Context) (runErr error) {
 		}
 	}
 
+	for _, ch := range channels {
+		if prep, ok := ch.(channel.HostPreparer); ok {
+			if err := prep.PrepareHost(out, channel.HostInfo{Agent: info.Agent, Version: info.Version, Channels: info.Channels}); err != nil {
+				return err
+			}
+		}
+	}
 	mux := http.NewServeMux()
 	schedules, err := newScheduleService(c, runner, channels)
 	if err != nil {
@@ -191,7 +207,7 @@ func (a *Agent) Run(ctx context.Context) (runErr error) {
 	// Bind before the banner, so the banner reports the address the process
 	// actually listens on. A configured ":0" is a request for any free port,
 	// and printing it back would tell an operator nothing.
-	if ln == nil {
+	if ln == nil && !c.httpDisabled {
 		var err error
 		ln, err = net.Listen("tcp", c.addr)
 		if err != nil {
@@ -209,7 +225,11 @@ func (a *Agent) Run(ctx context.Context) (runErr error) {
 
 	var presenceErr <-chan error
 	if c.presence != nil {
-		candidate, err := newPresenceLifecycle(*c.presence, append(append([]Channel(nil), channels...), httpChannel))
+		presenceChannels := append([]Channel(nil), channels...)
+		if !c.httpDisabled {
+			presenceChannels = append(presenceChannels, httpChannel)
+		}
+		candidate, err := newPresenceLifecycle(*c.presence, presenceChannels)
 		if err != nil {
 			return err
 		}
@@ -256,6 +276,25 @@ func (a *Agent) Run(ctx context.Context) (runErr error) {
 			runErr = errors.Join(runErr, fmt.Errorf("bonnie: scheduler: %w", err))
 		}
 	}()
+	if c.httpDisabled {
+		fmt.Fprintln(os.Stderr, "BONNIE: TCP HTTP listener disabled")
+		var scheduleDone <-chan error
+		if schedules != nil {
+			scheduleDone = schedules.done
+		}
+		select {
+		case <-schedulerCtx.Done():
+			return nil
+		case err := <-presenceErr:
+			return err
+		case err := <-scheduleDone:
+			schedules.done = nil
+			if errors.Is(err, context.Canceled) {
+				return nil
+			}
+			return err
+		}
+	}
 	c.banner(os.Stderr, ln.Addr().String(), prepared.contextFiles, prepared.skills, prepared.dotenv)
 	if schedules == nil {
 		if presenceErr == nil {

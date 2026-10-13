@@ -80,14 +80,15 @@ import (
 // Channel is the HTTP transport. It implements [channel.Channel] and
 // [channel.Inbound].
 type Channel struct {
-	namespace   string
-	runner      *runtime.Runner
-	core        *chat.Core
-	policy      channel.TurnPolicy
-	idGen       []chat.CoreOption
-	info        Info
-	auth        Authenticator
-	operationMu sync.Mutex
+	namespace                 string
+	runner                    *runtime.Runner
+	core                      *chat.Core
+	policy                    channel.TurnPolicy
+	idGen                     []chat.CoreOption
+	info                      Info
+	auth                      Authenticator
+	operationMu               sync.Mutex
+	streamEvents, streamBytes int
 }
 
 var (
@@ -121,7 +122,12 @@ func WithIDGenerator(fn func() string) Option {
 // known. An empty Version is replaced by the BONNIE module version from the
 // binary's build info.
 func WithInfo(info Info) Option {
-	return func(c *Channel) { c.info = info }
+	return func(c *Channel) {
+		c.info = info
+		if c.info.Version == "" {
+			c.info.Version = moduleVersion()
+		}
+	}
 }
 
 // Authenticator verifies a request and returns the principal it proves.
@@ -823,7 +829,19 @@ func (c *Channel) handleStream(w http.ResponseWriter, r *http.Request, in channe
 		cursor = n
 	}
 
-	events, unsubscribe := c.core.Runner().StreamEvents(runID, cursor)
+	var events <-chan runtime.Event
+	var terminal <-chan error
+	var unsubscribe func()
+	if c.streamEvents > 0 {
+		events, terminal, unsubscribe = c.core.Runner().StreamEventsBounded(r.Context(), runID, cursor, c.streamEvents, c.streamBytes)
+	} else {
+		events, unsubscribe = c.core.Runner().StreamEvents(runID, cursor)
+	}
+	fail := func(err error) {
+		if w, ok := w.(interface{ Fail(error) }); ok {
+			w.Fail(err)
+		}
+	}
 	defer unsubscribe()
 
 	w.Header().Set("Content-Type", "application/x-ndjson")
@@ -838,8 +856,16 @@ func (c *Channel) handleStream(w http.ResponseWriter, r *http.Request, in channe
 	enc := json.NewEncoder(w)
 	for {
 		select {
+		case err := <-terminal:
+			fail(err)
+			return
 		case ev, open := <-events:
 			if !open {
+				select {
+				case err := <-terminal:
+					fail(err)
+				default:
+				}
 				return
 			}
 			if err := enc.Encode(ev); err != nil {
@@ -1008,4 +1034,10 @@ func (c *Channel) handleOperation(w http.ResponseWriter, r *http.Request, req St
 		return
 	}
 	writeJSON(w, http.StatusOK, runResponse(run))
+}
+
+// WithBoundedStreams opts into bounded observers and terminal replay errors.
+// It is intended for transports whose response writers can report failures.
+func WithBoundedStreams(events, bytes int) Option {
+	return func(c *Channel) { c.streamEvents = events; c.streamBytes = bytes }
 }

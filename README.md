@@ -1592,3 +1592,15 @@ paired peers have access. See [Iroh setup and programmatic pairing](docs/IROH.md
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+### Run API over NATS
+
+For the complete synchronous run API and cursor-resumable event streams, use
+`bonnie.WithNATSAPI` and `client/natsapi.NewTransport` with the existing Go
+client. This is **separate from the NATS task protocol**. It requires a
+caller-owned connection, a verified HTTP authenticator, one literal subject
+per journal-owning agent, and broker ACLs protecting reply inboxes.
+`bonnie.WithHTTPListenerDisabled()` optionally runs without a TCP listener and
+rejects incompatible web UI, listener and webhook configuration. See
+[Run API over Core NATS](docs/NATS_API.md) for setup, ACLs, framing, limits,
+uncertain mutation delivery and explicit stream reconnect behavior.

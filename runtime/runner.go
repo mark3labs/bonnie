@@ -472,7 +472,11 @@ func sendEvent(out chan<- Event, done <-chan struct{}, ev Event) bool {
 // record, anchored to the last message record of the turn. Everything else
 // in the journal is conversation state, not an event.
 func (r *Runner) replayEvents(runID string, after int, out chan<- Event, done <-chan struct{}, emitted *int) error {
-	recs, err := r.journal.Replay(context.Background(), runID)
+	return r.replayEventsContext(context.Background(), runID, after, out, done, emitted)
+}
+
+func (r *Runner) replayEventsContext(ctx context.Context, runID string, after int, out chan<- Event, done <-chan struct{}, emitted *int) error {
+	recs, err := r.journal.Replay(ctx, runID)
 	if err != nil {
 		return err
 	}
@@ -1088,4 +1092,99 @@ func renderResponse(resp InputResponse) string {
 		return verdict
 	}
 	return verdict + ": " + resp.Text
+}
+
+// StreamEventsBounded preserves journal/live handoff while bounding the live
+// observer and each forwarded event. Replay and overflow errors are terminal.
+func (r *Runner) StreamEventsBounded(ctx context.Context, runID string, after, maxEvents, maxBytes int) (<-chan Event, <-chan error, func()) {
+	ctx, cancel := context.WithCancel(ctx)
+	live, fail, unsubscribe := r.bus.SubscribeBounded(runID, after, maxEvents, maxBytes)
+	out := make(chan Event)
+	terminal := make(chan error, 1)
+	var once sync.Once
+	stop := func() { once.Do(func() { cancel(); unsubscribe() }) }
+	position := r.durableSeq(runID)
+	oldest := r.bus.Oldest(runID)
+	replay := position > after && (oldest == 0 || after+1 < oldest)
+	watchDone := make(chan struct{})
+	go func() {
+		defer close(watchDone)
+		select {
+		case err := <-fail:
+			select {
+			case terminal <- err:
+			default:
+			}
+			cancel()
+			unsubscribe()
+		case <-ctx.Done():
+		}
+	}()
+	go func() {
+		defer func() { stop(); <-watchDone; close(out) }()
+		report := func(err error) {
+			if err != nil && !errors.Is(err, errStreamClosed) && !errors.Is(err, context.Canceled) {
+				select {
+				case terminal <- err:
+				default:
+				}
+			}
+		}
+		if replay {
+			projected := make(chan Event)
+			replayDone := make(chan error, 1)
+			go func() {
+				emitted := after
+				replayDone <- r.replayEventsContext(ctx, runID, after, projected, ctx.Done(), &emitted)
+				close(projected)
+			}()
+			covered := after
+			for ev := range projected {
+				raw, err := json.Marshal(ev)
+				if err != nil || len(raw) > maxBytes {
+					report(ErrEventOverflow)
+					cancel()
+					<-replayDone
+					return
+				}
+				if !sendEvent(out, ctx.Done(), ev) {
+					<-replayDone
+					return
+				}
+				covered = max(covered, ev.Seq)
+			}
+			if err := <-replayDone; err != nil {
+				report(err)
+				return
+			}
+			after = covered
+		}
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case ev, ok := <-live:
+				if !ok {
+					select {
+					case err := <-fail:
+						report(err)
+					default:
+					}
+					return
+				}
+				if ev.Seq != 0 && ev.Seq <= after {
+					continue
+				}
+				raw, err := json.Marshal(ev)
+				if err != nil || len(raw) > maxBytes {
+					report(ErrEventOverflow)
+					return
+				}
+				if !sendEvent(out, ctx.Done(), ev) {
+					return
+				}
+			}
+		}
+	}()
+	return out, terminal, stop
 }
