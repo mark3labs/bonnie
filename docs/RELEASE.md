@@ -76,6 +76,35 @@ indefinitely**, **reachable over HTTP**. State the limits from the current
 
 ## History
 
+### `v0.27.0`, 2026-10-13 — published with a red `test` job
+
+- [x] `task release-check`, `task release-snapshot`, `task check`, and `task ci`
+      pass locally. The snapshot at `08285de` builds both Linux targets, verifies
+      both archive checksums, and prints `0.26.0-SNAPSHOT-08285de` on amd64.
+- [ ] **Not confirmed.** At tagged commit
+      `36c185c4e00c1cd6899b05c2499d26d0890d2411` (CI run `38412082473`),
+      `lint` and `examples` pass and `test` fails. The maintainer waived the
+      check and ordered the tag.
+- [x] The dated `[0.27.0]` changelog section states claims, limits, and the NATS
+      run API limit. The NATS API entries moved out of the published `[0.26.0]`
+      section, which now matches its tagged text. Note extraction passes.
+- [x] Annotated tag pushed after human approval. Release run `38413329559`
+      succeeds and publishes three artifacts.
+- [x] Both downloaded archive checksums verify. The statically linked amd64
+      binary prints `bonnie version 0.27.0`.
+- [x] Both example trees pin v0.27.0 after publication; `task examples` passes.
+
+**Version choice.** MINOR under the pre-1.0 convention: `WithNATSAPI`,
+`WithHTTPListenerDisabled`, `channel.HostPreparer`, `channel/natsapi`,
+`client/natsapi`, and `runtime.StreamEventsBounded` are added. Kit minimum is
+`v0.129.0`.
+
+**Open defect.** `TestShellJobDurabilityAcrossRunnerRestart` fails
+intermittently in CI since `9039b59`. It replaced a fixed sleep with a receipt
+poll and shortened the job. The job reports exit code 0, but `marker` is
+missing. It passes 20 of 20 race-enabled local runs. Find out whether the test
+or shell-job recovery is at fault before the next release.
+
 ### `v0.26.0`, 2026-10-13 — publication verified
 
 - [x] `task release-check`, `task release-snapshot`, `task check`, and `task ci`
