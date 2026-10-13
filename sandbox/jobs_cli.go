@@ -56,7 +56,17 @@ func (c *cliSandbox) StartJob(ctx context.Context, cmd Command) (string, error) 
 func jobStartScript(dir string, cmd Command) string {
 	// Pass environment and argv as distinct positional parameters. env's
 	// assignments must precede its command; a separator is not an argv boundary.
-	worker := `d=$1; work=$2; shift 2; trap 'printf "143\n" >"$d/exit"; exit 143' TERM; pid=$$; printf '%s\n' "$pid" >"$d/pid"; sed 's/^.*) //' "/proc/$pid/stat" | awk '{print $20}' >"$d/start"; cat /proc/sys/kernel/random/boot_id >"$d/boot"; touch "$d/ready"; cd "$work" || { echo 125 >"$d/exit"; exit 125; }; env -- "$@" <"$d/stdin" >>"$d/stdout" 2>>"$d/stderr"; rc=$?; printf '%s\n' "$rc" >"$d/exit"; exit "$rc"`
+	// Rename within the job directory so readers see only a complete record.
+	worker := `d=$1; work=$2; shift 2
+complete() { printf '%s\n' "$1" >"$d/exit.tmp" && mv "$d/exit.tmp" "$d/exit"; }
+trap 'complete 143; exit 143' TERM
+pid=$$; printf '%s\n' "$pid" >"$d/pid"
+sed 's/^.*) //' "/proc/$pid/stat" | awk '{print $20}' >"$d/start"
+cat /proc/sys/kernel/random/boot_id >"$d/boot"
+touch "$d/ready"
+cd "$work" || { complete 125; exit 125; }
+env -- "$@" <"$d/stdin" >>"$d/stdout" 2>>"$d/stderr"
+rc=$?; complete "$rc"; exit "$rc"`
 	parts := []string{"d=" + shellQuote(dir), "mkdir -p \"$d\" || exit 1", " : >\"$d/stdin\"", " : >\"$d/stdout\"", " : >\"$d/stderr\""}
 	if len(cmd.Stdin) > 0 {
 		parts = append(parts, "printf %s "+shellQuote(string(cmd.Stdin))+" >\"$d/stdin\"")
@@ -96,7 +106,15 @@ func (c *cliSandbox) JobStatus(ctx context.Context, id string) (*JobStatus, erro
 		return nil, err
 	}
 	dir := c.jobsRoot() + "/" + id
-	script := "d=" + shellQuote(dir) + "; if [ ! -d \"$d\" ]; then echo MISSING; elif [ -f \"$d/exit\" ]; then printf 'DONE '; cat \"$d/exit\"; elif [ -f \"$d/pid\" ] && p=$(cat \"$d/pid\") && [ \"$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)\" = \"$(cat \"$d/boot\" 2>/dev/null)\" ] && [ \"$(sed 's/^.*) //' /proc/$p/stat 2>/dev/null | awk '{print $20}')\" = \"$(cat \"$d/start\" 2>/dev/null)\" ]; then echo RUNNING; else echo UNKNOWN; fi"
+	// A worker can publish completion and exit during the identity check.
+	script := "d=" + shellQuote(dir) + `
+completed() { [ -f "$d/exit" ] || return 1; printf 'DONE '; cat "$d/exit"; }
+if [ ! -d "$d" ]; then echo MISSING
+elif completed; then :
+elif [ -f "$d/pid" ] && p=$(cat "$d/pid") && [ "$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)" = "$(cat "$d/boot" 2>/dev/null)" ] && [ "$(sed 's/^.*) //' /proc/$p/stat 2>/dev/null | awk '{print $20}')" = "$(cat "$d/start" 2>/dev/null)" ]; then echo RUNNING
+elif completed; then :
+else echo UNKNOWN
+fi`
 	out, stderr, code, err := runCLIRaw(ctx, nil, c.bin, c.execArgs(c, []string{"sh", "-c", script}, Command{})...)
 	if err != nil {
 		return nil, err
