@@ -472,7 +472,11 @@ func sendEvent(out chan<- Event, done <-chan struct{}, ev Event) bool {
 // record, anchored to the last message record of the turn. Everything else
 // in the journal is conversation state, not an event.
 func (r *Runner) replayEvents(runID string, after int, out chan<- Event, done <-chan struct{}, emitted *int) error {
-	recs, err := r.journal.Replay(context.Background(), runID)
+	return r.replayEventsContext(context.Background(), runID, after, out, done, emitted)
+}
+
+func (r *Runner) replayEventsContext(ctx context.Context, runID string, after int, out chan<- Event, done <-chan struct{}, emitted *int) error {
+	recs, err := r.journal.Replay(ctx, runID)
 	if err != nil {
 		return err
 	}

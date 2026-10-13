@@ -17,6 +17,7 @@ import (
 	bonniehttp "github.com/mark3labs/bonnie/channel/http"
 	irohchannel "github.com/mark3labs/bonnie/channel/iroh"
 	natschannel "github.com/mark3labs/bonnie/channel/nats"
+	"github.com/mark3labs/bonnie/channel/natsapi"
 	"github.com/mark3labs/bonnie/channel/slack"
 	"github.com/mark3labs/bonnie/channel/telegram"
 	"github.com/mark3labs/bonnie/runtime"
@@ -79,6 +80,7 @@ type config struct {
 	factory             runtime.AgentFactory
 	shutdown            time.Duration
 	listener            net.Listener
+	noHTTPListener      bool
 	activityLogger      runtime.ActivityLogger
 	quiet               bool
 	webUI               bool
@@ -614,4 +616,16 @@ func require(name string, creds ...named) error {
 		}
 	}
 	return nil
+}
+
+// WithNATSAPI mounts the run API on an explicit agent-specific Core NATS subject.
+// Broker authentication alone is not API authentication; cfg requires a verifier.
+func WithNATSAPI(cfg natsapi.Config) Option {
+	return WithChannel(func(r *runtime.Runner) (Channel, error) { return natsapi.New(r, cfg) })
+}
+
+// WithHTTPListenerDisabled explicitly disables TCP API and schedule routes.
+// It rejects web UI, injected listeners, and channels with TCP routes.
+func WithHTTPListenerDisabled() Option {
+	return func(c *config) { c.noHTTPListener = true }
 }
