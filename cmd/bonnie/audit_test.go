@@ -11,8 +11,6 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
-
-	"github.com/mark3labs/bonnie/internal/treetest"
 )
 
 // A failed initial build must return before a TUI waits for readiness.
@@ -152,11 +150,20 @@ func TestWatchSkipsDirenv(t *testing.T) {
 }
 
 // The loop must join child cleanup before it returns after cancellation.
+//
+// The claim is about the loop and the child process, not the build, so the
+// child is a shell script in place of a compiled tree.
+// TestDevRestartCompletesParkedRun covers the real `go build` path.
 func TestDevLoopCancellationReapsChild(t *testing.T) {
 	t.Parallel()
 	root := buildHermeticTree(t)
 	d := newDevServer(root, devOpts{shutdown: 5 * time.Second})
-	d.env = treetest.BuildEnv()
+	d.compile = func() error {
+		if err := os.MkdirAll(filepath.Dir(d.bin), 0o755); err != nil {
+			return err
+		}
+		return os.WriteFile(d.bin, []byte("#!/bin/sh\nexec sleep 60\n"), 0o755)
+	}
 	var log syncBuffer
 	d.log = &log
 	ctx, cancel := context.WithCancel(context.Background())

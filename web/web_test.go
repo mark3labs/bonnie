@@ -233,6 +233,8 @@ func TestLive(t *testing.T) {
 	case <-time.After(4 * time.Second):
 		t.Fatal("no live update")
 	}
+	// The first live view polled the journal every second. The idle window
+	// must outlast that interval to catch the poll coming back.
 	beforeIdle := journal.reads.Load()
 	time.Sleep(1100 * time.Millisecond)
 	if journal.reads.Load() != beforeIdle {
@@ -241,11 +243,17 @@ func TestLive(t *testing.T) {
 	if err := response.Body.Close(); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(100 * time.Millisecond)
-	before := journal.reads.Load()
-	time.Sleep(1100 * time.Millisecond)
-	if journal.reads.Load() != before {
-		t.Fatal("polling continued after disconnect")
+	// Server.Close blocks until every handler has returned, so it proves the
+	// disconnect ended the stream without a second fixed wait.
+	closed := make(chan struct{})
+	go func() {
+		server.Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the live handler kept running after disconnect")
 	}
 }
 

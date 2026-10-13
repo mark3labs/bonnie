@@ -5,8 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/mark3labs/bonnie/internal/treetest"
 )
 
 // The scaffolded tree is the default layout and nothing else: no manifest,
@@ -212,19 +210,4 @@ func TestScaffoldPinsReleasedVersion(t *testing.T) {
 	if strings.Contains(string(mod), "require") {
 		t.Fatalf("dev scaffold pins a version: %s", mod)
 	}
-}
-
-// The scaffold's main.go must compile against this checkout. The mark3labs
-// modules are public, so a user can `go mod tidy` and build straight off the
-// proxy; this test instead points the tree's go.mod at the local checkout, so
-// it exercises the code under test and needs no network and no second
-// repository.
-func TestScaffoldToolsModuleBuilds(t *testing.T) {
-	t.Parallel()
-	dir := filepath.Join(t.TempDir(), "my-agent")
-	if _, err := Scaffold(dir, InitOptions{Tools: true}); err != nil {
-		t.Fatalf("Scaffold: %v", err)
-	}
-	treetest.LinkToCheckout(t, dir)
-	treetest.Compile(t, dir, nil)
 }

@@ -144,6 +144,9 @@ func TestDurableRetry(t *testing.T) {
 	t.Parallel()
 	nc, js := broker(t)
 	c := client(t, nc)
+	// The failed result comes back after the retry delay; the default (1s)
+	// would only make this test wait.
+	c.retryDelay = 10 * time.Millisecond
 	publishResult(t, js, Result{Version: 1, TaskID: "a", Response: "ok"})
 	failure := errors.New("handler failed")
 	if err := c.Consume(deadline(t), func(context.Context, Outcome) error { return failure }); !errors.Is(err, failure) {
@@ -162,8 +165,21 @@ func TestDurableRetry(t *testing.T) {
 		if o.TaskID != "a" {
 			t.Errorf("outcome %+v", o)
 		}
-		// Cancel after AckSync has time to complete.
-		time.AfterFunc(100*time.Millisecond, cancel)
+		// Cancel once the broker has the acknowledgement, not after a
+		// fixed wait. Consume acknowledges after this handler returns.
+		go func() {
+			for {
+				if ci, err := js.ConsumerInfo("OUTPUT", "reader"); err == nil && ci.AckFloor.Stream == 1 {
+					cancel()
+					return
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(5 * time.Millisecond):
+				}
+			}
+		}()
 		return nil
 	})
 	if !errors.Is(err, context.Canceled) || calls != 1 {

@@ -166,6 +166,10 @@ CGO_ENABLED=0 go build ./...
   (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GEMINI_API_KEY`). They must skip
   cleanly without a key, never fail. Run them with `task test-live`.
 - Add or update tests for the code you change, also when nobody asks.
+- Disable an intermittent test with `flaky.Skip(t, "<symptom>")` from
+  `internal/flaky`; do not delete it or loop on re-runs. Run the disabled
+  tests with `BONNIE_RUN_FLAKY=1`. When you fix one, delete its `Skip` call.
+  `depguard` (`flaky-in-tests-only`) keeps the package out of shipped code.
 
 ## Code style
 

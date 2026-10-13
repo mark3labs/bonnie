@@ -79,7 +79,9 @@ func TestTargetedDelivery(t *testing.T) {
 	if out := read(); out.AgentID != "one" {
 		t.Fatalf("shared went to %+v", out)
 	}
-	if _, err := sub.NextMsg(600 * time.Millisecond); err == nil {
+	// Agent one is idle, so a misrouted task would come back in milliseconds.
+	// This window only proves an absence, so it cannot fail a correct router.
+	if _, err := sub.NextMsg(200 * time.Millisecond); err == nil {
 		t.Fatal("offline target's task was taken by another agent")
 	}
 	start("two")

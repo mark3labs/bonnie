@@ -189,7 +189,9 @@ func TestSafeNameIsInjective(t *testing.T) {
 // TestSafeNameIsStable matters for reattachment. The name is derived, not
 // stored, so a run finds its sandbox again only if the derivation never
 // changes without checked adoption. Encoded names use the reserved namespace;
-// Docker checks legacy identity before it can adopt an older name.
+// Docker checks legacy identity before it can adopt an older name. A clean ID
+// gains no digest, so the name stays readable for an operator running
+// `docker ps`.
 func TestSafeNameIsStable(t *testing.T) {
 	t.Parallel()
 	golden := map[string]string{
@@ -202,21 +204,6 @@ func TestSafeNameIsStable(t *testing.T) {
 		if got := safeName("bonnie-", id); got != want {
 			t.Errorf("safeName(%q) = %q, want %q.\n"+
 				"Name changes require a checked migration path.", id, got, want)
-		}
-	}
-}
-
-func TestSafeNamePassesCleanIDsThrough(t *testing.T) {
-	t.Parallel()
-	// A clean ID must not gain a digest: the name stays readable for an
-	// operator running `docker ps`.
-	cases := []struct{ in, want string }{
-		{"run-1", "bonnie-run-1"},
-		{"ok_id.9", "bonnie-ok_id.9"},
-	}
-	for _, c := range cases {
-		if got := safeName("bonnie-", c.in); got != c.want {
-			t.Errorf("safeName(%q) = %q, want %q", c.in, got, c.want)
 		}
 	}
 }

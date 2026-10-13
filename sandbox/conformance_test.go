@@ -142,8 +142,12 @@ func openSandbox(t *testing.T, p Provider, runID string) Sandbox {
 	t.Cleanup(func() {
 		cleanupCtx, c := context.WithTimeout(context.Background(), time.Minute)
 		defer c()
-		// Reopen: the test may have closed the handle, and a closed handle
-		// cannot delete the sandbox it left running.
+		// Reopen, then delete through the fresh handle. This is not for the
+		// closed handle's sake (a CLI backend deletes by name, closed or not):
+		// the Open runs under the provider's mutex, and that spacing matters.
+		// Deleting through sb at once was tried; under a full `go test ./...`
+		// msb's own SQLite store then failed a concurrent create with
+		// "database is locked" (see the note on sharedDocker).
 		fresh, err := p.Open(cleanupCtx, runID)
 		if err != nil {
 			_ = sb.Close()
@@ -165,225 +169,238 @@ func testCtx(t *testing.T) context.Context {
 	return ctx
 }
 
-func TestExecReturnsOutput(t *testing.T) {
+// TestSharedSandboxContract runs the cases that only exec and touch files
+// against ONE sandbox per backend.
+//
+// Opening a guest sandbox is the cost of this suite: a provider serialises
+// its Opens (see the note on sharedDocker), so with one sandbox per case the
+// microsandbox cases queued for most of a 20s package run. These cases do not
+// need a fresh sandbox, so they share one, under two rules:
+//
+//   - The subtests run serially, never with t.Parallel. Each case owns the
+//     work directory while it runs, and a case that runs commands at once
+//     (concurrentExecIsRaceClean) does so on its own.
+//   - Each case uses file names no other case uses. A case that needs a file
+//     to exist writes it itself; one that needs it absent uses a name nobody
+//     writes.
+//
+// A case that kills, stops, closes, reopens, or compares sandboxes changes
+// state another case would see. It keeps its own sandbox: see
+// TestTimeoutStopsDescendants, TestClosedSandboxRefusesWork, TestReopenKeepsWorkDir,
+// TestOpenTwiceGivesSameWorkDir, TestFreshProviderReopen, and
+// TestSeparateRunsAreSeparateWorkDirs.
+func TestSharedSandboxContract(t *testing.T) {
 	t.Parallel()
-	eachBackend(t, func(t *testing.T, _ backend, p Provider) {
-		sb := openSandbox(t, p, "exec-output")
-		ctx := testCtx(t)
-
-		res, err := sb.Exec(ctx, Shell("echo hello sandbox"))
-		if err != nil {
-			t.Fatalf("Exec: %v", err)
-		}
-		if !res.OK() {
-			t.Fatalf("exit = %d, stderr = %q", res.ExitCode, res.Stderr)
-		}
-		if !strings.Contains(res.Stdout, "hello sandbox") {
-			t.Fatalf("stdout = %q", res.Stdout)
+	cases := []struct {
+		name string
+		fn   func(t *testing.T, b backend, sb Sandbox)
+	}{
+		{"execReturnsOutput", execReturnsOutput},
+		{"nonZeroExitIsNotAnError", nonZeroExitIsNotAnError},
+		{"exitCodesRoundTrip", exitCodesRoundTrip},
+		{"everyCallExecutes", everyCallExecutes},
+		{"fileRoundTrip", fileRoundTrip},
+		{"binaryFileRoundTrip", binaryFileRoundTrip},
+		{"readMissingFile", readMissingFile},
+		{"workDirIsTheWorkingDirectory", workDirIsTheWorkingDirectory},
+		{"filesPersistAcrossCommands", filesPersistAcrossCommands},
+		{"execWithEnvAndDir", execWithEnvAndDir},
+		{"argvNeedsNoQuoting", argvNeedsNoQuoting},
+		{"execStdin", execStdin},
+		{"emptyCommandIsRejected", emptyCommandIsRejected},
+		{"concurrentExecIsRaceClean", concurrentExecIsRaceClean},
+	}
+	eachBackend(t, func(t *testing.T, b backend, p Provider) {
+		sb := openSandbox(t, p, "shared-contract")
+		for _, c := range cases {
+			t.Run(c.name, func(t *testing.T) { c.fn(t, b, sb) })
 		}
 	})
 }
 
-// TestNonZeroExitIsNotAnError is the contract an agent loop depends on. A
+func execReturnsOutput(t *testing.T, _ backend, sb Sandbox) {
+	ctx := testCtx(t)
+
+	res, err := sb.Exec(ctx, Shell("echo hello sandbox"))
+	if err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+	if !res.OK() {
+		t.Fatalf("exit = %d, stderr = %q", res.ExitCode, res.Stderr)
+	}
+	if !strings.Contains(res.Stdout, "hello sandbox") {
+		t.Fatalf("stdout = %q", res.Stdout)
+	}
+}
+
+// nonZeroExitIsNotAnError is the contract an agent loop depends on. A
 // failed build is information the model must act on, not a transport fault.
-func TestNonZeroExitIsNotAnError(t *testing.T) {
-	t.Parallel()
-	eachBackend(t, func(t *testing.T, _ backend, p Provider) {
-		sb := openSandbox(t, p, "exec-nonzero")
-		ctx := testCtx(t)
+func nonZeroExitIsNotAnError(t *testing.T, _ backend, sb Sandbox) {
+	ctx := testCtx(t)
 
-		res, err := sb.Exec(ctx, Shell("echo to-stdout; echo to-stderr >&2; exit 42"))
-		if err != nil {
-			t.Fatalf("a non-zero exit must not be a Go error, got: %v", err)
-		}
-		if res.ExitCode != 42 {
-			t.Fatalf("exit = %d, want 42", res.ExitCode)
-		}
-		if res.OK() {
-			t.Fatal("OK() must be false for a non-zero exit")
-		}
-		if !strings.Contains(res.Stdout, "to-stdout") {
-			t.Fatalf("stdout = %q", res.Stdout)
-		}
-		if !strings.Contains(res.Stderr, "to-stderr") {
-			t.Fatalf("stderr = %q", res.Stderr)
-		}
-	})
+	res, err := sb.Exec(ctx, Shell("echo to-stdout; echo to-stderr >&2; exit 42"))
+	if err != nil {
+		t.Fatalf("a non-zero exit must not be a Go error, got: %v", err)
+	}
+	if res.ExitCode != 42 {
+		t.Fatalf("exit = %d, want 42", res.ExitCode)
+	}
+	if res.OK() {
+		t.Fatal("OK() must be false for a non-zero exit")
+	}
+	if !strings.Contains(res.Stdout, "to-stdout") {
+		t.Fatalf("stdout = %q", res.Stdout)
+	}
+	if !strings.Contains(res.Stderr, "to-stderr") {
+		t.Fatalf("stderr = %q", res.Stderr)
+	}
 }
 
-// TestExitCodesRoundTrip walks the range, because a CLI backend that reports
+// exitCodesRoundTrip walks the range, because a CLI backend that reports
 // its own failure as the guest's code usually gets one specific value wrong.
-func TestExitCodesRoundTrip(t *testing.T) {
-	t.Parallel()
-	eachBackend(t, func(t *testing.T, _ backend, p Provider) {
-		sb := openSandbox(t, p, "exec-codes")
-		ctx := testCtx(t)
+func exitCodesRoundTrip(t *testing.T, _ backend, sb Sandbox) {
+	ctx := testCtx(t)
 
-		for _, want := range []int{0, 1, 2, 42, 126, 127} {
-			res, err := sb.Exec(ctx, Shell(fmt.Sprintf("exit %d", want)))
-			if err != nil {
-				t.Fatalf("exit %d: %v", want, err)
-			}
-			if res.ExitCode != want {
-				t.Fatalf("exit = %d, want %d", res.ExitCode, want)
-			}
+	for _, want := range []int{0, 1, 2, 42, 126, 127} {
+		res, err := sb.Exec(ctx, Shell(fmt.Sprintf("exit %d", want)))
+		if err != nil {
+			t.Fatalf("exit %d: %v", want, err)
 		}
-	})
+		if res.ExitCode != want {
+			t.Fatalf("exit = %d, want %d", res.ExitCode, want)
+		}
+	}
 }
 
-// TestEveryCallExecutes is the anti-caching contract. A backend that memoizes
+// everyCallExecutes is the anti-caching contract. A backend that memoizes
 // would return the first answer twice, and the model would never know a side
 // effect did not happen.
-func TestEveryCallExecutes(t *testing.T) {
-	t.Parallel()
-	eachBackend(t, func(t *testing.T, _ backend, p Provider) {
-		sb := openSandbox(t, p, "exec-nocache")
-		ctx := testCtx(t)
+func everyCallExecutes(t *testing.T, _ backend, sb Sandbox) {
+	ctx := testCtx(t)
 
-		// Append to a file and read it back. A cached second call would
-		// report one line; a real one reports two.
-		//
-		// The ledger is work directory-relative on purpose. It used to be
-		// /tmp/ledger, which assumed every backend has a writable /tmp — true
-		// inside a guest, and true for the local backend only because it
-		// writes to the HOST's /tmp. A backend that confines the filesystem
-		// refuses that path, correctly, and the case would fail for doing its
-		// job. The work directory is the one location every backend promises.
-		const script = "echo tick >> ledger && wc -l < ledger"
-		first, err := sb.Exec(ctx, Shell(script))
-		if err != nil {
-			t.Fatalf("Exec: %v", err)
-		}
-		second, err := sb.Exec(ctx, Shell(script))
-		if err != nil {
-			t.Fatalf("Exec: %v", err)
-		}
+	// Append to a file and read it back. A cached second call would
+	// report one line; a real one reports two.
+	//
+	// The ledger is work directory-relative on purpose. It used to be
+	// /tmp/ledger, which assumed every backend has a writable /tmp — true
+	// inside a guest, and true for the local backend only because it
+	// writes to the HOST's /tmp. A backend that confines the filesystem
+	// refuses that path, correctly, and the case would fail for doing its
+	// job. The work directory is the one location every backend promises.
+	const script = "echo tick >> ledger && wc -l < ledger"
+	first, err := sb.Exec(ctx, Shell(script))
+	if err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+	second, err := sb.Exec(ctx, Shell(script))
+	if err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
 
-		if strings.TrimSpace(first.Stdout) == strings.TrimSpace(second.Stdout) {
-			t.Fatalf("both calls reported %q: the backend cached a tool call, "+
-				"so a repeated side effect is invisible to the model",
-				strings.TrimSpace(first.Stdout))
-		}
-	})
+	if strings.TrimSpace(first.Stdout) == strings.TrimSpace(second.Stdout) {
+		t.Fatalf("both calls reported %q: the backend cached a tool call, "+
+			"so a repeated side effect is invisible to the model",
+			strings.TrimSpace(first.Stdout))
+	}
 }
 
-func TestFileRoundTrip(t *testing.T) {
-	t.Parallel()
-	eachBackend(t, func(t *testing.T, _ backend, p Provider) {
-		sb := openSandbox(t, p, "file-roundtrip")
-		ctx := testCtx(t)
+func fileRoundTrip(t *testing.T, _ backend, sb Sandbox) {
+	ctx := testCtx(t)
 
-		const body = "line one\nline two\n"
-		if err := sb.WriteFile(ctx, "notes/todo.txt", []byte(body)); err != nil {
-			t.Fatalf("WriteFile: %v", err)
-		}
-		got, err := sb.ReadFile(ctx, "notes/todo.txt")
-		if err != nil {
-			t.Fatalf("ReadFile: %v", err)
-		}
-		if string(got) != body {
-			t.Fatalf("read %q, want %q", got, body)
-		}
+	const body = "line one\nline two\n"
+	if err := sb.WriteFile(ctx, "notes/todo.txt", []byte(body)); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	got, err := sb.ReadFile(ctx, "notes/todo.txt")
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(got) != body {
+		t.Fatalf("read %q, want %q", got, body)
+	}
 
-		// A relative path and its absolute form must name one file.
-		abs, err := sb.ReadFile(ctx, WorkDir+"/notes/todo.txt")
-		if err != nil {
-			t.Fatalf("ReadFile(absolute): %v", err)
-		}
-		if string(abs) != body {
-			t.Fatalf("absolute read %q, want %q", abs, body)
-		}
-	})
+	// A relative path and its absolute form must name one file.
+	abs, err := sb.ReadFile(ctx, WorkDir+"/notes/todo.txt")
+	if err != nil {
+		t.Fatalf("ReadFile(absolute): %v", err)
+	}
+	if string(abs) != body {
+		t.Fatalf("absolute read %q, want %q", abs, body)
+	}
 }
 
-// TestBinaryFileRoundTrip guards the file path against the exit marker and any
+// binaryFileRoundTrip guards the file path against the exit marker and any
 // other text mangling.
-func TestBinaryFileRoundTrip(t *testing.T) {
-	t.Parallel()
-	eachBackend(t, func(t *testing.T, _ backend, p Provider) {
-		sb := openSandbox(t, p, "file-binary")
-		ctx := testCtx(t)
+func binaryFileRoundTrip(t *testing.T, _ backend, sb Sandbox) {
+	ctx := testCtx(t)
 
-		payload := make([]byte, 1024)
-		for i := range payload {
-			payload[i] = byte(i % 256)
-		}
-		if err := sb.WriteFile(ctx, "blob.bin", payload); err != nil {
-			t.Fatalf("WriteFile: %v", err)
-		}
-		got, err := sb.ReadFile(ctx, "blob.bin")
-		if err != nil {
-			t.Fatalf("ReadFile: %v", err)
-		}
-		if !bytes.Equal(got, payload) {
-			t.Fatalf("binary round trip corrupted %d bytes", len(payload))
-		}
-	})
+	payload := make([]byte, 1024)
+	for i := range payload {
+		payload[i] = byte(i % 256)
+	}
+	if err := sb.WriteFile(ctx, "blob.bin", payload); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	got, err := sb.ReadFile(ctx, "blob.bin")
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !bytes.Equal(got, payload) {
+		t.Fatalf("binary round trip corrupted %d bytes", len(payload))
+	}
 }
 
-func TestReadMissingFile(t *testing.T) {
-	t.Parallel()
-	eachBackend(t, func(t *testing.T, _ backend, p Provider) {
-		sb := openSandbox(t, p, "file-missing")
-		ctx := testCtx(t)
+func readMissingFile(t *testing.T, _ backend, sb Sandbox) {
+	ctx := testCtx(t)
 
-		if _, err := sb.ReadFile(ctx, "does/not/exist.txt"); !errors.Is(err, ErrNotFound) {
-			t.Fatalf("err = %v, want ErrNotFound", err)
-		}
-	})
+	if _, err := sb.ReadFile(ctx, "does/not/exist.txt"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("err = %v, want ErrNotFound", err)
+	}
 }
 
-// TestWorkDirIsTheWorkingDirectory pins the one namespace that lets a
+// workDirIsTheWorkingDirectory pins the one namespace that lets a
 // conversation move between backends and still find its files.
-func TestWorkDirIsTheWorkingDirectory(t *testing.T) {
-	t.Parallel()
-	eachBackend(t, func(t *testing.T, b backend, p Provider) {
-		sb := openSandbox(t, p, "workdir-cwd")
-		ctx := testCtx(t)
+func workDirIsTheWorkingDirectory(t *testing.T, b backend, sb Sandbox) {
+	ctx := testCtx(t)
 
-		if err := sb.WriteFile(ctx, "here.txt", []byte("x")); err != nil {
-			t.Fatalf("WriteFile: %v", err)
-		}
-		res, err := sb.Exec(ctx, Shell("cat here.txt"))
+	if err := sb.WriteFile(ctx, "here.txt", []byte("x")); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	res, err := sb.Exec(ctx, Shell("cat here.txt"))
+	if err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+	if !res.OK() || !strings.Contains(res.Stdout, "x") {
+		t.Fatalf("a relative path did not resolve from the work directory: %+v", res)
+	}
+
+	// A backend with a guest filesystem reports the work directory as its
+	// cwd. The local and landlock backends map the work directory onto a host
+	// directory, so they do not.
+	if b.guestFS {
+		pwd, err := sb.Exec(ctx, Shell("pwd"))
 		if err != nil {
 			t.Fatalf("Exec: %v", err)
 		}
-		if !res.OK() || !strings.Contains(res.Stdout, "x") {
-			t.Fatalf("a relative path did not resolve from the work directory: %+v", res)
+		if strings.TrimSpace(pwd.Stdout) != WorkDir {
+			t.Fatalf("pwd = %q, want %q", strings.TrimSpace(pwd.Stdout), WorkDir)
 		}
-
-		// A backend with a guest filesystem reports the work directory as its
-		// cwd. The local and landlock backends map the work directory onto a host
-		// directory, so they do not.
-		if b.guestFS {
-			pwd, err := sb.Exec(ctx, Shell("pwd"))
-			if err != nil {
-				t.Fatalf("Exec: %v", err)
-			}
-			if strings.TrimSpace(pwd.Stdout) != WorkDir {
-				t.Fatalf("pwd = %q, want %q", strings.TrimSpace(pwd.Stdout), WorkDir)
-			}
-		}
-	})
+	}
 }
 
-func TestFilesPersistAcrossCommands(t *testing.T) {
-	t.Parallel()
-	eachBackend(t, func(t *testing.T, _ backend, p Provider) {
-		sb := openSandbox(t, p, "persist-commands")
-		ctx := testCtx(t)
+func filesPersistAcrossCommands(t *testing.T, _ backend, sb Sandbox) {
+	ctx := testCtx(t)
 
-		if _, err := sb.Exec(ctx, Shell("echo persisted > state.txt")); err != nil {
-			t.Fatalf("Exec: %v", err)
-		}
-		res, err := sb.Exec(ctx, Shell("cat state.txt"))
-		if err != nil {
-			t.Fatalf("Exec: %v", err)
-		}
-		if !strings.Contains(res.Stdout, "persisted") {
-			t.Fatalf("a file written by one command was gone in the next: %+v", res)
-		}
-	})
+	if _, err := sb.Exec(ctx, Shell("echo persisted > state.txt")); err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+	res, err := sb.Exec(ctx, Shell("cat state.txt"))
+	if err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+	if !strings.Contains(res.Stdout, "persisted") {
+		t.Fatalf("a file written by one command was gone in the next: %+v", res)
+	}
 }
 
 // TestReopenKeepsWorkDir is the durability contract that matters to BONNIE:
@@ -435,74 +452,58 @@ func TestSeparateRunsAreSeparateWorkDirs(t *testing.T) {
 	})
 }
 
-func TestExecWithEnvAndDir(t *testing.T) {
-	t.Parallel()
-	eachBackend(t, func(t *testing.T, _ backend, p Provider) {
-		sb := openSandbox(t, p, "exec-env")
-		ctx := testCtx(t)
+func execWithEnvAndDir(t *testing.T, _ backend, sb Sandbox) {
+	ctx := testCtx(t)
 
-		if _, err := sb.Exec(ctx, Shell("mkdir -p sub")); err != nil {
-			t.Fatalf("Exec: %v", err)
-		}
-		res, err := sb.Exec(ctx, Command{
-			Args: []string{"sh", "-lc", "echo $GREETING"},
-			Env:  []string{"GREETING=hello-env"},
-			Dir:  "sub",
-		})
-		if err != nil {
-			t.Fatalf("Exec: %v", err)
-		}
-		if !strings.Contains(res.Stdout, "hello-env") {
-			t.Fatalf("env not visible: %q", res.Stdout)
-		}
+	if _, err := sb.Exec(ctx, Shell("mkdir -p sub")); err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+	res, err := sb.Exec(ctx, Command{
+		Args: []string{"sh", "-lc", "echo $GREETING"},
+		Env:  []string{"GREETING=hello-env"},
+		Dir:  "sub",
 	})
+	if err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+	if !strings.Contains(res.Stdout, "hello-env") {
+		t.Fatalf("env not visible: %q", res.Stdout)
+	}
 }
 
-// TestArgvNeedsNoQuoting checks the marker wrapper does not break an argument
+// argvNeedsNoQuoting checks the marker wrapper does not break an argument
 // that holds a space or a quote.
-func TestArgvNeedsNoQuoting(t *testing.T) {
-	t.Parallel()
-	eachBackend(t, func(t *testing.T, _ backend, p Provider) {
-		sb := openSandbox(t, p, "exec-quoting")
-		ctx := testCtx(t)
+func argvNeedsNoQuoting(t *testing.T, _ backend, sb Sandbox) {
+	ctx := testCtx(t)
 
-		tricky := `a b "c" 'd' $e`
-		res, err := sb.Exec(ctx, Command{Args: []string{"echo", tricky}})
-		if err != nil {
-			t.Fatalf("Exec: %v", err)
-		}
-		if strings.TrimSpace(res.Stdout) != tricky {
-			t.Fatalf("argument mangled: got %q, want %q", strings.TrimSpace(res.Stdout), tricky)
-		}
-	})
+	tricky := `a b "c" 'd' $e`
+	res, err := sb.Exec(ctx, Command{Args: []string{"echo", tricky}})
+	if err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+	if strings.TrimSpace(res.Stdout) != tricky {
+		t.Fatalf("argument mangled: got %q, want %q", strings.TrimSpace(res.Stdout), tricky)
+	}
 }
 
-func TestExecStdin(t *testing.T) {
-	t.Parallel()
-	eachBackend(t, func(t *testing.T, _ backend, p Provider) {
-		sb := openSandbox(t, p, "exec-stdin")
-		ctx := testCtx(t)
+func execStdin(t *testing.T, _ backend, sb Sandbox) {
+	ctx := testCtx(t)
 
-		cmd := Shell("cat")
-		cmd.Stdin = []byte("piped in")
-		res, err := sb.Exec(ctx, cmd)
-		if err != nil {
-			t.Fatalf("Exec: %v", err)
-		}
-		if !strings.Contains(res.Stdout, "piped in") {
-			t.Fatalf("stdin not delivered: %q", res.Stdout)
-		}
-	})
+	cmd := Shell("cat")
+	cmd.Stdin = []byte("piped in")
+	res, err := sb.Exec(ctx, cmd)
+	if err != nil {
+		t.Fatalf("Exec: %v", err)
+	}
+	if !strings.Contains(res.Stdout, "piped in") {
+		t.Fatalf("stdin not delivered: %q", res.Stdout)
+	}
 }
 
-func TestEmptyCommandIsRejected(t *testing.T) {
-	t.Parallel()
-	eachBackend(t, func(t *testing.T, _ backend, p Provider) {
-		sb := openSandbox(t, p, "exec-empty")
-		if _, err := sb.Exec(testCtx(t), Command{}); err == nil {
-			t.Fatal("want an error for a command with no arguments")
-		}
-	})
+func emptyCommandIsRejected(t *testing.T, _ backend, sb Sandbox) {
+	if _, err := sb.Exec(testCtx(t), Command{}); err == nil {
+		t.Fatal("want an error for a command with no arguments")
+	}
 }
 
 func TestClosedSandboxRefusesWork(t *testing.T) {
@@ -522,29 +523,25 @@ func TestClosedSandboxRefusesWork(t *testing.T) {
 	})
 }
 
-// TestConcurrentExecIsRaceClean matters because an agent can run tools in
+// concurrentExecIsRaceClean matters because an agent can run tools in
 // parallel.
-func TestConcurrentExecIsRaceClean(t *testing.T) {
-	t.Parallel()
-	eachBackend(t, func(t *testing.T, _ backend, p Provider) {
-		sb := openSandbox(t, p, "exec-concurrent")
-		ctx := testCtx(t)
+func concurrentExecIsRaceClean(t *testing.T, _ backend, sb Sandbox) {
+	ctx := testCtx(t)
 
-		var wg sync.WaitGroup
-		for i := range 4 {
-			wg.Go(func() {
-				res, err := sb.Exec(ctx, Shell(fmt.Sprintf("echo agent-%d", i)))
-				if err != nil {
-					t.Errorf("Exec: %v", err)
-					return
-				}
-				if !strings.Contains(res.Stdout, fmt.Sprintf("agent-%d", i)) {
-					t.Errorf("agent %d got %q", i, res.Stdout)
-				}
-			})
-		}
-		wg.Wait()
-	})
+	var wg sync.WaitGroup
+	for i := range 4 {
+		wg.Go(func() {
+			res, err := sb.Exec(ctx, Shell(fmt.Sprintf("echo agent-%d", i)))
+			if err != nil {
+				t.Errorf("Exec: %v", err)
+				return
+			}
+			if !strings.Contains(res.Stdout, fmt.Sprintf("agent-%d", i)) {
+				t.Errorf("agent %d got %q", i, res.Stdout)
+			}
+		})
+	}
+	wg.Wait()
 }
 
 func TestOpenTwiceGivesSameWorkDir(t *testing.T) {
@@ -574,11 +571,22 @@ func TestOpenTwiceGivesSameWorkDir(t *testing.T) {
 
 // TestTimeoutStopsDescendants checks the timeout error and a delayed child
 // write. Killing only the shell or host CLI leaves this write running.
+//
+// The child's delay must exceed the time the backend takes to kill it. A host
+// backend kills the process group at the deadline, so 600ms is ample. A guest
+// backend kills through its CLI (`docker kill`, `msb`), which can take
+// seconds, so it keeps 2s: a shorter delay would let a correct backend fail.
+// The test then waits only until the child's write is due, measured from the
+// start, not a fixed time after Exec returns.
 func TestTimeoutStopsDescendants(t *testing.T) {
 	t.Parallel()
-	eachBackend(t, func(t *testing.T, _ backend, p Provider) {
+	eachBackend(t, func(t *testing.T, b backend, p Provider) {
 		sb := openSandbox(t, p, "timeout-descendants")
-		cmd := Shell("(sleep 2; echo escaped > late.txt) & wait")
+		delay := 600 * time.Millisecond
+		if b.guestFS {
+			delay = 2 * time.Second
+		}
+		cmd := Shell(fmt.Sprintf("(sleep %.1f; echo escaped > late.txt) & wait", delay.Seconds()))
 		cmd.Timeout = 150 * time.Millisecond
 		start := time.Now()
 		if _, err := sb.Exec(testCtx(t), cmd); !errors.Is(err, context.DeadlineExceeded) {
@@ -587,7 +595,7 @@ func TestTimeoutStopsDescendants(t *testing.T) {
 		if time.Since(start) > 35*time.Second {
 			t.Fatal("timeout did not bound cleanup")
 		}
-		time.Sleep(2200 * time.Millisecond)
+		time.Sleep(time.Until(start.Add(delay + 200*time.Millisecond)))
 		if _, err := sb.ReadFile(testCtx(t), "late.txt"); !errors.Is(err, ErrNotFound) {
 			t.Fatalf("descendant survived: %v", err)
 		}

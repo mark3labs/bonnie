@@ -119,6 +119,11 @@ type devServer struct {
 	log io.Writer
 	env []string
 
+	// compile, when non-nil, replaces the `go build` of the tree. It is nil
+	// for a real dev run. A test of the loop's process lifecycle sets it to
+	// write a stand-in child, so it does not pay for a link it does not test.
+	compile func() error
+
 	// beforeStop closes parent-owned connections to the child before a hot
 	// reload. It is nil when dev runs without the TUI.
 	beforeStop func()
@@ -268,7 +273,11 @@ func (d *devServer) restart() error {
 		return fmt.Errorf("bonnie: dev: write %s: %w", plan.OutFile, err)
 	}
 
-	if err := d.build(); err != nil {
+	compile := d.build
+	if d.compile != nil {
+		compile = d.compile
+	}
+	if err := compile(); err != nil {
 		return err
 	}
 

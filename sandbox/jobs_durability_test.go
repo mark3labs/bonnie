@@ -3,6 +3,7 @@ package sandbox
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -50,15 +51,17 @@ func TestShellJobDurabilityAcrossRunnerRestart(t *testing.T) {
 	}
 
 	// Turn two starts a long job, then returns while the job is still running.
+	// wait_seconds cannot be below 1, so the job must outlive one second; 1.4
+	// seconds keeps a margin without a longer fixed cost.
 	journalA, err = runtime.OpenSQLiteJournal(journalRoot)
 	if err != nil {
 		t.Fatalf("reopen journal A: %v", err)
 	}
 	runningModel := fakemodel.New(
-		fakemodel.Call("shell", `{"command":"sleep 2; printf once >> marker","wait_seconds":1}`),
+		fakemodel.Call("shell", `{"command":"sleep 1.4; printf once >> marker","wait_seconds":1}`),
 		fakemodel.Say("parked"),
 	)
-	runA, err := runtime.NewRunner(journalA, Agent(providerA, hermetic, runningModel.Option())).Start(ctx, runID, runtime.Input{Text: "Start a shell job that sleeps 2 seconds then appends once to marker, using wait_seconds=1, and report the job id."})
+	runA, err := runtime.NewRunner(journalA, Agent(providerA, hermetic, runningModel.Option())).Start(ctx, runID, runtime.Input{Text: "Start a shell job that sleeps 1.4 seconds then appends once to marker, using wait_seconds=1, and report the job id."})
 	if err != nil {
 		t.Fatalf("start running job: %v", err)
 	}
@@ -69,22 +72,23 @@ func TestShellJobDurabilityAcrossRunnerRestart(t *testing.T) {
 		t.Fatalf("close journal before restart: %v", err)
 	}
 
-	// Allow the process to exit before the second provider reads its receipt.
-	time.Sleep(2100 * time.Millisecond)
-
 	// A fresh provider and Runner recover the recorded job ID from the journal.
 	journalB, err := runtime.OpenSQLiteJournal(journalRoot)
 	if err != nil {
 		t.Fatalf("open journal B: %v", err)
 	}
 	defer func() { _ = journalB.Close() }()
-	providerB := Local(WithLocalRoot(workRoot))
 	// Extract the real job ID from the first runner's journal-backed history.
 	restored, err := runtime.Restore(ctx, runID, journalB)
 	if err != nil {
 		t.Fatalf("restore run history: %v", err)
 	}
 	jobID := findRunningJobID(t, restored.GetMessages())
+
+	// Let the process exit before the second provider reads its receipt. A
+	// separate probe provider polls, so providerB starts with no state.
+	waitJobExit(t, Local(WithLocalRoot(workRoot)), runID, jobID)
+	providerB := Local(WithLocalRoot(workRoot))
 	modelB := fakemodel.New(fakemodel.Call("shell_status", `{"job_id":"`+jobID+`"}`), fakemodel.Say("recovered"))
 	runB, err := runtime.NewRunner(journalB, Agent(providerB, hermetic, modelB.Option())).Start(ctx, runID, runtime.Input{Text: "Check the prior job with shell_status using its recorded job id. Report its output."})
 	if err != nil {
@@ -114,6 +118,37 @@ func TestShellJobDurabilityAcrossRunnerRestart(t *testing.T) {
 	marker, err := sb.ReadFile(ctx, "marker")
 	if err != nil || string(marker) != "once" {
 		t.Fatalf("marker=%q err=%v, want one append", marker, err)
+	}
+}
+
+// waitJobExit polls a job until its exit receipt is on disk. It replaces a
+// fixed sleep sized to the job, which cost the full job time on every run.
+//
+// A provider that did not start the job reads only the receipt, which the
+// starting provider writes after the process exits. Until then it reports
+// [ErrJobUnknown], so that error means "not yet", not failure.
+func waitJobExit(t *testing.T, p Provider, runID, jobID string) {
+	t.Helper()
+	ctx := context.Background()
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		sb, err := p.Open(ctx, runID)
+		if err != nil {
+			t.Fatalf("open probe sandbox: %v", err)
+		}
+		st, err := sb.(JobSandbox).JobStatus(ctx, jobID)
+		_ = sb.Close()
+		switch {
+		case errors.Is(err, ErrJobUnknown):
+		case err != nil:
+			t.Fatalf("probe job status: %v", err)
+		case !st.Running:
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("job %s still running after 30s", jobID)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 

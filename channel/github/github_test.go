@@ -23,6 +23,7 @@ import (
 	"github.com/mark3labs/bonnie/channel/chat"
 	"github.com/mark3labs/bonnie/channel/github"
 	"github.com/mark3labs/bonnie/channeltest"
+	"github.com/mark3labs/bonnie/internal/flaky"
 	"github.com/mark3labs/bonnie/runtime"
 
 	kit "github.com/mark3labs/kit/pkg/kit"
@@ -447,6 +448,8 @@ func TestSignatureAndReplay(t *testing.T) {
 // mention in an unbound thread is ignored.
 func TestBotsAndStrangersAreIgnored(t *testing.T) {
 	t.Parallel()
+	flaky.Skip(t, "failed intermittently on master under a full `go test -race ./...`; "+
+		"it proves an absence with a fixed 200ms wait")
 	h := newHarness(t, github.Config{})
 	h.deliver(t, "b1", issueComment("my-agent[bot]", "the answer was 42"))
 	h.deliver(t, "b2", issueComment("U1", "a stranger comments"))

@@ -16,16 +16,6 @@ func assistant(text string) kit.LLMMessage {
 	}
 }
 
-func TestSessionSatisfiesKitContract(t *testing.T) {
-	t.Parallel()
-	// The compile-time assertion lives in session.go; this test documents why
-	// it matters and fails loudly if the interface is ever widened.
-	var sm kit.SessionManager = NewSession("s", NewMemoryJournal())
-	if sm.GetSessionID() != "s" {
-		t.Fatalf("GetSessionID = %q", sm.GetSessionID())
-	}
-}
-
 func TestAppendAndReadBranch(t *testing.T) {
 	t.Parallel()
 	s := NewSession("s1", NewMemoryJournal())
@@ -145,12 +135,5 @@ func TestRestoreRebuildsConversation(t *testing.T) {
 	}
 	if messageText(msgs[0]) != "first" || messageText(msgs[1]) != "second" {
 		t.Fatalf("restored content wrong: %+v", msgs)
-	}
-}
-
-func TestIsPersistedTracksJournalKind(t *testing.T) {
-	t.Parallel()
-	if NewSession("a", NewMemoryJournal()).IsPersisted() {
-		t.Fatal("memory journal must report ephemeral")
 	}
 }

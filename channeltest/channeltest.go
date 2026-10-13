@@ -62,6 +62,11 @@ type ScriptAgent struct {
 
 	session *runtime.Session
 	steers  []string
+
+	// running and maxRunning count turns inside PromptResult at once. Two
+	// turns of one run must never overlap; MaxConcurrent proves it without a
+	// fixed wait.
+	running, maxRunning int
 }
 
 var _ runtime.Agent = (*ScriptAgent)(nil)
@@ -122,9 +127,24 @@ func (a *ScriptAgent) Calls() int {
 	return a.call
 }
 
+// MaxConcurrent reports the most turns that were inside PromptResult at the
+// same time. A queued message that ran during an active turn makes it 2.
+func (a *ScriptAgent) MaxConcurrent() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.maxRunning
+}
+
 // PromptResult implements [runtime.Agent].
 func (a *ScriptAgent) PromptResult(ctx context.Context, msg string) (*kit.TurnResult, error) {
 	a.mu.Lock()
+	a.running++
+	a.maxRunning = max(a.maxRunning, a.running)
+	defer func() {
+		a.mu.Lock()
+		a.running--
+		a.mu.Unlock()
+	}()
 	if a.hold != nil {
 		hold, active := a.hold, a.active
 		a.hold, a.active = nil, nil
@@ -135,6 +155,13 @@ func (a *ScriptAgent) PromptResult(ctx context.Context, msg string) (*kit.TurnRe
 		case <-hold:
 		case <-ctx.Done():
 			return nil, ctx.Err()
+		}
+		// A real agent stops at the next context check. When the turn
+		// context ended while the turn was held, report that, whichever
+		// select case won. This makes a turn that lost its context fail
+		// on every run, so no test needs a fixed wait to see it.
+		if err := ctx.Err(); err != nil {
+			return nil, err
 		}
 	} else {
 		a.mu.Unlock()
@@ -352,11 +379,14 @@ func RunConformance(t *testing.T, build func(t *testing.T) *Fixture) {
 			done <- run
 		}()
 
-		// The queued send must NOT complete while the first turn runs.
+		// The queued send must NOT complete while the first turn runs. The
+		// short window only lets a defective queued send reach the agent;
+		// MaxConcurrent below is the assertion. A wait that proves an
+		// absence cannot fail a correct transport, so it stays short.
 		select {
 		case run := <-done:
 			t.Fatalf("the queued message ran while the turn was active: %+v", run)
-		case <-time.After(300 * time.Millisecond):
+		case <-time.After(50 * time.Millisecond):
 		}
 
 		release()
@@ -364,8 +394,14 @@ func RunConformance(t *testing.T, build func(t *testing.T) *Fixture) {
 		if run.Err != nil {
 			t.Fatalf("queued turn failed: %v", run.Err)
 		}
+		if run.State != runtime.RunCompleted {
+			t.Fatalf("queued run state = %q, want %q: Send returned before its turn ran", run.State, runtime.RunCompleted)
+		}
 		if calls := f.Agent.Calls(); calls != 2 {
 			t.Fatalf("agent ran %d turns, want 2: the queued message must run as its own turn", calls)
+		}
+		if n := f.Agent.MaxConcurrent(); n != 1 {
+			t.Fatalf("%d turns overlapped: the queued message ran while the turn was active", n)
 		}
 	})
 
@@ -480,12 +516,9 @@ func RunConformance(t *testing.T, build func(t *testing.T) *Fixture) {
 		}
 		hangUp()
 
-		// The turn is still working: the caller's exit unwound nothing.
-		select {
-		case run := <-done:
-			t.Fatalf("the turn ended when its caller left: %+v", run)
-		case <-time.After(200 * time.Millisecond):
-		}
+		// No wait is needed here. If the hang-up reached the turn, the
+		// held agent returns the context error once released, and the run
+		// does not end completed: the state checks below fail.
 		release()
 
 		select {

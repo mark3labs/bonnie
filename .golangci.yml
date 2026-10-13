@@ -58,6 +58,17 @@ linters:
                 tests. Import it from a _test.go file only, so fantasy never
                 reaches a package BONNIE ships.
 
+        flaky-in-tests-only:
+          list-mode: lax
+          files:
+            - $all
+            - "!$test"
+          deny:
+            - pkg: github.com/mark3labs/bonnie/internal/flaky
+              desc: >-
+                internal/flaky skips intermittent tests. Import it from a
+                _test.go file only; shipped code must never skip itself.
+
         # `bonnie build` promises the user a single static binary, and
         # goreleaser cross-compiles four targets from one machine. Both stop
         # working the moment a C library enters the graph, so the journal's

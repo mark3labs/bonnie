@@ -205,6 +205,10 @@ func TestEngineRetryDeliveryAfterSQLiteReopen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The retry time is journalled when the delivery fails, so a short delay
+	// here is what the reopened engine honours. The real backoff (2s) would
+	// make the test wait it out; TestDefaultRetryDelay pins that schedule.
+	e.retryDelay = func(int) time.Duration { return 20 * time.Millisecond }
 	if _, err := e.Trigger(ctx, "outbox", "delivery", time.Now(), "manual"); err != nil {
 		t.Fatal(err)
 	}
@@ -264,6 +268,20 @@ func TestEngineRetryDeliveryAfterSQLiteReopen(t *testing.T) {
 	}
 	if agent.Calls() != 0 {
 		t.Fatalf("background agent unexpectedly called for channel dispatch: %d", agent.Calls())
+	}
+}
+
+func TestDefaultRetryDelay(t *testing.T) {
+	t.Parallel()
+	for attempts, want := range map[int]time.Duration{
+		1: 2 * time.Second,
+		2: 4 * time.Second,
+		8: 256 * time.Second,
+		9: 256 * time.Second,
+	} {
+		if got := defaultRetryDelay(attempts); got != want {
+			t.Errorf("defaultRetryDelay(%d) = %v, want %v", attempts, got, want)
+		}
 	}
 }
 

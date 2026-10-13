@@ -92,21 +92,7 @@ func TestGenerateContextFilesOnly(t *testing.T) {
 func TestCodegenSupportsScopedTool(t *testing.T) {
 	t.Parallel()
 	root := scaffoldTools(t)
-	dir := filepath.Join(root, "tools", "scoped")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	source := `package scoped
-import (
- "context"
- "github.com/mark3labs/bonnie"
- kit "github.com/mark3labs/kit/pkg/kit"
-)
-func Tool(scope bonnie.ToolScope) kit.Tool { return kit.NewTool("scoped", "scoped", func(context.Context, struct{}) (kit.ToolOutput, error) { return kit.TextResult("ok"), nil }) }
-`
-	if err := os.WriteFile(filepath.Join(dir, "tool.go"), []byte(source), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeScopedTool(t, root)
 	plan, err := Discover(root)
 	if err != nil {
 		t.Fatal(err)
@@ -128,11 +114,28 @@ func Tool(scope bonnie.ToolScope) kit.Tool { return kit.NewTool("scoped", "scope
 	if !strings.Contains(text, "tool1.Tool(scope)") || !strings.Contains(text, "ToolFactory:  _bonnieToolFactory") || !strings.Contains(text, "func _bonnieToolFactory(ctx context.Context, scope bonnie.ToolScope)") {
 		t.Fatalf("scoped factory missing from generated code:\n%s", text)
 	}
-	if err := os.WriteFile(filepath.Join(root, "bonnie_gen.go"), code, 0o644); err != nil {
+	// TestGeneratedFileCompiles compiles a tree with this tool, so the
+	// factory is proven to type-check without a second compile here.
+}
+
+// writeScopedTool adds a tool whose constructor takes a [bonnie.ToolScope].
+func writeScopedTool(t *testing.T, root string) {
+	t.Helper()
+	dir := filepath.Join(root, "tools", "scoped")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	treetest.LinkToCheckout(t, root)
-	treetest.Compile(t, root, nil)
+	source := `package scoped
+import (
+ "context"
+ "github.com/mark3labs/bonnie"
+ kit "github.com/mark3labs/kit/pkg/kit"
+)
+func Tool(scope bonnie.ToolScope) kit.Tool { return kit.NewTool("scoped", "scoped", func(context.Context, struct{}) (kit.ToolOutput, error) { return kit.TextResult("ok"), nil }) }
+`
+	if err := os.WriteFile(filepath.Join(dir, "tool.go"), []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // Codegen twice over the same tree must be byte-identical (invariant 12).
@@ -410,6 +413,12 @@ func TestCodegenSkipsEmptySlots(t *testing.T) {
 // The generated file must compile as the tree's wiring. This is the guard test
 // that leans on the compiler: codegen emits a valid Go file, and the symbols it
 // emits are the ones the runtime exposes.
+//
+// It is also the only compile of a scaffold in this package, because each
+// compile is a `go list -export` subprocess. One tree carries every shape that
+// must type-check: the scaffold's own main.go, a plain tool, a scoped tool
+// factory, and a context file. The tree's go.mod points at this checkout, so
+// the test exercises the code under test and needs no network.
 func TestGeneratedFileCompiles(t *testing.T) {
 	t.Parallel()
 	root := filepath.Join(t.TempDir(), "my-agent")
@@ -417,6 +426,7 @@ func TestGeneratedFileCompiles(t *testing.T) {
 		t.Fatalf("Scaffold: %v", err)
 	}
 	writeTool(t, root, "charge_card", "charge_card")
+	writeScopedTool(t, root)
 	if err := os.WriteFile(filepath.Join(root, "context", "seed.txt"), []byte("seed\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

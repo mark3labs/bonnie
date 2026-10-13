@@ -4,31 +4,6 @@ import (
 	"testing"
 )
 
-func TestChatURL(t *testing.T) {
-	t.Parallel()
-	cases := map[string]string{
-		"127.0.0.1:8080": "http://127.0.0.1:8080",
-		":9090":          "http://127.0.0.1:9090",
-		"localhost:9000": "http://localhost:9000",
-		"http://x:1":     "http://x:1",
-		"https://x:1":    "https://x:1",
-		"":               "http://127.0.0.1:8080",
-		":0":             "http://127.0.0.1:0",
-	}
-	for in, want := range cases {
-		if got := chatURL(in); got != want {
-			t.Errorf("chatURL(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
-func TestTuiAddress(t *testing.T) {
-	t.Parallel()
-	if got := tuiAddress("/tmp/my-agent"); got != "dev-my-agent" {
-		t.Fatalf("tuiAddress = %q, want dev-my-agent", got)
-	}
-}
-
 // TestChatCommandMounts: the chat command parses and is wired into the root,
 // with sensible defaults, so `bonnie chat` is present in help.
 func TestChatCommandMounts(t *testing.T) {

@@ -43,14 +43,9 @@ func TestTurnSurvivesCallerCancellation(t *testing.T) {
 	<-started
 	cancel()
 
-	// Nothing should have changed for the turn: it is still blocked on the
-	// agent, not unwound by the cancellation.
-	select {
-	case got := <-done:
-		t.Fatalf("the turn ended when its caller left: %+v, %v", got.run, got.err)
-	case <-time.After(200 * time.Millisecond):
-	}
-
+	// No wait is needed here. If the cancellation reached the turn, the
+	// blocked agent returns the context error once released, and the state
+	// checks below fail.
 	close(release)
 
 	select {
@@ -104,7 +99,7 @@ func TestCallerDeadlineDoesNotBoundTheTurn(t *testing.T) {
 
 	<-started
 	// Let the caller's deadline pass while the turn is still working.
-	time.Sleep(150 * time.Millisecond)
+	<-ctx.Done()
 	close(release)
 
 	select {

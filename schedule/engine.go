@@ -35,7 +35,18 @@ type Engine struct {
 	started      bool
 	cancel       context.CancelFunc
 	workCtx      context.Context
+	// retryDelay is the wait before a failed delivery is tried again. New
+	// sets [defaultRetryDelay]; a test sets a short one so it does not wait
+	// out the real backoff.
+	retryDelay func(attempts int) time.Duration
 }
+
+// defaultRetryDelay doubles the wait after each failed delivery: 2s after the
+// first, capped at 256s from the eighth.
+func defaultRetryDelay(attempts int) time.Duration {
+	return time.Second * time.Duration(1<<min(attempts, 8))
+}
+
 type cronSchedule struct {
 	schedule interface{ Next(time.Time) time.Time }
 	location *time.Location
@@ -47,7 +58,7 @@ func New(r *runtime.Runner, destinations map[string]channel.TrackedReceiver, def
 		return nil, errors.New("bonnie: schedule: runner is nil")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	e := &Engine{runner: r, journal: r.Journal(), destinations: destinations, defs: map[string]Definition{}, schedules: map[string]cronSchedule{}, active: map[string]bool{}, workCtx: ctx, cancel: cancel}
+	e := &Engine{runner: r, journal: r.Journal(), destinations: destinations, defs: map[string]Definition{}, schedules: map[string]cronSchedule{}, active: map[string]bool{}, workCtx: ctx, cancel: cancel, retryDelay: defaultRetryDelay}
 	for _, d := range definitions {
 		if d.Name == "" || strings.ContainsAny(d.Name, "/\\") {
 			cancel()
@@ -362,8 +373,7 @@ func (e *Engine) execute(ctx context.Context, d Definition, o Occurrence) error 
 				if err := receiver.DeliverDispatch(ctx, w.Receipt, w.Result); err != nil {
 					w.Error = err.Error()
 					w.Attempts++
-					delay := time.Second * time.Duration(1<<min(w.Attempts, 8))
-					w.RetryAt = time.Now().Add(delay)
+					w.RetryAt = time.Now().Add(e.retryDelay(w.Attempts))
 					o.State = Running
 					return e.save(ctx, o)
 				}

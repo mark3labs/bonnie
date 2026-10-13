@@ -91,7 +91,15 @@ type Client struct {
 	ackWait      time.Duration
 	eventAckWait time.Duration
 	nc           *gonats.Conn
+	// retryDelay is how long the broker holds a message whose handler
+	// failed before it delivers the message again. New sets
+	// [defaultRetryDelay]; a test sets a short one.
+	retryDelay time.Duration
 }
+
+// defaultRetryDelay spaces redeliveries after a handler error, so a handler
+// that fails at once does not spin on the same message.
+const defaultRetryDelay = time.Second
 
 const maxMessageBytes = 1 << 20
 
@@ -185,7 +193,7 @@ func New(nc *gonats.Conn, cfg Config) (*Client, error) {
 	if cc.Durable != cfg.ResultConsumer || cc.DeliverSubject != "" || cc.DeliverGroup != "" || cc.AckPolicy != gonats.AckExplicitPolicy || cc.FilterSubject != cfg.ResultSubject || len(cc.FilterSubjects) != 0 || cc.DeliverPolicy != gonats.DeliverAllPolicy || cc.ReplayPolicy != gonats.ReplayInstantPolicy || cc.AckWait < 3*time.Millisecond || cc.MaxDeliver > 0 || len(cc.BackOff) != 0 || cc.MaxAckPending < 1 || cc.HeadersOnly || cc.InactiveThreshold != 0 || (cc.MaxRequestExpires > 0 && cc.MaxRequestExpires < 250*time.Millisecond) || (cc.MaxRequestMaxBytes > 0 && cc.MaxRequestMaxBytes < maxMessageBytes) {
 		return nil, errors.New("bonnie: client/nats: incompatible result pull consumer")
 	}
-	return &Client{js: js, nc: nc, cfg: cfg, ackWait: cc.AckWait, eventAckWait: eventAckWait}, nil
+	return &Client{js: js, nc: nc, cfg: cfg, ackWait: cc.AckWait, eventAckWait: eventAckWait, retryDelay: defaultRetryDelay}, nil
 }
 
 // DefaultResultStreamName returns a stable stream name for the exact result
@@ -386,7 +394,7 @@ func (c *Client) handleData(ctx context.Context, msg *gonats.Msg, ackWait time.D
 	close(done)
 	err = errors.Join(err, <-heartbeat, ctx.Err())
 	if err != nil {
-		if e := msg.NakWithDelay(time.Second); e != nil {
+		if e := msg.NakWithDelay(c.retryDelay); e != nil {
 			err = errors.Join(err, fmt.Errorf("bonnie: client/nats: retry result: %w", e))
 		}
 		return err

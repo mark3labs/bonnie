@@ -40,6 +40,12 @@ func (f *fakeAgent) PromptResult(ctx context.Context, msg string) (*kit.TurnResu
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
+		// A real agent stops at its next context check. Report a context
+		// that ended while the turn was blocked, whichever case won, so a
+		// lost turn context fails a test on every run, with no fixed wait.
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 	}
 	if f.session != nil {
 		if _, err := f.session.AppendMessage(kit.NewLLMUserMessage(msg)); err != nil {
