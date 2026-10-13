@@ -19,11 +19,11 @@ import (
 // defaultAddr sets the default --addr value. The command does not start a server.
 // Use --token to send a bearer token on each HTTP request.
 func NewChatCommand(defaultAddr string) *cobra.Command {
-	return newChatCommand(defaultAddr, RunTUIClient)
+	return newChatCommand(defaultAddr, runTUIClient)
 }
 
-func newChatCommand(defaultAddr string, run func(context.Context, tui.Client, string) error) *cobra.Command {
-	var addr, address, token string
+func newChatCommand(defaultAddr string, run func(context.Context, tui.Client, string, bool) error) *cobra.Command {
+	var addr, runID, token string
 	cmd := &cobra.Command{
 		Use:   "chat",
 		Short: "Interact with an agent over the HTTP channel in a terminal",
@@ -32,8 +32,8 @@ func newChatCommand(defaultAddr string, run func(context.Context, tui.Client, st
 Use --addr to select the HTTP channel and --token to send a bearer token.
 This command does not start a server.
 
-The server records the conversation as one run. Open the terminal again with
-the same --run address to continue the conversation from the journal.
+Use --run with an existing run ID to load its history and continue that run.
+Without --run, the terminal uses the default conversation address.
 
 Keys: enter sends, ctrl+w cancels a running turn, ctrl+c quits.`,
 		Args: cobra.NoArgs,
@@ -48,11 +48,18 @@ Keys: enter sends, ctrl+w cancels a running turn, ctrl+c quits.`,
 			if token != "" {
 				opts = append(opts, client.WithBearerToken(token))
 			}
-			return run(ctx, client.New(url, opts...), address)
+			target := "tui-default"
+			if cmd.Flags().Changed("run") {
+				if strings.TrimSpace(runID) == "" {
+					return fmt.Errorf("bonnie: chat: --run needs a run ID")
+				}
+				target = runID
+			}
+			return run(ctx, client.New(url, opts...), target, cmd.Flags().Changed("run"))
 		},
 	}
 	cmd.Flags().StringVar(&addr, "addr", defaultAddr, "the HTTP channel address to connect to")
-	cmd.Flags().StringVar(&address, "run", "tui-default", "conversation address (the run the server resolves it to)")
+	cmd.Flags().StringVar(&runID, "run", "", "existing run ID to continue with its saved history")
 	cmd.Flags().StringVar(&token, "token", "", "bearer token for the HTTP channel")
 	return cmd
 }
@@ -84,7 +91,14 @@ func RunTUI(ctx context.Context, url, address string) error {
 // ctx is canceled. address is the conversation key for the run.
 // It does not start a server.
 func RunTUIClient(ctx context.Context, c tui.Client, address string) error {
-	model := tui.New(c, ctx, address)
+	return runTUIClient(ctx, c, address, false)
+}
+
+func runTUIClient(ctx context.Context, c tui.Client, target string, byID bool) error {
+	model := tui.New(c, ctx, target)
+	if byID {
+		model = tui.NewRun(c, ctx, target)
+	}
 	p := tea.NewProgram(model, tea.WithContext(ctx))
 	if _, err := p.Run(); err != nil {
 		return fmt.Errorf("bonnie: chat: %w", err)

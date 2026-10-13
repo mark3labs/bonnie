@@ -45,8 +45,8 @@ func TestChatCommandMounts(t *testing.T) {
 	if addr == nil || addr.DefValue != "127.0.0.1:8080" {
 		t.Fatalf("addr flag = %+v, want default 127.0.0.1:8080", addr)
 	}
-	if run := chat.Flags().Lookup("run"); run == nil || run.DefValue != "tui-default" {
-		t.Fatalf("run flag = %+v, want default tui-default", run)
+	if run := chat.Flags().Lookup("run"); run == nil || run.DefValue != "" {
+		t.Fatalf("run flag = %+v, want empty default", run)
 	}
 }
 

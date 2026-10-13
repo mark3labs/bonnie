@@ -28,6 +28,12 @@ type fakeClient struct {
 	streamAfter []int
 	cancelled   int
 	snapshot    *client.Snapshot
+	snapshotErr error
+	snapshotRun string
+	lookups     int
+	sentRun     string
+	respondRun  string
+	streamRun   string
 	answered    int
 	lookupRun   string
 	lookupAt    int
@@ -39,6 +45,10 @@ type fakeClient struct {
 }
 
 func (f *fakeClient) Snapshot(_ context.Context, runID string) (*client.Snapshot, error) {
+	f.snapshotRun = runID
+	if f.snapshotErr != nil {
+		return nil, f.snapshotErr
+	}
 	if f.snapshot != nil {
 		return f.snapshot, nil
 	}
@@ -46,6 +56,7 @@ func (f *fakeClient) Snapshot(_ context.Context, runID string) (*client.Snapshot
 }
 
 func (f *fakeClient) Lookup(_ context.Context, _ string) (string, int, error) {
+	f.lookups++
 	return f.lookupRun, f.lookupAt, f.lookupErr
 }
 
@@ -73,6 +84,7 @@ func (f *fakeClient) Start(_ context.Context, _ string, _ string) (*runtime.Run,
 }
 
 func (f *fakeClient) Send(_ context.Context, runID, _ string) (*runtime.Run, error) {
+	f.sentRun = runID
 	f.turns++
 	if len(f.errs) > 0 {
 		return nil, f.errs[0]
@@ -84,6 +96,7 @@ func (f *fakeClient) Send(_ context.Context, runID, _ string) (*runtime.Run, err
 }
 
 func (f *fakeClient) Respond(_ context.Context, runID, _ string) (*runtime.Run, error) {
+	f.respondRun = runID
 	f.answered++
 	f.turns++
 	if len(f.errs) > 0 {
@@ -100,7 +113,8 @@ func (f *fakeClient) Cancel(_ context.Context, _ string) error {
 	return nil
 }
 
-func (f *fakeClient) Stream(_ context.Context, _ string, after int) (<-chan runtime.Event, func(), error) {
+func (f *fakeClient) Stream(_ context.Context, runID string, after int) (<-chan runtime.Event, func(), error) {
+	f.streamRun = runID
 	f.streamed++
 	f.streamAfter = append(f.streamAfter, after)
 	ch := make(chan runtime.Event)

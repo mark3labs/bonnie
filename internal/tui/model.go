@@ -132,10 +132,13 @@ type Model struct {
 	client Client
 	ctx    context.Context
 
-	// address is the channel-local conversation key. The channel resolves it
-	// to one run for the whole session.
+	// address is the channel-local conversation key, or the selected run ID
+	// shown in the header when selectedRun is set.
 	address string
-	// runID is the run the address resolved to. It is resolved before the
+	// selectedRun is an explicit run ID. It must never resolve as an address.
+	selectedRun string
+	// runID is the loaded run, selected by ID or resolved from an address.
+	// It is loaded before the
 	// first turn is sent, not after it returns: a turn's reasoning and tool
 	// events are live-only, so a stream opened after the turn has already
 	// missed them.
@@ -206,6 +209,14 @@ func New(client Client, ctx context.Context, address string) Model {
 	return m
 }
 
+// NewRun returns a Model that loads an existing run and its saved history.
+// An unknown run is an error; it does not create a conversation.
+func NewRun(client Client, ctx context.Context, runID string) Model {
+	m := New(client, ctx, runID)
+	m.selectedRun = runID
+	return m
+}
+
 // Init implements tea.Model.
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(m.initCmd, func() tea.Msg { return spinnerMsg{} }, m.lookup())
@@ -262,7 +273,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case lookupMsg:
 		m.loading = false
 		if msg.err != nil {
-			if errors.Is(msg.err, ErrNotFound) {
+			if errors.Is(msg.err, ErrNotFound) && m.selectedRun == "" {
 				return m, nil
 			}
 			m.state = statusError
@@ -475,7 +486,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 // else sends a new turn. It returns the updated model and the command that
 // drives the turn.
 func (m Model) send(text string) (tea.Model, tea.Cmd) {
-	if text == "" || m.spin {
+	if text == "" || m.spin || m.loading || (m.selectedRun != "" && m.runID == "") {
 		return m, nil
 	}
 	start := m.runID == ""
@@ -640,6 +651,10 @@ func (m *Model) restoreSnapshot(snapshot *client.Snapshot) {
 
 func (m Model) lookup() tea.Cmd {
 	return func() tea.Msg {
+		if m.selectedRun != "" {
+			snapshot, err := m.client.Snapshot(m.ctx, m.selectedRun)
+			return lookupMsg{generation: m.generation, runID: m.selectedRun, snapshot: snapshot, err: err}
+		}
 		runID, cursor, err := m.client.Lookup(m.ctx, m.address)
 		msg := lookupMsg{generation: m.generation, runID: runID, cursor: cursor, err: err}
 		if err == nil && runID != "" {

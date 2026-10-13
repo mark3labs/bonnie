@@ -5,6 +5,15 @@ All notable changes to BONNIE are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- `bonnie chat --run <run-id>` loads the selected run and its saved history.
+  It no longer treats the run ID as a conversation address. Unknown IDs show
+  an error and do not create a new run. Chat without `--run` keeps the default
+  conversation address.
+
 ## [0.25.0] — 2026-10-13
 
 **Paired Iroh transport and reliable guest completion.**

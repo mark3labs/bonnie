@@ -33,7 +33,7 @@ func TestChatURL(t *testing.T) {
 func TestChatCommandFlags(t *testing.T) {
 	t.Parallel()
 	cmd := NewChatCommand(":9090")
-	for name, want := range map[string]string{"addr": ":9090", "run": "tui-default", "token": ""} {
+	for name, want := range map[string]string{"addr": ":9090", "run": "", "token": ""} {
 		flag := cmd.Flags().Lookup(name)
 		if flag == nil || flag.DefValue != want {
 			t.Errorf("flag %s = %+v, want default %q", name, flag, want)
@@ -44,7 +44,7 @@ func TestChatCommandFlags(t *testing.T) {
 	}
 }
 
-// The command passes its context, conversation address, and bearer token to
+// The command passes its context, selected run ID, and bearer token to
 // the terminal client without opening a terminal or starting a server.
 func TestChatCommandClient(t *testing.T) {
 	t.Parallel()
@@ -59,6 +59,9 @@ func TestChatCommandClient(t *testing.T) {
 				if got := r.Header.Get("Authorization"); got != want {
 					t.Errorf("Authorization = %q, want %q", got, want)
 				}
+				if r.URL.Path != "/bonnie/v1/runs/test-run/snapshot" {
+					t.Errorf("path = %q", r.URL.Path)
+				}
 				w.Header().Set("Content-Type", "application/json")
 				_, _ = io.WriteString(w, `{"run_id":"test-run","cursor":0}`)
 			}))
@@ -69,13 +72,13 @@ func TestChatCommandClient(t *testing.T) {
 			defer cancel()
 			wantErr := errors.New("terminal stopped")
 			called := false
-			cmd := newChatCommand("unused:1", func(gotCtx context.Context, c tui.Client, address string) error {
+			cmd := newChatCommand("unused:1", func(gotCtx context.Context, c tui.Client, runID string, byID bool) error {
 				called = true
-				if address != "conversation" || gotCtx.Value(contextKey{}) != "value" {
-					t.Fatalf("address or context not passed: %q", address)
+				if runID != "test-run" || !byID || gotCtx.Value(contextKey{}) != "value" {
+					t.Fatalf("run ID or context not passed: %q, byID=%v", runID, byID)
 				}
-				if _, _, err := c.Ensure(gotCtx, address); err != nil {
-					t.Fatalf("Ensure: %v", err)
+				if _, err := c.Snapshot(gotCtx, runID); err != nil {
+					t.Fatalf("Snapshot: %v", err)
 				}
 				cancel()
 				<-gotCtx.Done()
@@ -84,7 +87,7 @@ func TestChatCommandClient(t *testing.T) {
 			cmd.SetErr(io.Discard)
 			cmd.SilenceUsage = true
 			cmd.SilenceErrors = true
-			cmd.SetArgs([]string{"--addr", server.URL, "--run", "conversation", "--token", token})
+			cmd.SetArgs([]string{"--addr", server.URL, "--run", "test-run", "--token", token})
 			if err := cmd.ExecuteContext(ctx); !errors.Is(err, wantErr) {
 				t.Fatalf("ExecuteContext = %v, want %v", err, wantErr)
 			}

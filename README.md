@@ -263,7 +263,7 @@ The agent binary also includes its operator commands:
 ./my-agent auth status
 ./my-agent auth logout openai
 ./my-agent serve                      # same action as ./my-agent
-./my-agent chat --run production      # connect to a running HTTP server
+./my-agent chat --run <run-id>        # continue a run on the HTTP server
 ./my-agent runs list                  # read the configured local journal
 ./my-agent runs show <run-id> --json
 ./my-agent runs inspect
@@ -968,7 +968,8 @@ bonnie dev my-agent --dry-run      print the discovery plan, build nothing
 bonnie build my-agent              one static binary at ./my-agent
 bonnie build my-agent --output bin/agent
 
-bonnie chat --addr 127.0.0.1:8080 --run tui-default
+bonnie chat --addr 127.0.0.1:8080
+bonnie chat --addr 127.0.0.1:8080 --run <run-id>
 
 bonnie serve --addr :8080 --journal .bonnie \
              --model anthropic/claude-sonnet-4-5 \

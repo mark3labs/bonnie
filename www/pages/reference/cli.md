@@ -69,9 +69,10 @@ Connects terminal chat to an existing HTTP server. It does not start one.
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `--addr` | `127.0.0.1:8080` | Server address or full HTTP/HTTPS URL; `:9090` means loopback port 9090 |
-| `--run` | `tui-default` | Conversation address resolved by the server, not necessarily a literal run ID |
+| `--run` | empty | Existing run ID to continue with its saved history |
+| `--token` | empty | Bearer token sent on each HTTP request |
 
-Enter sends, Ctrl+W requests cancellation, and Ctrl+C quits. `/cancel` is also available. Reopen with the same conversation address to continue saved work. Closing the terminal does not cancel the server's durable turn. The chat command has no `--token` flag.
+Enter sends, Ctrl+W requests cancellation, and Ctrl+C quits. `/cancel` is also available. Use `--run <run-id>` to load an existing run and its saved history. An unknown ID shows an error and does not create a run. Without `--run`, chat uses the default `tui-default` conversation address. Closing the terminal does not cancel the server's durable turn.
 
 ## `bonnie serve`
 
