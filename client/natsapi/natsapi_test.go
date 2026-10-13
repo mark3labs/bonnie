@@ -186,6 +186,7 @@ func TestDisconnectFailsBodyWithoutReplacingHandlers(t *testing.T) {
 // A synchronous turn writes headers only at its end. Heartbeats before the
 // headers prove liveness, so SetupTimeout must not abort the request.
 func TestHeartbeatsBeforeHeadersOutlastSetupTimeout(t *testing.T) {
+	t.Parallel()
 	nc := connect(t)
 	_, err := nc.Subscribe("agent", func(m *nats.Msg) {
 		var r wire.Request
@@ -231,6 +232,7 @@ func TestHeartbeatsBeforeHeadersOutlastSetupTimeout(t *testing.T) {
 // The renew cadence follows the server's negotiated interval, not the
 // client's default, so a short server lease is renewed in time.
 func TestRenewFollowsNegotiatedInterval(t *testing.T) {
+	t.Parallel()
 	nc := connect(t)
 	renews := make(chan struct{}, 1024)
 	_, err := nc.Subscribe("agent.control", func(m *nats.Msg) {

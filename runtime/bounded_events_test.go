@@ -105,6 +105,7 @@ func TestBoundedStopReleasesReplay(t *testing.T) {
 // A live-only event anchored at the replay watermark follows the replay and
 // must not be suppressed as a duplicate; replayed types at that anchor are.
 func TestReplayHandoffKeepsLiveOnlyEventsAtWatermark(t *testing.T) {
+	t.Parallel()
 	factory, _ := fakeFactory(&kit.TurnResult{Response: "done"})
 	r := NewRunner(NewMemoryJournal(), factory, WithEventBuffer(1))
 	if _, err := r.Start(t.Context(), "run", Input{Text: "hello"}); err != nil {

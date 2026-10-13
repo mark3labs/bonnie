@@ -16,7 +16,10 @@ import (
 	"unicode"
 )
 
+// Version is the protocol version that requests, frames, and controls carry.
 const Version = 1
+
+// DefaultInboxPrefix is the subject prefix of client reply inboxes.
 const DefaultInboxPrefix = "_INBOX.bonnieapi"
 
 // Limits bound independently admitted requests and per-response memory.
@@ -33,6 +36,8 @@ type Limits struct {
 	SetupTimeout time.Duration
 }
 
+// Defaults fills each zero limit with its default value. It returns an error
+// when a limit is out of range or Renew is not less than half of Lease.
 func (l Limits) Defaults() (Limits, error) {
 	if l.MaxRequests == 0 {
 		l.MaxRequests = 64
@@ -70,6 +75,8 @@ func (l Limits) Defaults() (Limits, error) {
 	return l, nil
 }
 
+// Request is one HTTP request that a client publishes to the agent subject.
+// Secret authorizes the control messages for this request.
 type Request struct {
 	Version   int         `json:"version"`
 	ID        string      `json:"request_id"`
@@ -81,6 +88,10 @@ type Request struct {
 	Secret    string      `json:"secret"`
 }
 
+// Frame is one response message on the client inbox. Kind is "headers",
+// "data", "heartbeat", "end", or "error". Sequence starts at 0 and
+// increases by 1 for each frame. Only a headers frame sets Status, Headers,
+// LeaseMS, RenewMS, and Window.
 type Frame struct {
 	Version  int         `json:"version"`
 	ID       string      `json:"request_id"`
@@ -95,6 +106,9 @@ type Frame struct {
 	Window   int         `json:"window,omitempty"`
 }
 
+// Control is one client message on the control subject. Kind is "ack",
+// "renew", or "cancel". Sequence increases by 1 for each control of a
+// request, so the agent can reject a replayed control.
 type Control struct {
 	Version  int    `json:"version"`
 	ID       string `json:"request_id"`
@@ -105,6 +119,8 @@ type Control struct {
 	Ack      uint64 `json:"ack,omitempty"`
 }
 
+// Decode decodes exactly one JSON value into dst. It rejects unknown fields
+// and trailing data.
 func Decode(data []byte, dst any) error {
 	d := json.NewDecoder(bytes.NewReader(data))
 	d.DisallowUnknownFields()
@@ -117,6 +133,7 @@ func Decode(data []byte, dst any) error {
 	return nil
 }
 
+// Token returns n random bytes as a hexadecimal string.
 func Token(n int) string {
 	b := make([]byte, n)
 	if _, err := rand.Read(b); err != nil {
@@ -124,6 +141,8 @@ func Token(n int) string {
 	}
 	return hex.EncodeToString(b)
 }
+
+// IsToken reports whether s is a hexadecimal string of n bytes.
 func IsToken(s string, n int) bool {
 	if len(s) != 2*n {
 		return false
@@ -131,6 +150,9 @@ func IsToken(s string, n int) bool {
 	_, err := hex.DecodeString(s)
 	return err == nil
 }
+
+// Subject reports whether s is a valid literal NATS subject: no wildcards,
+// no empty tokens, no whitespace, and no control characters.
 func Subject(s string) bool {
 	if s == "" || len(s) > 512 {
 		return false
@@ -140,9 +162,14 @@ func Subject(s string) bool {
 	}
 	return !strings.ContainsAny(s, "*> \t\r\n") && !strings.ContainsFunc(s, unicode.IsControl)
 }
+
+// Inbox reports whether s is prefix, a dot, and a 16-byte token.
 func Inbox(s, prefix string) bool {
 	return strings.HasPrefix(s, prefix+".") && IsToken(strings.TrimPrefix(s, prefix+"."), 16)
 }
+
+// Path parses a request path below /bonnie/v1/. It rejects absolute URLs,
+// fragments, control characters, and dot segments.
 func Path(s string) (*url.URL, error) {
 	if len(s) > 8192 || !strings.HasPrefix(s, "/bonnie/v1/") || strings.ContainsAny(s, "#\\") || strings.ContainsFunc(s, unicode.IsControl) {
 		return nil, errors.New("invalid_request")
@@ -158,6 +185,9 @@ func Path(s string) (*url.URL, error) {
 	}
 	return u, nil
 }
+
+// Stream reports whether method and u name the run event stream,
+// GET /bonnie/v1/runs/{id}/stream.
 func Stream(u *url.URL, method string) bool {
 	p := strings.Split(u.Path, "/")
 	return method == http.MethodGet && len(p) == 6 && p[1] == "bonnie" && p[2] == "v1" && p[3] == "runs" && p[4] != "" && p[5] == "stream"
@@ -165,6 +195,8 @@ func Stream(u *url.URL, method string) bool {
 
 var responseHeaders = map[string]bool{"Content-Type": true, "Cache-Control": true, "Allow": true, "Www-Authenticate": true, "Retry-After": true}
 
+// ResponseHeaders returns a copy of the response headers that the protocol
+// forwards to the client. It drops all other headers.
 func ResponseHeaders(h http.Header) http.Header {
 	out := make(http.Header)
 	for k, v := range h {
@@ -175,6 +207,10 @@ func ResponseHeaders(h http.Header) http.Header {
 	}
 	return out
 }
+
+// Headers validates request headers. It allows Authorization, Content-Type,
+// Accept, and the names in extra. It rejects hop-by-hop, proxy, and
+// identity headers, and it limits the count and total size.
 func Headers(h http.Header, extra []string) error {
 	allowed := map[string]bool{"Authorization": true, "Content-Type": true, "Accept": true}
 	for _, k := range extra {
@@ -222,6 +258,9 @@ func denied(s string) bool {
 	}
 	return strings.HasPrefix(s, "proxy-") || strings.HasPrefix(s, "x-forwarded-") || strings.HasPrefix(s, "x-identity") || strings.HasPrefix(s, "x-user") || strings.HasPrefix(s, "x-auth") || strings.HasPrefix(s, "nats-")
 }
+
+// Validate checks the version, identifiers, timeout, method, path, body
+// size, and headers of r.
 func Validate(r Request, maxBody int, extra []string) error {
 	if r.Version != Version {
 		return errors.New("unsupported_version")
