@@ -5,7 +5,53 @@ All notable changes to BONNIE are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.27.0] — 2026-10-13
+
+**Reach the run API over NATS.**
+This is a MINOR release under the pre-1.0 convention: it adds public APIs for
+the run API over Core NATS and for a host with no TCP listener. The Kit
+minimum moves to `v0.129.0`. BONNIE remains early and experimental. No release
+is proven in production. Do not use it for work whose loss would hurt.
+
+### The claims
+
+- **A run survives process death.** Another process restores the journalled
+  conversation, including typed tool calls and results. SQLite commits each
+  tool-calling step atomically. Saved input continues without an empty or repeated
+  user message. Uncertain external effects need verification, not blind replay.
+  Execution is not exactly once; callbacks can run again.
+- **A run parks indefinitely.** A human-input wait needs no live agent process
+  or running sandbox compute. Resume supplies the answer after restart. Keep
+  the journal and sandbox data. JetStream waits need their original agent.
+- **A run is reachable over HTTP.** Routes under `/bonnie/v1` expose runs,
+  snapshots, events, durable submissions, and owned child runs. Terminal chat
+  loads saved history and continues the selected run through the HTTP channel.
+  The optional `/web` interface uses the same channel and run executor. Iroh
+  serves the HTTP wire API over authenticated QUIC streams for approved peers.
+  The same authenticated API is now also reachable over Core NATS subjects.
+
+### Added
+
+- `bonnie.WithNATSAPI` with `channel/natsapi` and `client/natsapi`: the
+  authenticated run API over agent-specific Core NATS subjects. The
+  `client/natsapi` transport is an `http.RoundTripper` for the existing Go
+  client. It supports snapshots, same-run messages, explicit suspension answers,
+  framed NDJSON streams with cursor resume, renewable leases, and
+  capability-protected cancellation. NATS task delivery is unchanged. See
+  `docs/NATS_API.md`.
+- `bonnie.WithHTTPListenerDisabled` for hosts with no TCP API or webhook port.
+  It refuses the web UI, an injected listener, and channels with TCP routes.
+- `channel.HostPreparer` and `channel.HostInfo`, which bind host metadata and
+  outbound dispatch to a channel before it starts.
+- `runtime.Runner.StreamEventsBounded` and `runtime.ErrEventOverflow`: an event
+  observer with a queue budget that ends the observation on overflow. Default
+  HTTP observers keep their existing behaviour.
+
+### Fixed
+
+- After a journal replay, an event stream delivers live-only events anchored at
+  the replay watermark. Before, it dropped them. Only replayed event types at
+  that anchor are suppressed as duplicates.
 
 ### Changed
 
@@ -15,6 +61,121 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Keep `charm.land/fantasy` at `v0.45.2`. `v0.45.3` removes
   `fantasy.ToolExecutionError`, and Kit `v0.129.0` still uses it. Do not
   update fantasy past the version that Kit requires.
+- Both example trees pin the published v0.26.0 release. They move to v0.27.0
+  only after publication. Go remains at 1.27.0.
+
+### Known limits
+
+- **Linux only.** Releases support linux/amd64 and linux/arm64. The default needs
+  kernel 5.13 or newer with Landlock enabled; otherwise select Docker.
+- **Containment is not isolation.** Landlock confines files, not the network,
+  and shares the host kernel. Do not run as a user in the `docker` group:
+  access to its socket permits host escape. Docker uses namespaces, not a
+  separate kernel. Microsandbox needs Linux and KVM. Local provides no isolation.
+- **Sandbox egress is open** until a policy is set. Landlock refuses policies it
+  cannot enforce. Microsandbox policy is fixed at creation; reattachment with a
+  different policy fails. Automatic runtime installation needs network access
+  and does not upgrade existing installations or remove runtime requirements.
+- **Custom tools and completion callbacks are trusted host code.** Use scoped
+  `Exec` for commands; do not retain scopes after execution. Use `Kit.Subagent`,
+  not `Kit.Prompt`, from active tools. Closure state is not durable; interrupted
+  calls and checks can repeat. Child model calls are not durable BONNIE runs.
+  Enforce authorization and idempotency in tool code. Keep completion policy and
+  limits stable after restart. Usage can be undercounted; unsaved attachments
+  are lost, accepted events can repeat, and drafts can appear before acceptance.
+  Checks skip suspension and model failure. Managed setup, scoped factories, and
+  completion options cannot use `WithAgentFactory`.
+- **A halt stops the turn, not the step.** Sibling tool calls still run before
+  suspension. Omitting human-input tools does not change permissions.
+- **A skill's bundled files stay on the host.** Put required text in the skill
+  body and required sandbox files in `context/`.
+- **HTTP authentication is opt-in.** Protect TCP HTTP separately; Iroh approval
+  does not authenticate or disable it. Health remains public on TCP HTTP.
+  Verified ownership is required for `operation_id`. CSRF checks do not replace
+  authentication. Chat webhooks verify the platform, not the person.
+- **Iroh pairing grants access to all runs, not tenant isolation.** Verify peer
+  IDs out of band. Persist approved IDs and stable endpoint keys on the host;
+  pairing and revocation are process-local. Revocation blocks later requests,
+  not requests already accepted. Tickets provide reachability, not permission.
+  There is no built-in Iroh CLI, pairing command, or presence advertisement.
+  Loopback tests do not prove Internet relays or Rust-client interoperability.
+- **Run ownership is per host.** Use one process and one submission scheduler per
+  journal. SQLite protects transactions, not execution coordination. Do not mix
+  direct Start and scheduler delivery to the same run. Network filesystems need
+  reliable POSIX locks and are unsafe for the journal.
+- **Events are journal-anchored.** Durable events replay; transient assistant
+  deltas do not. Web chat does not show reasoning deltas. Another process's
+  writes do not publish live events in this host.
+- **Cleanup is opt-in and deletes files, not history.** Waiting runs are kept;
+  publish output before completion. CLI serve does not sweep sandboxes. Locks
+  are local to one Runner; deletion callbacks must be safe to repeat. Shared
+  directories and custom factories cannot use automatic cleanup. Only Landlock
+  and Local support shared directories; use one server and no context seeding.
+- **Tool recovery is not exactly once.** Saved and current policies must allow
+  replay; no tool is replay-safe by default. Replay bypasses interactive approval
+  hooks. Different arguments can evade uncertain-action blocks. Outcomes saved
+  before a step retain text, not media. Custom factories need their own recovery.
+- **Submission deduplication covers admission, not effects.** Human waits park
+  inputs; failed work is not retried automatically. Recovery covers recorded
+  submissions, not older synchronous runs. Steering supports text only. Atomic
+  markers and child creation need `runtime.StepJournal`. Background children do
+  not keep parents busy or grant approval. Unsaved callbacks can repeat.
+- **Logs can contain sensitive data.** Info includes final responses; Debug
+  includes prompts, arguments, results, and reasoning. Synchronous logging can
+  delay runs; replay does not log events again.
+- **Authoring needs Go and public module access.** Static agents need neither Go
+  nor BONNIE installed, but their sandbox can need a separate runtime. Scoped
+  command operations own resources; do not retain them after return.
+- **Cancellation is cooperative, not rollback.** Models, tools, and callbacks
+  must observe contexts. Detached children can escape process-group signals.
+  Route controls to the execution owner. Legacy text answers cannot identify
+  delayed questions; chat retry can repeat effects. Interrupted synchronous HTTP
+  work needs explicit recovery; address and operation_id cannot be combined.
+- **NATS credentials and routes need protection.** Use TLS, broker permissions,
+  and one authentication method. Payloads do not verify identity. Other connection
+  options need a caller-supplied connection. Core NATS can lose tasks and results;
+  interrupted work is not retried automatically. Ordinary subscribers get copies.
+- **JetStream delivery is at least once.** Recovery needs the original journal,
+  sandbox data, unique agent identity, and one owner. Waiting runs need their
+  original agent. Deduplication and retention are bounded; there is no global
+  attempt lookup. Consumer changes can replay messages. Targeted tasks have no
+  fallback; task IDs deduplicate per route, not across routes.
+- **Publish receipts confirm storage, not execution.** Existing streams are not
+  changed. Filter task IDs and respect cancellation; invalid messages need
+  correction. Deduplicate status event IDs and order by sequence. Statuses and
+  results have no cross-stream ordering. Queries and cancellation are not durable
+  commands; timeouts do not prove failure. Custom reply prefixes are unsupported.
+- **The NATS run API is operator access, not tenant isolation.** API access
+  covers all runs; per-run ownership authorization is not supplied. It needs an
+  HTTP authenticator and restrictive broker ACLs and TLS; broker authentication
+  alone does not identify a publisher. Assign one bridge per journal-owning agent
+  subject; it is not a shared worker queue. Requests are not retried, reply loss
+  does not prove failure, and API delivery is not durable. Missed live-only
+  activity cannot be replayed.
+- **Schedules have one journal owner.** Change Revision when policy changes.
+  Waiting work blocks default overlap. Latest catch-up needs saved cron history,
+  not every missed occurrence. Delivery and callbacks can repeat. Only mounted
+  tracked chat receivers are supported, not scheduled files or NATS. Execution
+  has 16 active occurrences. Manual and HTTP triggers need separate authorization.
+- **Browser validation is incomplete.** CI excludes the live-state and end-to-end
+  browser tests. They need Chromium and Node WebSocket support and otherwise skip.
+  CI green does not prove other browsers or production authentication.
+- **Presence is advisory, not execution ownership.** Polling can miss changes;
+  expiry does not prove work stopped. It adds no scheduler, routing, or failover.
+  Protect registries; labels are not authorization. Keep caller-owned connections
+  open through shutdown. Existing storage and history are not validated. Memory
+  presence is process-local with no default renewal; readiness is local only.
+- **Saved-input continuation needs agent support.** Custom agents must implement
+  `runtime.ContinuationAgent` and resolve pending tool calls first. Retry APIs
+  need one owner and provide no process lease or reversal of effects.
+- **Job output has no disk-use limit.** Model output is bounded to 32 KiB per
+  stream, but saved files can fill storage. Fresh providers cannot establish
+  unfinished host job outcomes. Guest reconnection needs files and identity;
+  stopping a sandbox need not preserve jobs.
+- **Provider login uses a shared credential store.** Only OpenAI ChatGPT/Codex
+  login is supported. Protect and persist credentials; they can override
+  environment keys. Login needs a loopback callback on port 1455 with no manual
+  fallback. Restart agents to load changes. Logout does not revoke provider access.
 
 ## [0.26.0] — 2026-10-13
 
@@ -39,13 +200,6 @@ loss would hurt.
   loads saved history and continues the selected run through the HTTP channel.
   The optional `/web` interface uses the same channel and run executor. Iroh
   serves the HTTP wire API over authenticated QUIC streams for approved peers.
-
-### Added
-
-- Optional authenticated run API over agent-specific Core NATS subjects, with
-  the existing Go client, framed NDJSON streams, bounded observers, renewable
-  leases and capability-protected cancellation. Task delivery is unchanged.
-- Explicit `WithHTTPListenerDisabled` for hosts with no TCP API or webhook port.
 
 ### Fixed
 

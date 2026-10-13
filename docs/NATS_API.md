@@ -68,8 +68,8 @@ existing HTTP behavior when its request context ends.
 
 An application may serve its own HTTP/SSE gateway in front of this client; no
 BONNIE UI or browser NATS credentials are needed. The generic package example is
-compiled in the main module. Release-pinned scaffold examples cannot yet depend
-on this unreleased API.
+compiled in the main module. The API is released in v0.27.0; a scaffolded tree
+must pin v0.27.0 or later to use it.
 
 ## Routing, authentication, and broker ACLs
 
