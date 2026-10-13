@@ -1593,3 +1593,14 @@ paired peers have access. See [Iroh setup and programmatic pairing](docs/IROH.md
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+### Run API over NATS
+
+Use `bonnie.WithNATSAPI` to expose the existing authenticated run API on one
+journal-owning agent's Core NATS subject, optionally with
+`bonnie.WithHTTPListenerDisabled()` for no TCP listener. `client/natsapi` provides
+an `http.RoundTripper` for the existing Go client, including snapshots, same-run
+messages, explicit suspension answers and cursor-based NDJSON streams. This is
+separate from NATS task/result delivery, not a shared worker queue. API credentials
+and restrictive broker ACLs are required; access is operator-wide, not per-run
+ownership. See [NATS API setup, protocol and durability limits](docs/NATS_API.md).

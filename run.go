@@ -146,7 +146,20 @@ func (a *Agent) Run(ctx context.Context) (runErr error) {
 			return err
 		}
 	}
-	info := bonniehttp.Info{Agent: c.name, Channels: []string{"http"}}
+	if c.noHTTPListener {
+		if c.listener != nil || c.webUI {
+			return errors.New("bonnie: disabled HTTP listener conflicts with listener or web UI")
+		}
+		for _, ch := range channels {
+			if len(ch.Routes()) != 0 {
+				return fmt.Errorf("bonnie: disabled HTTP listener conflicts with channel %q routes", ch.Name())
+			}
+		}
+	}
+	info := bonniehttp.Info{Agent: c.name}
+	if !c.noHTTPListener {
+		info.Channels = []string{"http"}
+	}
 	for _, ch := range channels {
 		info.Channels = append(info.Channels, ch.Name())
 	}
@@ -157,6 +170,14 @@ func (a *Agent) Run(ctx context.Context) (runErr error) {
 	for _, ch := range channels {
 		if r, ok := ch.(channel.Receiver); ok {
 			out.byName[ch.Name()] = r
+		}
+	}
+
+	for _, ch := range channels {
+		if prepare, ok := ch.(channel.HostPreparer); ok {
+			if err := prepare.PrepareHost(out, channel.HostInfo{Agent: info.Agent, Version: info.Version, Channels: info.Channels}); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -191,7 +212,7 @@ func (a *Agent) Run(ctx context.Context) (runErr error) {
 	// Bind before the banner, so the banner reports the address the process
 	// actually listens on. A configured ":0" is a request for any free port,
 	// and printing it back would tell an operator nothing.
-	if ln == nil {
+	if ln == nil && !c.noHTTPListener {
 		var err error
 		ln, err = net.Listen("tcp", c.addr)
 		if err != nil {
@@ -209,7 +230,11 @@ func (a *Agent) Run(ctx context.Context) (runErr error) {
 
 	var presenceErr <-chan error
 	if c.presence != nil {
-		candidate, err := newPresenceLifecycle(*c.presence, append(append([]Channel(nil), channels...), httpChannel))
+		presenceChannels := append([]Channel(nil), channels...)
+		if !c.noHTTPListener {
+			presenceChannels = append(presenceChannels, httpChannel)
+		}
+		candidate, err := newPresenceLifecycle(*c.presence, presenceChannels)
 		if err != nil {
 			return err
 		}
@@ -256,6 +281,26 @@ func (a *Agent) Run(ctx context.Context) (runErr error) {
 			runErr = errors.Join(runErr, fmt.Errorf("bonnie: scheduler: %w", err))
 		}
 	}()
+
+	if c.noHTTPListener {
+		c.banner(os.Stderr, "no TCP listener", prepared.contextFiles, prepared.skills, prepared.dotenv)
+		var scheduleErr <-chan error
+		if schedules != nil {
+			scheduleErr = schedules.done
+		}
+		select {
+		case <-schedulerCtx.Done():
+			return nil // scheduler error is joined by its defer
+		case err := <-presenceErr:
+			return err
+		case err := <-scheduleErr:
+			schedules.done = nil
+			if errors.Is(err, context.Canceled) {
+				return nil
+			}
+			return err
+		}
+	}
 	c.banner(os.Stderr, ln.Addr().String(), prepared.contextFiles, prepared.skills, prepared.dotenv)
 	if schedules == nil {
 		if presenceErr == nil {

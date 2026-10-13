@@ -256,9 +256,11 @@ type subscriber struct {
 	wake chan struct{}
 	done chan struct{}
 
-	mu     sync.Mutex
-	queue  []Event
-	closed bool
+	mu                               sync.Mutex
+	queue                            []Event
+	closed                           bool
+	failure                          chan error
+	maxEvents, maxBytes, queuedBytes int
 }
 
 func newSubscriber() *subscriber {
@@ -276,6 +278,17 @@ func (s *subscriber) push(ev Event) {
 	if s.closed {
 		s.mu.Unlock()
 		return
+	}
+	if s.failure != nil {
+		raw, err := json.Marshal(ev)
+		if err != nil || len(s.queue) >= s.maxEvents || len(raw)+s.queuedBytes > s.maxBytes {
+			s.failure <- ErrEventOverflow
+			s.closed = true
+			close(s.done)
+			s.mu.Unlock()
+			return
+		}
+		s.queuedBytes += len(raw)
 	}
 	s.queue = append(s.queue, ev)
 	s.mu.Unlock()

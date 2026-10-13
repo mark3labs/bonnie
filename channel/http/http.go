@@ -80,14 +80,15 @@ import (
 // Channel is the HTTP transport. It implements [channel.Channel] and
 // [channel.Inbound].
 type Channel struct {
-	namespace   string
-	runner      *runtime.Runner
-	core        *chat.Core
-	policy      channel.TurnPolicy
-	idGen       []chat.CoreOption
-	info        Info
-	auth        Authenticator
-	operationMu sync.Mutex
+	namespace                 string
+	runner                    *runtime.Runner
+	core                      *chat.Core
+	policy                    channel.TurnPolicy
+	idGen                     []chat.CoreOption
+	info                      Info
+	auth                      Authenticator
+	operationMu               sync.Mutex
+	streamEvents, streamBytes int
 }
 
 var (
@@ -122,6 +123,12 @@ func WithIDGenerator(fn func() string) Option {
 // binary's build info.
 func WithInfo(info Info) Option {
 	return func(c *Channel) { c.info = info }
+}
+
+// WithBoundedStreams opts into bounded observers for non-TCP transports.
+// Overflow terminates the observation, not the agent turn.
+func WithBoundedStreams(maxEvents, maxBytes int) Option {
+	return func(c *Channel) { c.streamEvents = maxEvents; c.streamBytes = maxBytes }
 }
 
 // Authenticator verifies a request and returns the principal it proves.
@@ -823,7 +830,19 @@ func (c *Channel) handleStream(w http.ResponseWriter, r *http.Request, in channe
 		cursor = n
 	}
 
-	events, unsubscribe := c.core.Runner().StreamEvents(runID, cursor)
+	var events <-chan runtime.Event
+	var failures <-chan error
+	var unsubscribe func()
+	if c.streamEvents > 0 && c.streamBytes > 0 {
+		events, failures, unsubscribe = c.core.Runner().StreamEventsBounded(r.Context(), runID, cursor, c.streamEvents, c.streamBytes)
+	} else {
+		events, unsubscribe = c.core.Runner().StreamEvents(runID, cursor)
+	}
+	fail := func(err error) {
+		if w, ok := w.(interface{ FailStream(error) }); ok {
+			w.FailStream(err)
+		}
+	}
 	defer unsubscribe()
 
 	w.Header().Set("Content-Type", "application/x-ndjson")
@@ -838,8 +857,16 @@ func (c *Channel) handleStream(w http.ResponseWriter, r *http.Request, in channe
 	enc := json.NewEncoder(w)
 	for {
 		select {
+		case err := <-failures:
+			fail(err)
+			return
 		case ev, open := <-events:
 			if !open {
+				select {
+				case err := <-failures:
+					fail(err)
+				default:
+				}
 				return
 			}
 			if err := enc.Encode(ev); err != nil {
