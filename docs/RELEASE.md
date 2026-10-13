@@ -76,6 +76,28 @@ indefinitely**, **reachable over HTTP**. State the limits from the current
 
 ## History
 
+### `v0.26.0`, 2026-10-13 — publication verified
+
+- [x] `task release-check`, `task release-snapshot`, `task check`, and `task ci`
+      pass. The clean snapshot at `683253b` builds both Linux targets, verifies
+      both archive checksums, and prints `0.25.0-SNAPSHOT-683253b` on amd64.
+- [x] `test`, `examples`, and `lint` pass on `master` at tagged commit
+      `683253b9ce9df658422f9fba9fff8b0ff8a30f28` (CI run `38392369616`).
+- [x] The dated `[0.26.0]` changelog section states claims, limits, and the
+      `chat --run` migration. Note extraction passes.
+- [x] Annotated tag pushed after human approval. Release run `38393540010`
+      succeeds and publishes three artifacts.
+- [x] Both downloaded archive checksums verify. The statically linked amd64
+      binary prints `bonnie version 0.26.0`.
+- [x] Both example trees pin v0.26.0 after publication; `task examples` passes.
+
+**Version choice.** MINOR under the pre-1.0 convention: `chat --run` changes
+from a conversation address to an existing run ID in the CLI and compiled agents.
+
+**Validation limits.** Many local package results were cached. CI excludes the
+Chromium live-state and end-to-end tests. Neither the arm64 binary nor live-model
+behaviour was executed. External effects are not exactly once.
+
 ### `v0.23.0`, 2026-10-12 — publication verified
 
 - [x] `task release-check`, `task release-snapshot`, `task check`, and `task ci`
