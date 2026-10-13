@@ -3,6 +3,7 @@ package natsapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -353,4 +354,102 @@ func TestAdmissionSlowConsumerAndShutdown(t *testing.T) {
 	if !a.IsConnected() || !b.IsConnected() {
 		t.Fatal("closed caller connection")
 	}
+}
+
+func TestCancelBeforeHeadersPanicAndShutdown(t *testing.T) {
+	a, b := broker(t, 0)
+	c, err := New(runner(), Config{Conn: a, Subject: "lifecycle-api", Authenticator: auth})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entered := make(chan struct{}, 1)
+	c.handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("panic") == "1" {
+			panic("private panic payload")
+		}
+		entered <- struct{}{}
+		<-r.Context().Done()
+	})
+	if err = c.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.Shutdown(context.Background()) }()
+	tr := transport(t, b, "lifecycle-api")
+	ctx, cancel := context.WithCancel(t.Context())
+	req, _ := http.NewRequestWithContext(ctx, "GET", "http://logical/bonnie/v1/info", nil)
+	done := make(chan error, 1)
+	go func() { _, err := tr.RoundTrip(req); done <- err }()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("handler did not start")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("cancel succeeded")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("cancel did not release RoundTrip")
+	}
+	waitEmpty(t, c)
+	req, _ = http.NewRequestWithContext(t.Context(), "GET", "http://logical/bonnie/v1/info?panic=1", nil)
+	if _, err = tr.RoundTrip(req); err == nil || strings.Contains(err.Error(), "private panic") {
+		t.Fatal("panic not safely recovered", err)
+	}
+	waitEmpty(t, c)
+	req, _ = http.NewRequestWithContext(t.Context(), "GET", "http://logical/bonnie/v1/info", nil)
+	go func() { _, err := tr.RoundTrip(req); done <- err }()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("handler did not start")
+	}
+	shutdownCtx, stop := context.WithTimeout(context.Background(), time.Second)
+	defer stop()
+	if err = c.Shutdown(shutdownCtx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("shutdown succeeded")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("shutdown response not released")
+	}
+	waitEmpty(t, c)
+}
+
+func TestQuietStreamRenewsLease(t *testing.T) {
+	a, b := broker(t, 0)
+	limits := Limits{Lease: 120 * time.Millisecond, Renew: 20 * time.Millisecond, AckTimeout: 80 * time.Millisecond}
+	c, err := New(runner(), Config{Conn: a, Subject: "quiet", Authenticator: auth, Limits: limits})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+	})
+	if err = c.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.Shutdown(context.Background()) }()
+	tr := transport(t, b, "quiet")
+	ctx, cancel := context.WithTimeout(t.Context(), 400*time.Millisecond)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, "GET", "http://logical/bonnie/v1/runs/r/stream", nil)
+	resp, err := tr.RoundTrip(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = resp.Body.Read(make([]byte, 1))
+	if err == nil || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatal("quiet stream did not survive renewals", err)
+	}
+	_ = resp.Body.Close()
+	waitEmpty(t, c)
 }

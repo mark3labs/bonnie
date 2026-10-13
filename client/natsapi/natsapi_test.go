@@ -158,3 +158,27 @@ func TestSetupErrorClosesBodyAndNoRetry(t *testing.T) {
 		t.Fatal("connection closed")
 	}
 }
+
+func TestDisconnectFailsBodyWithoutReplacingHandlers(t *testing.T) {
+	tr, nc := fakeFrames(t, func(id string) []wire.Frame { return []wire.Frame{headers(id)} })
+	req, _ := http.NewRequestWithContext(t.Context(), "GET", "http://logical/bonnie/v1/info", nil)
+	resp, err := tr.RoundTrip(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nc.Close()
+	done := make(chan error, 1)
+	go func() { _, err := resp.Body.Read(make([]byte, 1)); done <- err }()
+	select {
+	case err := <-done:
+		if err == nil || err == io.EOF {
+			t.Fatal("disconnect became EOF")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("disconnect not observed")
+	}
+	_ = resp.Body.Close()
+	if _, err = tr.RoundTrip(req); err == nil {
+		t.Fatal("closed broker accepted new request")
+	}
+}
