@@ -82,6 +82,26 @@ func (s *subscriber) boundedPump() {
 	}
 }
 
+// replayedType reports whether replay reproduces events of this type from the
+// journal. Every other type is live-only and never comes out of a replay.
+func replayedType(typ string) bool {
+	switch typ {
+	case EventTurn, EventCancelRequested, EventSuspend, EventResume, EventResponse, EventState:
+		return true
+	}
+	return false
+}
+
+// coveredByReplay reports whether a live event must be suppressed after a
+// replay that emitted everything up to watermark. Events anchored before the
+// watermark predate the last replayed event and cannot be placed correctly in
+// the replayed history. At the watermark itself only replayed types are
+// duplicates: a live-only event anchored there was published after that
+// record was written, so it follows the replay and must still be delivered.
+func coveredByReplay(ev Event, watermark int) bool {
+	return ev.Seq < watermark || (ev.Seq == watermark && replayedType(ev.Type))
+}
+
 // StreamEventsBounded provides the same journal/live handoff as StreamEvents,
 // but bounds live buffering and surfaces replay/overflow errors. Cancellation
 // reaches journal reads as well as forwarding. The journal Replay interface
@@ -172,7 +192,7 @@ func (r *Runner) StreamEventsBounded(ctx context.Context, runID string, after, m
 					}
 					return
 				}
-				if needReplay && ev.Seq <= watermark {
+				if needReplay && coveredByReplay(ev, watermark) {
 					continue
 				}
 				select {

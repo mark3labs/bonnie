@@ -101,3 +101,50 @@ func TestBoundedStopReleasesReplay(t *testing.T) {
 		stop()
 	}
 }
+
+// A live-only event anchored at the replay watermark follows the replay and
+// must not be suppressed as a duplicate; replayed types at that anchor are.
+func TestReplayHandoffKeepsLiveOnlyEventsAtWatermark(t *testing.T) {
+	factory, _ := fakeFactory(&kit.TurnResult{Response: "done"})
+	r := NewRunner(NewMemoryJournal(), factory, WithEventBuffer(1))
+	if _, err := r.Start(t.Context(), "run", Input{Text: "hello"}); err != nil {
+		t.Fatal(err)
+	}
+	watermark := r.durableSeq("run")
+	check := func(t *testing.T, out <-chan Event, fail <-chan error) {
+		t.Helper()
+		// Publish a duplicate of the replayed closing state and a live-only
+		// event at the same anchor; only the live-only one may come through.
+		r.Events().Publish(Event{RunID: "run", Seq: watermark, Type: EventState, State: RunCompleted})
+		r.Events().Publish(Event{RunID: "run", Seq: watermark, Type: "tool"})
+		states := 0
+		for {
+			select {
+			case ev := <-out:
+				if ev.Type == EventState && ev.Seq == watermark {
+					states++
+				}
+				if ev.Type == "tool" {
+					if states != 1 {
+						t.Fatalf("saw %d closing states before the live event, want 1", states)
+					}
+					return
+				}
+			case err := <-fail:
+				t.Fatal(err)
+			case <-time.After(time.Second):
+				t.Fatal("live-only event at the watermark was dropped")
+			}
+		}
+	}
+	t.Run("bounded", func(t *testing.T) {
+		out, fail, stop := r.StreamEventsBounded(t.Context(), "run", 0, 256, 4<<20)
+		defer stop()
+		check(t, out, fail)
+	})
+	t.Run("unbounded", func(t *testing.T) {
+		out, stop := r.StreamEvents("run", 0)
+		defer stop()
+		check(t, out, nil)
+	})
+}

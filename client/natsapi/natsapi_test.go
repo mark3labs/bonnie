@@ -182,3 +182,90 @@ func TestDisconnectFailsBodyWithoutReplacingHandlers(t *testing.T) {
 		t.Fatal("closed broker accepted new request")
 	}
 }
+
+// A synchronous turn writes headers only at its end. Heartbeats before the
+// headers prove liveness, so SetupTimeout must not abort the request.
+func TestHeartbeatsBeforeHeadersOutlastSetupTimeout(t *testing.T) {
+	nc := connect(t)
+	_, err := nc.Subscribe("agent", func(m *nats.Msg) {
+		var r wire.Request
+		_ = json.Unmarshal(m.Data, &r)
+		go func() {
+			var seq uint64
+			publish := func(f wire.Frame) {
+				f.Version, f.ID, f.Sequence = 1, r.ID, seq
+				seq++
+				b, _ := json.Marshal(f)
+				_ = nc.Publish(m.Reply, b)
+			}
+			for range 10 {
+				publish(wire.Frame{Kind: "heartbeat"})
+				time.Sleep(30 * time.Millisecond)
+			}
+			publish(headers(r.ID))
+			publish(wire.Frame{Kind: "data", Data: []byte("ok")})
+			publish(wire.Frame{Kind: "end"})
+		}()
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = nc.Flush()
+	tr, err := NewTransport(Config{Conn: nc, Subject: "agent", Limits: Limits{Lease: 100 * time.Millisecond, Renew: 20 * time.Millisecond, SetupTimeout: 100 * time.Millisecond}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tr.Close() }()
+	req, _ := http.NewRequestWithContext(t.Context(), "POST", "http://logical/bonnie/v1/runs", nil)
+	resp, err := tr.RoundTrip(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil || string(body) != "ok" {
+		t.Fatalf("body %q, err %v", body, err)
+	}
+}
+
+// The renew cadence follows the server's negotiated interval, not the
+// client's default, so a short server lease is renewed in time.
+func TestRenewFollowsNegotiatedInterval(t *testing.T) {
+	nc := connect(t)
+	renews := make(chan struct{}, 1024)
+	_, err := nc.Subscribe("agent.control", func(m *nats.Msg) {
+		var c wire.Control
+		if json.Unmarshal(m.Data, &c) == nil && c.Kind == "renew" {
+			renews <- struct{}{}
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = nc.Subscribe("agent", func(m *nats.Msg) {
+		var r wire.Request
+		_ = json.Unmarshal(m.Data, &r)
+		h := wire.Frame{Version: 1, ID: r.ID, Kind: "headers", Status: 200, LeaseMS: 1000, RenewMS: 10, Window: 8}
+		b, _ := json.Marshal(h)
+		_ = nc.Publish(m.Reply, b)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = nc.Flush()
+	tr, err := NewTransport(Config{Conn: nc, Subject: "agent", Limits: Limits{SetupTimeout: time.Second}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tr.Close() }()
+	req, _ := http.NewRequestWithContext(t.Context(), "GET", "http://logical/bonnie/v1/info", nil)
+	resp, err := tr.RoundTrip(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	time.Sleep(300 * time.Millisecond)
+	if n := len(renews); n < 8 {
+		t.Fatalf("sent %d renewals in 300ms with a 10ms renew interval", n)
+	}
+}

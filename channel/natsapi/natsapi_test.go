@@ -439,15 +439,18 @@ func TestQuietStreamRenewsLease(t *testing.T) {
 	}
 	defer func() { _ = c.Shutdown(context.Background()) }()
 	tr := transport(t, b, "quiet")
-	ctx, cancel := context.WithTimeout(t.Context(), 400*time.Millisecond)
+	// Cancel instead of using a deadline: a deadline propagates to the agent as
+	// TimeoutMS and races the client's own expiry.
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
+	time.AfterFunc(400*time.Millisecond, cancel)
 	req, _ := http.NewRequestWithContext(ctx, "GET", "http://logical/bonnie/v1/runs/r/stream", nil)
 	resp, err := tr.RoundTrip(req)
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, err = resp.Body.Read(make([]byte, 1))
-	if err == nil || !errors.Is(err, context.DeadlineExceeded) {
+	if err == nil || !errors.Is(err, context.Canceled) {
 		t.Fatal("quiet stream did not survive renewals", err)
 	}
 	_ = resp.Body.Close()

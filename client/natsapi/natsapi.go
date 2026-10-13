@@ -156,9 +156,10 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	go b.monitor()
 	timer := time.NewTimer(t.cfg.Limits.SetupTimeout)
 	defer timer.Stop()
+	headerTimeout := timer.C
 	for {
 		select {
-		case <-timer.C:
+		case <-headerTimeout:
 			err = errors.New("nats-api: header timeout; execution may be uncertain")
 		case <-b.done:
 			err = b.failure()
@@ -166,6 +167,11 @@ func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
 			switch f.Kind {
 			case "heartbeat":
 				b.ack(f.Sequence)
+				// The agent has proven liveness; SetupTimeout only bounds the
+				// wait for a first frame. The lease check in monitor bounds the
+				// rest, so a long turn that writes headers late still succeeds.
+				timer.Stop()
+				headerTimeout = nil
 				continue
 			case "headers":
 				if f.Status < 200 || f.Status > 999 || f.LeaseMS <= 0 || f.RenewMS <= 0 || f.RenewMS*2 >= f.LeaseMS || f.Window < 1 || f.Window > t.cfg.Limits.Window {
@@ -343,8 +349,14 @@ func (b *body) Read(p []byte) (int, error) {
 		}
 	}
 }
+func renewTick(renew time.Duration) time.Duration {
+	return max(min(renew/2, 100*time.Millisecond), time.Millisecond)
+}
 func (b *body) monitor() {
-	ticker := time.NewTicker(min(b.t.cfg.Limits.Renew/2, 100*time.Millisecond))
+	b.mu.Lock()
+	tick := renewTick(b.renew)
+	b.mu.Unlock()
+	ticker := time.NewTicker(tick)
 	defer ticker.Stop()
 	renewed := time.Now()
 	for {
@@ -363,6 +375,12 @@ func (b *body) monitor() {
 			b.mu.Lock()
 			last, lease, renew := b.last, b.lease, b.renew
 			b.mu.Unlock()
+			// Headers replace the local renew interval with the server's, so
+			// derive the tick from the negotiated value to renew short leases.
+			if next := renewTick(renew); next != tick {
+				tick = next
+				ticker.Reset(tick)
+			}
 			if !b.t.cfg.Conn.IsConnected() {
 				b.terminate(nats.ErrDisconnected, true)
 				return

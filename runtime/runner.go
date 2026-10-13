@@ -420,13 +420,15 @@ func (r *Runner) StreamEvents(runID string, after int) (<-chan Event, func()) {
 		// Without replay, preserve the bus order. Several live Kit events can
 		// share one journal anchor, so advancing emitted after the first one
 		// would hide every later event at that anchor (usually tool calls).
-		// A replay still filters everything it covered because those live-only
-		// events cannot be placed correctly in the replayed history.
+		// After a replay, live events anchored before the watermark cannot be
+		// placed correctly in the replayed history and are filtered. At the
+		// watermark only replayed types are duplicates; live-only events
+		// anchored there follow the replay and are delivered.
 		// Only the replay watermark suppresses live events. Several live
 		// events, including the response, can share a later anchor.
 		replayCovered := emitted
 		for ev := range live {
-			if needReplay && ev.Seq <= replayCovered {
+			if needReplay && coveredByReplay(ev, replayCovered) {
 				continue
 			}
 			if !needReplay && ev.Seq != 0 && ev.Seq <= after {
