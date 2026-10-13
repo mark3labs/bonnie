@@ -5,6 +5,17 @@ All notable changes to BONNIE are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Update all module dependencies. Kit goes from `v0.127.0` to `v0.129.0`;
+  NATS server goes from `v2.12.0` to `v2.15.1`; NATS client goes from
+  `v1.47.0` to `v1.54.0`.
+- Keep `charm.land/fantasy` at `v0.45.2`. `v0.45.3` removes
+  `fantasy.ToolExecutionError`, and Kit `v0.129.0` still uses it. Do not
+  update fantasy past the version that Kit requires.
+
 ## [0.26.0] — 2026-10-13
 
 **Continue terminal chat by run ID.**
