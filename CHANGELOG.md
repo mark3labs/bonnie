@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Simplify the host serve exit, durable submission planning lock, and JetStream
+  admission and acknowledgement paths without changing their behaviour.
 - Share NATS wire ID validation between the client and server, and sandbox
   provider forwarding between environment and seed wrappers. No behavior or
   public API changes.

@@ -371,7 +371,45 @@ func (c *Channel) saveResult(ctx context.Context, key string, result Result) err
 	return err
 }
 
+// errNoAck leaves a delivery pending for redelivery after an infrastructure
+// failure. Protocol errors become Result.Error and are acknowledged instead.
+var errNoAck = errors.New("bonnie: channel/nats: leave unacknowledged")
+
+// errHandled means a cached result was already published (and acknowledged).
+var errHandled = errors.New("bonnie: channel/nats: cached result handled")
+
+type jsInput struct {
+	key       string
+	isAnswer  bool
+	task      Task
+	answer    Answer
+	decodeErr error // A protocol error, not errNoAck.
+}
+
 func (c *Channel) handleJetStream(ctx context.Context, msg *gonats.Msg) {
+	stop := c.heartbeat(ctx, msg)
+	defer stop()
+	in, err := c.decodeJetStream(msg)
+	if errors.Is(err, errNoAck) {
+		return
+	}
+	unlock := c.lockIdentity(in)
+	defer unlock()
+	result, answerKey, run, err := c.processJetStream(ctx, msg, in)
+	if errors.Is(err, errNoAck) || errors.Is(err, errHandled) || ctx.Err() != nil {
+		return
+	}
+	// An interrupted turn is deliberately neither cached nor acknowledged: the
+	// broker redelivery must re-enter Runner with the admitted attempt identity.
+	if run != nil && run.State == runtime.RunInterrupted {
+		return
+	}
+	if err := c.finishJetStream(ctx, msg, in.key, answerKey, result, run, err); errors.Is(err, errNoAck) {
+		return
+	}
+}
+
+func (c *Channel) heartbeat(ctx context.Context, msg *gonats.Msg) func() {
 	// Heartbeats also cover journal access, lock waits, and result publication.
 	finished := make(chan struct{})
 	watched := make(chan struct{})
@@ -392,14 +430,16 @@ func (c *Channel) handleJetStream(ctx context.Context, msg *gonats.Msg) {
 			}
 		}
 	}()
-	defer func() { close(finished); <-watched }()
+	return func() { close(finished); <-watched }
+}
+
+func (c *Channel) decodeJetStream(msg *gonats.Msg) (jsInput, error) {
 	meta, err := msg.Metadata()
 	if err != nil {
 		c.report("JetStream metadata failed")
-		return
+		return jsInput{}, errNoAck
 	}
 	key := c.cacheKey("input", fmt.Sprint(meta.Sequence.Stream))
-	// Serialize same-run answers and redelivered input within this process.
 	var answer Answer
 	var task Task
 	isAnswer := msg.Subject == c.answerRoute()
@@ -409,9 +449,14 @@ func (c *Channel) handleJetStream(ctx context.Context, msg *gonats.Msg) {
 	} else {
 		err = decode(msg.Data, &task)
 	}
-	identity := key
-	if isAnswer {
-		identity = answer.RunID
+	return jsInput{key: key, isAnswer: isAnswer, task: task, answer: answer, decodeErr: err}, nil
+}
+
+// Serialize same-run answers and redelivered input within this process.
+func (c *Channel) lockIdentity(in jsInput) func() {
+	identity := in.key
+	if in.isAnswer {
+		identity = in.answer.RunID
 	}
 	var hash uint32
 	for _, b := range []byte(identity) {
@@ -419,15 +464,23 @@ func (c *Channel) handleJetStream(ctx context.Context, msg *gonats.Msg) {
 	}
 	lock := &c.locks[hash%uint32(len(c.locks))]
 	lock.Lock()
-	defer lock.Unlock()
+	return lock.Unlock
+}
+
+// processJetStream returns errHandled for a cached publication, errNoAck for
+// infrastructure failures, and an ordinary error for a protocol or turn result.
+func (c *Channel) processJetStream(ctx context.Context, msg *gonats.Msg, in jsInput) (Result, string, *runtime.Run, error) {
+	key, isAnswer, task, answer, err := in.key, in.isAnswer, in.task, in.answer, in.decodeErr
 	cached, loadErr := c.loadResult(ctx, key)
 	if loadErr != nil {
 		c.report("result cache read failed")
-		return
+		return Result{}, "", nil, errNoAck
 	}
 	if cached != nil {
-		c.publishJetStream(ctx, msg, *cached, key)
-		return
+		if err := c.publishJetStreamResult(ctx, msg, *cached, key); err != nil {
+			return Result{}, "", nil, err
+		}
+		return Result{}, "", nil, errHandled
 	}
 	answerKey := ""
 	if err == nil && isAnswer && answer.Version == 1 && answer.AgentID == c.cfg.AgentID && natswire.ValidID(answer.RunID) && natswire.ValidID(answer.MessageID) {
@@ -435,11 +488,13 @@ func (c *Channel) handleJetStream(ctx context.Context, msg *gonats.Msg) {
 		cached, loadErr = c.loadResult(ctx, answerKey)
 		if loadErr != nil {
 			c.report("answer cache read failed")
-			return
+			return Result{}, "", nil, errNoAck
 		}
 		if cached != nil {
-			c.publishJetStream(ctx, msg, *cached, key)
-			return
+			if err := c.publishJetStreamResult(ctx, msg, *cached, key); err != nil {
+				return Result{}, "", nil, err
+			}
+			return Result{}, "", nil, errHandled
 		}
 	}
 	result := Result{Version: 1, TaskID: task.TaskID, AgentID: c.cfg.AgentID, AnswerSubject: c.answerRoute()}
@@ -448,7 +503,7 @@ func (c *Channel) handleJetStream(ctx context.Context, msg *gonats.Msg) {
 		taskAdmission, loadErr = c.loadTaskAdmission(ctx, key)
 		if loadErr != nil {
 			c.report("task admission read failed")
-			return
+			return Result{}, "", nil, errNoAck
 		}
 		if taskAdmission != nil {
 			result = taskAdmission.Result
@@ -458,7 +513,7 @@ func (c *Channel) handleJetStream(ctx context.Context, msg *gonats.Msg) {
 		attempt := make([]byte, 16)
 		if _, randomErr := rand.Read(attempt); randomErr != nil {
 			c.report("attempt identity failed")
-			return
+			return Result{}, "", nil, errNoAck
 		}
 		result.AttemptID = hex.EncodeToString(attempt)
 	}
@@ -468,104 +523,108 @@ func (c *Channel) handleJetStream(ctx context.Context, msg *gonats.Msg) {
 	if err == nil && ((!isAnswer && task.Version != 1) || (isAnswer && answer.Version != 1)) {
 		err = errors.New("JetStream requires version 1")
 	}
+	if err != nil {
+		return result, answerKey, nil, err
+	}
 	var run *runtime.Run
-	if err == nil && isAnswer {
-		if !natswire.ValidID(answer.MessageID) || answer.AgentID != c.cfg.AgentID || !natswire.ValidID(answer.RunID) || answer.ToolCallID == "" || len(answer.Responses) == 0 {
-			err = errors.New("invalid answer route or identity")
-		} else {
-			admission, admissionErr := c.loadAdmission(ctx, answerKey)
-			if admissionErr != nil {
-				c.report("answer admission read failed")
-				return
-			}
-			if admission != nil {
-				answer = admission.Answer
-				result = admission.Result
-			} else {
-				var prior *Result
-				prior, err = c.loadResult(ctx, c.cacheKey("run", answer.RunID))
-				if err == nil && (prior == nil || prior.TaskID != answer.TaskID) {
-					err = errors.New("unknown task attempt")
-				}
-				if err == nil {
-					result.AttemptID, result.RunID = prior.AttemptID, answer.RunID
-				}
-			}
-			if err == nil {
-				run, err = c.core.Runner().Snapshot(ctx, answer.RunID)
-				if err == nil && admission == nil {
-					if run.State != runtime.RunWaiting || run.Suspend == nil || run.Suspend.ToolCallID != answer.ToolCallID {
-						err = errors.New("stale answer")
-					} else {
-						admission = &admittedAnswer{Answer: answer, Suspend: run.Suspend, Result: result}
-						data, encodeErr := json.Marshal(admission)
-						if encodeErr != nil {
-							c.report("answer admission encode failed")
-							return
-						}
-						if _, saveErr := c.core.Runner().Journal().Append(ctx, runtime.Record{RunID: answerKey, Kind: runtime.RecordExtensionData, ExtType: "nats_answer_admitted", Payload: data}); saveErr != nil {
-							c.report("answer admission save failed")
-							return
-						}
-					}
-				}
-				if err == nil {
-					switch {
-					case run.State == runtime.RunWaiting && reflect.DeepEqual(run.Suspend, admission.Suspend):
-						run, err = c.turn(ctx, answer.RunID, func() (*runtime.Run, error) { return c.core.Attach(answer.RunID).Respond(ctx, answer.Responses) })
-					case run.State == runtime.RunCompleted || (run.State == runtime.RunWaiting && run.Suspend != nil):
-						// Resume finished before the outcome was saved. Recover its snapshot.
-					default:
-						// A cancelled, failed, or interrupted turn can have executed tools.
-						// Repeating the answer or continuing automatically is not safe.
-						err = errors.New("admitted answer resume interrupted; cannot auto continue safely")
-					}
-				}
-			}
+	if isAnswer {
+		run, result, err = c.admitJetStreamAnswer(ctx, answer, answerKey, result)
+	} else {
+		run, err = c.admitJetStreamTask(ctx, task, key, result, taskAdmission)
+	}
+	return result, answerKey, run, err
+}
+
+func (c *Channel) admitJetStreamAnswer(ctx context.Context, answer Answer, answerKey string, result Result) (*runtime.Run, Result, error) {
+	if !natswire.ValidID(answer.MessageID) || answer.AgentID != c.cfg.AgentID || !natswire.ValidID(answer.RunID) || answer.ToolCallID == "" || len(answer.Responses) == 0 {
+		return nil, result, errors.New("invalid answer route or identity")
+	}
+	admission, err := c.loadAdmission(ctx, answerKey)
+	if err != nil {
+		c.report("answer admission read failed")
+		return nil, result, errNoAck
+	}
+	if admission != nil {
+		answer = admission.Answer
+		result = admission.Result
+	} else {
+		prior, err := c.loadResult(ctx, c.cacheKey("run", answer.RunID))
+		if err != nil {
+			return nil, result, err
 		}
-	} else if err == nil {
-		if strings.TrimSpace(task.Text) == "" {
-			err = errors.New("text is required")
-		} else {
-			// Reuse the durable mapping on redelivery so Runner continues the same attempt.
-			ref := c.core.From("js/" + result.AttemptID)
-			var runID string
-			if taskAdmission != nil {
-				runID = taskAdmission.RunID
-			} else {
-				runID, err = ref.RunID(ctx)
-				if err == nil {
-					taskAdmission = &admittedTask{Result: result, RunID: runID}
-					data, encodeErr := json.Marshal(taskAdmission)
-					if encodeErr != nil {
-						c.report("task admission encode failed")
-						return
-					}
-					if _, saveErr := c.core.Runner().Journal().Append(ctx, runtime.Record{RunID: key, Kind: runtime.RecordExtensionData, ExtType: "nats_task_attempt_admitted", Payload: data}); saveErr != nil {
-						c.report("task admission save failed")
-						return
-					}
-					if err := c.admitTask(ctx, result, runID); err != nil {
-						c.report("task admission index save failed")
-						return
-					}
-				}
-			}
-			if err == nil {
-				run, err = c.turn(ctx, runID, func() (*runtime.Run, error) {
-					return ref.SendRetry(ctx, task.Text, channel.SendOptions{Context: task.Context, Kind: "task"})
-				})
-			}
+		if prior == nil || prior.TaskID != answer.TaskID {
+			return nil, result, errors.New("unknown task attempt")
+		}
+		result.AttemptID, result.RunID = prior.AttemptID, answer.RunID
+	}
+	run, err := c.core.Runner().Snapshot(ctx, answer.RunID)
+	if err != nil {
+		return run, result, err
+	}
+	if admission == nil {
+		if run.State != runtime.RunWaiting || run.Suspend == nil || run.Suspend.ToolCallID != answer.ToolCallID {
+			return run, result, errors.New("stale answer")
+		}
+		admission = &admittedAnswer{Answer: answer, Suspend: run.Suspend, Result: result}
+		data, encodeErr := json.Marshal(admission)
+		if encodeErr != nil {
+			c.report("answer admission encode failed")
+			return nil, result, errNoAck
+		}
+		if _, saveErr := c.core.Runner().Journal().Append(ctx, runtime.Record{RunID: answerKey, Kind: runtime.RecordExtensionData, ExtType: "nats_answer_admitted", Payload: data}); saveErr != nil {
+			c.report("answer admission save failed")
+			return nil, result, errNoAck
 		}
 	}
-	if ctx.Err() != nil {
-		return
+	switch {
+	case run.State == runtime.RunWaiting && reflect.DeepEqual(run.Suspend, admission.Suspend):
+		run, err = c.turn(ctx, answer.RunID, func() (*runtime.Run, error) { return c.core.Attach(answer.RunID).Respond(ctx, answer.Responses) })
+	case run.State == runtime.RunCompleted || (run.State == runtime.RunWaiting && run.Suspend != nil):
+		// Resume finished before the outcome was saved. Recover its snapshot.
+	default:
+		// A cancelled, failed, or interrupted turn can have executed tools.
+		// Repeating the answer or continuing automatically is not safe.
+		err = errors.New("admitted answer resume interrupted; cannot auto continue safely")
 	}
-	// An interrupted turn is deliberately neither cached nor acknowledged: the
-	// broker redelivery must re-enter Runner with the admitted attempt identity.
-	if run != nil && run.State == runtime.RunInterrupted {
-		return
+	return run, result, err
+}
+
+func (c *Channel) admitJetStreamTask(ctx context.Context, task Task, key string, result Result, taskAdmission *admittedTask) (*runtime.Run, error) {
+	if strings.TrimSpace(task.Text) == "" {
+		return nil, errors.New("text is required")
 	}
+	// Reuse the durable mapping on redelivery so Runner continues the same attempt.
+	ref := c.core.From("js/" + result.AttemptID)
+	var runID string
+	if taskAdmission != nil {
+		runID = taskAdmission.RunID
+	} else {
+		var err error
+		runID, err = ref.RunID(ctx)
+		if err != nil {
+			return nil, err
+		}
+		taskAdmission = &admittedTask{Result: result, RunID: runID}
+		data, encodeErr := json.Marshal(taskAdmission)
+		if encodeErr != nil {
+			c.report("task admission encode failed")
+			return nil, errNoAck
+		}
+		if _, saveErr := c.core.Runner().Journal().Append(ctx, runtime.Record{RunID: key, Kind: runtime.RecordExtensionData, ExtType: "nats_task_attempt_admitted", Payload: data}); saveErr != nil {
+			c.report("task admission save failed")
+			return nil, errNoAck
+		}
+		if err := c.admitTask(ctx, result, runID); err != nil {
+			c.report("task admission index save failed")
+			return nil, errNoAck
+		}
+	}
+	return c.turn(ctx, runID, func() (*runtime.Run, error) {
+		return ref.SendRetry(ctx, task.Text, channel.SendOptions{Context: task.Context, Kind: "task"})
+	})
+}
+
+func (c *Channel) finishJetStream(ctx context.Context, msg *gonats.Msg, key, answerKey string, result Result, run *runtime.Run, err error) error {
 	if run != nil {
 		result.RunID, result.State, result.Response, result.Suspend = run.ID, run.State, run.Response, run.Suspend
 		if err == nil {
@@ -580,30 +639,36 @@ func (c *Channel) handleJetStream(ctx context.Context, msg *gonats.Msg) {
 		if ctx.Err() == nil {
 			c.report("result size check failed")
 		}
-		return
+		return errNoAck
 	}
 	if result.RunID != "" {
 		if err := c.saveResult(ctx, c.cacheKey("run", result.RunID), result); err != nil {
 			c.report("run route save failed")
-			return
+			return errNoAck
 		}
 	}
 	if answerKey != "" {
 		if err := c.saveResult(ctx, answerKey, result); err != nil {
 			c.report("answer result save failed")
-			return
+			return errNoAck
 		}
 	}
 	if err := c.saveResult(ctx, key, result); err != nil {
 		c.report("result cache save failed")
-		return
+		return errNoAck
 	}
-	c.publishJetStream(ctx, msg, result, key)
+	return c.publishJetStreamResult(ctx, msg, result, key)
 }
 
+// publishJetStream keeps the existing publication entry point for callers that
+// do not need the ack outcome. Failures are reported by the result helper.
 func (c *Channel) publishJetStream(ctx context.Context, input *gonats.Msg, result Result, key string) {
+	_ = c.publishJetStreamResult(ctx, input, result, key)
+}
+
+func (c *Channel) publishJetStreamResult(ctx context.Context, input *gonats.Msg, result Result, key string) error {
 	if ctx.Err() != nil {
-		return
+		return errNoAck
 	}
 	result, err := c.boundResult(ctx, result)
 	if err != nil {
@@ -612,12 +677,12 @@ func (c *Channel) publishJetStream(ctx context.Context, input *gonats.Msg, resul
 		if ctx.Err() == nil {
 			c.report("result size check failed")
 		}
-		return
+		return errNoAck
 	}
 	data, err := json.Marshal(result)
 	if err != nil {
 		c.report("result encode failed")
-		return
+		return errNoAck
 	}
 	publishCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -628,9 +693,13 @@ func (c *Channel) publishJetStream(ctx context.Context, input *gonats.Msg, resul
 		if ctx.Err() == nil {
 			c.report("JetStream result publish failed")
 		}
-		return
+		return errNoAck
 	}
-	if err = input.AckSync(gonats.Context(publishCtx)); err != nil && ctx.Err() == nil {
-		c.report("JetStream input ack failed")
+	if err = input.AckSync(gonats.Context(publishCtx)); err != nil {
+		if ctx.Err() == nil {
+			c.report("JetStream input ack failed")
+		}
+		return errNoAck
 	}
+	return nil
 }

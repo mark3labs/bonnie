@@ -274,17 +274,26 @@ func (r *Runner) RunScheduler(ctx context.Context) error {
 	}
 }
 
-func (r *Runner) deliverSubmission(ctx context.Context, runID string) error {
+// submissionStart owns the acquired turn after the planning lock is released.
+type submissionStart struct {
+	item    Submission
+	input   Input
+	turnCtx context.Context
+	act     *activeTurn
+}
+
+// planSubmission settles work that needs no turn, or acquires a turn and writes
+// its running marker. Failure after acquire releases the turn.
+func (r *Runner) planSubmission(ctx context.Context, runID string) (_ *submissionStart, err error) {
 	r.workMu.Lock()
+	defer r.workMu.Unlock()
 	items, err := r.Submissions(ctx, runID)
 	if err != nil {
-		r.workMu.Unlock()
-		return err
+		return nil, err
 	}
 	recs, err := replayKinds(ctx, r.journal, runID, RecordOwnerCancel)
 	if err != nil {
-		r.workMu.Unlock()
-		return err
+		return nil, err
 	}
 	for _, rec := range recs {
 		if rec.Kind != RecordOwnerCancel {
@@ -294,13 +303,11 @@ func (r *Runner) deliverSubmission(ctx context.Context, runID string) error {
 			if item.State == SubmissionQueued || item.State == SubmissionRunning {
 				item.State = SubmissionAborted
 				if err := r.writeSubmission(ctx, RecordSubmissionState, item); err != nil {
-					r.workMu.Unlock()
-					return err
+					return nil, err
 				}
 			}
 		}
-		r.workMu.Unlock()
-		return nil
+		return nil, nil
 	}
 	var selected *Submission
 	for _, item := range items {
@@ -310,27 +317,23 @@ func (r *Runner) deliverSubmission(ctx context.Context, runID string) error {
 		}
 	}
 	if selected == nil {
-		r.workMu.Unlock()
-		return nil
+		return nil, nil
 	}
 	item := *selected
 	if item.Policy == BusySteer && item.State == SubmissionQueued {
 		placed, err := r.steerPlaced(ctx, item)
 		if err != nil {
-			r.workMu.Unlock()
-			return err
+			return nil, err
 		}
 		if placed {
 			item.State = SubmissionDone
 			err = r.writeSubmission(ctx, RecordSubmissionState, item)
-			r.workMu.Unlock()
-			return err
+			return nil, err
 		}
 	}
 	state, err := r.journal.State(ctx, runID)
 	if err != nil {
-		r.workMu.Unlock()
-		return err
+		return nil, err
 	}
 	if item.State == SubmissionRunning && (state.IsTerminal() || state == RunWaiting) {
 		item.State = SubmissionDone
@@ -338,30 +341,25 @@ func (r *Runner) deliverSubmission(ctx context.Context, runID string) error {
 			item.State = SubmissionFailed
 		}
 		err = r.writeSubmission(ctx, RecordSubmissionState, item)
-		r.workMu.Unlock()
-		return err
+		return nil, err
 	}
 	if state == RunRetired {
 		item.State = SubmissionAborted
 		err = r.writeSubmission(ctx, RecordSubmissionState, item)
-		r.workMu.Unlock()
-		return err
+		return nil, err
 	}
 	if state == RunWaiting {
-		r.workMu.Unlock()
-		return nil
+		return nil, nil
 	}
 	turnCtx, act, acquireErr := r.acquire(ctx, runID)
 	if acquireErr != nil {
-		r.workMu.Unlock()
 		if errors.Is(acquireErr, ErrRunActive) {
-			return nil
+			return nil, nil
 		}
-		return acquireErr
+		return nil, acquireErr
 	}
-	started := false
 	defer func() {
-		if !started {
+		if err != nil {
 			r.release(runID)
 		}
 	}()
@@ -371,16 +369,14 @@ func (r *Runner) deliverSubmission(ctx context.Context, runID string) error {
 	if item.State == SubmissionRunning {
 		recs, replayErr := r.journal.Replay(ctx, runID)
 		if replayErr != nil {
-			r.workMu.Unlock()
-			return replayErr
+			return nil, replayErr
 		}
 		marker := 0
 		for _, rec := range recs {
 			if rec.Kind == RecordSubmissionState {
 				var x Submission
 				if err := json.Unmarshal(rec.Payload, &x); err != nil {
-					r.workMu.Unlock()
-					return err
+					return nil, err
 				}
 				if x.ID == item.ID {
 					marker = rec.Seq
@@ -398,24 +394,33 @@ func (r *Runner) deliverSubmission(ctx context.Context, runID string) error {
 		item.State = SubmissionRunning
 		j, ok := r.journal.(StepJournal)
 		if !ok {
-			r.workMu.Unlock()
-			return errors.New("bonnie: scheduler requires atomic step journal")
+			return nil, errors.New("bonnie: scheduler requires atomic step journal")
 		}
 		payload, err := json.Marshal(item)
 		if err != nil {
-			r.workMu.Unlock()
-			return err
+			return nil, err
 		}
 		if _, err := j.AppendStep(ctx, []Record{
 			{RunID: runID, Kind: RecordSubmissionState, Timestamp: now(), Payload: payload},
 			{RunID: runID, Kind: RecordState, Timestamp: now(), State: RunPending},
 		}); err != nil {
-			r.workMu.Unlock()
-			return err
+			return nil, err
 		}
 	}
-	r.workMu.Unlock()
-	started = true
+	return &submissionStart{item: item, input: input, turnCtx: turnCtx, act: act}, nil
+}
+
+func (r *Runner) deliverSubmission(ctx context.Context, runID string) error {
+	start, err := r.planSubmission(ctx, runID)
+	if err != nil || start == nil {
+		return err
+	}
+	// Release workMu before starting: a turn can call Submit.
+	return r.runSubmission(ctx, runID, start)
+}
+
+func (r *Runner) runSubmission(ctx context.Context, runID string, start *submissionStart) error {
+	item, input, turnCtx, act := start.item, start.input, start.turnCtx, start.act
 	done := make(chan struct{})
 	go func() {
 		select {
