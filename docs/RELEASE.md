@@ -76,6 +76,34 @@ indefinitely**, **reachable over HTTP**. State the limits from the current
 
 ## History
 
+### `v0.28.0`, 2026-10-14 — publication verified
+
+- [x] `task release-check` and `task release-snapshot` pass. The snapshot at
+      `d6ba6d6` builds both Linux targets, verifies both archive checksums, and
+      prints `0.27.0-SNAPSHOT-d6ba6d6` on amd64. Local `task ci` passes, except
+      for one microsandbox "database is locked" failure in
+      `TestTimeoutStopsDescendants`; a fresh run of `./sandbox` passes.
+- [x] `test`, `examples`, and `lint` pass on `master` at tagged commit
+      `4281d174bc2a4d0388a0c283e22fc2f56d09f99a` (CI run `38584583675`).
+- [x] The dated `[0.28.0]` changelog section states claims and limits. README
+      did not change after v0.27.0, and no commit falsifies a limit. Note
+      extraction and the changelog guard pass.
+- [x] Annotated tag pushed after human approval. Release run `38585647457`
+      succeeds and publishes three artifacts. Published notes start with the
+      changelog section.
+- [x] Both downloaded archive checksums verify. The statically linked amd64
+      binary prints `bonnie 0.28.0` and refuses `--sandbox none` by name.
+- [x] Both example trees pin v0.28.0 after publication; `task examples` passes.
+
+**Version choice.** MINOR under the pre-1.0 convention: `runtime.KindReader`
+and `presence.Filter.Match` are added. A `presence/nats` filter with an empty
+label value no longer matches an absent key.
+
+**Open defect closed.** `TestShellJobDurabilityAcrossRunnerRestart` failed in
+CI at `ec66991`, `15a4840`, and `5725f08`. `d6ba6d6` makes the first turn wait
+for its job and follow the newest running job; CI passes at `d6ba6d6` and at
+the tagged commit.
+
 ### `v0.27.0`, 2026-10-13 — published with a red `test` job
 
 - [x] `task release-check`, `task release-snapshot`, `task check`, and `task ci`
