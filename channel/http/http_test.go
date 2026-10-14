@@ -581,7 +581,8 @@ func TestSteerPolicyReachesActiveTurn(t *testing.T) {
 }
 
 // TestQueuePolicySerialises proves the other policy: a queued message waits
-// for the active turn and then runs as its own turn.
+// for the active turn and then runs as its own turn. The request omits
+// turn_policy, so WithTurnPolicy must supply the queue default.
 func TestQueuePolicySerialises(t *testing.T) {
 	t.Parallel()
 	release := make(chan struct{})
@@ -590,7 +591,7 @@ func TestQueuePolicySerialises(t *testing.T) {
 		block: release, started: started,
 		turns: []*kit.TurnResult{{Response: "first"}, {Response: "second"}},
 	}
-	s := newTestServer(t, agent, WithIDGenerator(func() string { return "queue-me" }))
+	s := newTestServer(t, agent, WithIDGenerator(func() string { return "queue-me" }), WithTurnPolicy(channel.PolicyQueue))
 
 	firstDone := make(chan RunResponse, 1)
 	go func() {
@@ -602,7 +603,7 @@ func TestQueuePolicySerialises(t *testing.T) {
 	secondDone := make(chan RunResponse, 1)
 	go func() {
 		_, run := s.post(t, "/bonnie/v1/runs/queue-me", SendRequest{
-			Text: "second", TurnPolicy: channel.PolicyQueue,
+			Text: "second",
 		})
 		secondDone <- run
 	}()
@@ -866,5 +867,20 @@ func TestEnsureAddressBindsWithoutATurn(t *testing.T) {
 	_, started := s.post(t, "/bonnie/v1/runs", StartRequest{Address: "tui-session", Text: "hi"})
 	if started.RunID != ensured.RunID {
 		t.Fatalf("the turn ran on %q, want the bound run %q", started.RunID, ensured.RunID)
+	}
+}
+
+// A request without turn_policy must use WithTurnPolicy's default.
+// An invalid default exposes the selection without a timing-dependent turn.
+func TestWithTurnPolicyDefaultAndOverride(t *testing.T) {
+	t.Parallel()
+	s := newTestServer(t, &stubAgent{}, WithTurnPolicy(channel.TurnPolicy("invalid-default")))
+	resp, _ := s.post(t, "/bonnie/v1/runs", StartRequest{Text: "hi"})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("default status = %d, want 400", resp.StatusCode)
+	}
+	resp, _ = s.post(t, "/bonnie/v1/runs", StartRequest{Text: "hi", TurnPolicy: channel.PolicyQueue})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("override status = %d, want 200", resp.StatusCode)
 	}
 }

@@ -12,6 +12,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Simplify the host serve exit, durable submission planning lock, and JetStream
   admission and acknowledgement paths without changing their behaviour.
 
+### Fixed
+
+- `bonnie runs` truncates titles and messages at rune boundaries, so multi-byte
+  text remains valid UTF-8.
+- **presence/nats: an empty label value no longer matches an absent key.**
+  `Discover` and `Watch` on the NATS store read a missing label as "", so a
+  filter such as `{"zone": ""}` also returned records without a zone. Both
+  registries now use the new `presence.Filter.Match`, the rule `MemoryStore`
+  already applied. A caller that relied on the old NATS result must register
+  the label explicitly.
+
+### Added
+
+- `presence.Filter.Match` reports whether a record satisfies a filter, for
+  third-party registries.
+
 ## [0.27.0] — 2026-10-13
 
 **Reach the run API over NATS.**

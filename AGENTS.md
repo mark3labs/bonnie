@@ -30,13 +30,21 @@ Layout:
 
 | Path | Function |
 |---|---|
-| `bonnie.go`, `options.go`, `run.go` | root package: serve, options, run API |
+| `bonnie.go`, `options.go`, `run.go`, `serve.go` | root package: serve, options, run API |
 | `runtime/` | durable run executor and SQLite journal |
-| `channel/` | inbound transports: `http`, `chat`, `slack`, `discord`, `telegram`, `github` |
+| `channel/` | inbound transports: `http`, `chat`, `slack`, `discord`, `telegram`, `github`, `nats`, `iroh`, `natsapi` |
+| `channeltest/` | conformance suite for channel adapters |
+| `client/` | Go clients: HTTP wire API (`client`), JetStream (`client/nats`), HTTP transports (`client/iroh`, `client/natsapi`) |
+| `presence/` | agent presence records; memory and NATS KV registries |
+| `schedule/` | durable cron jobs |
+| `web/` | optional operator web UI (templ) |
 | `agent/` | agent-tree scaffold and code generation |
 | `sandbox/` | tool sandboxes: local, exec, docker, landlock, microsandbox |
-| `cmd/bonnie/` | CLI (`init`, `dev`, `chat`, `serve`, `build`, `runs`, `sandbox`) |
+| `internal/` | shared TUI, operator commands, inspector, test helpers |
+| `cmd/bonnie/` | CLI (`init`, `dev`, `chat`, `serve`, `build`, `runs`, `schedules`, `sandbox`, `auth`, `version`) |
 | `examples/` | `github-bot`, `slack-bot`: agent trees, each its own module (see below) |
+| `scripts/` | build and release scripts, with Go tests |
+| `www/` | documentation site and Open Graph image generator |
 
 ## The one rule that matters
 
@@ -188,7 +196,8 @@ CGO_ENABLED=0 go build ./...
 
 ```
 L4  CLI, evals, traces                 CLI implemented; evals planned
-L3  channel/    inbound transports     channel/http implemented
+L3  channel/    inbound transports     http, chat, slack, discord, telegram,
+                                       github, nats, iroh, natsapi implemented
 L2  discovery   agent/ tree + codegen  default layout, init, codegen, dev,
                                        build; configuration is code
 L1  runtime/    durable run executor   implemented

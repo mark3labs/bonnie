@@ -74,7 +74,8 @@ func (r Record) Validate() error {
 }
 
 // Filter selects records by optional identity fields, state, and exact label
-// matches. Empty fields and labels impose no restriction.
+// matches. Empty identity and state fields impose no restriction. See
+// [Filter.Match] for the label rule.
 type Filter struct {
 	Agent    string
 	Instance string
@@ -189,7 +190,7 @@ func (s *MemoryStore) Discover(ctx context.Context, filter Filter) ([]Record, er
 			delete(s.records, id)
 			continue
 		}
-		if !matches(record, filter) {
+		if !filter.Match(record) {
 			continue
 		}
 		result = append(result, cloneRecord(record))
@@ -203,7 +204,15 @@ func (s *MemoryStore) Discover(ctx context.Context, filter Filter) ([]Record, er
 	return result, nil
 }
 
-func matches(r Record, f Filter) bool {
+// Match reports whether r satisfies f. Each label in f matches only when r
+// carries the same key with the same value: an empty value matches an empty
+// value, never an absent key. Every [Discoverer] uses Match, so all backends
+// select the same records for one filter.
+//
+// The NATS store once read an absent key as "", so {"zone": ""} also
+// selected records without a zone. Match is exported so that a backend in
+// another package cannot drift from the rule again.
+func (f Filter) Match(r Record) bool {
 	if f.Agent != "" && r.Identity.Agent != f.Agent {
 		return false
 	}
