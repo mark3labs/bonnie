@@ -197,7 +197,7 @@ func (s *Store) Discover(ctx context.Context, f presence.Filter) ([]presence.Rec
 		if err != nil {
 			return nil, fmt.Errorf("presence nats: decode record: %w", err)
 		}
-		if matches(r, f) {
+		if f.Match(r) {
 			out = append(out, r)
 		}
 	}
@@ -208,17 +208,6 @@ func (s *Store) Discover(ctx context.Context, f presence.Filter) ([]presence.Rec
 		return out[i].Identity.Instance < out[j].Identity.Instance
 	})
 	return out, nil
-}
-func matches(r presence.Record, f presence.Filter) bool {
-	if f.Agent != "" && r.Identity.Agent != f.Agent || f.Instance != "" && r.Identity.Instance != f.Instance || f.State != "" && r.State != f.State {
-		return false
-	}
-	for k, v := range f.Labels {
-		if r.Labels[k] != v {
-			return false
-		}
-	}
-	return true
 }
 
 // TTL returns the configured bucket lifetime.
