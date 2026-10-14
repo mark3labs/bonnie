@@ -2,6 +2,7 @@ package nats
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -106,5 +107,56 @@ func TestRootValidationAndOverrides(t *testing.T) {
 	}
 	if _, err := New(nc, Config{RootSubject: "a", EventSubject: "a.answers.agent", CreateStream: true}); err == nil {
 		t.Fatal("accepted overlap")
+	}
+}
+
+// CancelTurn must send the observed turn ID, not an unscoped cancellation.
+func TestCancelTurnSendsExactTarget(t *testing.T) {
+	t.Parallel()
+	nc, _ := broker(t)
+	c, err := New(nc, Config{RootSubject: "tasks", CreateStream: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub, err := nc.SubscribeSync(c.cfg.CommandSubject + ".one")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = sub.Unsubscribe() }()
+	if err := nc.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	target := Target{TaskID: "task", RunID: "run", AttemptID: "attempt", AgentID: "one"}
+	ctx := deadline(t)
+	done := make(chan error, 1)
+	go func() {
+		_, err := c.CancelTurn(ctx, target, "turn-42")
+		done <- err
+	}()
+	msg, err := sub.NextMsgWithContext(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var req transport.StatusRequest
+	if err := json.Unmarshal(msg.Data, &req); err != nil {
+		t.Fatal(err)
+	}
+	if req.Version != 1 || req.Target != target || req.TurnID != "turn-42" {
+		t.Fatalf("request = %+v", req)
+	}
+	data, err := json.Marshal(Status{Version: 1, Target: target})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := msg.Respond(data); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
 	}
 }
