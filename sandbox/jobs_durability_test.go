@@ -32,11 +32,15 @@ func TestShellJobDurabilityAcrossRunnerRestart(t *testing.T) {
 		o.NoAgents = true
 		o.Quiet = true
 	}
+	// Turn one must see its job complete. waitJob returns when the job exits,
+	// so the long wait costs nothing on a fast machine. A one-second wait was
+	// not enough on a loaded CI runner: the job was still running, and the
+	// test then followed this job instead of the marker job.
 	completedModel := fakemodel.New(
-		fakemodel.Call("shell", `{"command":"sleep .2; printf durable","wait_seconds":1}`),
+		fakemodel.Call("shell", `{"command":"sleep .2; printf durable","wait_seconds":30}`),
 		fakemodel.Say("completed"),
 	)
-	completed, err := runtime.NewRunner(journalA, Agent(providerA, hermetic, completedModel.Option())).Start(ctx, runID, runtime.Input{Text: "Run sleep .2; printf durable with wait_seconds=1. Report its output."})
+	completed, err := runtime.NewRunner(journalA, Agent(providerA, hermetic, completedModel.Option())).Start(ctx, runID, runtime.Input{Text: "Run sleep .2; printf durable with wait_seconds=30. Report its output."})
 	if err != nil {
 		t.Fatalf("start completed job: %v", err)
 	}
@@ -152,8 +156,13 @@ func waitJobExit(t *testing.T, p Provider, runID, jobID string) {
 	}
 }
 
+// findRunningJobID returns the job ID of the newest tool result that reports a
+// running job. It must be the newest: an older turn's job can also be recorded
+// as running when a slow machine misses that turn's wait, and that job does not
+// write the marker.
 func findRunningJobID(t *testing.T, messages []kit.LLMMessage) string {
 	t.Helper()
+	found := ""
 	for _, message := range messages {
 		for _, part := range message.Content {
 			result, ok := part.(kit.LLMToolResultPart)
@@ -165,10 +174,12 @@ func findRunningJobID(t *testing.T, messages []kit.LLMMessage) string {
 				Running bool   `json:"running"`
 			}
 			if json.Unmarshal([]byte(result.Output.(kit.LLMToolResultOutputContentText).Text), &data) == nil && data.Running && data.JobID != "" {
-				return data.JobID
+				found = data.JobID
 			}
 		}
 	}
-	t.Fatal("journal has no running job result")
-	return ""
+	if found == "" {
+		t.Fatal("journal has no running job result")
+	}
+	return found
 }
