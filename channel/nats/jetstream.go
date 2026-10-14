@@ -706,8 +706,10 @@ func (c *Channel) publishJetStreamResult(ctx context.Context, input *gonats.Msg,
 		}
 		return errNoAck
 	}
-	if err = input.AckSync(gonats.Context(publishCtx)); err != nil && ctx.Err() == nil {
-		c.report("JetStream input ack failed")
+	if err = input.AckSync(gonats.Context(publishCtx)); err != nil {
+		if ctx.Err() == nil {
+			c.report("JetStream input ack failed")
+		}
 		return errNoAck
 	}
 	return nil
