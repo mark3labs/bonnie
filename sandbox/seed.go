@@ -32,7 +32,7 @@ const gitkeep = ".gitkeep"
 // wrapper refuses on its behalf — so wrapping never widens what a caller
 // can request.
 func Seeded(p Provider, dir string) Provider {
-	s := &seeded{p: p, dir: dir}
+	s := &seeded{forwarder{p: p}, dir}
 	if _, ok := p.(Imaged); ok {
 		return &seededImaged{s}
 	}
@@ -41,17 +41,11 @@ func Seeded(p Provider, dir string) Provider {
 
 // seeded is the [Seeded] wrapper.
 type seeded struct {
-	p   Provider
+	forwarder
 	dir string
 }
 
 var _ Provider = (*seeded)(nil)
-
-// Name implements [Provider].
-func (s *seeded) Name() string { return s.p.Name() }
-
-// Available implements [Provider].
-func (s *seeded) Available(ctx context.Context) error { return s.p.Available(ctx) }
 
 // Open implements [Provider]. The seed lands after the underlying open, so a
 // failed seed fails the open: the tool call that triggered it reports the
@@ -128,64 +122,6 @@ func (s *seededJobOutputDeleterSandbox) Delete(ctx context.Context) error {
 	return s.Sandbox.(Deleter).Delete(ctx)
 }
 
-// SetNetworkPolicy forwards to the wrapped provider. When that provider
-// cannot enforce policies at all, the wrapper refuses — the same refusal the
-// backend would have made, kept intact through the wrapper.
-func (s *seeded) SetNetworkPolicy(policy NetworkPolicy) error {
-	n, ok := s.p.(Networked)
-	if !ok {
-		return fmt.Errorf("%w: the %s sandbox cannot control the network", ErrPolicyUnsupported, s.p.Name())
-	}
-	return n.SetNetworkPolicy(policy)
-}
-
-// SandboxExists forwards to the wrapped provider. A backend that cannot
-// report existence returns an error rather than a false "no": the caller
-// treats an error as "cannot report" and a bare false as a verified loss,
-// and confusing the two would record a loss that never happened.
-func (s *seeded) SandboxExists(ctx context.Context, runID string) (bool, error) {
-	ec, ok := s.p.(ExistenceChecker)
-	if !ok {
-		return false, fmt.Errorf("bonnie: sandbox: the %s backend cannot report sandbox existence", s.p.Name())
-	}
-	return ec.SandboxExists(ctx, runID)
-}
-
-// DeleteRun forwards to the wrapped provider. A backend that cannot delete
-// reports that, rather than claiming a reclaim that never happened.
-func (s *seeded) DeleteRun(ctx context.Context, runID string) (bool, error) {
-	rd, ok := s.p.(RunDeleter)
-	if !ok {
-		return false, fmt.Errorf("bonnie: sandbox: the %s backend cannot delete sandboxes", s.p.Name())
-	}
-	return rd.DeleteRun(ctx, runID)
-}
-
-// ValidateRunCleanup implements [RunCleanupValidator]. It checks the wrapped
-// backend's deletion capability and forwards its mode check when present.
-func (s *seeded) ValidateRunCleanup() error {
-	return validateRunCleanup(s.p)
-}
-
-// WorkingDir forwards to the wrapped provider, so the system prompt still
-// names the directory the tools really use when a seed is in play.
-//
-// Forgetting this was a live defect: seeding is applied to the DEFAULT
-// backend in run.go, so the wrapper stood between the agent and the only
-// provider that could report a host path. The prompt fell back to
-// /workspace, a directory that does not exist under a host-mapped backend,
-// and a live model said so — "my work directory is not actually /workspace".
-//
-// A provider that runs at [WorkDir] reports nothing and the caller's
-// fallback applies, which is why this returns "" rather than guessing.
-func (s *seeded) WorkingDir(runID string) string {
-	r, ok := s.p.(WorkingDirReporter)
-	if !ok {
-		return ""
-	}
-	return r.WorkingDir(runID)
-}
-
 // seededImaged is a [seeded] whose backend runs a named image.
 //
 // The capability is mirrored rather than always advertised, the way
@@ -197,7 +133,7 @@ func (s *seeded) WorkingDir(runID string) string {
 // Forwarding it at all is the point. run.go wraps the default backend in
 // [EnvInjected] and then [Seeded] before the agent sees it, so a host that
 // type-asserts [Imaged] after configuration reaches the wrapper. Dropping
-// the method there is the defect [Seeded.WorkingDir] records for the
+// the method there is the defect [forwarder.WorkingDir] records for the
 // neighbouring interface, one interface over.
 type seededImaged struct{ *seeded }
 

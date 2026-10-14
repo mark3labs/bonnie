@@ -7,12 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Share NATS wire ID validation between the client and server, and sandbox
+  provider forwarding between environment and seed wrappers. No behavior or
+  public API changes.
+
 ### Fixed
 
 - The scheduler and child lookup read indexed control records instead of full
   conversation history. Settled owner cancellation does not repeat the walk.
   Child and submission waits back off to 500 ms when state does not change.
-
+- New chat input after `/cancel` no longer restores the cancelled turn's
+  completion prompt or candidate. Cancellation resets completion work;
+  process interruption still keeps it for recovery.
 - `bonnie runs` truncates titles and messages at rune boundaries, so multi-byte
   text remains valid UTF-8.
 - **presence/nats: an empty label value no longer matches an absent key.**

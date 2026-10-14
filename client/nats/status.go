@@ -10,6 +10,7 @@ import (
 	gonats "github.com/nats-io/nats.go"
 
 	protocol "github.com/mark3labs/bonnie/channel/nats"
+	"github.com/mark3labs/bonnie/internal/natswire"
 )
 
 // Target selects an exact task attempt and its agent.
@@ -83,7 +84,7 @@ func (c *Client) Cancel(ctx context.Context, target Target) (Status, error) {
 }
 
 func validTarget(t Target) bool {
-	return validID(t.TaskID) && validID(t.RunID) && validID(t.AttemptID) && safeToken(t.AgentID)
+	return natswire.ValidID(t.TaskID) && natswire.ValidID(t.RunID) && natswire.ValidID(t.AttemptID) && natswire.ValidToken(t.AgentID)
 }
 
 // CancelTurn requests cancellation of one observed turn, including pending input.

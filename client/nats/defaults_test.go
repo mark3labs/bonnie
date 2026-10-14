@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mark3labs/bonnie/internal/natswire"
 	gonats "github.com/nats-io/nats.go"
 )
 
@@ -23,7 +24,7 @@ func TestResultDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	stream, consumer := DefaultResultStreamName(cfg.ResultSubject), DefaultResultConsumerName(cfg.ResultSubject)
-	if first.cfg.ResultStream != stream || first.cfg.ResultConsumer != consumer || !safeToken(stream) || !safeToken(consumer) {
+	if first.cfg.ResultStream != stream || first.cfg.ResultConsumer != consumer || !natswire.ValidToken(stream) || !natswire.ValidToken(consumer) {
 		t.Fatalf("unexpected defaults: %+v", first.cfg)
 	}
 	if cfg.ResultStream != "" || cfg.ResultConsumer != "" {
