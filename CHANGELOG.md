@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- New chat input after `/cancel` no longer restores the cancelled turn's
+  completion prompt or candidate. Cancellation resets completion work;
+  process interruption still keeps it for recovery.
 - `bonnie runs` truncates titles and messages at rune boundaries, so multi-byte
   text remains valid UTF-8.
 - **presence/nats: an empty label value no longer matches an absent key.**

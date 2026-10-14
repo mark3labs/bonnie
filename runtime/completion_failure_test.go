@@ -67,9 +67,9 @@ func TestCompletionJournalFailureRecovery(t *testing.T) {
 	}
 }
 
-// Cancellation after durable feedback preserves both the prompt and its charged
-// budget. Recovery must not ask the hook to recreate that feedback.
-func TestCompletionCancelledContinuationRecovery(t *testing.T) {
+// Cancellation after durable feedback discards its prompt and charged budget.
+// A second Runner must use the new input, not the old continuation.
+func TestCompletionCancelledContinuationAcceptsNewInput(t *testing.T) {
 	t.Parallel()
 	j := NewMemoryJournal()
 	f, a := fakeFactory(&kit.TurnResult{Response: "draft"})
@@ -96,12 +96,12 @@ func TestCompletionCancelledContinuationRecovery(t *testing.T) {
 	}
 	f2, a2 := fakeFactory(&kit.TurnResult{Response: "fixed"})
 	r2 := NewRunner(j, f2, WithCompletionHook(func(_ context.Context, c CompletionCandidate) (CompletionFeedback, error) {
-		if c.ContinuationsUsed != 1 || c.Response != "fixed" {
+		if c.ContinuationsUsed != 0 || c.Response != "fixed" {
 			t.Errorf("candidate = %+v", c)
 		}
 		return CompletionFeedback{}, nil
 	}, 1))
-	run, err := r2.Start(context.Background(), "cancel-next", Input{Text: "ignored"})
+	run, err := r2.Start(context.Background(), "cancel-next", Input{Text: "new request"})
 	if err != nil || run.Response != "fixed" || a2.call != 1 {
 		t.Fatalf("run = %+v, err = %v", run, err)
 	}
@@ -110,7 +110,7 @@ func TestCompletionCancelledContinuationRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	msgs := s.GetMessages()
-	if text := messageText(msgs[len(msgs)-2]); text != "fix" {
+	if text := messageText(msgs[len(msgs)-2]); text != "new request" {
 		t.Fatalf("continuation prompt = %q", text)
 	}
 }

@@ -48,8 +48,8 @@ func WithCompletionHook(hook CompletionHook, limit int) RunnerOption {
 }
 
 // WithCompletionLimit sets the maximum number of model continuations for one
-// logical turn. The default is zero. Suspension, cancellation, and process
-// recovery do not reset the count. A completed or failed turn starts a new budget.
+// logical turn. The default is zero. Suspension and process interruption
+// do not reset the count. A completed, failed, or cancelled turn starts a new budget.
 func WithCompletionLimit(limit int) RunnerOption {
 	return func(r *Runner) { r.completionLimit = max(0, limit) }
 }
@@ -92,7 +92,7 @@ func (r *Runner) restoreCompletion(ctx context.Context, s *Session) (*completion
 	}
 	var c *completionRecord
 	for _, rec := range recs {
-		if rec.Kind == RecordClear || (rec.Kind == RecordState && (rec.State == RunCompleted || rec.State == RunFailed || rec.State == RunRetired)) {
+		if rec.Kind == RecordClear || (rec.Kind == RecordState && (rec.State == RunCompleted || rec.State == RunFailed || rec.State == RunCancelled || rec.State == RunRetired)) {
 			c = nil
 		}
 		if rec.Kind == RecordResume && c != nil {
