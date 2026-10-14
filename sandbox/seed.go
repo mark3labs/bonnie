@@ -26,7 +26,7 @@ const gitkeep = ".gitkeep"
 //
 // The wrapper forwards the optional provider interfaces: [Networked],
 // [ExistenceChecker], [RunDeleter], [RunCleanupValidator], [WorkingDirReporter],
-// and [Imaged]. Opened sandboxes preserve [Deleter], [JobSandbox], and
+// and [Imaged]. Opened sandboxes preserve [DirectoryReader], [Deleter], [JobSandbox], and
 // [JobOutputReader] when the backend supports them. A
 // backend that cannot enforce a network policy still refuses one — the
 // wrapper refuses on its behalf — so wrapping never widens what a caller
@@ -63,6 +63,14 @@ func (s *seeded) Open(ctx context.Context, runID string) (Sandbox, error) {
 }
 
 func newSeededJobSandbox(sb Sandbox) Sandbox {
+	result := newSeededJobSandboxBase(sb)
+	if reader, ok := sb.(DirectoryReader); ok {
+		return preserveDirectoryReader(result, reader)
+	}
+	return result
+}
+
+func newSeededJobSandboxBase(sb Sandbox) Sandbox {
 	if jobs, ok := sb.(JobSandbox); ok {
 		base := &seededJobSandbox{Sandbox: sb, jobs: jobs}
 		_, deleter := sb.(Deleter)

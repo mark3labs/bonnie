@@ -90,21 +90,26 @@ func lazyOpener(p Provider, s *runtime.Session) (Opener, func() error) {
 }
 
 // Tools returns the model-facing tools that work inside a sandbox: shell,
-// read_file, write_file, and list_files.
+// shell_status, shell_wait, shell_cancel, read_file, write_file, list_files,
+// grep, find, and edit. Core host tools remain disabled by Agent.
 //
 // The tools run in the BONNIE process and proxy into the sandbox. The model
 // never holds a sandbox handle and never sees a credential — it drives the
 // work through tool calls and reads the results. Every sandbox call therefore
 // travels the same journalling and approval path as any other tool.
 func Tools(open Opener) []kit.Tool {
+	gate := make(mutationGate, 1)
 	return []kit.Tool{
 		shellTool(open),
 		shellStatusTool(open),
 		shellWaitTool(open),
 		shellCancelTool(open),
 		readFileTool(open),
-		writeFileTool(open),
+		writeFileTool(open, gate),
 		listFilesTool(open),
+		grepTool(open),
+		findTool(open),
+		editTool(open, gate),
 	}
 }
 
@@ -196,7 +201,11 @@ func readFileTool(open Opener) kit.Tool {
 }
 
 // writeFileTool writes a file into the sandbox.
-func writeFileTool(open Opener) kit.Tool {
+func writeFileTool(open Opener, gates ...mutationGate) kit.Tool {
+	gate := make(mutationGate, 1)
+	if len(gates) > 0 {
+		gate = gates[0]
+	}
 	type input struct {
 		Path    string `json:"path" description:"File path. Relative paths resolve from /workspace."`
 		Content string `json:"content" description:"The full file content."`
@@ -207,6 +216,14 @@ func writeFileTool(open Opener) kit.Tool {
 			sb, err := open(ctx)
 			if err != nil {
 				return unavailable(err), nil
+			}
+			release, err := gate.acquire(ctx)
+			if err != nil {
+				return searchError(err), nil
+			}
+			defer release()
+			if err := ctx.Err(); err != nil {
+				return searchError(err), nil
 			}
 			if err := sb.WriteFile(ctx, in.Path, []byte(in.Content)); err != nil {
 				return kit.ErrorResult(err.Error()), nil

@@ -144,8 +144,9 @@ git ls-files --cached --others --exclude-standard '*.go'
 `--others` adds a file you have just written but not staged — without it a
 new package is never checked — and `--exclude-standard` honours
 `.gitignore`, which is what keeps `.direnv/` out. `task fmt-check` uses
-exactly this command. Kit's `grep` and `find` tools honour `.gitignore` too,
-so prefer them over `shell`.
+exactly this command. BONNIE's sandbox-backed `grep` and `find` tools do not honour `.gitignore`.
+They prune `.git` directories and bound traversal; use a narrow path or glob.
+Do not confuse these tools with Kit's host core tools, which remain disabled.
 
 The CGO-free build is proven, not assumed:
 

@@ -30,7 +30,7 @@ import (
 //
 // Like [Seeded], the wrapper forwards the optional provider interfaces
 // [Networked], [ExistenceChecker], [RunDeleter], [RunCleanupValidator], [WorkingDirReporter], and
-// [Imaged], and forwards the [Sandbox]-level [Deleter] and [JobSandbox] only
+// [Imaged], and forwards the [Sandbox]-level [DirectoryReader], [Deleter] and [JobSandbox] only
 // when the backend supports them, so wrapping never widens what a caller can do.
 func EnvInjected(p Provider, env map[string]string) Provider {
 	kv := make([]string, 0, len(env))
@@ -124,6 +124,15 @@ func (s *envJobSandbox) CancelJob(ctx context.Context, id string) error {
 }
 
 func newEnvSandbox(inner Sandbox, env []string) Sandbox {
+	result := newEnvSandboxBase(inner, env)
+	if _, ok := inner.(DirectoryReader); ok {
+		reader := directoryReaderFunc((&envSandbox{Sandbox: inner, env: env}).readDirectory)
+		return preserveDirectoryReader(result, reader)
+	}
+	return result
+}
+
+func newEnvSandboxBase(inner Sandbox, env []string) Sandbox {
 	base := &envSandbox{Sandbox: inner, env: env}
 	_, deleter := inner.(Deleter)
 	jobs, hasJobs := inner.(JobSandbox)
