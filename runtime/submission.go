@@ -127,10 +127,7 @@ func (r *Runner) writeSubmission(ctx context.Context, kind RecordKind, item Subm
 
 // Submissions returns the inbox and its settled inputs in admission order.
 func (r *Runner) Submissions(ctx context.Context, runID string) ([]Submission, error) {
-	recs, err := r.journal.Replay(ctx, runID)
-	if errors.Is(err, ErrRunNotFound) {
-		return nil, nil
-	}
+	recs, err := replayKinds(ctx, r.journal, runID, RecordSubmission, RecordSubmissionState)
 	if err != nil {
 		return nil, err
 	}
@@ -179,8 +176,10 @@ func (r *Runner) AbortSubmission(ctx context.Context, runID, id string) error {
 // WaitSubmission waits for settlement. Cancelling the wait does not cancel
 // execution. The caller must run RunScheduler separately.
 func (r *Runner) WaitSubmission(ctx context.Context, runID, id string) (*Submission, error) {
-	tick := time.NewTicker(20 * time.Millisecond)
-	defer tick.Stop()
+	delay := 20 * time.Millisecond
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	var previous SubmissionState
 	for {
 		items, err := r.Submissions(ctx, runID)
 		if err != nil {
@@ -190,6 +189,10 @@ func (r *Runner) WaitSubmission(ctx context.Context, runID, id string) (*Submiss
 		for _, item := range items {
 			if item.ID == id {
 				found = true
+				if item.State != previous {
+					delay = 20 * time.Millisecond
+				}
+				previous = item.State
 				if item.State != SubmissionQueued && item.State != SubmissionRunning {
 					return &item, nil
 				}
@@ -198,10 +201,12 @@ func (r *Runner) WaitSubmission(ctx context.Context, runID, id string) (*Submiss
 		if !found {
 			return nil, ErrRunNotFound
 		}
+		timer.Reset(delay)
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-tick.C:
+		case <-timer.C:
+			delay = min(delay*2, 500*time.Millisecond)
 		}
 	}
 }
@@ -231,7 +236,7 @@ func (r *Runner) RunScheduler(ctx context.Context) error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		ids, err := r.journal.Runs(ctx, "")
+		ids, err := r.schedulerCandidates(ctx)
 		if err != nil {
 			return err
 		}
@@ -276,7 +281,7 @@ func (r *Runner) deliverSubmission(ctx context.Context, runID string) error {
 		r.workMu.Unlock()
 		return err
 	}
-	recs, err := r.journal.Replay(ctx, runID)
+	recs, err := replayKinds(ctx, r.journal, runID, RecordOwnerCancel)
 	if err != nil {
 		r.workMu.Unlock()
 		return err
@@ -442,4 +447,11 @@ func (r *Runner) deliverSubmission(ctx context.Context, runID string) error {
 		}
 	}
 	return r.writeSubmission(context.WithoutCancel(ctx), RecordSubmissionState, item)
+}
+
+func (r *Runner) schedulerCandidates(ctx context.Context) ([]string, error) {
+	if kr, ok := r.journal.(KindReader); ok {
+		return kr.RunsWithKinds(ctx, RecordSubmission, RecordSubmissionState, RecordOwnerCancel)
+	}
+	return r.journal.Runs(ctx, "")
 }

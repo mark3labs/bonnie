@@ -90,6 +90,8 @@ CREATE TABLE IF NOT EXISTS records (
 	PRIMARY KEY (run_id, seq)
 ) STRICT;
 
+CREATE INDEX IF NOT EXISTS records_by_kind ON records (kind, run_id, seq);
+
 CREATE INDEX IF NOT EXISTS runs_by_state ON runs (state);
 `
 
@@ -152,6 +154,7 @@ type SQLiteJournal struct {
 
 var (
 	_ Journal     = (*SQLiteJournal)(nil)
+	_ KindReader  = (*SQLiteJournal)(nil)
 	_ Positioner  = (*SQLiteJournal)(nil)
 	_ StepJournal = (*SQLiteJournal)(nil)
 )
@@ -582,4 +585,74 @@ func (j *SQLiteJournal) Close() error {
 		return fmt.Errorf("bonnie: close journal: %w", err)
 	}
 	return nil
+}
+
+func kindFilter(kinds []RecordKind) (string, []any) {
+	args := make([]any, len(kinds))
+	for i, kind := range kinds {
+		args[i] = string(kind)
+	}
+	return "kind IN (" + strings.TrimSuffix(strings.Repeat("?,", len(kinds)), ",") + ")", args
+}
+
+// ReplayKinds implements [KindReader].
+func (j *SQLiteJournal) ReplayKinds(ctx context.Context, runID string, kinds ...RecordKind) ([]Record, error) {
+	if err := validRunID(runID); err != nil {
+		return nil, err
+	}
+	if len(kinds) == 0 {
+		return nil, nil
+	}
+	filter, args := kindFilter(kinds)
+	return j.readKindRecords(ctx, selectRecordSQL+" WHERE run_id = ? AND "+filter+" ORDER BY seq", append([]any{runID}, args...)...)
+}
+
+// RunsWithKinds implements [KindReader].
+func (j *SQLiteJournal) RunsWithKinds(ctx context.Context, kinds ...RecordKind) ([]string, error) {
+	if len(kinds) == 0 {
+		return nil, nil
+	}
+	filter, args := kindFilter(kinds)
+	rows, err := j.db.QueryContext(ctx, "SELECT DISTINCT run_id FROM records WHERE "+filter+" ORDER BY run_id", args...)
+	if err != nil {
+		return nil, fmt.Errorf("bonnie: list runs by kind: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("bonnie: read run by kind: %w", err)
+		}
+		out = append(out, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("bonnie: list runs by kind: %w", err)
+	}
+	return out, nil
+}
+
+// RecordsOfKind implements [KindReader].
+func (j *SQLiteJournal) RecordsOfKind(ctx context.Context, kind RecordKind) ([]Record, error) {
+	return j.readKindRecords(ctx, selectRecordSQL+" WHERE kind = ? ORDER BY run_id, seq", string(kind))
+}
+
+func (j *SQLiteJournal) readKindRecords(ctx context.Context, query string, args ...any) ([]Record, error) {
+	rows, err := j.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("bonnie: read records by kind: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []Record
+	for rows.Next() {
+		rec, err := scanRecord(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, rec)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("bonnie: read records by kind: %w", err)
+	}
+	return out, nil
 }
