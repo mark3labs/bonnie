@@ -34,6 +34,7 @@ import (
 
 	"github.com/mark3labs/bonnie/channel"
 	"github.com/mark3labs/bonnie/channel/chat"
+	"github.com/mark3labs/bonnie/internal/natswire"
 	"github.com/mark3labs/bonnie/presence"
 	"github.com/mark3labs/bonnie/runtime"
 )
@@ -189,7 +190,7 @@ func New(r *runtime.Runner, cfg Config) (*Channel, error) {
 	if cfg.EventStream == "" && cfg.EventSubject != "" {
 		cfg.EventStream = DefaultEventStreamName(cfg.EventSubject)
 	}
-	if !safeToken(cfg.ResultStream) || (cfg.EventSubject != "" && !safeToken(cfg.EventStream)) {
+	if !natswire.ValidToken(cfg.ResultStream) || (cfg.EventSubject != "" && !natswire.ValidToken(cfg.EventStream)) {
 		return nil, errors.New("bonnie: channel/nats: invalid output stream name")
 	}
 	if cfg.Stream == "" && (cfg.EventSubject != "" || cfg.CommandSubject != "" || cfg.QuerySubject != "") {
@@ -493,10 +494,6 @@ func decode(data []byte, out any) error {
 	return nil
 }
 
-func validID(id string) bool {
-	return id != "" && len(id) <= 256 && strings.TrimSpace(id) == id && strings.IndexFunc(id, unicode.IsControl) < 0 && !strings.HasPrefix(id, "nats/")
-}
-
 func (c *Channel) claim(id string) bool {
 	c.seenMu.Lock()
 	defer c.seenMu.Unlock()
@@ -526,7 +523,7 @@ func (c *Channel) handle(ctx context.Context, msg *gonats.Msg) {
 	if err == nil && ((!isAnswer && task.Version != 0 && task.Version != 1) || (isAnswer && answer.Version != 0 && answer.Version != 1)) {
 		err = errors.New("unsupported version")
 	}
-	if err == nil && !validID(task.TaskID) {
+	if err == nil && !natswire.ValidID(task.TaskID) {
 		err = errors.New("invalid task_id")
 	}
 	if err == nil && !isAnswer && strings.TrimSpace(task.Text) == "" {

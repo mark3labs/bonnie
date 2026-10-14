@@ -26,6 +26,7 @@ import (
 	gonats "github.com/nats-io/nats.go"
 
 	protocol "github.com/mark3labs/bonnie/channel/nats"
+	"github.com/mark3labs/bonnie/internal/natswire"
 	"github.com/mark3labs/bonnie/runtime"
 )
 
@@ -144,7 +145,7 @@ func New(nc *gonats.Conn, cfg Config) (*Client, error) {
 	if cfg.ResultConsumer == "" {
 		cfg.ResultConsumer = DefaultResultConsumerName(cfg.ResultSubject)
 	}
-	if !safeToken(cfg.ResultStream) || !safeToken(cfg.ResultConsumer) || !safeToken(cfg.InputStream) || (cfg.EventSubject != "" && (!safeToken(cfg.EventStream) || !safeToken(cfg.EventConsumer))) {
+	if !natswire.ValidToken(cfg.ResultStream) || !natswire.ValidToken(cfg.ResultConsumer) || !natswire.ValidToken(cfg.InputStream) || (cfg.EventSubject != "" && (!natswire.ValidToken(cfg.EventStream) || !natswire.ValidToken(cfg.EventConsumer))) {
 		return nil, errors.New("bonnie: client/nats: invalid stream or consumer name")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -219,20 +220,6 @@ func subjectName(prefix, subject string) string {
 func literalSubject(s string) bool {
 	return s != "" && !strings.ContainsAny(s, "*>\\") && strings.IndexFunc(s, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) < 0 && !slices.Contains(strings.Split(s, "."), "")
 }
-func safeToken(s string) bool {
-	if s == "" || len(s) > 128 {
-		return false
-	}
-	for _, r := range s {
-		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '-' {
-			return false
-		}
-	}
-	return true
-}
-func validID(s string) bool {
-	return s != "" && len(s) <= 256 && strings.TrimSpace(s) == s && strings.IndexFunc(s, unicode.IsControl) < 0 && !strings.HasPrefix(s, "nats/")
-}
 func messageID(kind string, parts ...string) string {
 	// JSON preserves boundaries, so different identity tuples cannot collide
 	// through concatenation. Hashing keeps arbitrary IDs out of headers.
@@ -256,7 +243,7 @@ func (c *Client) SubmitTo(ctx context.Context, agentID string, task Task) (Recei
 	if !c.cfg.TargetedTasks {
 		return Receipt{}, errors.New("bonnie: client/nats: TargetedTasks is required for SubmitTo")
 	}
-	if !safeToken(agentID) {
+	if !natswire.ValidToken(agentID) {
 		return Receipt{}, errors.New("bonnie: client/nats: invalid target agent ID")
 	}
 	return c.submit(ctx, c.cfg.TaskSubject+".agent."+agentID, task)
@@ -266,7 +253,7 @@ func (c *Client) submit(ctx context.Context, subject string, task Task) (Receipt
 	if task.Version == 0 {
 		task.Version = 1
 	}
-	if task.Version != 1 || !validID(task.TaskID) || strings.TrimSpace(task.Text) == "" {
+	if task.Version != 1 || !natswire.ValidID(task.TaskID) || strings.TrimSpace(task.Text) == "" {
 		return Receipt{}, errors.New("bonnie: client/nats: invalid version 1 task")
 	}
 	return c.publish(ctx, subject, task.TaskID, messageID("task", subject, task.TaskID), task)
@@ -277,7 +264,7 @@ func (c *Client) submit(ctx context.Context, subject string, task Task) (Receipt
 // even if responses change.
 // The outcome route must equal the configured base plus a safe agent token.
 func (c *Client) Answer(ctx context.Context, outcome Outcome, responses []runtime.InputResponse) (Receipt, error) {
-	if outcome.Version != 1 || !validID(outcome.TaskID) || !validID(outcome.RunID) || !safeToken(outcome.AgentID) || outcome.State != runtime.RunWaiting || outcome.Suspend == nil || outcome.Suspend.ToolCallID == "" || len(responses) == 0 || outcome.Error != "" {
+	if outcome.Version != 1 || !natswire.ValidID(outcome.TaskID) || !natswire.ValidID(outcome.RunID) || !natswire.ValidToken(outcome.AgentID) || outcome.State != runtime.RunWaiting || outcome.Suspend == nil || outcome.Suspend.ToolCallID == "" || len(responses) == 0 || outcome.Error != "" {
 		return Receipt{}, errors.New("bonnie: client/nats: invalid waiting outcome")
 	}
 	route := c.cfg.AnswerSubject + "." + outcome.AgentID
