@@ -14,7 +14,6 @@ func (s *envOutputDeleterSandbox) Delete(ctx context.Context) error {
 	return s.Sandbox.(Deleter).Delete(ctx)
 }
 
-type envJobOnlySandbox struct{ *envJobSandbox }
 type envJobDeleterSandbox struct{ *envJobSandbox }
 
 func (s *envJobDeleterSandbox) Delete(ctx context.Context) error {
