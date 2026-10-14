@@ -80,13 +80,6 @@ func ChatURL(addr string) string {
 	return "http://" + addr
 }
 
-// RunTUI opens the terminal interface against a running HTTP channel at url.
-// address is the conversation key that the channel resolves to one run.
-// Use RunTUIClient to supply a client with authentication options.
-func RunTUI(ctx context.Context, url, address string) error {
-	return RunTUIClient(ctx, client.New(url), address)
-}
-
 // RunTUIClient opens the terminal interface with c until the user quits or
 // ctx is canceled. address is the conversation key for the run.
 // It does not start a server.

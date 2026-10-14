@@ -123,17 +123,6 @@ func (s *envJobSandbox) CancelJob(ctx context.Context, id string) error {
 	return s.jobs.CancelJob(ctx, id)
 }
 
-type envDeleterJobSandbox struct{ *envJobSandbox }
-
-var _ interface {
-	Deleter
-	JobSandbox
-} = (*envDeleterJobSandbox)(nil)
-
-func (s *envDeleterJobSandbox) Delete(ctx context.Context) error {
-	return s.Sandbox.(Deleter).Delete(ctx)
-}
-
 func newEnvSandbox(inner Sandbox, env []string) Sandbox {
 	base := &envSandbox{Sandbox: inner, env: env}
 	_, deleter := inner.(Deleter)
@@ -148,7 +137,7 @@ func newEnvSandbox(inner Sandbox, env []string) Sandbox {
 	case hasJobs && reader:
 		return &envJobReaderSandbox{jobBase}
 	case hasJobs:
-		return &envJobOnlySandbox{jobBase}
+		return jobBase
 	case deleter && reader:
 		return &envOutputDeleterSandbox{&envOutputSandbox{base}}
 	case reader:
