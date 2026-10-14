@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Share NATS wire ID validation between the client and server, and sandbox
+  provider forwarding between environment and seed wrappers. No behavior or
+  public API changes.
+
 ### Fixed
 
 - `bonnie runs` truncates titles and messages at rune boundaries, so multi-byte

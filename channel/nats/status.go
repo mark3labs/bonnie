@@ -10,6 +10,7 @@ import (
 
 	gonats "github.com/nats-io/nats.go"
 
+	"github.com/mark3labs/bonnie/internal/natswire"
 	"github.com/mark3labs/bonnie/runtime"
 )
 
@@ -189,7 +190,7 @@ func (c *Channel) saveStatusCursor(ctx context.Context, runID string, seq int) e
 
 func (c *Channel) inspect(ctx context.Context, req StatusRequest, cancel bool) Status {
 	out := Status{Version: 1, Target: req.Target}
-	if req.Version != 1 || !validID(req.TaskID) || !validID(req.RunID) || !validID(req.AttemptID) || req.AgentID != c.cfg.AgentID {
+	if req.Version != 1 || !natswire.ValidID(req.TaskID) || !natswire.ValidID(req.RunID) || !natswire.ValidID(req.AttemptID) || req.AgentID != c.cfg.AgentID {
 		out.Error = "invalid target or version"
 		return out
 	}
