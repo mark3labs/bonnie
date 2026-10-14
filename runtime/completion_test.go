@@ -115,9 +115,9 @@ func TestCompletionSuspensionKeepsBudget(t *testing.T) {
 	}
 }
 
-// Cancel during a check leaves its candidate durable. A second Runner retries
+// A lifecycle interruption leaves its candidate durable. A second Runner retries
 // the check, not the model, and sees the same continuation count.
-func TestCompletionCancelledCheckRecovery(t *testing.T) {
+func TestCompletionInterruptedCheckRecovery(t *testing.T) {
 	t.Parallel()
 	j := NewMemoryJournal()
 	f, _ := fakeFactory(&kit.TurnResult{Response: "draft"})
@@ -136,10 +136,10 @@ func TestCompletionCancelledCheckRecovery(t *testing.T) {
 		done <- run
 	}()
 	<-started
-	if err := r.Cancel("cancel"); err != nil {
+	if err := r.Interrupt("cancel"); err != nil {
 		t.Fatal(err)
 	}
-	if run := <-done; run == nil || run.State != RunCancelled {
+	if run := <-done; run == nil || run.State != RunInterrupted {
 		t.Fatalf("run = %+v", run)
 	}
 	f2, a := fakeFactory()
@@ -152,6 +152,61 @@ func TestCompletionCancelledCheckRecovery(t *testing.T) {
 	run, err := r2.Start(context.Background(), "cancel", Input{Text: "must not replace pending work"})
 	if err != nil || run.Response != "draft" || a.call != 0 {
 		t.Fatalf("run = %+v, err = %v, calls = %d", run, err, a.call)
+	}
+}
+
+// Cancellation ends pending completion work. New input must reach the agent,
+// also when a second Runner shares only the journal. Interrupted work still
+// uses the recovery path tested above.
+func TestCompletionCancelledTurnAcceptsNewInput(t *testing.T) {
+	t.Parallel()
+	for _, duringCheck := range []bool{false, true} {
+		t.Run(map[bool]string{false: "model", true: "check"}[duringCheck], func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			j := NewMemoryJournal()
+			f, a := fakeFactory(&kit.TurnResult{Response: "old draft"})
+			started := make(chan struct{})
+			if !duringCheck {
+				a.started = started
+				a.block = make(chan struct{})
+			}
+			r := NewRunner(j, f, WithCompletionHook(func(ctx context.Context, _ CompletionCandidate) (CompletionFeedback, error) {
+				close(started)
+				<-ctx.Done()
+				return CompletionFeedback{}, ctx.Err()
+			}, 1))
+			done := make(chan *Run, 1)
+			go func() {
+				run, err := r.Start(ctx, "cancel", Input{Text: "old request"})
+				if err != nil {
+					t.Errorf("Start: %v", err)
+				}
+				done <- run
+			}()
+			<-started
+			if err := r.Cancel("cancel"); err != nil {
+				t.Fatal(err)
+			}
+			if run := <-done; run == nil || run.State != RunCancelled {
+				t.Fatalf("cancelled run = %+v", run)
+			}
+			f2, a2 := fakeFactory(&kit.TurnResult{Response: "YES"})
+			r2 := NewRunner(j, f2, WithCompletionHook(func(_ context.Context, c CompletionCandidate) (CompletionFeedback, error) {
+				if c.Response != "YES" || c.ContinuationsUsed != 0 {
+					t.Errorf("new candidate = %+v", c)
+				}
+				return CompletionFeedback{}, nil
+			}, 1))
+			run, err := r2.Start(ctx, "cancel", Input{Text: "reply YES"})
+			if err != nil || run == nil || run.Response != "YES" || a2.call != 1 {
+				t.Fatalf("run = %+v, err = %v, calls = %d", run, err, a2.call)
+			}
+			msgs := a2.session.GetMessages()
+			if len(msgs) < 2 || messageText(msgs[len(msgs)-2]) != "reply YES" {
+				t.Fatalf("new input missing from conversation: %+v", msgs)
+			}
+		})
 	}
 }
 

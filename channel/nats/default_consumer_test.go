@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/mark3labs/bonnie/internal/fakemodel"
+	"github.com/mark3labs/bonnie/internal/natswire"
 )
 
 // Default names depend only on the exact subject, never agent identity.
@@ -16,7 +17,7 @@ func TestDefaultConsumer(t *testing.T) {
 		t.Fatal(err)
 	}
 	name := first.cfg.Consumer
-	if !safeToken(name) || name != DefaultConsumerName(cfg.Subject) {
+	if !natswire.ValidToken(name) || name != DefaultConsumerName(cfg.Subject) {
 		t.Fatalf("invalid default: %q", name)
 	}
 	cfg.AgentID = "two"

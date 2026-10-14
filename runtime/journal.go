@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"time"
 )
@@ -251,4 +252,63 @@ type StepJournal interface {
 	// number assigned to each, in input order. Implementations assign Seq;
 	// callers may leave it zero.
 	AppendStep(ctx context.Context, recs []Record) (seqs []int, err error)
+}
+
+// KindReader is an optional journal interface for reads that exclude conversation
+// history. The scheduler and child lookup use it when it is available.
+type KindReader interface {
+	// ReplayKinds returns matching records in sequence order. An unknown run,
+	// or an empty list of kinds, returns no records and no error.
+	ReplayKinds(ctx context.Context, runID string, kinds ...RecordKind) ([]Record, error)
+	// RunsWithKinds returns distinct matching run IDs in lexical order.
+	// An empty list of kinds returns no runs and no error.
+	RunsWithKinds(ctx context.Context, kinds ...RecordKind) ([]string, error)
+	// RecordsOfKind returns matching records ordered by run ID, then sequence.
+	RecordsOfKind(ctx context.Context, kind RecordKind) ([]Record, error)
+}
+
+func replayKinds(ctx context.Context, j Journal, runID string, kinds ...RecordKind) ([]Record, error) {
+	if kr, ok := j.(KindReader); ok {
+		return kr.ReplayKinds(ctx, runID, kinds...)
+	}
+	if len(kinds) == 0 {
+		return nil, nil
+	}
+	recs, err := j.Replay(ctx, runID)
+	if errors.Is(err, ErrRunNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var out []Record
+	for _, rec := range recs {
+		if slices.Contains(kinds, rec.Kind) {
+			out = append(out, rec)
+		}
+	}
+	return out, nil
+}
+
+func recordsOfKind(ctx context.Context, j Journal, kind RecordKind) ([]Record, error) {
+	if kr, ok := j.(KindReader); ok {
+		return kr.RecordsOfKind(ctx, kind)
+	}
+	ids, err := j.Runs(ctx, "")
+	if err != nil {
+		return nil, err
+	}
+	var out []Record
+	for _, id := range ids {
+		recs, err := j.Replay(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		for _, rec := range recs {
+			if rec.Kind == kind {
+				out = append(out, rec)
+			}
+		}
+	}
+	return out, nil
 }

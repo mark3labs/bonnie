@@ -2,7 +2,6 @@ package sandbox
 
 import (
 	"context"
-	"fmt"
 	"sort"
 )
 
@@ -47,7 +46,7 @@ func EnvInjected(p Provider, env map[string]string) Provider {
 	// Sort so the injected set is deterministic: a journal record, a log
 	// line, or a test reads the same order every run.
 	sort.Strings(kv)
-	e := &envProvider{p: p, env: kv}
+	e := &envProvider{forwarder{p: p}, kv}
 	if _, ok := p.(Imaged); ok {
 		return &envImagedProvider{e}
 	}
@@ -55,18 +54,11 @@ func EnvInjected(p Provider, env map[string]string) Provider {
 }
 
 type envProvider struct {
-	p   Provider
+	forwarder
 	env []string
 }
 
 var _ Provider = (*envProvider)(nil)
-
-// Name implements [Provider]. The name is the wrapped backend's, unchanged, so
-// a journal record and a network error still read as the real backend.
-func (e *envProvider) Name() string { return e.p.Name() }
-
-// Available implements [Provider].
-func (e *envProvider) Available(ctx context.Context) error { return e.p.Available(ctx) }
 
 // Open implements [Provider]. It wraps the opened sandbox so every command it
 // runs carries the injected environment.
@@ -76,52 +68,6 @@ func (e *envProvider) Open(ctx context.Context, runID string) (Sandbox, error) {
 		return nil, err
 	}
 	return newEnvSandbox(sb, e.env), nil
-}
-
-// SetNetworkPolicy forwards to the wrapped provider, refusing on its behalf
-// when the backend cannot control the network — the same refusal the backend
-// would have made, kept intact through the wrapper. See [Seeded].
-func (e *envProvider) SetNetworkPolicy(policy NetworkPolicy) error {
-	n, ok := e.p.(Networked)
-	if !ok {
-		return fmt.Errorf("%w: the %s sandbox cannot control the network", ErrPolicyUnsupported, e.p.Name())
-	}
-	return n.SetNetworkPolicy(policy)
-}
-
-// SandboxExists forwards to the wrapped provider, reporting an error rather
-// than a false "no" when the backend cannot answer. See [Seeded].
-func (e *envProvider) SandboxExists(ctx context.Context, runID string) (bool, error) {
-	ec, ok := e.p.(ExistenceChecker)
-	if !ok {
-		return false, fmt.Errorf("bonnie: sandbox: the %s backend cannot report sandbox existence", e.p.Name())
-	}
-	return ec.SandboxExists(ctx, runID)
-}
-
-// DeleteRun forwards to the wrapped provider, reporting an error rather than
-// claiming a reclaim that never happened. See [Seeded].
-func (e *envProvider) DeleteRun(ctx context.Context, runID string) (bool, error) {
-	rd, ok := e.p.(RunDeleter)
-	if !ok {
-		return false, fmt.Errorf("bonnie: sandbox: the %s backend cannot delete sandboxes", e.p.Name())
-	}
-	return rd.DeleteRun(ctx, runID)
-}
-
-// ValidateRunCleanup implements [RunCleanupValidator]. It checks the wrapped
-// backend's deletion capability and forwards its mode check when present.
-func (e *envProvider) ValidateRunCleanup() error { return validateRunCleanup(e.p) }
-
-// WorkingDir forwards to the wrapped provider so the system prompt still names
-// the directory the tools really use. A provider that runs at [WorkDir]
-// reports nothing and the caller's fallback applies. See [Seeded.WorkingDir].
-func (e *envProvider) WorkingDir(runID string) string {
-	r, ok := e.p.(WorkingDirReporter)
-	if !ok {
-		return ""
-	}
-	return r.WorkingDir(runID)
 }
 
 // envImagedProvider is an [envProvider] whose backend runs a named image.
@@ -149,11 +95,7 @@ var _ Sandbox = (*envSandbox)(nil)
 // of the same name. A fresh slice is built rather than appending in place, so
 // the caller's Env is never mutated by a call.
 func (s *envSandbox) Exec(ctx context.Context, cmd Command) (*Result, error) {
-	merged := make([]string, 0, len(cmd.Env)+len(s.env))
-	merged = append(merged, cmd.Env...)
-	merged = append(merged, s.env...)
-	cmd.Env = merged
-	return s.Sandbox.Exec(ctx, cmd)
+	return s.Sandbox.Exec(ctx, withEnv(cmd, s.env))
 }
 
 type envDeleterSandbox struct{ *envSandbox }
@@ -172,11 +114,7 @@ type envJobSandbox struct {
 var _ JobSandbox = (*envJobSandbox)(nil)
 
 func (s *envJobSandbox) StartJob(ctx context.Context, cmd Command) (string, error) {
-	merged := make([]string, 0, len(cmd.Env)+len(s.env))
-	merged = append(merged, cmd.Env...)
-	merged = append(merged, s.env...)
-	cmd.Env = merged
-	return s.jobs.StartJob(ctx, cmd)
+	return s.jobs.StartJob(ctx, withEnv(cmd, s.env))
 }
 func (s *envJobSandbox) JobStatus(ctx context.Context, id string) (*JobStatus, error) {
 	return s.jobs.JobStatus(ctx, id)
@@ -209,4 +147,14 @@ func newEnvSandbox(inner Sandbox, env []string) Sandbox {
 	default:
 		return base
 	}
+}
+
+// withEnv appends configured variables after command variables, so a configured
+// value wins. It builds a fresh slice so the caller's Env is never mutated.
+func withEnv(cmd Command, env []string) Command {
+	merged := make([]string, 0, len(cmd.Env)+len(env))
+	merged = append(merged, cmd.Env...)
+	merged = append(merged, env...)
+	cmd.Env = merged
+	return cmd
 }

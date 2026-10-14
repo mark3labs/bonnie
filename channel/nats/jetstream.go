@@ -17,22 +17,11 @@ import (
 	gonats "github.com/nats-io/nats.go"
 
 	"github.com/mark3labs/bonnie/channel"
+	"github.com/mark3labs/bonnie/internal/natswire"
 	"github.com/mark3labs/bonnie/runtime"
 )
 
 const defaultAckWait = 30 * time.Second
-
-func safeToken(s string) bool {
-	if s == "" || len(s) > 128 {
-		return false
-	}
-	for _, ch := range s {
-		if (ch < 'a' || ch > 'z') && (ch < 'A' || ch > 'Z') && (ch < '0' || ch > '9') && ch != '-' {
-			return false
-		}
-	}
-	return true
-}
 
 func validateJetStream(cfg Config) error {
 	if cfg.Stream == "" {
@@ -49,7 +38,7 @@ func validateJetStream(cfg Config) error {
 	if cfg.AgentID == "" {
 		return errors.New("bonnie: channel/nats: AgentID is required for JetStream")
 	}
-	if !safeToken(cfg.Stream) || !safeToken(cfg.Consumer) || !safeToken(cfg.AgentID) {
+	if !natswire.ValidToken(cfg.Stream) || !natswire.ValidToken(cfg.Consumer) || !natswire.ValidToken(cfg.AgentID) {
 		return errors.New("bonnie: channel/nats: stream, consumer, and agent must be safe tokens (letters, digits, hyphen)")
 	}
 	if strings.HasPrefix(cfg.Subject, cfg.AnswerSubject+".") || strings.HasPrefix(cfg.ResultSubject, cfg.AnswerSubject+".") {
@@ -335,7 +324,7 @@ func (c *Channel) boundResult(ctx context.Context, result Result) (Result, error
 		// Never truncate a suspension: its questions are needed to resume safely.
 		result.Response, result.Suspend = "", nil
 		result.State, result.Error = runtime.RunFailed, "result too large"
-		if !validID(result.TaskID) {
+		if !natswire.ValidID(result.TaskID) {
 			result.TaskID = ""
 		}
 		data, err = json.Marshal(result)
@@ -494,7 +483,7 @@ func (c *Channel) processJetStream(ctx context.Context, msg *gonats.Msg, in jsIn
 		return Result{}, "", nil, errHandled
 	}
 	answerKey := ""
-	if err == nil && isAnswer && answer.Version == 1 && answer.AgentID == c.cfg.AgentID && validID(answer.RunID) && validID(answer.MessageID) {
+	if err == nil && isAnswer && answer.Version == 1 && answer.AgentID == c.cfg.AgentID && natswire.ValidID(answer.RunID) && natswire.ValidID(answer.MessageID) {
 		answerKey = c.cacheKey("answer", answer.RunID, answer.MessageID)
 		cached, loadErr = c.loadResult(ctx, answerKey)
 		if loadErr != nil {
@@ -528,7 +517,7 @@ func (c *Channel) processJetStream(ctx context.Context, msg *gonats.Msg, in jsIn
 		}
 		result.AttemptID = hex.EncodeToString(attempt)
 	}
-	if err == nil && !validID(task.TaskID) {
+	if err == nil && !natswire.ValidID(task.TaskID) {
 		err = errors.New("invalid task_id")
 	}
 	if err == nil && ((!isAnswer && task.Version != 1) || (isAnswer && answer.Version != 1)) {
@@ -547,7 +536,7 @@ func (c *Channel) processJetStream(ctx context.Context, msg *gonats.Msg, in jsIn
 }
 
 func (c *Channel) admitJetStreamAnswer(ctx context.Context, answer Answer, answerKey string, result Result) (*runtime.Run, Result, error) {
-	if !validID(answer.MessageID) || answer.AgentID != c.cfg.AgentID || !validID(answer.RunID) || answer.ToolCallID == "" || len(answer.Responses) == 0 {
+	if !natswire.ValidID(answer.MessageID) || answer.AgentID != c.cfg.AgentID || !natswire.ValidID(answer.RunID) || answer.ToolCallID == "" || len(answer.Responses) == 0 {
 		return nil, result, errors.New("invalid answer route or identity")
 	}
 	admission, err := c.loadAdmission(ctx, answerKey)
