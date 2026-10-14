@@ -49,6 +49,8 @@ is proven in production. Do not use it for work whose loss would hurt.
 
 ### Fixed
 
+- The `bonnie runs` table now truncates titles and messages by Unicode code
+  points, so multi-byte text is never split into invalid UTF-8.
 - After a journal replay, an event stream delivers live-only events anchored at
   the replay watermark. Before, it dropped them. Only replayed event types at
   that anchor are suppressed as duplicates.

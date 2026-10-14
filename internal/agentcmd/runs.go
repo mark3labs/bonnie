@@ -243,10 +243,13 @@ func detail(rec runtime.Record) string {
 	}
 }
 
-func oneLine(s string, max int) string {
+// oneLine folds s onto one line and caps it at n runes. It counts runes, not
+// bytes, so a multi-byte character is never split.
+func oneLine(s string, n int) string {
 	s = strings.Join(strings.Fields(s), " ")
-	if len(s) > max {
-		return s[:max-1] + "…"
+	runes := []rune(s)
+	if len(runes) > n {
+		return string(runes[:max(0, n-1)]) + "…"
 	}
 	return s
 }
