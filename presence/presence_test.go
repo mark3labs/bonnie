@@ -113,3 +113,37 @@ func TestRecordValidationAndContext(t *testing.T) {
 		t.Fatalf("expected cancellation, got %v", err)
 	}
 }
+
+// TestFilterMatch pins the label rule that every registry shares. The NATS
+// store once read an absent key as "", so {"zone": ""} also selected records
+// that had no zone.
+func TestFilterMatch(t *testing.T) {
+	t.Parallel()
+	rec := func(labels map[string]string) Record {
+		return Record{Identity: Identity{Agent: "a", Instance: "1"}, State: Ready, Labels: labels}
+	}
+	for _, c := range []struct {
+		name   string
+		filter Filter
+		record Record
+		want   bool
+	}{
+		{"empty filter", Filter{}, rec(nil), true},
+		{"nil filter labels", Filter{Agent: "a"}, rec(map[string]string{"zone": "west"}), true},
+		{"identity mismatch", Filter{Agent: "b"}, rec(nil), false},
+		{"instance mismatch", Filter{Instance: "2"}, rec(nil), false},
+		{"state mismatch", Filter{State: Draining}, rec(nil), false},
+		{"label equal", Filter{Labels: map[string]string{"zone": "west"}}, rec(map[string]string{"zone": "west"}), true},
+		{"label differs", Filter{Labels: map[string]string{"zone": "west"}}, rec(map[string]string{"zone": "east"}), false},
+		{"label absent", Filter{Labels: map[string]string{"zone": "west"}}, rec(nil), false},
+		{"empty value present", Filter{Labels: map[string]string{"zone": ""}}, rec(map[string]string{"zone": ""}), true},
+		{"empty value absent", Filter{Labels: map[string]string{"zone": ""}}, rec(nil), false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			if got := c.filter.Match(c.record); got != c.want {
+				t.Fatalf("Match = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
