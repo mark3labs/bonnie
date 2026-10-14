@@ -95,27 +95,18 @@ func (r *Runner) SpawnChild(ctx context.Context, parentID, key string, in Input,
 
 // Children lists children of a run, including completed children.
 func (r *Runner) Children(ctx context.Context, parentID string) ([]ChildRun, error) {
-	ids, err := r.journal.Runs(ctx, "")
+	recs, err := recordsOfKind(ctx, r.journal, RecordOwnership)
 	if err != nil {
 		return nil, err
 	}
 	var children []ChildRun
-	for _, id := range ids {
-		recs, err := r.journal.Replay(ctx, id)
-		if err != nil {
-			return nil, err
+	for _, rec := range recs {
+		var child ChildRun
+		if err := json.Unmarshal(rec.Payload, &child); err != nil {
+			return nil, fmt.Errorf("bonnie: decode ownership: %w", err)
 		}
-		for _, rec := range recs {
-			if rec.Kind != RecordOwnership {
-				continue
-			}
-			var child ChildRun
-			if err := json.Unmarshal(rec.Payload, &child); err != nil {
-				return nil, fmt.Errorf("bonnie: decode ownership: %w", err)
-			}
-			if child.ParentID == parentID {
-				children = append(children, child)
-			}
+		if child.ParentID == parentID {
+			children = append(children, child)
 		}
 	}
 	return children, nil
@@ -127,7 +118,12 @@ func (r *Runner) Children(ctx context.Context, parentID string) ([]ChildRun, err
 // through IsActive. Cancellation is bottom-up and is recorded before return.
 func (r *Runner) CancelOwned(ctx context.Context, runID string, includeBackground bool) error {
 	r.workMu.Lock()
-	recs, err := r.journal.Replay(ctx, runID)
+	_, err := r.journal.State(ctx, runID)
+	if err != nil {
+		r.workMu.Unlock()
+		return err
+	}
+	recs, err := replayKinds(ctx, r.journal, runID, RecordOwnerCancel)
 	if err != nil {
 		r.workMu.Unlock()
 		return err

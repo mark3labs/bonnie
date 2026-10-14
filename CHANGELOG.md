@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The scheduler and child lookup read indexed control records instead of full
+  conversation history. Settled owner cancellation does not repeat the walk.
+  Child and submission waits back off to 500 ms when state does not change.
+
 - `bonnie runs` truncates titles and messages at rune boundaries, so multi-byte
   text remains valid UTF-8.
 - **presence/nats: an empty label value no longer matches an absent key.**
@@ -19,6 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the label explicitly.
 
 ### Added
+
+- Optional `runtime.KindReader` journal interface for filtered record reads.
+  SQLite and memory journals implement it; other journals retain the fallback.
 
 - `presence.Filter.Match` reports whether a record satisfies a filter, for
   third-party registries.
