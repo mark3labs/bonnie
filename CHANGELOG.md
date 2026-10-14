@@ -5,6 +5,13 @@ All notable changes to BONNIE are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Simplify the host serve exit, durable submission planning lock, and JetStream
+  admission and acknowledgement paths without changing their behaviour.
+
 ## [0.27.0] — 2026-10-13
 
 **Reach the run API over NATS.**

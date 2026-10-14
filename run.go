@@ -302,25 +302,14 @@ func (a *Agent) Run(ctx context.Context) (runErr error) {
 		}
 	}
 	c.banner(os.Stderr, ln.Addr().String(), prepared.contextFiles, prepared.skills, prepared.dotenv)
-	if schedules == nil {
-		if presenceErr == nil {
-			return c.serve(schedulerCtx, mux, ln)
-		}
-		serveCtx, cancel := context.WithCancel(schedulerCtx)
-		defer cancel()
-		served := make(chan error, 1)
-		go func() { served <- c.serve(serveCtx, mux, ln) }()
-		select {
-		case err := <-served:
-			return err
-		case err := <-presenceErr:
-			cancel()
-			serveErr := <-served
-			if err != nil {
-				return errors.Join(serveErr, err)
-			}
-			return serveErr
-		}
+	// A nil channel never fires, so an absent presence loop or schedule service
+	// takes no part in the select below.
+	var schedulesDone <-chan error
+	if schedules != nil {
+		schedulesDone = schedules.done
+	}
+	if presenceErr == nil && schedulesDone == nil {
+		return c.serve(schedulerCtx, mux, ln)
 	}
 	serveCtx, cancel := context.WithCancel(schedulerCtx)
 	defer cancel()
@@ -336,7 +325,10 @@ func (a *Agent) Run(ctx context.Context) (runErr error) {
 			return errors.Join(serverErr, err)
 		}
 		return serverErr
-	case err := <-schedules.done:
+	case err := <-schedulesDone:
+		// The deferred schedules.shutdown also receives from done. It is a
+		// one-value channel and this case consumed the value, so clear it or
+		// shutdown waits for the full shutdown timeout.
 		schedules.done = nil
 		cancel()
 		serverErr := <-served
