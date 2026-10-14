@@ -177,3 +177,27 @@ func TestConfigTTLMatch(t *testing.T) {
 		t.Fatal("expected TTL mismatch")
 	}
 }
+
+// TestDiscoverEmptyLabelNeedsKey proves the NATS store applies
+// presence.Filter.Match: an empty label value does not match a record that
+// has no such key. The store once read the absent key as "".
+func TestDiscoverEmptyLabelNeedsKey(t *testing.T) {
+	t.Parallel()
+	s, _ := testStore(t, time.Minute)
+	ctx := context.Background()
+	withKey := record("with-key", "1")
+	withKey.Labels = map[string]string{"zone": ""}
+	without := record("without", "1")
+	for _, r := range []presence.Record{withKey, without} {
+		if err := s.Register(ctx, r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := s.Discover(ctx, presence.Filter{Labels: map[string]string{"zone": ""}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Identity.Agent != "with-key" {
+		t.Fatalf("Discover = %+v, want only with-key", got)
+	}
+}
