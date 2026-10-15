@@ -343,7 +343,7 @@ func (e *Engine) execute(ctx context.Context, d Definition, o Occurrence) error 
 					}
 					input := dp.Input
 					input.Trigger = trigger
-					w.Result, err = e.runner.Start(ctx, w.Receipt.RunID, input)
+					w.Result, err = e.runner.StartRetry(ctx, w.Receipt.RunID, input)
 				} else {
 					w.Result, err = receiver.RunDispatch(ctx, w.Receipt, dp.Input.Text, channel.SendOptions{Auth: dp.Auth, Context: dp.Input.Context, Title: dp.Input.Title, Trigger: trigger, TurnPolicy: channel.PolicyQueue})
 				}

@@ -99,9 +99,16 @@ the completion interfaces in `runtime` instead.
 ## Recovery and limits
 
 BONNIE saves completion feedback before it starts a continuation and charges
-the continuation before its prompt. Suspension, cancellation, and recovery
-do not reset the budget. A completed or failed logical turn starts a new
-budget on its next turn.
+the continuation before its prompt. Suspension and interrupted-work recovery
+do not reset the budget. A completed, failed, or cancelled logical turn starts
+a new budget on its next turn.
+
+Use `StartRetry` to recover admitted input. Nonempty `Start` input is new input
+and returns `runtime.ErrInputDeferred` while saved work remains unfinished.
+Keep that command undelivered, recover the old work, then submit the command
+with `Start` after the old logical turn closes. If recovery waits for human
+input, use `Resume` first. `Start(..., runtime.Input{})` keeps legacy recovery
+behavior. Do not cancel saved work unless cancellation is intended.
 
 An interrupted check can run again. External effects must tolerate retries;
 this API does not provide exactly-once execution. Configure the same policy

@@ -191,7 +191,9 @@ type Trigger struct {
 	Kind         string    `json:"kind,omitempty"`
 }
 
-// Input starts or continues a run.
+// Input supplies new input to Start or redelivery data to StartRetry.
+// Any nonzero field is explicit input to Start, including whitespace Text.
+// Empty slices and zero-value metadata do not count. Input{} retains legacy recovery.
 type Input struct {
 	// Text is the user's message: the one thing that enters the
 	// conversation as a user turn.
@@ -562,26 +564,36 @@ func (r *Runner) replayEventsContext(ctx context.Context, runID string, after in
 	return nil
 }
 
-// Start begins a run, or continues an existing one that is not suspended. If
-// runID is already known to the journal, its conversation is replayed first,
-// so Start doubles as crash recovery.
+// Start begins a new logical turn on a fresh or closed conversation.
+// Nonempty input, including text equal to an earlier message, is new input.
+// If unfinished work owns the conversation, Start returns a nil Run and
+// ErrInputDeferred before restoring the session or writing input metadata.
+// The caller must retain that input as undelivered, recover with StartRetry,
+// then submit it again only after recovery closes the logical turn. If recovery
+// waits for human input, use Resume first. Do not cancel unless intended.
 //
-// The input's title and origin are recorded on the run the first time they
-// are seen; its context is journalled and handed to the model for this turn
-// only.
+// Input{} retains legacy recovery behavior; it is not an admission signal.
+// A previously saved cancellation command is applied before admission and can
+// write cancellation bookkeeping even when inspecting saved work.
 func (r *Runner) Start(ctx context.Context, runID string, in Input) (*Run, error) {
 	turnCtx, act, err := r.acquire(ctx, runID)
 	if err != nil {
 		return nil, err
 	}
-	return r.startAcquired(turnCtx, act, runID, in)
+	intent := startNewInput
+	if !in.nonempty() {
+		intent = startRecovery
+	}
+	return r.startAcquired(turnCtx, act, runID, in, intent)
 }
 
 // StartRetry retries previously admitted input. It returns a cancelled snapshot
 // instead of starting a new turn if the current turn was explicitly cancelled.
 // The cancellation check and start share one run reservation. Like Start, this
 // method requires one Runner owner per run; it does not provide a process lease.
-// Use Start for new input that can continue a cancelled conversation.
+// Use Start for new input that can continue a cancelled conversation. Input
+// is recovery data, not a new message; supply the original admitted input when
+// it might not be saved yet. This is not generic idempotency after completion.
 func (r *Runner) StartRetry(ctx context.Context, runID string, in Input) (*Run, error) {
 	turnCtx, act, err := r.acquire(ctx, runID)
 	if err != nil {
@@ -600,10 +612,27 @@ func (r *Runner) StartRetry(ctx context.Context, runID string, in Input) (*Run, 
 		defer r.release(runID)
 		return r.Snapshot(turnCtx, runID)
 	}
-	return r.startAcquired(turnCtx, act, runID, in)
+	return r.startAcquired(turnCtx, act, runID, in, startRecovery)
 }
 
-func (r *Runner) startAcquired(turnCtx context.Context, act *activeTurn, runID string, in Input) (*Run, error) {
+// ErrInputDeferred means new input was not admitted because saved unfinished
+// work must be recovered first. The caller must retain the input; BONNIE does
+// not queue it. Use errors.Is to inspect this error and StartRetry to recover.
+var ErrInputDeferred = errors.New("bonnie: input deferred until saved work is recovered")
+
+type startIntent uint8
+
+const (
+	startRecovery startIntent = iota
+	startNewInput
+)
+
+func (in Input) nonempty() bool {
+	return in.Text != "" || len(in.Files) != 0 || len(in.Context) != 0 ||
+		in.Title != "" || in.Origin != (Origin{}) || in.Trigger != nil
+}
+
+func (r *Runner) startAcquired(turnCtx context.Context, act *activeTurn, runID string, in Input, intent startIntent) (*Run, error) {
 	defer r.release(runID)
 	if err := r.recoverCancellation(turnCtx, runID); err != nil {
 		return nil, err
@@ -617,6 +646,24 @@ func (r *Runner) startAcquired(turnCtx context.Context, act *activeTurn, runID s
 	}
 	if state == RunWaiting {
 		return nil, fmt.Errorf("%w: %s", ErrRunWaiting, runID)
+	}
+
+	// Inspect records without Restore: session repair itself can append records.
+	if intent == startNewInput {
+		if state == RunInterrupted {
+			return nil, fmt.Errorf("%w: %s", ErrInputDeferred, runID)
+		}
+		recs, err := r.journal.Replay(turnCtx, runID)
+		if err != nil && !errors.Is(err, ErrRunNotFound) {
+			return nil, fmt.Errorf("bonnie: inspect input admission: %w", err)
+		}
+		c, err := replayCompletion(recs)
+		if err != nil {
+			return nil, err
+		}
+		if c != nil {
+			return nil, fmt.Errorf("%w: %s", ErrInputDeferred, runID)
+		}
 	}
 
 	s, err := r.session(turnCtx, runID)
@@ -646,7 +693,7 @@ func (r *Runner) startAcquired(turnCtx context.Context, act *activeTurn, runID s
 	}
 	s.SetTurnContext(in.Context)
 	// Continue an interrupted turn without adding input that is already durable.
-	if state == RunInterrupted {
+	if state == RunInterrupted && intent == startRecovery {
 		// Kit may have been interrupted before it appended the user message.
 		// Reuse the caller input only when replay confirms it is not durable.
 		prompt := ""
@@ -756,7 +803,7 @@ func (r *Runner) Cancel(runID string) error {
 }
 
 // Interrupt stops an active turn for lifecycle recovery. Unlike Cancel, it
-// does not record an explicit cancellation. Start can continue from the durable
+// does not record an explicit cancellation. StartRetry can continue from the durable
 // conversation. It returns ErrRunNotActive if this Runner does not own the run.
 func (r *Runner) Interrupt(runID string) error {
 	r.mu.Lock()

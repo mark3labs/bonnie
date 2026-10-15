@@ -8,7 +8,7 @@ import (
 	kit "github.com/mark3labs/kit/pkg/kit"
 )
 
-func TestInterruptPreservesRunAndStartContinuesWithoutPromptDuplication(t *testing.T) {
+func TestInterruptPreservesRunAndRetryContinuesWithoutPromptDuplication(t *testing.T) {
 	t.Parallel()
 	j := NewMemoryJournal()
 	first := &fakeAgent{started: make(chan struct{}), block: make(chan struct{})}
@@ -46,7 +46,7 @@ func TestInterruptPreservesRunAndStartContinuesWithoutPromptDuplication(t *testi
 		t.Fatal(err)
 	}
 	before := len(recs)
-	continued, err := r.Start(context.Background(), "interrupt", Input{Text: "original prompt"})
+	continued, err := r.StartRetry(context.Background(), "interrupt", Input{Text: "original prompt"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +111,7 @@ func TestInterruptedRecoveryUsesLatestTurnAndFilesAcrossRunner(t *testing.T) {
 		recovered.session = s
 		return recovered, nil
 	})
-	got, err := runner.Start(ctx, "repeat", Input{Text: "same prompt", Files: []kit.LLMFilePart{file}})
+	got, err := runner.StartRetry(ctx, "repeat", Input{Text: "same prompt", Files: []kit.LLMFilePart{file}})
 	if err != nil {
 		t.Fatal(err)
 	}

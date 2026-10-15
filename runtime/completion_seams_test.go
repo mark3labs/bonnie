@@ -74,7 +74,7 @@ func TestCompletionResumeRecordRecovery(t *testing.T) {
 		}
 		return CompletionFeedback{}, nil
 	}, 1))
-	if _, err := r2.Start(ctx, s.runID, Input{Text: "ignored"}); err != nil {
+	if _, err := r2.StartRetry(ctx, s.runID, Input{Text: "ignored"}); err != nil {
 		t.Fatal(err)
 	}
 	restored, err := Restore(ctx, s.runID, j)

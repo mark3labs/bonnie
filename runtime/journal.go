@@ -26,7 +26,7 @@ const (
 	// RunFailed means the run ended with an error.
 	RunFailed RunState = "failed"
 	// RunInterrupted means the host stopped execution to recover later. It is
-	// distinct from an explicit operator cancellation and can be continued with Start.
+	// distinct from an explicit operator cancellation and can be continued with StartRetry.
 	RunInterrupted RunState = "interrupted"
 	// RunCancelled means an operator stopped the turn before it ended.
 	// Completed steps stay in the journal, so a cancelled run is resumable

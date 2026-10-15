@@ -68,6 +68,14 @@ Runner options include `WithEventBuffer`, `WithActivityLogger`, `WithCompletionH
 
 `Runner.Start(ctx, runID, Input)` begins a run or restores an existing non-waiting run before execution. `Runner.Resume(ctx, runID, []InputResponse)` answers a waiting run, including one parked by another process.
 
+Nonempty `Start` input is always a new command, even when its text equals an earlier message. If saved work is interrupted or has unclosed completion metadata, Start returns a nil Run and `ErrInputDeferred`. This includes files-only, context-only, title, origin, trigger, and whitespace input. Empty slices and zero-value metadata do not count.
+
+The refusal does not restore or repair the session, write input metadata, build an agent, or publish a response. A previously durable cancellation command is applied first and can write cancellation bookkeeping. Waiting, retired, and active errors keep precedence.
+
+The caller must retain the command as undelivered: BONNIE does not queue it. Recover with `StartRetry` using the original admitted input when needed. Submit the new command with Start only after recovery closes the logical turn. If recovery parks, answer through Resume first. Do not use RequestCancel unless cancellation is intended.
+
+`StartRetry` preserves cancelled snapshots and continues saved input without duplication. It is not generic idempotency after a completed turn. `Start(ctx, runID, Input{})` keeps legacy recovery behavior; it is not an explicit admission signal. There is no request-ID or exactly-once guarantee for successful Start calls.
+
 | `Input` field | Purpose |
 | --- | --- |
 | `Text` | User conversation input |
@@ -154,14 +162,14 @@ Root `WithCompletionHook` supplies an execution-scoped factory. Low-level hosts 
 | `continue` | Feedback is saved; charge and start the next prompt |
 | `accepted` | Publish the accepted candidate without another check |
 
-Completion metadata keeps the candidate, feedback, count, prompt, known usage, and message watermark. A saved running or cancelled logical turn restores this state. Start then uses the saved work, not replacement text or files. Resume supplies the human answer and retains the count. Completed, failed, retired, or cleared runs end that budget.
+Completion metadata keeps the candidate, feedback, count, prompt, known usage, and message watermark. A saved running or interrupted logical turn restores this state through StartRetry (or zero-value Start). Recovery uses saved work, not replacement text or files. Resume supplies the human answer and retains the count. Completed, failed, cancelled, retired, or cleared runs end that budget.
 
 Recovery limits:
 
 - An interrupted check can repeat. Hook effects must tolerate retries.
 - A final non-empty assistant text after the watermark can prove completion. Tool messages, empty responses, and unsaved results cannot; the model call can repeat.
 - Usage not yet saved in completion metadata cannot be recovered, so reported totals can be lower.
-- Initial file attachments not yet saved by Kit cannot be recovered from completion metadata. New Start attachments do not replace them during recovery.
+- Initial file attachments not yet saved by Kit cannot be recovered from completion metadata. Replacement attachments do not replace them during completion recovery.
 - Response publication and the completed checkpoint are separate. A crash between them can repeat the accepted response event.
 - Setup and factories run again, even for an accepted candidate. Configure the same policy and limit after restart.
 - An orchestration write failure leaves running state and returns an error so later execution can restore saved work. Hook or model failure ends the turn as failed.
@@ -172,6 +180,6 @@ Completion delays the final response event, not live model activity or saved dra
 
 A Runner serializes its own turns only. Two Runners or processes executing one run can interleave the conversation even when SQLite protects database integrity. Controls and cleanup must reach the execution owner. Shared storage is not a distributed lock or cancellation router.
 
-Opening a journal or restarting a generic HTTP server does not automatically execute every saved running run. Start and Resume are the recovery entry points; transports and schedule agents apply their own retry rules. Core NATS can lose tasks and result delivery. JetStream retries are at least once and can create a new attempt or execute on another agent. Schedules save prepared dispatches and retry delivery, but channel posts can repeat after a crash. See [Channels](/channels/overview) and [Scheduling](/guides/scheduling).
+Opening a journal or restarting a generic HTTP server does not automatically execute every saved running run. StartRetry, zero-value Start, and Resume are the recovery entry points; transports and schedule agents apply their own retry rules. Core NATS can lose tasks and result delivery. JetStream retries are at least once and can create a new attempt or execute on another agent. Schedules save prepared dispatches and retry delivery, but channel posts can repeat after a crash. See [Channels](/channels/overview) and [Scheduling](/guides/scheduling).
 
 Keep journal storage, working files, configured backends, and agent identity stable. Cleanup is opt-in and local to one owner. A journal survives removal of a sandbox, but it cannot recreate lost working output. See [Troubleshooting](/guides/troubleshooting) before retrying an external action.

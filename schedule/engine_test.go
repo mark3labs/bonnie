@@ -314,3 +314,39 @@ func waitFor(t *testing.T, condition func() bool) {
 
 // jsonUnmarshal keeps this test focused on the public journal payload.
 func jsonUnmarshal(data []byte, dst any) error { return json.Unmarshal(data, dst) }
+
+// Re-execution of an admitted dispatch is recovery, not new chat input. A
+// saved running completion must not turn the occurrence into Failed.
+func TestEngineRecoversRunningCompletion(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	j := runtime.NewMemoryJournal()
+	const runID = "recover-dispatch"
+	if _, err := j.Append(ctx, runtime.Record{RunID: runID, Kind: runtime.RecordState, State: runtime.RunRunning}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := j.Append(ctx, runtime.Record{RunID: runID, Kind: runtime.RecordCompletion, Payload: []byte(`{"phase":"accepted","candidate":{"response":"saved response","continuations_used":1},"usage":{"total_tokens":7}}`)}); err != nil {
+		t.Fatal(err)
+	}
+	agent := channeltest.NewScriptAgent()
+	e, err := New(runtime.NewRunner(j, agent.Factory()), nil, Definition{Name: "recover", Cron: "* * * * *", Prompt: "original"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := e.Shutdown(ctx); err != nil {
+			t.Error(err)
+		}
+	}()
+	o := Occurrence{Fire: Fire{Name: "recover", ID: "recover-occurrence", ScheduledAt: time.Now()}, State: Running, Prepared: true, Work: []Work{{Dispatch: Dispatch{Key: "default", Input: runtime.Input{Text: "original"}}, Reserved: true, Receipt: channel.DispatchReceipt{RunID: runID}}}}
+	if err := e.execute(ctx, Definition{Name: "recover"}, o); err != nil {
+		t.Fatal(err)
+	}
+	history, err := e.History(ctx, "recover")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(history) != 1 || history[0].State != Completed || history[0].Work[0].Result.Response != "saved response" || agent.Calls() != 0 {
+		t.Fatalf("history = %+v, calls = %d", history, agent.Calls())
+	}
+}

@@ -68,7 +68,11 @@ func TestKitRepeatedInterruptedRecovery(t *testing.T) {
 					}, 0))
 				}
 				runner = NewRunner(journal, factory, opts...)
-				run, err := runner.Start(ctx, runID, Input{Text: prompt})
+				start := runner.Start
+				if attempt > 0 {
+					start = runner.StartRetry
+				}
+				run, err := start(ctx, runID, Input{Text: prompt})
 				if err != nil {
 					t.Fatal(err)
 				}
