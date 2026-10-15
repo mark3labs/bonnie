@@ -76,6 +76,34 @@ indefinitely**, **reachable over HTTP**. State the limits from the current
 
 ## History
 
+### `v0.29.0`, 2026-10-15 — publication verified
+
+- [x] `task release-check`, `task release-snapshot`, `task check`, and `task ci`
+      pass before the release commit. The snapshot builds both Linux targets;
+      both archive checksums verify and amd64 prints the injected version.
+- [x] No `replace` directive is committed in the framework or example modules.
+- [x] `test`, `examples`, and `lint` pass on `master` at tagged commit
+      `72a10c7ab92cef3addcb5bf70d0b4b24dc26e924` (CI run `38736290490`).
+- [x] The dated `[0.29.0]` changelog section states claims, current limits, new
+      public APIs, and migration from nonempty `Start` to `StartRetry` for recovery.
+      Note extraction passes; published notes match the section exactly.
+- [x] Annotated tag pushed after human approval. Release run `38738525922`
+      succeeds and publishes both Linux archives and the checksum file.
+- [x] Both downloaded archive checksums verify. The statically linked amd64
+      binary prints `bonnie version 0.29.0` and refuses `--sandbox none`, naming
+      Landlock and Local as alternatives.
+- [x] Both example trees pin v0.29.0 after publication; `task examples` passes.
+
+**Version choice.** MINOR under the pre-1.0 convention: sandbox search and edit
+tools and optional directory-reading APIs are added. Nonempty `Runner.Start`
+input is new input and can return the new `ErrInputDeferred` sentinel while
+saved work needs recovery. Extra tools must not use the new built-in names.
+
+**Validation limits.** Local checks use cached results for many packages. CI
+excludes the Chromium live-state and end-to-end tests. The arm64 binary and
+live-model behavior were not executed. Search ignores `.gitignore`; mutation
+gates do not coordinate external writers. External effects are not exactly once.
+
 ### `v0.28.0`, 2026-10-14 — publication verified
 
 - [x] `task release-check` and `task release-snapshot` pass. The snapshot at
