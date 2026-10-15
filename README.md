@@ -342,6 +342,44 @@ run, _ := runner.Start(ctx, "run-1", runtime.Input{Text: "What did I just ask?"}
 // `You asked me "In one sentence, what is a durable agent run?"`
 ```
 
+### New input and interrupted work
+
+Nonempty `Start` input always means a new command, even when it equals a saved
+message. If unfinished work owns the conversation, Start returns a nil Run and
+`runtime.ErrInputDeferred`. BONNIE does not queue the command. Retain it as
+undelivered and recover the admitted work with `StartRetry`:
+
+```go
+run, err := runner.Start(ctx, runID, newInput)
+if errors.Is(err, runtime.ErrInputDeferred) {
+    // Keep newInput undelivered. originalInput is the admitted recovery data.
+    recovered, retryErr := runner.StartRetry(ctx, runID, originalInput)
+    if retryErr != nil {
+        return retryErr
+    }
+    if recovered.State != runtime.RunCompleted {
+        // If waiting, use Resume for the human answer before new input.
+        return nil
+    }
+    run, err = runner.Start(ctx, runID, newInput)
+}
+// Handle err and run through the host's normal outcome path.
+```
+
+Import `errors` for `errors.Is`. Files, context, title, origin, trigger, and
+whitespace text also count as explicit input. Empty slices and zero-value
+metadata do not. Ordinary refusal leaves saved work unchanged, before session
+restore or repair. Recovery of a previously durable cancellation command can
+write cancellation bookkeeping first.
+
+`StartRetry` uses saved work and the original input if it was not yet saved.
+It returns a cancelled snapshot rather than starting a new turn. It does not
+promise idempotency after completion. `Start(..., runtime.Input{})` retains
+legacy recovery behavior, not explicit admission. Do not cancel old work unless
+cancellation is intended. The caller must retain deferred commands durably;
+successful Start calls and external effects are not exactly once. One Runner
+or process must own each run.
+
 `runtime.Input` carries more than text:
 
 | Field | Function |
@@ -1439,7 +1477,7 @@ the current suspension. Active task executions and buffers are bounded;
 `Concurrency` defaults to 4 and `Buffer` to 64. Shutdown interrupts active turns
 and waits for their execution to stop.
 Connection loss also interrupts active turns. The saved `interrupted` state is
-not an operator cancellation; `Runner.Start` can continue it.
+not an operator cancellation; `Runner.StartRetry` can continue it.
 
 **This adapter follows the asynchronous GitHub pattern, not a durable broker
 queue.** It uses Core NATS, not JetStream. Offline subscribers, buffer overflow,

@@ -429,7 +429,7 @@ func (r *Runner) runSubmission(ctx context.Context, runID string, start *submiss
 		case <-done:
 		}
 	}()
-	run, startErr := r.startAcquired(turnCtx, act, runID, input)
+	run, startErr := r.startAcquired(turnCtx, act, runID, input, startRecovery)
 	close(done)
 	if errors.Is(startErr, ErrRunActive) || errors.Is(startErr, ErrRunWaiting) {
 		return nil

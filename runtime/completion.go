@@ -90,6 +90,11 @@ func (r *Runner) restoreCompletion(ctx context.Context, s *Session) (*completion
 	if err != nil {
 		return nil, fmt.Errorf("bonnie: restore completion: %w", err)
 	}
+	return replayCompletion(recs)
+}
+
+// replayCompletion is shared by recovery and read-only input admission.
+func replayCompletion(recs []Record) (*completionRecord, error) {
 	var c *completionRecord
 	for _, rec := range recs {
 		if rec.Kind == RecordClear || (rec.Kind == RecordState && (rec.State == RunCompleted || rec.State == RunFailed || rec.State == RunCancelled || rec.State == RunRetired)) {

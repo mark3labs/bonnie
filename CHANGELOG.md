@@ -17,6 +17,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A cancellable mutation gate for `edit` and `write_file` callbacks from one
   tool set. It does not coordinate shell commands or external writers.
 
+### Changed
+
+- Nonempty `runtime.Runner.Start` input is now always new input, including
+  identical text and metadata-only input. It returns a nil Run and the public
+  `ErrInputDeferred` sentinel while saved unfinished work owns the conversation.
+  Callers must retain the undelivered command, recover with `StartRetry`, then
+  submit it after the old logical turn closes. Migrate nonempty crash-recovery
+  calls from Start to StartRetry. Zero-value Start keeps legacy recovery.
+  The durable scheduler's admission semantics are unchanged.
+
 ### Fixed
 
 - Sandbox documentation now states Local's actual path policy: no isolation.

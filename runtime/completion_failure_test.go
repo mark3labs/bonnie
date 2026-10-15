@@ -52,7 +52,7 @@ func TestCompletionJournalFailureRecovery(t *testing.T) {
 			r2 := NewRunner(j.Journal, f2, WithCompletionHook(func(_ context.Context, _ CompletionCandidate) (CompletionFeedback, error) {
 				return CompletionFeedback{}, nil
 			}, 1))
-			run, err = r2.Start(context.Background(), "failure", Input{Text: "start"})
+			run, err = r2.StartRetry(context.Background(), "failure", Input{Text: "start"})
 			if err != nil || run.State != RunCompleted {
 				t.Fatalf("run = %+v, err = %v", run, err)
 			}

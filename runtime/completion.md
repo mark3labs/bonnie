@@ -23,10 +23,14 @@ and message sequence watermark:
 - `continue`: feedback is durable; charge and start the next prompt.
 - `accepted`: the accepted response can be published without another check.
 
-A completed, failed, retired, or cleared run ends this completion budget.
-Running and cancelled runs restore the latest completion state. `Start` uses
-that stored prompt or candidate, not its new text or files. `Resume` supplies
-the human answer as a prompt and keeps the count and known usage. A durable
+A completed, failed, cancelled, retired, or cleared run ends this completion
+budget.
+Running and interrupted runs restore the latest completion state. `StartRetry`
+uses that stored prompt or candidate, not replacement text or files. Nonempty
+`Start` input is rejected with `ErrInputDeferred` while unfinished work owns
+the conversation. `Start(..., Input{})` retains legacy recovery behavior.
+`Resume` supplies the human answer as a prompt and keeps the count and known
+usage. A durable
 resume record also keeps this answer if the process stops before the next
 completion record.
 
@@ -39,7 +43,8 @@ runs before generation; completed external effects must not be repeated.
 An orchestration write error leaves the run running and returns an error.
 This lets a later Runner restore pending work instead of silently starting
 a new budget. Hook errors and model errors fail the turn. Cancellation
-records the cancelled state and keeps the completion state for `Start`.
+records the cancelled state and clears completion state. A new `Start` gets
+a fresh budget; `StartRetry` returns the cancelled snapshot.
 
 ## Limits of recovery
 
@@ -54,7 +59,7 @@ records the cancelled state and keeps the completion state for `Start`.
   completion record. Reported usage can be lower after this crash window.
 - Files are not copied into completion metadata. If the process stops before
   Kit saves the initial file input, automatic completion recovery cannot
-  restore those attachments. Recovery does not use new Start attachments.
+  restore those attachments. Recovery does not use replacement attachments.
 - Response publication and the completed state are not one transaction. A
   stop between them can cause the accepted response event to be sent again.
 - Factory setup still runs on recovery, even for an accepted candidate. The

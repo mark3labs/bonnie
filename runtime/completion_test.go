@@ -149,7 +149,7 @@ func TestCompletionInterruptedCheckRecovery(t *testing.T) {
 		}
 		return CompletionFeedback{}, nil
 	}, 1))
-	run, err := r2.Start(context.Background(), "cancel", Input{Text: "must not replace pending work"})
+	run, err := r2.StartRetry(context.Background(), "cancel", Input{Text: "must not replace pending work"})
 	if err != nil || run.Response != "draft" || a.call != 0 {
 		t.Fatalf("run = %+v, err = %v, calls = %d", run, err, a.call)
 	}
