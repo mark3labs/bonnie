@@ -104,11 +104,94 @@ The standalone `bonnie serve` CLI also supports `--sandbox auto`, which uses ava
 
 Sandboxes open lazily at the first tool call that needs one. A model-only turn does not start a container. A waiting run keeps durable state without holding sandbox compute. The files remain available for later turns unless they are deleted.
 
-Container and microVM commands use `/workspace`. Host-mapped backends report their actual per-run host path. Use relative paths in instructions and skills. Local and Landlock file operations reject working-directory escapes with `ErrOutsideWorkDir`, including symlink escapes. Docker and Microsandbox can access absolute paths inside their guest filesystem; their boundary is the container or microVM, not only `/workspace`.
+Container and microVM commands use `/workspace`. Host-mapped backends report their actual per-run host path. Use relative paths in instructions and skills. Landlock file operations reject working-directory escapes with `ErrOutsideWorkDir`, including symlink escapes. Local provides no isolation and permits other host paths. Docker and Microsandbox can access absolute paths inside their guest filesystem; their boundary is the container or microVM, not only `/workspace`.
 
 The shell tool detects Bash on each call and uses `sh` when Bash is absent. Results name the selected shell. A failed command is not retried under a second shell. For portable commands, use POSIX shell syntax or select an image with Bash. Standard tool output is bounded; save large artifacts to files and publish them through a trusted mechanism.
 
 `context/` seeds are copied without overwriting existing run files. They are not shared mutable output. A low-level host can use `sandbox.Seeded(provider, dir)` for the same copy behavior.
+
+### Search and targeted edits
+
+The built-in tool names are `shell`, `shell_status`, `shell_wait`, `shell_cancel`,
+`read_file`, `write_file`, `list_files`, `grep`, `find`, and `edit`. Do not reuse
+these names for extra tools; Kit's existing collision behavior applies.
+Host core tools stay disabled. All file operations use the selected sandbox.
+
+| Tool | Arguments and defaults |
+|---|---|
+| `shell` | Required `command`; optional `dir`; `wait_seconds` defaults to 30 (0–30). |
+| `shell_status` | Required `job_id`. |
+| `shell_wait` | Required `job_id`; `wait_seconds` defaults to 30 (0–30). |
+| `shell_cancel` | Required `job_id`. |
+| `read_file` | Required `path`. |
+| `write_file` | Required `path` and full `content`; can create files. |
+| `list_files` | `path` defaults to `/workspace`. |
+| `find` | Required `pattern`; directory `path` defaults to `/workspace`; `limit` defaults to 100 (1–1000, zero uses default). |
+| `grep` | Required nonempty `pattern`; file or directory `path` defaults to `/workspace`; optional `glob`; `literal` defaults to false; `context` defaults to 0 (0–10); `limit` defaults to 100 matching lines (1–1000, zero uses default). |
+| `edit` | Required existing-file `path`; either `old_text` and `new_text`, or `replacements` (1–100 objects with both fields). Do not mix forms. |
+
+Relative paths start at `/workspace`. Absolute paths use the backend's namespace
+and restrictions. Local maps `/workspace` to the run directory, but **does not
+provide isolation** and permits other host paths. Landlock rejects paths outside
+its work directory, including symlink escapes. Guest backends use guest paths.
+
+Search returns JSON text with `results`, `truncated`, and a `reason` when partial.
+Paths are relative to the selected directory, with slash separators. Single-file
+`grep` uses the basename. Structured records preserve filenames with newlines.
+Traversal is lexical, excludes `.git` directories, includes other dotfiles,
+ignores non-regular files, and does not follow descendant symlinks. The selected
+root follows the backend's normal path policy. **These tools do not honor
+`.gitignore`.** Narrow the path or glob for large trees.
+
+Globs use slash-separated segments: `*`, `?`, and character classes match within
+one segment. A segment exactly `**` matches zero or more directories. Thus
+`*.go` matches only root files; `**/*.go` also matches nested files. Absolute,
+malformed, blank, and `.` or `..` segment patterns are rejected. `grep` uses Go
+regular expressions by default, or an exact case-sensitive substring with
+`literal: true`. It searches each line, not across lines. Each matching line is
+one result, with `path`, one-based `line`, `text`, and `before`/`after` arrays of
+line/text records. CR is removed only as part of CRLF; a final line needs no LF.
+No matches is a successful empty result.
+
+Search stops at 10,000 visited entries, 30 seconds (or the caller's earlier
+deadline), the requested result limit, or the 32 KiB response limit, including
+JSON framing. Count and byte limits stop after evidence of an omitted result.
+NUL-containing binary files are skipped. Files above 1 MiB are skipped and make
+results partial. A very long result line can exhaust the response limit without
+being included. Visit/size limits state the partial reason; filesystem errors,
+cancellation, and deadlines are tool errors, not complete search results.
+Existing `ReadFile` operations read whole files: these ceilings bound accepted
+input, work, and model output, **not backend allocation or process memory**.
+
+For a single exact edit:
+
+```json
+{"path":"main.go","old_text":"return false","new_text":"return true"}
+```
+
+For several regions validated against the original file:
+
+```json
+{"path":"main.go","replacements":[{"old_text":"oldName","new_text":"newName"},{"old_text":"obsolete comment","new_text":""}]}
+```
+
+`edit` accepts UTF-8 files without NUL, at most 1 MiB. Empty `new_text` deletes;
+omitted `new_text` is an error. Empty `old_text` is an error. Each old text must
+occur exactly once, including overlapping occurrences. Regions must not
+overlap; adjacent regions are valid. Inserted text is never searched by later
+replacements in the request. All regions are validated before one write.
+Validation errors do not write, and a missing file is not created. Success
+reports the requested path, replacement count, and resulting byte count.
+
+A context-cancellable gate serializes `edit` and `write_file` within one tool
+set. It does not coordinate shell commands, custom tools, separate handles or
+processes, or external writers. Reads and enumeration are not a snapshot.
+Writes are not compare-and-swap transactions. A write failure does not promise
+rollback; read and check current content before retrying an uncertain edit.
+There is no automatic edit approval policy, and no exactly-once guarantee
+across a crash between a write and journal persistence. Custom providers can
+keep the required `Sandbox` interface unchanged; enumeration uses optional
+`DirectoryReader`, or a POSIX `sh` fallback through sandbox `Exec`.
 
 ## Inject environment values carefully
 

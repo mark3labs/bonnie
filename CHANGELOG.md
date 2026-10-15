@@ -5,6 +5,22 @@ All notable changes to BONNIE are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Default sandbox-backed `grep`, `find`, and exact `edit` tools. Search uses
+  bounded JSON results and portable directory enumeration; core host tools
+  remain disabled. Search includes dotfiles but does not honor `.gitignore`.
+- Optional `sandbox.DirectoryReader` capability, preserved by environment and
+  seed wrappers without changing the required `Sandbox` interface.
+- A cancellable mutation gate for `edit` and `write_file` callbacks from one
+  tool set. It does not coordinate shell commands or external writers.
+
+### Fixed
+
+- Sandbox documentation now states Local's actual path policy: no isolation.
+
 ## [0.28.0] — 2026-10-14
 
 **Read control records by kind.**

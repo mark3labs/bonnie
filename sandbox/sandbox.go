@@ -8,7 +8,7 @@
 //
 //	Provider   opens one Sandbox per run
 //	Sandbox    runs commands and moves files
-//	Tools      the model-facing shell/read_file/write_file, which proxy in
+//	Tools      the model-facing shell, file, search, and edit tools, which proxy in
 //
 // Tools run in the BONNIE process and proxy into the sandbox. The model never
 // holds a handle to the sandbox and never sees a credential: it drives work

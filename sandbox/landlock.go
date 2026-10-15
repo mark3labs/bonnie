@@ -651,3 +651,24 @@ func (p *LandlockProvider) WorkingDir(runID string) string {
 }
 
 var _ WorkingDirReporter = (*LandlockProvider)(nil)
+
+// ReadDirectory implements DirectoryReader without leaving the confined root.
+func (s *landlockSandbox) ReadDirectory(ctx context.Context, dir string, limit int) ([]DirectoryEntry, bool, error) {
+	if s.isClosed() {
+		return nil, false, ErrClosed
+	}
+	rel, err := s.relative(dir)
+	if err != nil {
+		return nil, false, err
+	}
+	return nativeDirectory(ctx, func() (*os.File, error) {
+		info, err := s.root.Stat(rel)
+		if err != nil {
+			return nil, err
+		}
+		if err := directoryRootType(info); err != nil {
+			return nil, err
+		}
+		return s.root.Open(rel)
+	}, limit)
+}
