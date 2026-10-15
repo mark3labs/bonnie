@@ -80,5 +80,5 @@ func (c *Core) RunDispatch(ctx context.Context, receipt channel.DispatchReceipt,
 			return nil, err
 		}
 	}
-	return c.runner.Start(ctx, receipt.RunID, runtime.Input{Text: text, Context: opts.Context, Title: opts.Title, Trigger: opts.Trigger, Origin: runtime.Origin{Channel: c.name, Kind: opts.Kind}})
+	return c.runner.StartRetry(ctx, receipt.RunID, runtime.Input{Text: text, Context: opts.Context, Title: opts.Title, Trigger: opts.Trigger, Origin: runtime.Origin{Channel: c.name, Kind: opts.Kind}})
 }
