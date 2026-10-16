@@ -159,7 +159,7 @@ func (c *config) managedFactory(provider sandbox.Provider, opts []kit.Option) ru
 						return fmt.Errorf("bonnie: completion factory returned nil hook")
 					}
 				}
-				return nil
+				return c.setupWorkspaceSkills(ctx, k, s, open)
 			}, opts...)
 		a, err := factory(ctx, s)
 		if err != nil {

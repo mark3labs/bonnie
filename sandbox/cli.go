@@ -13,11 +13,12 @@ import (
 // microsandbox differ only in how they build an argv and manage a lifecycle,
 // so those parts are function fields and everything else is common.
 type cliSandbox struct {
-	id      string
-	name    string
-	bin     string
-	backend string
-	jobsDir string
+	discovery guestDiscovery
+	id        string
+	name      string
+	bin       string
+	backend   string
+	jobsDir   string
 
 	// execArgs builds the CLI arguments that run argv inside the sandbox.
 	execArgs func(c *cliSandbox, argv []string, cmd Command) []string
@@ -117,7 +118,7 @@ func (c *cliSandbox) Exec(ctx context.Context, cmd Command) (*Result, error) {
 		return nil, err
 	}
 
-	stdout, stderr, code, err := runCLI(ctx, cmd.Stdin, c.bin, c.execArgs(c, argv, cmd)...)
+	stdout, stderr, code, err := runCLIBounded(ctx, cmd.outputLimit, cmd.Stdin, c.bin, c.execArgs(c, argv, cmd)...)
 	if ctx.Err() != nil {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()

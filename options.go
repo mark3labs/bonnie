@@ -54,6 +54,7 @@ type config struct {
 	prompt              string
 	instrPath           string
 	skillsPath          string
+	workspaceSkills     *WorkspaceSkills
 	contextFiles        string
 	contextFilesSet     bool
 	sharedDirectory     string
@@ -212,7 +213,8 @@ func WithInstructions(path string) Option {
 }
 
 // WithSkills reads the tree's skills from dir instead of [DefaultSkills]. An
-// empty dir disables tree skills and automatic skill discovery. Explicit
+// empty dir disables tree skills and automatic Kit discovery, not explicitly
+// enabled WithWorkspaceSkills discovery. Explicit
 // skills passed through [WithKit] remain in use.
 //
 // A skill is a markdown file with YAML frontmatter: dir holds one *.md or

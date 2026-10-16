@@ -110,3 +110,77 @@ Do not mix direct `Start` calls with scheduler delivery to the same run.
 Stopping the scheduler stops admission and cooperatively cancels its active
 turns. A process crash leaves running submissions for the next scheduler.
 Waiting human requests require no running agent.
+
+### Workspace skills (opt-in)
+
+Enable repository skills in the sandbox separately from authored tree skills:
+
+```go
+bonnie.New(
+    bonnie.WithSkills(""), // no authored tree skills
+    bonnie.WithWorkspaceSkills(bonnie.WorkspaceSkills{
+        Exclude: []string{"archives/**", "**/fixtures"},
+    }),
+).Serve()
+```
+
+Omit `WithWorkspaceSkills` to disable workspace discovery. Repeated options
+replace the policy. Negative limits, invalid exclusion globs, and combination
+with `WithAgentFactory` are rejected before resources open. An enabled scan
+opens sandbox compute at startup, even without a model tool call.
+
+Only `<scope>/.agents/skills/<bundle>/SKILL.md` and
+`<scope>/.kit/skills/<bundle>/SKILL.md` are candidates. Plain `skills/`, loose
+Markdown, and nested assets are not skills. Directory and file symlinks are
+not followed. Mandatory exclusions at every depth are `.git`, `node_modules`,
+`vendor`, `.direnv`, `.venv`, `venv`, `__pycache__`, `.cache`, and `.bonnie`.
+`Exclude` adds root-relative directory globs: `*`, `?`, and classes match
+within a segment; a whole `**` segment matches zero or more segments. Matching
+prunes descendants. Absolute paths, negation, empty/dot/dot-dot segments and
+malformed classes are invalid. Ignore exceptions cannot undo exclusions.
+
+`.gitignore` applies to tracked and untracked paths. Ignored parents are
+pruned. A regular `.git` file or directory starts an independent repository
+boundary; gitdir pointers are not followed. Inherited Git rules reset there,
+but explicit exclusions remain. Outside repositories, rules start at workspace
+root. No host ancestors, Git config, global excludes, or `.git/info/exclude`
+are read. Scope is the nearest repository root, or the owner of `.agents` or
+`.kit` outside a repository.
+
+Defaults are depth 12 (root depth 0; skill parent depth is bounded), 100 active
+skills, 128 KiB original bytes per skill, and 32 KiB exact escaped workspace
+metadata. Internal bounds are 10,000 visited entries, 30 seconds per scan,
+64 KiB per ignore file, 1 MiB aggregate ignore bytes, and bounded diagnostics.
+An over-budget candidate is skipped; later candidates remain eligible. Entries
+are selected in exact source-path order. No names, descriptions or bodies are
+truncated. Invalid edits remove live entries; old durable versions remain.
+Incomplete scans retain the previous complete catalogue. Cancellation aborts
+before a new request. Diagnostics name relative paths, not file contents.
+
+Names include readable components capped at 24 bytes and the full SHA-256 of
+the exact source path, for example `workspace/repo-a/review--<64 hex digits>`.
+The suffix is always present. Edits preserve identity; a declared-name change
+or move changes it. Workspace entries cannot replace authored names.
+
+Metadata is untrusted model input. Bodies arrive only through `activate_skill`;
+`when: always` does not enable eager workspace bodies. Activation is not
+approval and does not grant tools or execution permissions. Its output names
+the selected identity, version hash, source, scope, base directory, and body.
+Use normal sandbox tools for assets relative to that base. Durable bodies do
+not snapshot assets: assets are live and may change or disappear.
+
+Catalogue records contain instruction content and need the same access controls
+and retention as conversation history. A selected version is journalled before
+metadata or activation is available. A resumed execution first uses the last
+recorded catalogue, even if source files changed or vanished. Its following
+request boundary can select current files. Two stable reads detect unstable
+writes, not an atomic snapshot: a valid temporarily stable intermediate file
+can be selected. No watcher or public manual registration API is installed.
+
+Remote discovery uses a versioned static Linux guest helper, installed lazily
+outside the workspace into private backend storage. Release archives contain
+`bonnie-discovery-amd64` or `bonnie-discovery-arm64`. Place it beside BONNIE.
+A custom static agent can use its own fixed-operation helper entry point.
+Guest and helper architecture must match. No guest Go, Python, or Git is
+required. Unsupported platforms/protocols fail explicitly; discovery does not
+fall back to host paths. Custom sandbox providers must supply DiscoveryReader.

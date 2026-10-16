@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Add opt-in workspace skill discovery with bounded metadata, qualified names, and journal-backed version recovery.
+
 All notable changes to BONNIE are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)

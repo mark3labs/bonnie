@@ -367,10 +367,8 @@ func (c *config) kitOptions(prompt, skills string) []kit.Option {
 	// instructions from a directory it merely sits beside. A tree with no
 	// skills therefore says so, rather than leaving the question open.
 	//
-	// Kit reads the directory during construction, which is why the path has
-	// to be resolved before the agent is built: the activate_skill tool is
-	// registered only when at least one skill loaded, so a skill added to a
-	// running Kit would reach the catalog with no tool to open it.
+	// Resolve authored skills before Kit construction. Workspace versions are
+	// registered separately at managed request boundaries.
 	opts = append(opts, func(o *kit.Options) {
 		if skills == "" {
 			// A host that configured skills itself through WithKit keeps
@@ -390,6 +388,9 @@ func (c *config) kitOptions(prompt, skills string) []kit.Option {
 		opts = append(opts, func(o *kit.Options) {
 			o.ExtraTools = append(o.ExtraTools, extra...)
 		})
+	}
+	if c.workspaceSkills != nil {
+		opts = append(opts, kit.WithSkillActivation())
 	}
 	return opts
 }
@@ -631,6 +632,8 @@ func (c *config) agentFactory(ctx context.Context, contextFiles string, opts []k
 // agent factory, or "" when there is none.
 func (c *config) agentConflicts() string {
 	switch {
+	case c.workspaceSkills != nil:
+		return "WithWorkspaceSkills"
 	case c.model != "":
 		return "WithModel"
 	case c.prompt != "":

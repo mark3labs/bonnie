@@ -23,6 +23,7 @@ package fakemodel
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"iter"
@@ -76,6 +77,8 @@ type Request struct {
 	Messages []kit.LLMMessage
 	// Tools names every tool the model was offered.
 	Tools []string
+	// ToolSchemas holds the provider-facing JSON definitions, keyed by name.
+	ToolSchemas map[string]string
 }
 
 // System returns the text of the request's system messages: the system
@@ -163,9 +166,14 @@ func (m *Model) answer(call fantasy.Call) (Reply, []string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	req := Request{Messages: append([]kit.LLMMessage(nil), call.Prompt...)}
+	req := Request{Messages: append([]kit.LLMMessage(nil), call.Prompt...), ToolSchemas: make(map[string]string)}
 	for _, t := range call.Tools {
 		req.Tools = append(req.Tools, t.GetName())
+		data, err := json.Marshal(t)
+		if err != nil {
+			return Reply{}, nil, fmt.Errorf("fakemodel: encode tool schema: %w", err)
+		}
+		req.ToolSchemas[t.GetName()] = string(data)
 	}
 	m.requests = append(m.requests, req)
 

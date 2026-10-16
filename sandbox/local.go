@@ -139,11 +139,12 @@ func (p *LocalProvider) Open(_ context.Context, runID string) (Sandbox, error) {
 
 // localSandbox is one host directory standing in for a sandbox.
 type localSandbox struct {
-	id       string
-	dir      string
-	cleanup  bool
-	release  func()
-	released bool
+	discovery discoveryRoot
+	id        string
+	dir       string
+	cleanup   bool
+	release   func()
+	released  bool
 
 	mu     sync.RWMutex
 	closed bool
@@ -266,6 +267,7 @@ func (s *localSandbox) Stop(ctx context.Context) error { return s.jobs.stop(ctx)
 func (s *localSandbox) Close() error {
 	s.mu.Lock()
 	s.closed = true
+	_ = s.discovery.close()
 	release := s.release
 	if release != nil && !s.released {
 		s.released = true

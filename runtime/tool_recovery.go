@@ -181,6 +181,13 @@ func attachToolRecovery(k *kit.Kit, s *Session) {
 	k.OnAfterToolResult(kit.HookPriorityLow, func(h kit.AfterToolResultHook) *kit.AfterToolResultResult {
 		out := toolOutcome{ID: h.ToolCallID, Result: h.Result, IsError: h.IsError}
 		if err := appendToolRecord(context.Background(), s, RecordToolOutcome, out); err != nil {
+			if h.ToolName == "activate_skill" {
+				s.mu.Lock()
+				if s.workspaceCatalogue.Revision > 0 {
+					s.workspaceDurabilityError = fmt.Errorf("bonnie: workspace activation outcome: %w", err)
+				}
+				s.mu.Unlock()
+			}
 			text, failed := fmt.Sprintf("Cannot store tool outcome; external effect may have occurred: %v", err), true
 			return &kit.AfterToolResultResult{Result: &text, IsError: &failed}
 		}

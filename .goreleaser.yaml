@@ -3,7 +3,8 @@ version: 2
 project_name: bonnie
 
 builds:
-  - main: ./cmd/bonnie
+  - id: bonnie
+    main: ./cmd/bonnie
     binary: bonnie
     env:
       - CGO_ENABLED=0
@@ -23,6 +24,15 @@ builds:
       - arm64
     ldflags:
       - -s -w -X main.version={{.Version}}
+
+  - id: discovery-helper
+    main: ./cmd/bonnie-discovery
+    binary: bonnie-discovery-{{ .Arch }}
+    env:
+      - CGO_ENABLED=0
+    goos: [linux]
+    goarch: [amd64, arm64]
+    ldflags: [-s, -w]
 
 archives:
   # goreleaser v2.6 renamed `format` to `formats`. Use the new key so a

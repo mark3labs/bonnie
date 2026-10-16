@@ -24,7 +24,10 @@ var ErrEntryNotFound = errors.New("bonnie: session entry not found")
 // Session preserves Kit's branching model — entries form a tree, not a list —
 // so branch, collapse, and replay all keep working.
 type Session struct {
-	mu sync.RWMutex
+	workspaceSelect          sync.Mutex
+	workspaceCatalogue       WorkspaceCatalogue
+	workspaceDurabilityError error
+	mu                       sync.RWMutex
 
 	runID     string
 	name      string
@@ -115,6 +118,15 @@ func Restore(ctx context.Context, runID string, j Journal) (*Session, error) {
 	s := NewSession(runID, j)
 	maxSeq := 0
 	for _, rec := range recs {
+		if rec.Kind == RecordWorkspaceSkills {
+			if rec.EntryID != "" {
+				return nil, fmt.Errorf("bonnie: workspace catalogue must not have an entry ID")
+			}
+			if err := s.restoreWorkspaceCatalogue(rec.Payload); err != nil {
+				return nil, err
+			}
+			continue
+		}
 		if rec.Kind == RecordTrigger {
 			var trigger *Trigger
 			if err := json.Unmarshal(rec.Payload, &trigger); err != nil {

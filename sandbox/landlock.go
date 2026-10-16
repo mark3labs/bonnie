@@ -253,14 +253,15 @@ func (p *LandlockProvider) Open(_ context.Context, runID string) (Sandbox, error
 
 // landlockSandbox is one confined host directory.
 type landlockSandbox struct {
-	id       string
-	dir      string
-	root     *os.Root
-	scratch  *os.Root
-	tmp      string
-	cleanup  bool
-	release  func()
-	released bool
+	discovery discoveryRoot
+	id        string
+	dir       string
+	root      *os.Root
+	scratch   *os.Root
+	tmp       string
+	cleanup   bool
+	release   func()
+	released  bool
 
 	mu     sync.RWMutex
 	closed bool
@@ -528,7 +529,7 @@ func (s *landlockSandbox) Close() error {
 	if release != nil {
 		release()
 	}
-	return errors.Join(s.root.Close(), s.scratch.Close())
+	return errors.Join(s.discovery.close(), s.root.Close(), s.scratch.Close())
 }
 
 // Delete implements [Deleter]. It removes the work directory only when the

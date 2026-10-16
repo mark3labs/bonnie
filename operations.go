@@ -91,6 +91,14 @@ type runtimePreparation struct {
 
 // prepareRuntime resolves the tree and factory before the journal opens.
 func (c *config) prepareRuntime(ctx context.Context) (*runtimePreparation, error) {
+	if c.workspaceSkills != nil {
+		if _, err := c.workspaceSkills.policy(); err != nil {
+			return nil, fmt.Errorf("bonnie: workspace skills: %w", err)
+		}
+		if c.factory != nil {
+			return nil, fmt.Errorf("bonnie: WithWorkspaceSkills cannot be combined with WithAgentFactory")
+		}
+	}
 	// Load a .env before anything reads the environment: the provider key the
 	// agent factory needs and the channel credentials used by Run both come
 	// from os.Getenv, so the file has to fill the gaps first. An exported
