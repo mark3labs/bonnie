@@ -76,6 +76,28 @@ indefinitely**, **reachable over HTTP**. State the limits from the current
 
 ## History
 
+### `v0.30.0`, 2026-10-16 — preparation
+
+- [x] Before preparation, `task release-check`, `task release-snapshot`,
+      `task check`, and `task ci` pass at `d6b1acb`. Both Linux snapshot archive
+      checksums verify; the static amd64 binary prints its injected version
+      and refuses `--sandbox none`, naming Landlock and Local.
+- [x] No `replace` directive is committed in framework or example modules.
+- [x] The dated changelog section states claims, current limits, recovery APIs,
+      and the shutdown and `RunInterrupted.IsTerminal` behavior changes.
+- [ ] `test`, `examples`, and `lint` pass on master at the release commit.
+- [ ] Annotated tag pushed; publication and downloaded artifacts verified.
+- [ ] Examples pinned to v0.30.0 after publication and validated.
+
+**Version choice.** MINOR under the pre-1.0 convention: public recovery,
+shutdown, and channel-delivery APIs are added. Interrupted runs are no longer
+terminal, and shutdown interrupts active turns instead of waiting for completion.
+
+**Validation limits.** Many local package results are cached. CI excludes the
+Chromium live-state and end-to-end tests. The arm64 binary and live-model
+behavior were not executed. External effects are not exactly once; input
+that was not saved cannot be recovered, and reply delivery is not guaranteed.
+
 ### `v0.29.0`, 2026-10-15 — publication verified
 
 - [x] `task release-check`, `task release-snapshot`, `task check`, and `task ci`
