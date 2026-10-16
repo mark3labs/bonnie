@@ -117,3 +117,27 @@ func TestWorkspaceCatalogueRejectsCorruption(t *testing.T) {
 		}
 	}
 }
+
+func TestEmptyWorkspaceCatalogueIsIdempotent(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	j := NewMemoryJournal()
+	s := NewSession("empty", j)
+	if err := s.SelectWorkspaceSkills(ctx, []WorkspaceSkillVersion{}); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Restore(ctx, "empty", j)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SelectWorkspaceSkills(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	records, err := j.Replay(ctx, "empty")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("records=%d, want 1", len(records))
+	}
+}

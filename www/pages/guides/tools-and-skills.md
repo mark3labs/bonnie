@@ -297,19 +297,19 @@ Protect and retain the journal as instruction-content storage.
 
 Custom sandboxes must implement `sandbox.SkillDiscovery`; missing support fails
 clearly with no host fallback. Local and Landlock use rooted no-follow Linux
-opens. **Built-in Docker and Microsandbox discovery is not enabled in this WIP:**
-backend-controlled helper storage is still required. They fail closed instead
-of executing a helper that model commands could replace. The `bonnie-skillfs`
-helper and bounded JSON protocol are prepared, but their presence is not proof
-of safe installation. Linux `openat2` support is required; there is no weaker
-fallback.
+opens. **Built-in Docker and Microsandbox discovery is deferred and unavailable.**
+They return an explicit unsupported error rather than execute a guest-writable
+helper. This release supports Local, Landlock and custom remote implementations
+of `sandbox.SkillDiscovery`. Linux `openat2` support is required for the native
+implementation; there is no weaker fallback.
 
-Release builds package Linux amd64 and arm64 helpers. Source builders must run
-`bash scripts/build-skillfs.sh` before compiling BONNIE or an agent binary that
-uses remote discovery. `task build` and GoReleaser do this. Packaged helpers alone do not enable remote scanning. A secure backend-owned
-installation path must be implemented before this WIP is complete. Sandbox
-policy and compute lifecycle remain in force. No watcher, arbitrary host search root,
-manual registration callback or configuration file is added.
+The `bonnie-skillfs` helper and bounded JSON protocol are scaffolding for future
+built-in remote support. `bash scripts/build-skillfs.sh` cross-builds Linux amd64
+and arm64 helpers; `task build` and GoReleaser package them. Packaging does not
+enable remote discovery. No guest Go, Python or Git installation is needed by
+the helper. Sandbox policy and compute lifecycle remain in force. No watcher,
+arbitrary host search root, manual registration callback or configuration file
+is added.
 
 ## Put readable resources in context
 

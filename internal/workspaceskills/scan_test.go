@@ -268,3 +268,15 @@ func TestIgnoreEscapesAndChanges(t *testing.T) {
 		})
 	}
 }
+
+func TestCRLFContentKeepsOriginalVersion(t *testing.T) {
+	t.Parallel()
+	data := []byte(strings.ReplaceAll(valid, "\n", "\r\n"))
+	skill, err := Parse("repo/.agents/skills/x/SKILL.md", "repo", data)
+	if err != nil || skill == nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if string(skill.Original) != string(data) || !strings.Contains(skill.Body, "PRIVATE_BODY") {
+		t.Fatal("original bytes or parsed body lost")
+	}
+}

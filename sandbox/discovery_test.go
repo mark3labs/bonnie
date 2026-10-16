@@ -117,3 +117,39 @@ func TestDiscoveryRemoteProtocol(t *testing.T) {
 		})
 	}
 }
+
+func TestRemoteDiscoveryIsExplicitlyDeferred(t *testing.T) {
+	t.Parallel()
+	c := &cliSandbox{}
+	if _, _, err := c.SkillDirectory(context.Background(), ".", 10); err == nil || !strings.Contains(err.Error(), "backend-controlled helper storage") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestLocalDiscoveryConcurrentClose(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	for range 20 {
+		sb, err := Local(WithLocalRoot(t.TempDir())).Open(ctx, "close")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := sb.WriteFile(ctx, "file", []byte("body")); err != nil {
+			t.Fatal(err)
+		}
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			for range 30 {
+				_, _ = sb.(SkillDiscovery).SkillFile(ctx, "file", 100)
+			}
+		}()
+		if err := sb.Close(); err != nil {
+			t.Fatal(err)
+		}
+		<-done
+		if _, err := sb.(SkillDiscovery).SkillFile(ctx, "file", 100); err != ErrClosed {
+			t.Fatalf("after close: %v", err)
+		}
+	}
+}

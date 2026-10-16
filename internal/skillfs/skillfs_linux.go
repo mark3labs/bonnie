@@ -14,18 +14,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// Entry describes one direct child without following links.
-type Entry struct {
-	Name string
-	Kind string
-}
-
-// File contains bounded bytes and an identity for stability checks.
-type File struct {
-	Data     []byte
-	Identity string
-}
-
 // Reader pins a workspace directory for discovery.
 type Reader struct{ root *os.File }
 

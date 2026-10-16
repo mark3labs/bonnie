@@ -8,23 +8,8 @@ import (
 	"github.com/mark3labs/bonnie/internal/skillfs"
 )
 
-// DiscoveryEntry describes a direct workspace child without following links.
-type DiscoveryEntry = skillfs.Entry
-
-// DiscoveryFile holds bounded file bytes and a stable stat identity.
-type DiscoveryFile = skillfs.File
-
-// SkillDiscovery is an optional sandbox capability. Operations accept only
-// workspace-relative paths (root is "."). Implementations must pin their root,
-// reject every symlink component and nonregular file, and bound reads before
-// allocation. They must not consult the host for a remote workspace.
-type SkillDiscovery interface {
-	SkillDirectory(context.Context, string, int) ([]DiscoveryEntry, bool, error)
-	SkillFile(context.Context, string, int64) (DiscoveryFile, error)
-}
-
 func (s *localSandbox) discovery() (*skillfs.Reader, error) {
-	if s.isClosed() {
+	if s.closed {
 		return nil, ErrClosed
 	}
 	s.discoveryOnce.Do(func() { s.discoveryRoot, s.discoveryErr = skillfs.Open(s.dir) })
@@ -39,6 +24,8 @@ func (s *localSandbox) discovery() (*skillfs.Reader, error) {
 
 // SkillDirectory enumerates the local workspace without following links.
 func (s *localSandbox) SkillDirectory(ctx context.Context, p string, n int) ([]DiscoveryEntry, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	r, err := s.discovery()
 	if err != nil {
 		return nil, false, err
@@ -48,6 +35,8 @@ func (s *localSandbox) SkillDirectory(ctx context.Context, p string, n int) ([]D
 
 // SkillFile reads a bounded regular file from the local workspace.
 func (s *localSandbox) SkillFile(ctx context.Context, p string, n int64) (DiscoveryFile, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	r, err := s.discovery()
 	if err != nil {
 		return DiscoveryFile{}, err

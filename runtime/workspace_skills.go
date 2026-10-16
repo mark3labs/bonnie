@@ -41,7 +41,7 @@ func (s *Session) WorkspaceSkillCatalogue() ([]WorkspaceSkillVersion, bool) {
 func (s *Session) SelectWorkspaceSkills(ctx context.Context, skills []WorkspaceSkillVersion) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.workspaceSkills != nil && reflect.DeepEqual(s.workspaceSkills.Skills, skills) {
+	if s.workspaceSkills != nil && len(s.workspaceSkills.Skills) == len(skills) && (len(skills) == 0 || reflect.DeepEqual(s.workspaceSkills.Skills, skills)) {
 		return nil
 	}
 	revision := uint64(1)

@@ -306,13 +306,14 @@ func Scan(parent context.Context, source Source, p Policy, protected map[string]
 
 // Parse uses Kit's public parser over an in-memory single-file filesystem.
 func Parse(source, scope string, data []byte) (*Skill, error) {
-	if !safePath(source) || (scope != "." && !safePath(scope)) || !utf8.Valid(data) || !bytes.HasPrefix(data, []byte("---\n")) {
+	normalized := bytes.ReplaceAll(data, []byte("\r\n"), []byte("\n"))
+	if !safePath(source) || (scope != "." && !safePath(scope)) || !utf8.Valid(data) || !bytes.HasPrefix(normalized, []byte("---\n")) {
 		return nil, fmt.Errorf("invalid skill source or frontmatter")
 	}
-	if !bytes.Contains(data[4:], []byte("\n---\n")) {
+	if !bytes.Contains(normalized[4:], []byte("\n---\n")) {
 		return nil, fmt.Errorf("incomplete frontmatter")
 	}
-	loaded, err := kit.LoadSkillsFromFS(fstest.MapFS{"SKILL.md": &fstest.MapFile{Data: data}}, ".")
+	loaded, err := kit.LoadSkillsFromFS(fstest.MapFS{"SKILL.md": &fstest.MapFile{Data: normalized}}, ".")
 	if err != nil || len(loaded) != 1 {
 		return nil, fmt.Errorf("invalid skill")
 	}

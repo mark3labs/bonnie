@@ -1,5 +1,17 @@
 package skillfs
 
+// Entry describes one direct child without following links.
+type Entry struct {
+	Name string
+	Kind string
+}
+
+// File contains bounded bytes and an identity for stability checks.
+type File struct {
+	Data     []byte
+	Identity string
+}
+
 // Request is the versioned discovery helper request. All paths are relative.
 type Request struct {
 	Version   int    `json:"version"`

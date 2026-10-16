@@ -36,6 +36,8 @@ type WorkspaceSkills struct {
 // qualify. Tree skills remain separate, including with WithSkills("").
 // This option opens the sandbox at startup and cannot use WithAgentFactory.
 // Repeated options replace the policy. Bundled assets remain live, not saved.
+// Local, Landlock and custom SkillDiscovery sandboxes are supported. Built-in
+// Docker and Microsandbox discovery is deferred and returns an explicit error.
 func WithWorkspaceSkills(policy WorkspaceSkills) Option {
 	policy.Exclude = slices.Clone(policy.Exclude)
 	return func(c *config) {
@@ -102,8 +104,15 @@ func (c *config) setupWorkspaceSkills(ctx context.Context, k *kit.Kit, s *runtim
 	if err != nil {
 		return err
 	}
+	prepareGate := make(chan struct{}, 1)
 	first := true
 	k.OnPrepareStep(kit.HookPriorityLow, func(h kit.PrepareStepHook) *kit.PrepareStepResult {
+		select {
+		case prepareGate <- struct{}{}:
+			defer func() { <-prepareGate }()
+		case <-h.Context.Done():
+			return &kit.PrepareStepResult{Error: h.Context.Err()}
+		}
 		var result workspaceskills.Result
 		var err error
 		if first {
