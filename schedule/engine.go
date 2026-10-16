@@ -328,7 +328,9 @@ func (e *Engine) execute(ctx context.Context, d Definition, o Occurrence) error 
 					seen = t != nil && t.DispatchID == did
 					boundary = false
 				}
-				if seen && rec.Kind == runtime.RecordState && rec.State != runtime.RunRunning && rec.State != runtime.RunPending {
+				// An interrupted turn is not a boundary: it has no outcome yet,
+				// and the retry below continues it.
+				if seen && rec.Kind == runtime.RecordState && rec.State != runtime.RunRunning && rec.State != runtime.RunPending && rec.State != runtime.RunInterrupted {
 					boundary = true
 					completedRecords = recs[:index+1]
 					break
@@ -352,10 +354,20 @@ func (e *Engine) execute(ctx context.Context, d Definition, o Occurrence) error 
 				if ctx.Err() != nil {
 					return err
 				}
+				if errors.Is(err, runtime.ErrRunActive) || errors.Is(err, runtime.ErrRunnerDraining) {
+					// Another owner holds the run, or the process is stopping.
+					// The occurrence stays running; Reconcile tries again.
+					return nil
+				}
 				return e.fail(ctx, o, err)
 			}
 			if w.Result == nil {
 				return e.fail(ctx, o, errors.New("bonnie: schedule: receiver returned no run"))
+			}
+			if w.Result.State == runtime.RunInterrupted {
+				// The process is stopping. The next one continues the turn.
+				w.Result = nil
+				return nil
 			}
 			if w.Result.State == runtime.RunFailed || w.Result.State == runtime.RunCancelled {
 				return e.fail(ctx, o, errors.New("bonnie: schedule: agent execution failed"))
@@ -389,7 +401,7 @@ func (e *Engine) execute(ctx context.Context, d Definition, o Occurrence) error 
 			if err != nil {
 				return err
 			}
-			if current.State == runtime.RunWaiting || current.State == runtime.RunRunning {
+			if current.State == runtime.RunWaiting || current.State == runtime.RunRunning || current.State == runtime.RunInterrupted {
 				waiting = true
 			} else {
 				w.Result = current

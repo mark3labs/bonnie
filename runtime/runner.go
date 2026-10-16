@@ -245,6 +245,7 @@ type Runner struct {
 
 	mu         sync.Mutex
 	active     map[string]*activeTurn
+	draining   bool
 	workMu     sync.Mutex
 	scheduling bool
 }
@@ -282,6 +283,11 @@ func (a *activeTurn) steer(msg string) bool {
 
 // ErrRunActive is returned when a run is already executing.
 var ErrRunActive = errors.New("bonnie: run already active")
+
+// ErrRunnerDraining is returned when a turn would start after
+// [Runner.BeginDrain]. The process is stopping; the caller keeps its input
+// and sends it again to the next process.
+var ErrRunnerDraining = errors.New("bonnie: runner is shutting down")
 
 // ErrRunNotActive is returned when Cancel, Interrupt, or Steer targets a run that this
 // Runner is not currently executing.
@@ -692,8 +698,12 @@ func (r *Runner) startAcquired(turnCtx context.Context, act *activeTurn, runID s
 		return nil, err
 	}
 	s.SetTurnContext(in.Context)
-	// Continue an interrupted turn without adding input that is already durable.
-	if state == RunInterrupted && intent == startRecovery {
+	// Continue an interrupted turn without adding input that is already
+	// durable. RunRunning here is also interrupted work: acquire proved this
+	// Runner does not execute the run, and one Runner owns a journal, so the
+	// owner that wrote "running" is dead. Without this, a retry after a crash
+	// sent the original input a second time.
+	if (state == RunInterrupted || state == RunRunning) && intent == startRecovery {
 		// Kit may have been interrupted before it appended the user message.
 		// Reuse the caller input only when replay confirms it is not durable.
 		prompt := ""
@@ -708,6 +718,8 @@ func (r *Runner) startAcquired(turnCtx context.Context, act *activeTurn, runID s
 }
 
 func hasUserMessage(ctx context.Context, journal Journal, runID, text string) bool {
+	// Empty text is recovery without the original input (Input{}): any user
+	// message of the logical turn is the durable input to continue from.
 	recs, err := journal.Replay(ctx, runID)
 	if err != nil {
 		return false
@@ -724,7 +736,7 @@ func hasUserMessage(ctx context.Context, journal Journal, runID, text string) bo
 		if rec.Kind == RecordTurn {
 			turnStarted = true
 		}
-		if turnStarted && rec.Kind == RecordMessage && rec.Role == "user" && rec.Text == text {
+		if turnStarted && rec.Kind == RecordMessage && rec.Role == "user" && (rec.Text == text || text == "") {
 			found = true
 		}
 	}
@@ -803,7 +815,8 @@ func (r *Runner) Cancel(runID string) error {
 }
 
 // Interrupt stops an active turn for lifecycle recovery. Unlike Cancel, it
-// does not record an explicit cancellation. StartRetry can continue from the durable
+// does not record an explicit cancellation. The run records [RunInterrupted],
+// and [Runner.Continue] or StartRetry continues it from the durable
 // conversation. It returns ErrRunNotActive if this Runner does not own the run.
 func (r *Runner) Interrupt(runID string) error {
 	r.mu.Lock()
@@ -812,14 +825,66 @@ func (r *Runner) Interrupt(runID string) error {
 	if !ok {
 		return fmt.Errorf("%w: %s", ErrRunNotActive, runID)
 	}
-	act.control.Lock()
-	defer act.control.Unlock()
-	if act.finished {
+	if !act.interruptTurn() {
 		return fmt.Errorf("%w: %s", ErrRunNotActive, runID)
 	}
-	act.interrupt = true
-	act.cancel()
 	return nil
+}
+
+// interruptTurn marks the turn interrupted and stops it. It reports false
+// when the turn already finished.
+func (a *activeTurn) interruptTurn() bool {
+	a.control.Lock()
+	defer a.control.Unlock()
+	if a.finished {
+		return false
+	}
+	a.interrupt = true
+	a.cancel()
+	return true
+}
+
+// BeginDrain prepares the Runner for process shutdown. It refuses each new
+// turn with [ErrRunnerDraining] and interrupts each active turn, so the turn
+// records [RunInterrupted] at its next context check instead of a stop reason.
+// The next process continues those runs with [Runner.Recover].
+//
+// A turn that runs to a provider's own deadline is the alternative, and a
+// graceful stop that waits for it either hangs the deploy or ends in a kill
+// that leaves the run with no state at all. Draining is irreversible.
+func (r *Runner) BeginDrain() {
+	r.mu.Lock()
+	r.draining = true
+	turns := make([]*activeTurn, 0, len(r.active))
+	for _, act := range r.active {
+		turns = append(turns, act)
+	}
+	r.mu.Unlock()
+	for _, act := range turns {
+		act.interruptTurn()
+	}
+}
+
+// Drain calls [Runner.BeginDrain] and waits until no turn is active, or until
+// ctx ends. Call it before the journal closes, so each interrupted turn can
+// write its state.
+func (r *Runner) Drain(ctx context.Context) error {
+	r.BeginDrain()
+	tick := time.NewTicker(5 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		r.mu.Lock()
+		idle := len(r.active) == 0
+		r.mu.Unlock()
+		if idle {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("bonnie: drain turns: %w", ctx.Err())
+		case <-tick.C:
+		}
+	}
 }
 
 // Steer injects a message into a turn that is already running, so the next
@@ -949,7 +1014,16 @@ func (r *Runner) turn(ctx context.Context, act *activeTurn, s *Session, prompt s
 		}
 	}
 	if err != nil || ctx.Err() != nil {
-		children, childErr := r.Children(book, runID)
+		// An interrupted parent continues after the restart and still owns
+		// its children, so only a turn that stops for good cancels them.
+		act.control.Lock()
+		interrupted := act.interrupt
+		act.control.Unlock()
+		var children []ChildRun
+		var childErr error
+		if !interrupted {
+			children, childErr = r.Children(book, runID)
+		}
 		if childErr != nil {
 			err = errors.Join(err, childErr)
 		}
@@ -1074,6 +1148,9 @@ func (r *Runner) acquire(ctx context.Context, runID string) (context.Context, *a
 }
 
 func (r *Runner) acquireLocked(ctx context.Context, runID string) (context.Context, *activeTurn, error) {
+	if r.draining {
+		return nil, nil, fmt.Errorf("%w: %s", ErrRunnerDraining, runID)
+	}
 	if _, busy := r.active[runID]; busy {
 		return nil, nil, fmt.Errorf("%w: %s", ErrRunActive, runID)
 	}

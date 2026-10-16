@@ -17,7 +17,7 @@ The NATS channel receives JSON tasks from a broker. It has no HTTP webhook. Core
 | Results | Core publish and connection flush | Journal result, broker-confirmed publish, then input ACK |
 | Answers | Literal `AnswerSubject` | `AnswerSubject + "." + AgentID` |
 | Versions | 0 or 1 | 1 only |
-| Recovery | Explicit; input or output can be lost | Cached result reuse or a fresh independent attempt |
+| Recovery | Host continues an interrupted run at next start; input or output can be lost | Cached result reuse or a fresh independent attempt |
 | Status and cancel protocol | Not supported | Optional; enabled by root-derived subjects |
 
 NATS tasks are not chat follow-ups. An answer must use the answer protocol; another task does not answer a parked run.
@@ -107,7 +107,7 @@ nats --server "$NATS_URL" pub ops.answers \
 
 `responses` uses `runtime.InputResponse`: `text`, optional `turn_id`, and optional `approved`. Omit `approved` for a text question. Explicit `false` is rejection; absence is not rejection. Include the current suspension turn ID when available. The adapter requires a waiting run, matching tool-call ID, and a nonempty response list. Unknown tasks and stale answers produce error results. Core does not use `run_id`, `agent_id`, or `message_id` to route or deduplicate answers.
 
-Core input and output can be lost if no subscriber is present, buffers overflow, the broker disconnects, or shutdown interrupts publication. The result flush confirms connection progress, not subscriber receipt. There is no durable result-publication retry. A saved task is not automatically resumed after a crash.
+Core input and output can be lost if no subscriber is present, buffers overflow, the broker disconnects, or shutdown interrupts publication. The result flush confirms connection progress, not subscriber receipt. There is no durable result-publication retry. A saved task that a crash or shutdown interrupted continues at the agent's next start, but its result stays in the journal: the request's reply inbox is gone.
 
 ## JetStream setup
 
@@ -187,7 +187,7 @@ A task creates a random `attempt_id` and independent run at local address `js/AT
 
 The adapter sends in-progress heartbeats at one third of the effective ACK wait while it reads the journal, waits for locks, executes, and publishes. It saves a bounded result locally before publishing it with a stable `Nats-Msg-Id`. Only after the broker confirms the result does it synchronously acknowledge input. A waiting result also completes this input-delivery transaction; an explicit answer is a separate message.
 
-If the same input is redelivered to the same agent with its journal, a cached result is republished without another model turn. A crash after execution but before saving that result leaves an uncertain attempt. Task redelivery starts a fresh independent attempt, not automatic continuation of the uncertain run. Another agent with a separate journal can also execute the task again. Tool effects can repeat. Preserve journals and make external operations safe to repeat.
+If the same input is redelivered to the same agent with its journal, a cached result is republished without another model turn. A crash after execution but before saving that result leaves an uncertain attempt. Task redelivery starts a fresh independent attempt, not automatic continuation of the uncertain run. The channel owns recovery of its runs (`channel.RecoveryOwner`), so the host does not continue them at startup. Another agent with a separate journal can also execute the task again. Tool effects can repeat. Preserve journals and make external operations safe to repeat.
 
 Result publication or ACK failure leaves input eligible for redelivery. Stream retention limits can still expire or remove input. Broker deduplication can suppress repeated output only within its configured window. This is not distributed exactly-once execution or delivery.
 

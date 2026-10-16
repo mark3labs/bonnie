@@ -370,6 +370,28 @@ run, _ := runner.Start(ctx, "run-1", runtime.Input{Text: "What did I just ask?"}
 // `You asked me "In one sentence, what is a durable agent run?"`
 ```
 
+### Runs continue after a crash or a restart
+
+A served agent (`Agent.Serve`, `Agent.Run`) continues each run that has no stop
+reason when it starts: a run that is `running` (written by a process that is
+gone) or `interrupted`. No new message is necessary. The result goes to the
+channel the conversation is on; HTTP clients read it from the run. On SIGTERM,
+the agent interrupts each turn in flight instead of waiting for it, so the next
+start continues it.
+
+`Runner.Continue` does the least work that ends the turn. A final answer or a
+human-input wait that is already in the journal closes the turn without a model
+call. A durable human answer that the model has not seen is sent to it. Other
+runs continue the saved conversation through `ContinuationAgent`. A tool call
+that the crash left without a result gets an "effect unknown" result and is
+not run again, unless it is in `WithReplaySafeTools`. A run whose input never
+became durable fails with `runtime.ErrRecoveryInputLost`; send it again.
+
+A host that owns the runner calls `Runner.Recover` at startup and
+`Runner.Drain` before it closes the journal. Runs in the submission inbox
+belong to `RunScheduler`, scheduled dispatches to the schedule engine, and
+NATS JetStream tasks to broker redelivery (`channel.RecoveryOwner`).
+
 ### New input and interrupted work
 
 Nonempty `Start` input always means a new command, even when it equals a saved
@@ -1505,13 +1527,16 @@ the current suspension. Active task executions and buffers are bounded;
 `Concurrency` defaults to 4 and `Buffer` to 64. Shutdown interrupts active turns
 and waits for their execution to stop.
 Connection loss also interrupts active turns. The saved `interrupted` state is
-not an operator cancellation; `Runner.StartRetry` can continue it.
+not an operator cancellation. Over Core NATS the host continues it at its next
+start; the result stays in the journal, because the request's reply inbox is
+gone.
 
 **This adapter follows the asynchronous GitHub pattern, not a durable broker
 queue.** It uses Core NATS, not JetStream. Offline subscribers, buffer overflow,
 and process failure can lose tasks or result delivery. The journal preserves run
-state, but the adapter does not automatically retry interrupted tasks or result
-publication. Use broker permissions to restrict publishers and subscribers;
+state, and the host continues an interrupted run at its next start, but the
+adapter does not retry result publication. Use broker permissions to restrict
+publishers and subscribers;
 message payloads do not verify identity. Run one owner for each task namespace;
 multiple ordinary subscribers each receive a copy and can repeat the work.
 

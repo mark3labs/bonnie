@@ -241,6 +241,24 @@ func (m *AddressMap) UnbindRun(ctx context.Context, prefix, runID string) error 
 	return nil
 }
 
+// AddressesOf returns the addresses with prefix that point at runID, in
+// order. It is the reverse of [AddressMap.LookupContext].
+func (m *AddressMap) AddressesOf(ctx context.Context, prefix, runID string) ([]string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.loadLocked(ctx); err != nil {
+		return nil, err
+	}
+	var addresses []string
+	for address, bound := range m.byAddr {
+		if bound == runID && strings.HasPrefix(address, prefix) {
+			addresses = append(addresses, address)
+		}
+	}
+	sort.Strings(addresses)
+	return addresses, nil
+}
+
 // NotePrincipal records the identity that sent a message.
 func (m *AddressMap) NotePrincipal(ctx context.Context, runID string, p *channel.Principal) error {
 	payload, err := json.Marshal(principalNote{RunID: runID, Principal: p})
@@ -464,6 +482,26 @@ func (c *Core) Bind(ctx context.Context, local, runID string) error {
 // [Core.Address] applies; adapters use [Core.Lookup] and [Core.Bind], which
 // take the channel-local form.
 func (c *Core) Addresses() *AddressMap { return c.addresses }
+
+// DeliverRecovered sends the result of a run the host continued after a
+// restart to each surface of this channel that the run serves, with the
+// adapter's own deliver function — the one [Dispatch] calls. It is the
+// shared half of [channel.Recoverer]. A run that no address of this channel
+// points at delivers nothing.
+func (c *Core) DeliverRecovered(ctx context.Context, runID string, run *runtime.Run, err error, deliver func(address string, run *runtime.Run, err error)) error {
+	prefix := ""
+	if c.name != "" {
+		prefix = c.name + "/"
+	}
+	addresses, lookupErr := c.addresses.AddressesOf(ctx, prefix, runID)
+	if lookupErr != nil {
+		return lookupErr
+	}
+	for _, address := range addresses {
+		deliver(strings.TrimPrefix(address, prefix), run, err)
+	}
+	return nil
+}
 
 // Runner exposes the runner the adapter serves.
 func (c *Core) Runner() *runtime.Runner { return c.runner }

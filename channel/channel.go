@@ -249,6 +249,30 @@ type TrackedReceiver interface {
 	DeliverDispatch(ctx context.Context, receipt DispatchReceipt, run *runtime.Run) error
 }
 
+// Recoverer is optional for a channel that sends the result of a run that
+// the host continued after a restart. A served agent continues each run that
+// has no stop reason with [runtime.Runner.Recover], and calls this method on
+// the channel named by the run's origin when the run reaches a boundary. The
+// person who sent the message is then answered on the surface they used,
+// and not only in the journal.
+//
+// The channel finds its own surface from the run ID, usually through its
+// address map. A run with no surface in this channel is not an error: return
+// nil. Delivery is fire-and-log, as it is for a turn the channel started;
+// the returned error is for the host's log.
+type Recoverer interface {
+	DeliverRecovered(ctx context.Context, runID string, run *runtime.Run, err error) error
+}
+
+// RecoveryOwner is optional for a channel that continues its own
+// interrupted runs, for example through a broker that delivers an
+// unacknowledged message again. When OwnsRecovery reports true, the host does
+// not continue the runs whose origin is this channel: two owners would race,
+// and the slower one could run the input a second time.
+type RecoveryOwner interface {
+	OwnsRecovery() bool
+}
+
 // Lifecycle is optional for a channel that owns a connection or receives
 // messages without HTTP routes. A host calls Start after it binds the HTTP
 // listener and before it serves requests.
