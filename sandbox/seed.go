@@ -65,9 +65,9 @@ func (s *seeded) Open(ctx context.Context, runID string) (Sandbox, error) {
 func newSeededJobSandbox(sb Sandbox) Sandbox {
 	result := newSeededJobSandboxBase(sb)
 	if reader, ok := sb.(DirectoryReader); ok {
-		return preserveDirectoryReader(result, reader)
+		return preserveSkillDiscovery(preserveDirectoryReader(result, reader), sb)
 	}
-	return result
+	return preserveSkillDiscovery(result, sb)
 }
 
 func newSeededJobSandboxBase(sb Sandbox) Sandbox {

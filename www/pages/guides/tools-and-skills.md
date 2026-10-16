@@ -186,6 +186,131 @@ The name and description enter the system prompt. The body arrives when the mode
 
 The tree's `skills/` is the authored set. BONNIE does not inherit skills from a host directory beside the server. The managed agent-tree path selects the authored skill directory explicitly; it does not automatically discover model-written skills in run working files. A custom Kit setup can use a different discovery policy. Treat model-written or untrusted skill text as untrusted input.
 
+## Workspace skills
+
+Workspace discovery is off by default. Enable it in Go:
+
+```go
+bonnie.New(
+    bonnie.WithSkills(""), // Optional: disable authored tree skills only.
+    bonnie.WithWorkspaceSkills(bonnie.WorkspaceSkills{
+        Exclude: []string{"archives/**", "fixtures/**"},
+    }),
+).Serve()
+```
+
+This lets repository metadata enter model context. Descriptions and bodies are
+untrusted input and can contain hostile instructions. Progressive disclosure
+is not security approval. Repository skills apply to their source scope; they
+do not replace main instructions or change tool permissions. Activating a skill
+does not authorize execution of its scripts.
+
+The scanner uses sandbox filesystem operations. It recursively recognizes only
+`<scope>/.agents/skills/<bundle>/SKILL.md` and
+`<scope>/.kit/skills/<bundle>/SKILL.md`. Plain `skills/`, loose Markdown files,
+and nested asset files do not qualify. Each file needs complete frontmatter,
+nonempty name and description, and a nonempty body. `when: always` is forced to
+on-demand. Invocation-disabled files are not advertised. Unknown metadata
+cannot grant tools. File and directory symlinks, nonregular files and multiply
+linked files are rejected. No host home directory is scanned.
+
+### Names, scope and activation
+
+Names have the form `workspace/<scope>/<declared-name>--<source-hash>`.
+Readable scope and name components use ASCII letters, digits, hyphens and
+underscores, capped at 24 bytes each; other characters become hyphens. Root
+scope is `root`. The full lowercase SHA-256 suffix hashes the exact relative
+source path. All names get a suffix, so scan order and later collisions cannot
+rename existing entries. Moves and declared-name changes select a new identity.
+Workspace names never replace authored tree or explicit Kit skills.
+
+Only name, description, source location and scope/trust text enter the catalogue.
+`activate_skill` returns the selected body, version hash, source and relative
+base directory. Read bundled assets through ordinary sandbox tools relative to
+that base. BONNIE never enumerates host assets for workspace entries. Assets
+are not journal snapshots: they can change or disappear while a saved body
+remains available.
+
+### Ignore rules and limits
+
+Nested `.gitignore` rules use a Git-compatible matcher. Later rules and valid
+`!` exceptions apply, but an excluded parent is pruned before any child can be
+re-included. A regular `.git` file or directory starts an independent repository
+boundary and resets inherited Git rules. Gitdir pointers are not followed.
+Outside repositories, workspace `.gitignore` rules apply downward. Discovery
+uses these rules even for tracked files. It does not read `.git/info/exclude`,
+Git configuration, global excludes or ancestors of the workspace.
+
+Mandatory directory segments are `.git`, `node_modules`, `vendor`, `.direnv`,
+`.venv`, `venv`, `__pycache__`, `.cache` and `.bonnie`. `Exclude` adds
+workspace-root-relative directory patterns. `/` separates segments; `*`, `?`
+and character classes match within a segment; a whole `**` segment matches
+zero or more segments. A matching directory and all descendants are pruned.
+Absolute paths, empty/dot/dot-dot segments, negation and malformed classes are
+invalid. Neither Git exceptions nor explicit patterns can remove mandatory
+exclusions. There is no ignore override.
+
+| Limit | Default | Meaning |
+| --- | --- | --- |
+| `MaxDepth` | 12 | Directory segments below workspace root (root depth 0); file parent must fit |
+| `MaxSkills` | 100 | Selected workspace skills |
+| `MaxSkillBytes` | 128 KiB | Original bytes including frontmatter |
+| `MaxMetadataBytes` | 32 KiB | Exact escaped Kit workspace catalogue block, including fixed text |
+
+Zero selects defaults; negative limits fail before resources open. Defensive
+ceilings are depth 256, 10,000 selected skills, 16 MiB per file and 16 MiB
+metadata. Scans also have a 30-second deadline, 10,000 visited entries, 64 KiB
+per ignore file, 1 MiB aggregate ignore bytes, and 32 MiB retained candidate
+content. Diagnostics are capped at 100 per scan with 512-byte path excerpts.
+Journal snapshot decoding is capped at 64 MiB. Selection is in exact source
+path order. An over-count or over-metadata entry is skipped, not truncated;
+later entries are still considered. Bodies are never truncated to fit.
+
+Malformed, unstable, inaccessible and oversized skills are skipped with
+bounded diagnostics through `WithActivityLogger`. Invalid edits remove the
+live entry at the next complete boundary. Unreadable or invalid ignore rules
+fail closed for their subtree. Depth limits report omissions. Global timeout,
+entry/candidate exhaustion or root failure keeps the last complete catalogue
+(empty initially), rather than publishing partial removals. Cancellation stops
+the request. Every candidate is read twice and its bytes/stat identity compared.
+This detects unstable writes, not all temporarily stable intermediate content.
+Later scans retry incomplete files.
+
+### Timing and recovery
+
+Enabling discovery opens the sandbox at startup, even before a model tool call.
+BONNIE scans at startup/resume and before later model requests in the same tool
+loop, after the previous tool batch and step checkpoint. A changed catalogue
+is appended to the journal before its metadata is exposed. Activation uses
+that selected immutable body, not the current source file. Identical scans
+append no new catalogue records. Append failures and corrupt restored content
+stop execution before a request with unrecorded instructions.
+
+A resumed execution restores its recorded catalogue before tool recovery. Its
+first request uses that saved version even if files changed or disappeared;
+the following boundary can select the current workspace. Earlier activation
+results remain lossless history. Catalogue records are run-scoped, append-only
+metadata, not branch messages; clear and branch operations do not erase them.
+Protect and retain the journal as instruction-content storage.
+
+### Remote sandboxes
+
+Custom sandboxes must implement `sandbox.SkillDiscovery`; missing support fails
+clearly with no host fallback. Local and Landlock use rooted no-follow Linux
+opens. **Built-in Docker and Microsandbox discovery is deferred and unavailable.**
+They return an explicit unsupported error rather than execute a guest-writable
+helper. This release supports Local, Landlock and custom remote implementations
+of `sandbox.SkillDiscovery`. Linux `openat2` support is required for the native
+implementation; there is no weaker fallback.
+
+The `bonnie-skillfs` helper and bounded JSON protocol are scaffolding for future
+built-in remote support. `bash scripts/build-skillfs.sh` cross-builds Linux amd64
+and arm64 helpers; `task build` and GoReleaser package them. Packaging does not
+enable remote discovery. No guest Go, Python or Git installation is needed by
+the helper. Sandbox policy and compute lifecycle remain in force. No watcher,
+arbitrary host search root, manual registration callback or configuration file
+is added.
+
 ## Put readable resources in context
 
 Kit can name a skill's bundled `scripts/`, `references/`, and `assets/` in activation text using a host path. That path is not copied into the tool sandbox merely because it is in a skill bundle.

@@ -149,6 +149,11 @@ func (c *config) managedFactory(provider sandbox.Provider, opts []kit.Option) ru
 						return err
 					}
 				}
+				if c.workspaceSkills != nil {
+					if err := c.setupWorkspaceSkills(ctx, k, s, open); err != nil {
+						return err
+					}
+				}
 				if c.completion != nil {
 					var err error
 					hook, err = c.completion.NewHook(ctx, scope)

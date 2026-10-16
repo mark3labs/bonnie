@@ -23,6 +23,7 @@ tasks:
   build:
     desc: Build the bonnie binary
     cmds:
+      - bash scripts/build-skillfs.sh
       - go build {{.BUILD_FLAGS}} -ldflags "{{.LDFLAGS}}" ./cmd/bonnie
     sources:
       - "**/*.go"

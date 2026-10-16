@@ -2,6 +2,10 @@ version: 2
 
 project_name: bonnie
 
+before:
+  hooks:
+    - bash scripts/build-skillfs.sh
+
 builds:
   - main: ./cmd/bonnie
     binary: bonnie
