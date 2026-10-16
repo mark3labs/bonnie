@@ -59,7 +59,9 @@ Bindings are saved in the journal and survive a restart. Use `From(address)` to 
 
 Text is conversation history. `Context` is model input for this turn only, saved separately from history. `Title` and conversation `Kind` describe the first turn. `Auth` carries the caller's principal.
 
-Keep one live runner owner for each run. SQLite protects journal writes, but does not coordinate two servers that execute the same conversation. A saved `running` state after a crash does not mean execution continues automatically.
+Keep one live runner owner for each run. SQLite protects journal writes, but does not coordinate two servers that execute the same conversation.
+
+A run that a crash or a restart stopped mid-turn continues when the agent starts again, without a new message. Slack, Discord, Telegram, and GitHub post the result in the conversation that started the run (`channel.Recoverer`); HTTP clients read it from the run or its stream. On SIGTERM the agent interrupts each active turn, so a message that arrives during shutdown is refused with `ErrRunnerDraining` and must be sent again. A tool call that the crash left without a result is not run again; the model is told its effect is unknown. See [Runtime](/reference/runtime#ownership-and-automatic-recovery).
 
 ## Follow-ups, questions, and controls
 

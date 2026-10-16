@@ -34,7 +34,7 @@ bonnie dev --addr 127.0.0.1:8081 --tui=false
 
 `BotName` is a code setting, without `@`. It has no environment fallback. Empty `AppID`, `PrivateKey`, `WebhookSecret`, and `APIURL` come from `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_WEBHOOK_SECRET`, and `GITHUB_API_URL`. The root option requires all three credentials. `PrivateKey` is the PEM content, not a file path; PKCS#1 and PKCS#8 RSA keys are supported. Use the numeric App ID, not a client ID.
 
-A zero `InstallationID` comes from `GITHUB_INSTALLATION_ID` if it is set. This is required for hand-offs and schedule delivery, not normal webhook replies. Explicit config values take precedence. Low-level `github.New(runner, cfg)` does not fill environment fields and requires a bot name, webhook secret, and parseable private key.
+A zero `InstallationID` comes from `GITHUB_INSTALLATION_ID` if it is set. This is required for hand-offs, schedule delivery, and the reply of a run that continued after a restart, not normal webhook replies. Without it, a continued run completes but its reply is only in the journal, and the host logs an error. Explicit config values take precedence. Low-level `github.New(runner, cfg)` does not fill environment fields and requires a bot name, webhook secret, and parseable private key.
 
 `APIURL` defaults to `https://api.github.com`. For GitHub Enterprise Server, set the correct REST API root, usually `https://HOST/api/v3`. There is no `Path` config field; the route is `/github/events`.
 

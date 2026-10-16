@@ -73,7 +73,7 @@ func (a *Agent) Serve() {
 	a.serve()
 }
 
-// Run serves the agent until ctx ends, then drains in-flight turns and
+// Run serves the agent until ctx ends, then interrupts in-flight turns and
 // returns. It is [Agent.Serve] without the process: no flags, no signal
 // handler, no exit — for a host that already owns those.
 //
@@ -81,8 +81,12 @@ func (a *Agent) Serve() {
 // All constructed lifecycle channels shut down before the journal closes,
 // including when startup fails. Each shutdown phase uses WithShutdownTimeout.
 //
-// A run that parks holds no compute and lives in the journal, so stopping
-// here is never destructive.
+// At startup, Run continues each run that a previous process left without a
+// stop reason — a crash, a kill, or a restart in the middle of a turn — and
+// sends each result to the channel the conversation is on. At shutdown it
+// interrupts each turn instead of waiting for it, so the next start
+// continues it. A run that parks holds no compute and lives in the journal,
+// so stopping here is never destructive.
 func (a *Agent) Run(ctx context.Context) (runErr error) {
 	c := a.cfg
 	ln := c.listener
@@ -104,6 +108,17 @@ func (a *Agent) Run(ctx context.Context) (runErr error) {
 	}
 	defer func() { runErr = closeJournal(rt.journal, runErr) }()
 	journal, runner := rt.journal, rt.runner
+	// Interrupt every turn before the journal closes, and wait for each to
+	// record its state. A turn left running here would lose its state write
+	// to a closed journal; an interrupted one is continued by the next
+	// process. This runs last, after every other shutdown step.
+	defer func() {
+		drainCtx, cancel := context.WithTimeout(context.Background(), c.shutdown)
+		defer cancel()
+		if err := runner.Drain(drainCtx); err != nil {
+			runErr = errors.Join(runErr, err)
+		}
+	}()
 
 	// One mux carries every channel: the HTTP transport always, then
 	// whatever an option added. The others are built first so the HTTP
@@ -264,8 +279,8 @@ func (a *Agent) Run(ctx context.Context) (runErr error) {
 		}()
 		defer func() { cancel(); <-done }()
 	}
-	// The scheduler owns admitted durable inputs. Old runs without submission
-	// records are not retried: their external tool effects can be unknown.
+	// The scheduler owns admitted durable inputs, and continues the ones a
+	// previous process left running or interrupted.
 	schedulerCtx, stopScheduler := context.WithCancel(ctx)
 	schedulerDone := make(chan error, 1)
 	go func() {
@@ -281,6 +296,28 @@ func (a *Agent) Run(ctx context.Context) (runErr error) {
 			runErr = errors.Join(runErr, fmt.Errorf("bonnie: scheduler: %w", err))
 		}
 	}()
+
+	// Every other run without a stop reason continues now, without waiting
+	// for a new message. The channels have started, so each result reaches
+	// the conversation it belongs to. A run that a crash or a restart
+	// stopped mid-turn therefore always continues. Tool calls the crash left
+	// without a result are not repeated; see [WithReplaySafeTools].
+	recoveryCtx, stopRecovery := context.WithCancel(schedulerCtx)
+	recoveryDone := make(chan struct{})
+	go func() {
+		defer close(recoveryDone)
+		c.recoverRuns(recoveryCtx, runner, channels, schedules != nil)
+	}()
+	defer func() { stopRecovery(); <-recoveryDone }()
+
+	// When shutdown starts, interrupt every turn and refuse new ones. The
+	// turns record "interrupted" within the shutdown timeout, the HTTP
+	// handlers and chat deliveries that wait for them return, and the next
+	// process continues each one. Waiting for a turn to end by itself can
+	// take longer than any deploy allows, and the kill that follows leaves
+	// no state at all.
+	stopDrain := context.AfterFunc(schedulerCtx, runner.BeginDrain)
+	defer stopDrain()
 
 	if c.noHTTPListener {
 		c.banner(os.Stderr, "no TCP listener", prepared.contextFiles, prepared.skills, prepared.dotenv)
@@ -832,7 +869,7 @@ func (c *config) serve(ctx context.Context, mux http.Handler, ln net.Listener) e
 	case serveErr = <-errs:
 		stopped = true
 	case <-ctx.Done():
-		fmt.Fprintln(os.Stderr, "bonnie: shutting down, letting in-flight turns checkpoint")
+		fmt.Fprintln(os.Stderr, "bonnie: shutting down, interrupting in-flight turns")
 	}
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), c.shutdown)

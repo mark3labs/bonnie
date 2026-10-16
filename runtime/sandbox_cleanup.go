@@ -95,7 +95,7 @@ func (r *Runner) cleanupSandbox(ctx context.Context, runID string, policy Sandbo
 	// acquire detaches the turn context from caller cancellation. Cleanup must
 	// use ctx instead, so the host can stop or bound a cleanup pass.
 	if _, _, err := r.acquire(ctx, runID); err != nil {
-		if errors.Is(err, ErrRunActive) {
+		if errors.Is(err, ErrRunActive) || errors.Is(err, ErrRunnerDraining) {
 			return nil
 		}
 		return err

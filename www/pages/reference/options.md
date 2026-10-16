@@ -113,7 +113,7 @@ See [Agent Commands](/guides/agent-commands) for a complete example and scoped j
 | `WithAddr(addr string)` | Replaces the listen address when non-empty. |
 | `WithJournal(dir string)` | Replaces the journal directory when non-empty. Root hosting uses SQLite. |
 | `WithListener(ln net.Listener)` | Serves on an already-bound listener instead of binding the configured address. Useful for tests with port zero. |
-| `WithShutdownTimeout(d time.Duration)` | Replaces the 30-second shutdown timeout when positive. Shutdown phases use this bound. |
+| `WithShutdownTimeout(d time.Duration)` | Replaces the 30-second shutdown timeout when positive. Shutdown phases use this bound, including the wait for each interrupted turn to record its state. |
 | `WithHTTPAuthenticator(fn bonniehttp.Authenticator)` | Verifies callers of the framework HTTP API and supplies their principal. Health remains unauthenticated. |
 | `Quiet()` | Suppresses the startup banner, not authentication or isolation checks. |
 | `WithActivityLogger(logger runtime.ActivityLogger)` | Enables live activity logging across channels. Nil disables it. Replay is not logged again. |

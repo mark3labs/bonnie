@@ -114,7 +114,7 @@ The dry run prints the discovery plan without writing or building. Dev watches `
 
 Without an explicit address, dev selects a free loopback port from 8080 upward. Read its startup output to find the selected port. The terminal interface uses the same HTTP channel as other clients.
 
-A restart keeps the journal. A waiting run still needs an answer; restarting does not grant approval. Scheduled cron work is off in dev unless you use `--schedule-clock`.
+A restart keeps the journal. A turn in progress is interrupted and continues in the new child, without a new message. A waiting run still needs an answer; restarting does not grant approval. Scheduled cron work is off in dev unless you use `--schedule-clock`.
 
 ```bash
 curl -sS -H 'Content-Type: application/json' \

@@ -394,10 +394,12 @@ func WithChannel(f ChannelFunc) Option {
 	return func(c *config) { c.channels = append(c.channels, f) }
 }
 
-// WithShutdownTimeout is how long [Agent.Run] waits for in-flight turns to reach a
-// checkpoint after a signal. A turn that is cut short still keeps its
-// finished steps — the journal is what survives — but a clean stop is
-// cheaper.
+// WithShutdownTimeout bounds each shutdown phase of [Agent.Run]. When a
+// signal arrives, each in-flight turn is interrupted and records
+// "interrupted" at its next context check; the next start continues it. A
+// turn that does not stop within the timeout still keeps its finished steps
+// — the journal is what survives — and the next start continues it from
+// there.
 func WithShutdownTimeout(d time.Duration) Option {
 	return func(c *config) {
 		if d > 0 {

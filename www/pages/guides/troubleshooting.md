@@ -176,6 +176,8 @@ curl -sSN 'http://127.0.0.1:8080/bonnie/v1/runs/RUN_ID/stream?cursor=12'
 
 Include authentication when needed. Durable events are journal-anchored and replay after restart. Live-only deltas do not replay. A missing live text fragment does not prove that a committed step was lost. Check the snapshot and records.
 
+A run that was mid-turn when the process stopped continues at the next start. If it stays `running` or `interrupted`, check the startup log for `bonnie: continue run` errors. A run that fails with "input was not saved" stopped before its message reached the journal: send the message again. A message sent during shutdown is refused with "runner is shutting down"; send it again after the restart.
+
 If two processes executed the same run, stop the duplicate owner. SQLite protects record integrity, not turn coordination. Do not repeatedly retry a sequence conflict while both owners remain active.
 
 For `ErrCorruptConversation`, stop execution and preserve a backup. BONNIE can repair an incomplete trailing tool step, but an unanswered tool call in the middle of history is treated as damage. Do not manually rebuild messages from `Record.Text`: it is a display projection, while `Record.Payload` contains the typed message, including tool calls. Investigate storage or custom journal code.
@@ -203,6 +205,6 @@ Stop the owning server, preserve a consistent journal and working-file backup, a
 bonnie sandbox prune --journal .bonnie --sandbox docker --dry-run
 ```
 
-Use the backend the runs actually used. A real prune deletes finished-run working files and cannot recover them from journal history. Waiting, pending, and running runs are kept. Do not use pruning as a generic recovery command.
+Use the backend the runs actually used. A real prune deletes finished-run working files and cannot recover them from journal history. Waiting, pending, running, and interrupted runs are kept. Do not use pruning as a generic recovery command.
 
 Report reproducible defects with sanitized errors, versions, configuration, and a minimal test. Read the [runtime](https://pkg.go.dev/github.com/mark3labs/bonnie/runtime), [sandbox](https://pkg.go.dev/github.com/mark3labs/bonnie/sandbox), and channel godoc before changing a recovery boundary.

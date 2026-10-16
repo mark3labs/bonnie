@@ -24,7 +24,7 @@ Run: support-42
 
 The default journal is SQLite at `.bonnie/journal.db`. It stores typed conversation messages, run state, and control records. Typed messages preserve tool call IDs, arguments, results, and other message parts. Display text alone is not enough for replay.
 
-BONNIE uses the public Kit session manager and lifecycle hooks. A tool-calling step reaches SQLite as an atomic transaction. When another process opens the same journal, the runner restores the conversation before it calls the model again.
+BONNIE uses the public Kit session manager and lifecycle hooks. A tool-calling step reaches SQLite as an atomic transaction. When another process opens the same journal, the runner restores the conversation before it calls the model again. A served agent continues each run that a crash or a restart stopped mid-turn when it starts, without a new message.
 
 Keep sandbox working files as well as the journal. Conversation replay cannot recreate every output file. Read [Journal](/reference/journal) for storage, backup, and recovery details.
 
@@ -37,7 +37,7 @@ BONNIE does not provide exactly-once external execution. Consider this order:
 3. Recovery removes or retries incomplete work.
 4. The model can call the tool again.
 
-Use external idempotency keys and reconcile effects whose outcomes are uncertain. Completion callbacks can also repeat after interruption. A restored committed step is different: its tool results are already in conversation history.
+BONNIE reduces step 4: a tool call that the crash left without a result is not run again on recovery, and the model is told its effect is unknown. The model can still decide to call the tool again. Use external idempotency keys and reconcile effects whose outcomes are uncertain. Completion callbacks can also repeat after interruption. A restored committed step is different: its tool results are already in conversation history.
 
 SQLite serializes writes, but it does not coordinate model execution across servers. Use one execution host for a journal. Do not place the journal on a network filesystem with unreliable POSIX locks.
 

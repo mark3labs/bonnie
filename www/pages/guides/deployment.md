@@ -105,9 +105,9 @@ Approval tools do not automatically authorize external actions. A halting tool d
 
 ## Supervise and stop the process
 
-Run the executable under a service manager with a fixed working directory, persistent storage, protected environment, and a restart policy. Send SIGTERM for a normal stop. `Agent.Serve` owns signal handling and waits for in-flight work to reach checkpoints; the default shutdown timeout is 30 seconds. Configure `WithShutdownTimeout` when necessary.
+Run the executable under a service manager with a fixed working directory, persistent storage, protected environment, and a restart policy. Send SIGTERM for a normal stop. `Agent.Serve` owns signal handling. On SIGTERM it interrupts each turn in flight and waits for each to record `interrupted`; the next start continues those runs, and also every run a crash left `running`, without a new message. The default shutdown timeout is 30 seconds. Configure `WithShutdownTimeout` when necessary.
 
-Model calls, custom tools, and callbacks must observe their contexts. A callback that ignores cancellation can prevent a timely stop. Budget the service manager's stop timeout for BONNIE's shutdown phases. A forced kill can lose the in-progress step and can leave an external action with no saved result.
+Model calls, custom tools, and callbacks must observe their contexts. A callback that ignores cancellation can prevent a timely stop. Budget the service manager's stop timeout for BONNIE's shutdown phases. A forced kill can lose the in-progress step and can leave an external action with no saved result. The next start still continues the run from its last saved step, and a tool call with no saved result reaches the model as "effect unknown" instead of running again (unless it is in `WithReplaySafeTools`).
 
 A host that owns its own process lifecycle uses `Agent.Run(ctx)`. That method does not parse flags, install signal handling, or exit the process.
 
@@ -218,7 +218,7 @@ curl -sS -H "Authorization: Bearer $BONNIE_API_TOKEN" \
   -d '{"address":"deployment-check","text":"Reply with a short greeting. Do not run tools."}'
 ```
 
-Health is a liveness response with no journal read. It does not prove that the provider, disk, or sandbox works. Run a separate harmless sandbox test and a restart test before accepting traffic. Verify that a waiting run can be answered after restart.
+Health is a liveness response with no journal read. It does not prove that the provider, disk, or sandbox works. Run a separate harmless sandbox test and a restart test before accepting traffic. Verify that a waiting run can be answered after restart, and that a run stopped mid-turn completes after the next start with no new message.
 
 Inspect state even while the server is stopped:
 
@@ -228,7 +228,7 @@ bonnie runs list --journal /var/lib/bonnie/report-agent --state waiting
 bonnie runs show --journal /var/lib/bonnie/report-agent RUN_ID
 ```
 
-Completed steps replay with full typed tool-call data. The journal cannot guarantee exactly-once external effects when a process stops between an external action and its saved result. Use service idempotency keys and receipts for important effects. Ordinary runs do not become an automatic retry queue merely because the journal is durable.
+Completed steps replay with full typed tool-call data. The journal cannot guarantee exactly-once external effects when a process stops between an external action and its saved result. Use service idempotency keys and receipts for important effects. A run that a crash or restart stopped mid-turn continues at the next start from its last saved step; a failed or cancelled run is not retried.
 
 NDJSON streams can reconnect with their last `cursor`. Durable events replay across restart; live-only deltas do not. A restarted waiting run still requires an explicit answer. Cancellation keeps saved work and files; retirement permanently prevents new turns on that run.
 
@@ -242,7 +242,7 @@ Before an upgrade:
 2. Stop the owner cleanly and back up storage and working files.
 3. Record the executable, dependency versions, sandbox configuration, and schedule revisions.
 4. Test the new binary against a backup in an isolated environment with no real external effects.
-5. Start one owner and verify health, sandbox access, and parked-run recovery.
+5. Start one owner and verify health, sandbox access, parked-run recovery, and that interrupted runs continued (`bonnie runs list --state interrupted` is empty).
 
 Older JSONL journals are imported on first open. Source files keep their sequence numbers and are renamed with `.jsonl.imported`; import is idempotent. Keep an untouched backup before migration. Do not assume an older executable can read a database changed by a newer release.
 

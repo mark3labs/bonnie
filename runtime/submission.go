@@ -211,10 +211,12 @@ func (r *Runner) WaitSubmission(ctx context.Context, runID, id string) (*Submiss
 	}
 }
 
-// RunScheduler delivers durable submissions, including work left running by
-// a previous process. It leaves human waits parked. It does not retry failed
-// work or old runs that have no submission record. Call it once per journal
-// owner. Cancellation stops admission of more work and cancels owned turns.
+// RunScheduler delivers durable submissions, including work left running or
+// interrupted by a previous process. It leaves human waits parked. It does
+// not retry failed work. Runs that have no submission record are continued
+// by [Runner.Recover]. Call it once per journal owner. Cancellation stops
+// admission of more work and interrupts owned turns: their submissions stay
+// running, and the next scheduler continues them.
 func (r *Runner) RunScheduler(ctx context.Context) error {
 	r.workMu.Lock()
 	if r.scheduling {
@@ -353,7 +355,7 @@ func (r *Runner) planSubmission(ctx context.Context, runID string) (_ *submissio
 	}
 	turnCtx, act, acquireErr := r.acquire(ctx, runID)
 	if acquireErr != nil {
-		if errors.Is(acquireErr, ErrRunActive) {
+		if errors.Is(acquireErr, ErrRunActive) || errors.Is(acquireErr, ErrRunnerDraining) {
 			return nil, nil
 		}
 		return nil, acquireErr
@@ -425,13 +427,25 @@ func (r *Runner) runSubmission(ctx context.Context, runID string, start *submiss
 	go func() {
 		select {
 		case <-ctx.Done():
-			act.cancel()
+			// Stopping the scheduler is a shutdown, not a decision about the
+			// work. Interrupt, so the submission stays running and the next
+			// process continues it. A cancel here aborted the submission for
+			// good on every graceful restart.
+			act.interruptTurn()
 		case <-done:
 		}
 	}()
 	run, startErr := r.startAcquired(turnCtx, act, runID, input, startRecovery)
 	close(done)
 	if errors.Is(startErr, ErrRunActive) || errors.Is(startErr, ErrRunWaiting) {
+		return nil
+	}
+	if run != nil && run.State == RunInterrupted {
+		return nil
+	}
+	if startErr != nil && run == nil && ctx.Err() != nil {
+		// The turn stopped before it could record a state. The submission
+		// stays running for the next scheduler.
 		return nil
 	}
 	item.State = SubmissionDone

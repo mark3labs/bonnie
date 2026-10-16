@@ -997,8 +997,10 @@ func operationAddress(p *channel.Principal, operationID string) string {
 // handleOperation admits one start per key. Admission is durable before
 // execution. A retry reads state and never calls the agent, also after a
 // failure, cancellation, or reset. In-flight retries return pending or
-// running. A crash before execution can leave pending: recovery is explicit
-// through the run API, not an automatic retry of possible side effects.
+// running. A turn that a crash or restart interrupts is continued by the
+// host at its next start (runtime.Runner.Recover), not by a retry of this
+// request; a retry then reads the continued run. A crash before the input
+// is durable can leave pending; that run has no input to continue.
 // The first call reports execution errors normally; later calls report the
 // durable state (including failed) with 200. Changed bodies do not change
 // the admitted operation. Use a new key to request new work.

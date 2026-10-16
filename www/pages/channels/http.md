@@ -156,7 +156,7 @@ curl -s http://127.0.0.1:8080/bonnie/v1/runs \
   -d '{"operation_id":"deploy-request-42","text":"Prepare a staging deployment."}'
 ```
 
-The same key under the same `Authenticator`, `Kind`, and `ID` returns saved state without another turn. Changed text on a retry does not change the admitted operation. This also applies after failure, cancellation, retirement, or a restart. Use a new key for new work. A crash before execution can leave `pending`; recovery is explicit through the run API. This is not distributed exactly-once execution: keep one live owner for the journal's runs.
+The same key under the same `Authenticator`, `Kind`, and `ID` returns saved state without another turn. Changed text on a retry does not change the admitted operation. This also applies after failure, cancellation, retirement, or a restart. Use a new key for new work. A turn that a crash or restart interrupts continues at the agent's next start, and a retry then reads the continued run. A crash before the input is durable can leave `pending`; that run has no input to continue. This is not distributed exactly-once execution: keep one live owner for the journal's runs.
 
 ## Errors
 

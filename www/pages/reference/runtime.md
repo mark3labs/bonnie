@@ -57,12 +57,13 @@ Runner options include `WithEventBuffer`, `WithActivityLogger`, `WithCompletionH
 | `RunPending` | `pending` | Recorded, no executed step yet |
 | `RunRunning` | `running` | Saved execution state; use `IsActive` to determine whether this Runner is executing it now |
 | `RunWaiting` | `waiting` | Suspended for external input; answer with `Resume` |
+| `RunInterrupted` | `interrupted` | The host stopped the turn to continue it later (shutdown, connection loss); `Continue` or `StartRetry` continues it |
 | `RunCompleted` | `completed` | Normal outcome; another `Start` can add a turn |
 | `RunFailed` | `failed` | Execution error; another `Start` can add a turn after investigation |
 | `RunCancelled` | `cancelled` | Operator stopped work; completed steps remain; continue with `Start` |
 | `RunRetired` | `retired` | Permanently closed; history remains readable |
 
-`IsTerminal()` is true for completed, failed, cancelled, and retired. Terminal does not mean permanently closed except for retired. A saved running state can remain after a crash without an active executor.
+`IsTerminal()` is true for completed, failed, cancelled, and retired. Terminal does not mean permanently closed except for retired. `running` and `interrupted` are not terminal: the turn has no stop reason. A `running` state that a crash left has no executor until the next start of a served agent, which continues it. See [Ownership and automatic recovery](#ownership-and-automatic-recovery).
 
 ## Start and resume
 
@@ -72,7 +73,7 @@ Nonempty `Start` input is always a new command, even when its text equals an ear
 
 The refusal does not restore or repair the session, write input metadata, build an agent, or publish a response. A previously durable cancellation command is applied first and can write cancellation bookkeeping. Waiting, retired, and active errors keep precedence.
 
-The caller must retain the command as undelivered: BONNIE does not queue it. Recover with `StartRetry` using the original admitted input when needed. Submit the new command with Start only after recovery closes the logical turn. If recovery parks, answer through Resume first. Do not use RequestCancel unless cancellation is intended.
+The caller must retain the command as undelivered: BONNIE does not queue it. A served agent continues interrupted work by itself at startup, so the refusal is usually short. A host that owns the runner recovers with `Continue`, or with `StartRetry` using the original admitted input when needed. Submit the new command with Start only after recovery closes the logical turn. If recovery parks, answer through Resume first. Do not use RequestCancel unless cancellation is intended.
 
 `StartRetry` preserves cancelled snapshots and continues saved input without duplication. It is not generic idempotency after a completed turn. `Start(ctx, runID, Input{})` keeps legacy recovery behavior; it is not an explicit admission signal. There is no request-ID or exactly-once guarantee for successful Start calls.
 
@@ -180,6 +181,6 @@ Completion delays the final response event, not live model activity or saved dra
 
 A Runner serializes its own turns only. Two Runners or processes executing one run can interleave the conversation even when SQLite protects database integrity. Controls and cleanup must reach the execution owner. Shared storage is not a distributed lock or cancellation router.
 
-Opening a journal or restarting a generic HTTP server does not automatically execute every saved running run. StartRetry, zero-value Start, and Resume are the recovery entry points; transports and schedule agents apply their own retry rules. Core NATS can lose tasks and result delivery. JetStream retries are at least once and can create a new attempt or execute on another agent. Schedules save prepared dispatches and retry delivery, but channel posts can repeat after a crash. See [Channels](/channels/overview) and [Scheduling](/guides/scheduling).
+A served agent (`Agent.Serve`, `Agent.Run`) calls `Runner.Recover` at startup, after its channels start: each run that is `running` or `interrupted` continues through `Runner.Continue` with no new input, and the result goes to the channel of its origin (`channel.Recoverer`). At shutdown, `Runner.BeginDrain` and `Runner.Drain` interrupt each turn so the next start continues it. Continue closes a turn whose answer or human-input wait is already durable without a model call, sends a durable unseen answer, and otherwise continues the saved conversation through `ContinuationAgent`; a run whose input never became durable fails with `ErrRecoveryInputLost`. Opening a journal alone executes nothing: a host that owns the runner calls Recover itself. Submissions belong to RunScheduler, scheduled dispatches to the schedule engine, and JetStream tasks to broker redelivery (`channel.RecoveryOwner`). Core NATS can lose tasks and result delivery. JetStream retries are at least once and can create a new attempt or execute on another agent. Schedules save prepared dispatches and retry delivery, but channel posts can repeat after a crash. See [Channels](/channels/overview) and [Scheduling](/guides/scheduling).
 
 Keep journal storage, working files, configured backends, and agent identity stable. Cleanup is opt-in and local to one owner. A journal survives removal of a sandbox, but it cannot recreate lost working output. See [Troubleshooting](/guides/troubleshooting) before retrying an external action.

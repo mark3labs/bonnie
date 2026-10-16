@@ -295,6 +295,16 @@ func validSubject(s string) bool {
 // Name implements channel.Channel.
 func (c *Channel) Name() string { return "nats" }
 
+var _ channel.RecoveryOwner = (*Channel)(nil)
+
+// OwnsRecovery implements [channel.RecoveryOwner]. In JetStream mode an
+// interrupted turn is not acknowledged, and the broker delivers the task
+// again to the same attempt, so the channel continues its own runs and
+// publishes the result where the caller waits for it. Core NATS has no
+// redelivery; the host continues those runs, and the result stays in the
+// journal because the request's reply inbox is gone.
+func (c *Channel) OwnsRecovery() bool { return c.cfg.Stream != "" }
+
 // PresenceEndpoints describes the configured nats endpoint without credentials.
 func (c *Channel) PresenceEndpoints() []presence.Endpoint {
 	c.mu.Lock()

@@ -5,6 +5,47 @@ All notable changes to BONNIE are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+**Runs always continue after a crash or a restart.** Before, a served agent
+continued only durable submissions; a run that a channel started stayed
+`running` for ever after a crash, and a graceful stop aborted submissions for
+good.
+
+### Added
+
+- `runtime.Runner.Continue` continues one run whose turn has no stop reason
+  (`running` from a dead process, or `interrupted`) with no new input. It
+  closes a turn whose answer or human-input wait is already durable without a
+  model call, sends a durable answer the model has not seen, and otherwise
+  continues the saved conversation. A run whose input never became durable
+  fails with `runtime.ErrRecoveryInputLost`.
+- `runtime.Runner.Recover`, `Unfinished`, `RecoverOptions`, and
+  `RecoveredRun` continue every such run with bounded concurrency.
+  `Agent.Run` and `Agent.Serve` call it at startup.
+- `runtime.Runner.BeginDrain`, `Drain`, and `ErrRunnerDraining`: shutdown
+  interrupts each turn and refuses new ones, so the next process continues them.
+- `channel.Recoverer`: Slack, Discord, Telegram, and GitHub post the result of
+  a continued run in the conversation that started it (`chat.Core.DeliverRecovered`,
+  `chat.AddressMap.AddressesOf`). GitHub needs `GITHUB_INSTALLATION_ID` for it.
+- `channel.RecoveryOwner`: NATS JetStream keeps its runs for broker redelivery.
+
+### Changed
+
+- **Breaking:** `RunInterrupted.IsTerminal()` is now false. Sandbox cleanup no
+  longer deletes the files of an interrupted run.
+- **Breaking:** `Agent.Run` interrupts in-flight turns at shutdown instead of
+  waiting for them. `WithShutdownTimeout` bounds how long each turn has to
+  record `interrupted`.
+- `RunScheduler` cancellation interrupts its turns. Their submissions stay
+  `running`, and the next scheduler continues them; before, they were aborted.
+- `StartRetry` on a `running` run from a dead process continues the saved
+  input, as it does for `interrupted`, and does not send it a second time.
+- An interrupted parent turn no longer cancels the child runs it owns.
+- The schedule engine continues an interrupted dispatch and does not save the
+  interruption as its result. A dispatch held by another owner is retried, not
+  failed.
+
 ## [0.29.0] — 2026-10-15
 
 **Search and edit inside the sandbox; separate new input from recovery.**

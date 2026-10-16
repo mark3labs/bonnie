@@ -61,10 +61,11 @@ A submission is done when its turn reaches a boundary, including a human wait.
 Use the existing `Resume` API to answer that wait. Queued work stays parked
 until the human wait ends. Failed work is not retried automatically.
 
-The scheduler resumes running submissions after a crash. It does not retry
-older runs that have no submission record. Existing synchronous channel routes
-keep their existing semantics; use the new submission route for durable input.
-Atomic delivery markers require `runtime.StepJournal`.
+The scheduler resumes running and interrupted submissions after a crash or a
+restart; stopping the scheduler interrupts its turns and leaves their
+submissions running for the next process. Runs that have no submission record
+are continued by `Runner.Recover`, which the root BONNIE service calls at
+startup. Atomic delivery markers require `runtime.StepJournal`.
 
 ## Child runs
 
