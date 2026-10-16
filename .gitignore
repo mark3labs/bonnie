@@ -2,6 +2,7 @@
 /bonnie
 /output/
 /dist/
+/sandbox/discoveryhelpers/linux-*.gz
 
 # Nix build symlinks
 /result

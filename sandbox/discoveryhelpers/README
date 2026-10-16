@@ -1,0 +1,2 @@
+Generated Linux guest helpers are placed here by scripts/build-skillfs.sh.
+They are embedded in BONNIE release binaries, not committed as build output.

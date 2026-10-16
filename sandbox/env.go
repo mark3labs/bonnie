@@ -127,9 +127,9 @@ func newEnvSandbox(inner Sandbox, env []string) Sandbox {
 	result := newEnvSandboxBase(inner, env)
 	if _, ok := inner.(DirectoryReader); ok {
 		reader := directoryReaderFunc((&envSandbox{Sandbox: inner, env: env}).readDirectory)
-		return preserveDirectoryReader(result, reader)
+		return preserveSkillDiscovery(preserveDirectoryReader(result, reader), inner)
 	}
-	return result
+	return preserveSkillDiscovery(result, inner)
 }
 
 func newEnvSandboxBase(inner Sandbox, env []string) Sandbox {

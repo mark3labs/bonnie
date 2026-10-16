@@ -3,6 +3,36 @@
 BONNIE stores tool intents, submitted inputs, and child ownership in its
 existing journal. No second database or configuration file is needed.
 
+## Workspace skill versions
+
+`WithWorkspaceSkills(WorkspaceSkills{})` enables bounded repository discovery
+inside each managed run's sandbox. It is off by default. Selected catalogues
+are full append-only `workspace_skills` records with schema version, monotonic
+revision, exact source/scope/base, qualified identity, original bytes and hash,
+and parsed description/body. They have no entry ID and are not messages.
+Clear and branch changes retain the current run-scoped catalogue.
+
+A selection commits before its metadata reaches a model request. That revision
+stays fixed for the request and its tool batch. Activation reads saved content,
+not a live source file. Existing tool intent/outcome durability stores the
+activation result (including its version hash) before the atomic message step
+and step checkpoint. The next catalogue transition occurs at the following
+request boundary. Identical selections do not append another snapshot.
+
+Restore verifies schema, content hashes, identities and parsed content, with a
+64 MiB decode ceiling. Journal errors and corrupt content stop execution.
+The catalogue is restored before tool recovery. The first resumed request uses
+the saved versions even if sources changed or disappeared. Current filesystem
+changes can become active at the following boundary. An interrupted activation
+is not silently executed against a new body; ordinary uncertain-tool recovery
+still applies. Message payloads and earlier results remain lossless.
+
+Only skill files are versioned. Bundled assets remain live sandbox data and
+can be missing or changed. Protect journals as instruction-content storage;
+full snapshots can grow after repeated edits and no history deletion is added.
+See the workspace-skills guide for trust, exclusion, scan-limit and guest-helper
+requirements. Progressive disclosure is not permission to execute scripts.
+
 ## Tool recovery
 
 A Kit agent made with BONNIE's factories stores a tool intent before execution

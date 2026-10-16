@@ -237,7 +237,35 @@ that gives a `name` and a `description`. Those two fields go in the system
 prompt; the body arrives only when the model calls `activate_skill`, so a
 large skill set costs few tokens until it is used. The tree's `skills/` is the authored set. The managed agent-tree path selects
 that directory explicitly and does not automatically discover model-written
-skills in run working files. Skills beside the host process are not inherited.
+skills in run working files unless workspace discovery is explicitly enabled.
+Skills beside the host process are not inherited.
+
+Enable repository skills in each run's workspace with:
+
+```go
+bonnie.New(
+    bonnie.WithWorkspaceSkills(bonnie.WorkspaceSkills{}),
+).Serve()
+```
+
+Discovery scans only `.agents/skills/<bundle>/SKILL.md` and
+`.kit/skills/<bundle>/SKILL.md`, recursively inside the sandbox, before the
+next model request. Plain `skills/` directories do not qualify. `WithSkills("")`
+disables tree skills, not this opt-in. Repository skills cannot replace authored
+names. Names have the form `workspace/repo-a/review--<64-hex-path-hash>`;
+metadata includes the source location and repository scope. Bodies remain
+on-demand through `activate_skill`; assets use the sandbox-relative bundle
+base directory. Neither metadata nor activation authorizes execution.
+
+Defaults are depth 12, 100 skills, 128 KiB per file, and 32 KiB of escaped
+metadata. Scans honor nested `.gitignore` files and prune `.git`, dependency,
+and cache directories. They never use host ignore configuration or follow
+symlinks. Discovery opens sandbox compute at startup. Saved content versions
+are journalled before requests; the first resumed request uses its saved
+catalogue even if source files changed. Assets are live files, not snapshots.
+See [Tools and Skills](https://go-bonnie.dev/guides/tools-and-skills#workspace-skills)
+for exact limits, exclusions, diagnostics, remote helper requirements and the
+untrusted-input boundary.
 
 There is no configuration file. A setting is a file at a known path
 (`instructions.md`, `context/`, `skills/`, `tools/`) or an option in

@@ -21,17 +21,38 @@ import (
 // The returned error is about the CLI itself failing to run. The command's own
 // exit code comes back in the int, so a caller can tell the two apart.
 func runCLI(ctx context.Context, stdin []byte, name string, args ...string) (stdout, stderr string, code int, err error) {
+	return runCLILimited(ctx, stdin, 0, name, args...)
+}
+
+// boundedCLIOutput rejects protocol output before unbounded buffering.
+type boundedCLIOutput struct {
+	bytes.Buffer
+	limit    int
+	exceeded bool
+}
+
+func (b *boundedCLIOutput) Write(p []byte) (int, error) {
+	if b.limit > 0 && b.Len()+len(p) > b.limit {
+		b.exceeded = true
+		return 0, fmt.Errorf("sandbox protocol output exceeds bound")
+	}
+	return b.Buffer.Write(p)
+}
+func runCLILimited(ctx context.Context, stdin []byte, limit int, name string, args ...string) (stdout, stderr string, code int, err error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	if len(stdin) > 0 {
 		cmd.Stdin = bytes.NewReader(stdin)
 	}
-	var out, errb bytes.Buffer
+	out, errb := boundedCLIOutput{limit: limit}, boundedCLIOutput{limit: limit}
 	cmd.Stdout = &out
 	cmd.Stderr = &errb
 
 	configureProcess(cmd)
 	err = cmd.Run()
 	stdout, stderr = out.String(), errb.String()
+	if out.exceeded || errb.exceeded {
+		return stdout, stderr, -1, fmt.Errorf("bonnie: sandbox: protocol output exceeds bound")
+	}
 
 	var ee *exec.ExitError
 	switch {

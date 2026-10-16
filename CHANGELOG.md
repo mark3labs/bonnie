@@ -5,6 +5,23 @@ All notable changes to BONNIE are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Opt-in `WithWorkspaceSkills` for bounded recursive repository skill discovery
+  before model requests. Qualified identities, Git ignore boundaries, metadata
+  budgets and no-follow sandbox I/O keep workspace sources separate from authored
+  tree skills. Bodies remain on-demand and assets remain live sandbox files.
+- Append-only selected skill versions restore before tool recovery and the first
+  resumed request, even when source files changed or disappeared.
+- Linux amd64/arm64 guest discovery helper packaging for remote sandbox builds.
+
+### Changed
+
+- Upgrade Kit to v0.131.1 for public dynamic, content-backed activation and
+  request preparation errors, while retaining file-backed tree activation.
+
 ## [0.29.0] — 2026-10-15
 
 **Search and edit inside the sandbox; separate new input from recovery.**

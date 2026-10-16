@@ -38,6 +38,8 @@ type Session struct {
 	provider string
 	modelID  string
 
+	workspaceSkills *workspaceCatalogue
+
 	sandboxBackend string
 	sandboxID      string
 	sandboxGone    bool
@@ -115,6 +117,17 @@ func Restore(ctx context.Context, runID string, j Journal) (*Session, error) {
 	s := NewSession(runID, j)
 	maxSeq := 0
 	for _, rec := range recs {
+		if rec.Kind == RecordWorkspaceSkills {
+			catalogue, err := decodeWorkspaceCatalogue(rec.Payload)
+			if err != nil {
+				return nil, err
+			}
+			if rec.EntryID != "" || (s.workspaceSkills != nil && catalogue.Revision != s.workspaceSkills.Revision+1) || (s.workspaceSkills == nil && catalogue.Revision != 1) {
+				return nil, fmt.Errorf("bonnie: invalid workspace catalogue revision")
+			}
+			s.workspaceSkills = catalogue
+			continue
+		}
 		if rec.Kind == RecordTrigger {
 			var trigger *Trigger
 			if err := json.Unmarshal(rec.Payload, &trigger); err != nil {

@@ -70,6 +70,9 @@ func (l *ActivityLogger) LogActivity(ev runtime.Event) {
 		level = log.ErrorLevel
 	case string(kit.EventWarnings), string(kit.EventRetry):
 		level = log.WarnLevel
+		if ev.Text != "" {
+			fields = append(fields, "text", ev.Text)
+		}
 	}
 	l.logger.Log(level, ev.Type, fields...)
 	if len(ev.Data) != 0 {

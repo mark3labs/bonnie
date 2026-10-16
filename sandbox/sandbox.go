@@ -80,6 +80,8 @@ var (
 // []string{"sh", "-lc", "ls | wc -l"}. Backends must not add a shell of their
 // own, because a caller cannot then predict how quoting behaves.
 type Command struct {
+	// outputLimit is reserved for bounded internal discovery protocols.
+	outputLimit int
 	// Args is the program and its arguments. It must not be empty.
 	Args []string
 	// Dir is the working directory. Empty means [WorkDir]. A relative

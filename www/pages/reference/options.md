@@ -33,7 +33,8 @@ Most scalar options replace an earlier value. Additive options and options with 
 | `WithModel(model string)` | Selects a Kit model with a `provider/name` string. |
 | `WithSystemPrompt(prompt string)` | A non-empty direct prompt takes precedence over the instructions file. |
 | `WithInstructions(path string)` | Reads another prompt file. An empty path disables the instructions file. |
-| `WithSkills(dir string)` | Reads the complete tree skill set from this directory. An empty directory value disables tree skills and automatic discovery; explicit Kit skills remain. |
+| `WithSkills(dir string)` | Reads the complete tree skill set from this directory. An empty directory value disables tree skills and Kit automatic discovery; explicit Kit skills and opt-in workspace discovery remain. |
+| `WithWorkspaceSkills(policy WorkspaceSkills)` | Enables bounded, recursive sandbox repository discovery before model requests. Repeated options replace the copied policy. Off by default; cannot use `WithAgentFactory`. |
 | `WithContextFiles(dir string)` | Selects seed files copied into each new run. An empty directory value disables copying, not sandboxing. |
 | `WithTools(tools ...kit.Tool)` | Adds tools beside generated tree tools and the managed standard tools. Repeated calls append. |
 | `WithoutHumanInput()` | Omits BONNIE's `ask_human` and `request_approval`. Custom tools can still suspend; response text can still ask questions. Sandbox permissions do not change. |
@@ -44,6 +45,17 @@ A skill can be a `.md` or `.txt` file with YAML frontmatter, or a subdirectory w
 Generated `bonnie_gen.go` calls `Register(Tree)` from `init`. `Tree` holds static `Tools`, a scoped `ToolFactory`, embedded `Instructions`, `Skills`, and `ContextFiles`. Zero-argument tree tools are constructed during `init`; scoped tree tools are constructed for each Start or Resume. Disk data takes precedence when present; embedded data is the fallback for a deployed binary. `Registered()` returns that tree. Call it from `main` or later, not from a package-level variable initialized before generated `init` runs.
 
 Custom Go tool callbacks run on the host. Registration does not confine them to the sandbox. See [Tools and Skills](/guides/tools-and-skills).
+
+`WorkspaceSkills` has `Exclude []string`, `MaxDepth int`, `MaxSkills int`,
+`MaxSkillBytes int64`, and `MaxMetadataBytes int64`. Zero defaults are 12,
+100, 128 KiB and 32 KiB. Negative limits and invalid directory exclusion globs
+fail startup. Only `.agents/skills/<bundle>/SKILL.md` and
+`.kit/skills/<bundle>/SKILL.md` qualify. Tree skills remain separate.
+Discovery opens sandbox compute at startup and permits untrusted repository
+metadata in context; activation is not authorization. Saved bodies are durable,
+but bundled assets are live sandbox files. See [Workspace skills](/guides/tools-and-skills#workspace-skills)
+for exact ignore rules, defensive ceilings, diagnostics, guest helper packaging
+and resume timing.
 
 ## Sandbox and working files
 
@@ -92,7 +104,7 @@ The hook is skipped on suspension and model failure. Hook errors fail the run. A
 
 `WithAgentFactory(f runtime.AgentFactory)` replaces the managed model agent. The factory receives the restored session and builds a `runtime.Agent` for each execution.
 
-It cannot be combined with `WithModel`, `WithSystemPrompt`, `WithSandbox`, `WithSandboxes`, `WithSandboxEnv`, `WithNetwork`, `WithTools`, `WithToolFactory`, `WithKit`, `WithoutHumanInput`, `WithKitSetup`, `WithCompletionHook`, or `WithRunSandboxCleanup`. BONNIE refuses agent settings that it would otherwise ignore.
+It cannot be combined with `WithModel`, `WithSystemPrompt`, `WithSandbox`, `WithSandboxes`, `WithSandboxEnv`, `WithNetwork`, `WithTools`, `WithToolFactory`, `WithKit`, `WithoutHumanInput`, `WithKitSetup`, `WithCompletionHook`, `WithWorkspaceSkills`, or `WithRunSandboxCleanup`. BONNIE refuses agent settings that it would otherwise ignore.
 
 Tree instructions, skills, and generated tools do not automatically reach the custom factory. Use `Registered()` if the host needs them. BONNIE still owns journal storage, working files, channels, and shutdown. The host owns its agent's isolation.
 

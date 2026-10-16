@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/mark3labs/bonnie/internal/skillfs"
 )
 
 // LocalProvider runs commands as the host process, in a directory per run.
@@ -145,9 +147,12 @@ type localSandbox struct {
 	release  func()
 	released bool
 
-	mu     sync.RWMutex
-	closed bool
-	jobs   *hostJobs
+	mu            sync.RWMutex
+	closed        bool
+	jobs          *hostJobs
+	discoveryOnce sync.Once
+	discoveryRoot *skillfs.Reader
+	discoveryErr  error
 }
 
 var (
@@ -266,6 +271,11 @@ func (s *localSandbox) Stop(ctx context.Context) error { return s.jobs.stop(ctx)
 func (s *localSandbox) Close() error {
 	s.mu.Lock()
 	s.closed = true
+	// discoveryOnce prevents a concurrent first scan from reopening after close.
+	s.discoveryOnce.Do(func() {})
+	if s.discoveryRoot != nil {
+		_ = s.discoveryRoot.Close()
+	}
 	release := s.release
 	if release != nil && !s.released {
 		s.released = true
