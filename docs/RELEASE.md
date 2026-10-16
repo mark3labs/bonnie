@@ -76,7 +76,7 @@ indefinitely**, **reachable over HTTP**. State the limits from the current
 
 ## History
 
-### `v0.30.0`, 2026-10-16 — preparation
+### `v0.30.0`, 2026-10-16 — publication verified
 
 - [x] Before preparation, `task release-check`, `task release-snapshot`,
       `task check`, and `task ci` pass at `d6b1acb`. Both Linux snapshot archive
@@ -85,9 +85,16 @@ indefinitely**, **reachable over HTTP**. State the limits from the current
 - [x] No `replace` directive is committed in framework or example modules.
 - [x] The dated changelog section states claims, current limits, recovery APIs,
       and the shutdown and `RunInterrupted.IsTerminal` behavior changes.
-- [ ] `test`, `examples`, and `lint` pass on master at the release commit.
-- [ ] Annotated tag pushed; publication and downloaded artifacts verified.
-- [ ] Examples pinned to v0.30.0 after publication and validated.
+- [x] `test`, `examples`, and `lint` pass on master at tagged commit
+      `3ce8eafa4222ece7b692e9f351b8a7b582d35d03` (CI run `38913894889`).
+- [x] Annotated tag pushed after approval; release run `38919084801` passes.
+      Both downloaded archive checksums verify. The static amd64 binary prints
+      `bonnie version 0.30.0` and refuses `--sandbox none`, naming alternatives.
+      Published notes match the tagged changelog section.
+- [x] Both examples pin v0.30.0 after publication; `task examples` passes.
+
+The approved target remains `3ce8eaf`. Workspace-skill discovery merged on
+master after preparation and is not part of this tag.
 
 **Version choice.** MINOR under the pre-1.0 convention: public recovery,
 shutdown, and channel-delivery APIs are added. Interrupted runs are no longer
