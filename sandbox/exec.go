@@ -20,8 +20,8 @@ import (
 //
 // The returned error is about the CLI itself failing to run. The command's own
 // exit code comes back in the int, so a caller can tell the two apart.
-func runCLI(ctx context.Context, stdin []byte, name string, args ...string) (stdout, stderr string, code int, err error) {
-	return runCLILimited(ctx, stdin, 0, name, args...)
+func runCLI(ctx context.Context, name string, args ...string) (stdout, stderr string, code int, err error) {
+	return runCLILimited(ctx, nil, 0, name, args...)
 }
 
 // boundedCLIOutput rejects protocol output before unbounded buffering.

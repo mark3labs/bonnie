@@ -95,7 +95,7 @@ func (p *DockerProvider) DeleteRun(ctx context.Context, runID string) (bool, err
 	if state == "" {
 		return false, nil
 	}
-	_, stderr, code, rerr := runCLI(ctx, nil, p.bin, "rm", "--force", name)
+	_, stderr, code, rerr := runCLI(ctx, p.bin, "rm", "--force", name)
 	if cerr := cliError("rm "+name, firstLine(stderr), code, rerr); cerr != nil {
 		return true, cerr
 	}

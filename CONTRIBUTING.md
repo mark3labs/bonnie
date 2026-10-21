@@ -48,7 +48,7 @@ There is no separate `boundary` CI job. `depguard` already denies both paths
 by prefix whatever the module layout, so the job added nothing.
 
 If Kit exports a type but not a helper that operates on it, write the small
-helper in BONNIE. See `toolResultText` in `runtime/util.go` for an example.
+helper in BONNIE. See `messageText` in `runtime/util.go` for an example.
 
 If Kit cannot do a thing at all, do these steps in order:
 

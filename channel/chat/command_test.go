@@ -17,18 +17,17 @@ import (
 // delivery captures what Dispatch hands an adapter, so a test can read what
 // a person would have seen.
 type delivery struct {
-	mu   sync.Mutex
-	got  chan struct{}
-	run  *runtime.Run
-	err  error
-	addr string
+	mu  sync.Mutex
+	got chan struct{}
+	run *runtime.Run
+	err error
 }
 
 func newDelivery() *delivery { return &delivery{got: make(chan struct{}, 8)} }
 
-func (d *delivery) deliver(address string, run *runtime.Run, err error) {
+func (d *delivery) deliver(_ string, run *runtime.Run, err error) {
 	d.mu.Lock()
-	d.addr, d.run, d.err = address, run, err
+	d.run, d.err = run, err
 	d.mu.Unlock()
 	d.got <- struct{}{}
 }

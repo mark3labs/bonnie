@@ -92,7 +92,7 @@ func (p *DockerProvider) Available(ctx context.Context) error {
 	if err := lookPath(p.bin); err != nil {
 		return err
 	}
-	_, stderr, code, err := runCLI(ctx, nil, p.bin, "info", "--format", "{{.ServerVersion}}")
+	_, stderr, code, err := runCLI(ctx, p.bin, "info", "--format", "{{.ServerVersion}}")
 	if err != nil {
 		return fmt.Errorf("%w: %s info: %v", ErrUnavailable, p.bin, err)
 	}
@@ -147,15 +147,15 @@ func (p *DockerProvider) Open(ctx context.Context, runID string) (Sandbox, error
 		},
 		startFn: p.ensureRunning,
 		killFn: func(ctx context.Context, c *cliSandbox) error {
-			_, stderr, code, err := runCLI(ctx, nil, c.bin, "kill", c.name)
+			_, stderr, code, err := runCLI(ctx, c.bin, "kill", c.name)
 			return cliError("kill container "+c.name, firstLine(stderr), code, err)
 		},
 		stopFn: func(ctx context.Context, c *cliSandbox) error {
-			_, stderr, code, err := runCLI(ctx, nil, c.bin, "stop", c.name)
+			_, stderr, code, err := runCLI(ctx, c.bin, "stop", c.name)
 			return cliError("stop container "+c.name, firstLine(stderr), code, err)
 		},
 		deleteFn: func(ctx context.Context, c *cliSandbox) error {
-			_, stderr, code, err := runCLI(ctx, nil, c.bin, "rm", "-f", c.name)
+			_, stderr, code, err := runCLI(ctx, c.bin, "rm", "-f", c.name)
 			return cliError("remove container "+c.name, firstLine(stderr), code, err)
 		},
 	}
@@ -184,14 +184,14 @@ func (p *DockerProvider) ensureRunning(ctx context.Context, sb *cliSandbox) erro
 	case "":
 		return p.create(ctx, sb)
 	default:
-		_, stderr, code, err := runCLI(ctx, nil, p.bin, "start", sb.name)
+		_, stderr, code, err := runCLI(ctx, p.bin, "start", sb.name)
 		return cliError("start container "+sb.name, firstLine(stderr), code, err)
 	}
 }
 
 // inspectState returns the container's state, or "" when it does not exist.
 func (p *DockerProvider) inspectState(ctx context.Context, name string) (string, error) {
-	stdout, stderr, code, err := runCLI(ctx, nil, p.bin, "inspect", "--format", "{{.State.Status}}", name)
+	stdout, stderr, code, err := runCLI(ctx, p.bin, "inspect", "--format", "{{.State.Status}}", name)
 	if err != nil {
 		return "", fmt.Errorf("bonnie: sandbox: inspect %s: %w", name, err)
 	}
@@ -222,13 +222,13 @@ func (p *DockerProvider) create(ctx context.Context, sb *cliSandbox) error {
 	}
 	args = append(args, "--entrypoint", "sh", p.image, "-c", idleScript)
 
-	_, stderr, code, err := runCLI(ctx, nil, p.bin, args...)
+	_, stderr, code, err := runCLI(ctx, p.bin, args...)
 	if cerr := cliError("create container from "+p.image, firstLine(stderr), code, err); cerr != nil {
 		return cerr
 	}
 	// A fresh image may not have the work directory yet, and the entrypoint runs
 	// in parallel with the first exec.
-	_, stderr, code, err = runCLI(ctx, nil, p.bin, "exec", sb.name, "mkdir", "-p", WorkDir)
+	_, stderr, code, err = runCLI(ctx, p.bin, "exec", sb.name, "mkdir", "-p", WorkDir)
 	if err := cliError("create work directory", firstLine(stderr), code, err); err != nil {
 		return err
 	}
@@ -267,7 +267,7 @@ func firstLine(s string) string {
 // Labels alone do not prove isolation: privileged mode, mounts, namespaces,
 // extra capabilities, and a changed network must also be checked.
 func (p *DockerProvider) checkContainer(ctx context.Context, name, runID string) error {
-	stdout, stderr, code, err := runCLI(ctx, nil, p.bin, "inspect", "--format", "{{json .}}", name)
+	stdout, stderr, code, err := runCLI(ctx, p.bin, "inspect", "--format", "{{json .}}", name)
 	if err := cliError("inspect controls "+name, firstLine(stderr), code, err); err != nil {
 		return err
 	}

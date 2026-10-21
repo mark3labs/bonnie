@@ -45,7 +45,6 @@ var testKey = sync.OnceValue(func() string {
 // pull-request detail and file endpoints the PR context reads.
 type fakeAPI struct {
 	mu        sync.Mutex
-	tokens    int
 	posted    []string
 	reactions []string
 	server    *httptest.Server
@@ -56,9 +55,6 @@ func newFakeAPI(t *testing.T, withPulls bool, title, patch string) *fakeAPI {
 	f := &fakeAPI{}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /app/installations/{id}/access_tokens", func(w http.ResponseWriter, _ *http.Request) {
-		f.mu.Lock()
-		f.tokens++
-		f.mu.Unlock()
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(map[string]string{"token": "ghs_test-token"})
 	})

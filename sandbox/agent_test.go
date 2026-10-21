@@ -43,7 +43,7 @@ func (p *stubProvider) Open(_ context.Context, runID string) (Sandbox, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.opened++
-	sb := &stubSandbox{id: runID, provider: p}
+	sb := &stubSandbox{id: runID}
 	p.sandboxes[runID] = sb
 	return sb, nil
 }
@@ -68,8 +68,7 @@ func (p *stubProvider) DeleteRun(_ context.Context, runID string) (bool, error) 
 }
 
 type stubSandbox struct {
-	id       string
-	provider *stubProvider
+	id string
 }
 
 func (s *stubSandbox) ID() string { return s.id }
