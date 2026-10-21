@@ -76,6 +76,36 @@ indefinitely**, **reachable over HTTP**. State the limits from the current
 
 ## History
 
+### `v0.31.0`, 2026-10-21 — publication verified
+
+- [x] Before preparation, `task release-check`, `task release-snapshot`, and
+      `task ci` pass at `4a612d9`. Both Linux snapshot archive checksums
+      verify; the static amd64 binary prints its injected version.
+- [x] No `replace` directive is committed in framework or example modules.
+- [x] The dated changelog section states claims, current limits, the
+      workspace skill limits, and the NATS shutdown fix.
+- [ ] **Not confirmed at `e8972c5`** (CI run `39572866298`): `test` failed in
+      `TestRootStatusesAndQueries` because JetStream `Shutdown` reported a
+      result save that it cancelled. `52ed0b0` fixes the report and adds
+      shutdown cases to `TestJetStreamJournalFailuresLeaveUnacked`.
+- [x] `test`, `examples`, and `lint` pass on master at tagged commit
+      `52ed0b0165f6ad2f308f9c6e176ff9f685061e6d` (CI run `39574407084`).
+- [x] Annotated tag pushed after approval; release run `39575597163` passes.
+      Both downloaded archive checksums verify. The static amd64 binary prints
+      `bonnie 0.31.0` and refuses `--sandbox none`, naming alternatives.
+      Published notes match the tagged changelog section.
+- [x] Both examples pin v0.31.0 after publication; `task examples` passes.
+
+**Version choice.** MINOR under the pre-1.0 convention: `WithWorkspaceSkills`,
+the `wire` package, and the workspace skill journal records are added. Client
+types moved to `wire` and remain compatible through `runtime` aliases. Kit
+minimum is `v0.131.1`.
+
+**Validation limits.** The approved target moved from `e8972c5` to `52ed0b0`
+after the maintainer chose to fix the CI failure before tagging. CI excludes
+the Chromium live-state and end-to-end tests. The arm64 binary, live-model
+behavior, and workspace discovery in a published binary were not executed.
+
 ### `v0.30.0`, 2026-10-16 — publication verified
 
 - [x] Before preparation, `task release-check`, `task release-snapshot`,
