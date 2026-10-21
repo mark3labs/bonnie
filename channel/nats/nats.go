@@ -39,7 +39,7 @@ import (
 	"github.com/mark3labs/bonnie/runtime"
 )
 
-const maxMessageBytes = 1 << 20
+const maxMessageBytes = natswire.MaxMessageBytes
 const dedupeLimit = 4096
 
 // Config sets the connection, subjects, and resource limits.

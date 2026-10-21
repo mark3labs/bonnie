@@ -23,6 +23,11 @@ import (
 
 const defaultAckWait = 30 * time.Second
 
+const (
+	extTaskAdmitted   = "nats_task_attempt_admitted"
+	extAnswerAdmitted = "nats_answer_admitted"
+)
+
 func validateJetStream(cfg Config) error {
 	if cfg.Stream == "" {
 		if cfg.Consumer != "" || cfg.AgentID != "" || cfg.CreateStream || cfg.TargetedTasks {
@@ -105,18 +110,12 @@ func (c *Channel) startJetStream(ctx context.Context, nc *gonats.Conn) error {
 		if i == 2 {
 			name = streamName("bonnie-target-", c.cfg.Consumer+"."+subject)
 		}
-		ci, err := js.ConsumerInfo(c.cfg.Stream, name, gonats.Context(ready))
-		if errors.Is(err, gonats.ErrConsumerNotFound) {
-			ci, err = js.AddConsumer(c.cfg.Stream, &gonats.ConsumerConfig{Durable: name, AckPolicy: gonats.AckExplicitPolicy, AckWait: defaultAckWait, DeliverPolicy: gonats.DeliverAllPolicy, ReplayPolicy: gonats.ReplayInstantPolicy, FilterSubject: subject, MaxAckPending: c.cfg.Concurrency, MaxWaiting: 1024}, gonats.Context(ready))
-			if err != nil {
-				ci, err = js.ConsumerInfo(c.cfg.Stream, name, gonats.Context(ready))
-			}
-		}
+		ci, err := natswire.EnsurePullConsumer(ready, js, c.cfg.Stream, &gonats.ConsumerConfig{Durable: name, AckPolicy: gonats.AckExplicitPolicy, AckWait: defaultAckWait, DeliverPolicy: gonats.DeliverAllPolicy, ReplayPolicy: gonats.ReplayInstantPolicy, FilterSubject: subject, MaxAckPending: c.cfg.Concurrency, MaxWaiting: 1024})
 		if err != nil {
 			return fmt.Errorf("bonnie: channel/nats: consumer: %w", err)
 		}
 		cc := ci.Config
-		if cc.Durable != name || cc.DeliverSubject != "" || cc.AckPolicy != gonats.AckExplicitPolicy || cc.FilterSubject != subject || len(cc.FilterSubjects) != 0 || cc.DeliverPolicy != gonats.DeliverAllPolicy || cc.ReplayPolicy != gonats.ReplayInstantPolicy || cc.AckWait < 3*time.Millisecond || cc.MaxDeliver > 0 || len(cc.BackOff) != 0 || cc.MaxAckPending < 1 || cc.HeadersOnly || cc.InactiveThreshold != 0 || cc.DeliverGroup != "" || (cc.MaxRequestExpires > 0 && cc.MaxRequestExpires < 250*time.Millisecond) || (cc.MaxRequestMaxBytes > 0 && cc.MaxRequestMaxBytes < maxMessageBytes) {
+		if !natswire.CompatiblePullConsumer(cc, name, subject) {
 			return errors.New("bonnie: channel/nats: incompatible existing pull consumer")
 		}
 		if ackWait == 0 || cc.AckWait < ackWait {
@@ -229,7 +228,13 @@ type admittedTask struct {
 }
 
 func (c *Channel) loadTaskAdmission(ctx context.Context, key string) (*admittedTask, error) {
-	records, err := c.core.Runner().Journal().Replay(ctx, key)
+	return loadAdmitted[admittedTask](ctx, c.core.Runner().Journal(), key, extTaskAdmitted)
+}
+
+// loadAdmitted returns the first admission record of extType on key, or nil
+// when the key has no run or no such record.
+func loadAdmitted[T any](ctx context.Context, j runtime.Journal, key, extType string) (*T, error) {
+	records, err := j.Replay(ctx, key)
 	if errors.Is(err, runtime.ErrRunNotFound) {
 		return nil, nil
 	}
@@ -237,8 +242,8 @@ func (c *Channel) loadTaskAdmission(ctx context.Context, key string) (*admittedT
 		return nil, err
 	}
 	for _, record := range records {
-		if record.ExtType == "nats_task_attempt_admitted" {
-			var admission admittedTask
+		if record.ExtType == extType {
+			var admission T
 			if err := json.Unmarshal(record.Payload, &admission); err != nil {
 				return nil, err
 			}
@@ -257,23 +262,7 @@ type admittedAnswer struct {
 }
 
 func (c *Channel) loadAdmission(ctx context.Context, key string) (*admittedAnswer, error) {
-	records, err := c.core.Runner().Journal().Replay(ctx, key)
-	if errors.Is(err, runtime.ErrRunNotFound) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	for _, record := range records {
-		if record.ExtType == "nats_answer_admitted" {
-			var admission admittedAnswer
-			if err := json.Unmarshal(record.Payload, &admission); err != nil {
-				return nil, err
-			}
-			return &admission, nil
-		}
-	}
-	return nil, nil
+	return loadAdmitted[admittedAnswer](ctx, c.core.Runner().Journal(), key, extAnswerAdmitted)
 }
 
 // resultLimit bounds encoded JSON plus the publication header, not response
@@ -571,7 +560,7 @@ func (c *Channel) admitJetStreamAnswer(ctx context.Context, answer Answer, answe
 			c.report("answer admission encode failed")
 			return nil, result, errNoAck
 		}
-		if _, saveErr := c.core.Runner().Journal().Append(ctx, runtime.Record{RunID: answerKey, Kind: runtime.RecordExtensionData, ExtType: "nats_answer_admitted", Payload: data}); saveErr != nil {
+		if _, saveErr := c.core.Runner().Journal().Append(ctx, runtime.Record{RunID: answerKey, Kind: runtime.RecordExtensionData, ExtType: extAnswerAdmitted, Payload: data}); saveErr != nil {
 			c.report("answer admission save failed")
 			return nil, result, errNoAck
 		}
@@ -610,7 +599,7 @@ func (c *Channel) admitJetStreamTask(ctx context.Context, task Task, key string,
 			c.report("task admission encode failed")
 			return nil, errNoAck
 		}
-		if _, saveErr := c.core.Runner().Journal().Append(ctx, runtime.Record{RunID: key, Kind: runtime.RecordExtensionData, ExtType: "nats_task_attempt_admitted", Payload: data}); saveErr != nil {
+		if _, saveErr := c.core.Runner().Journal().Append(ctx, runtime.Record{RunID: key, Kind: runtime.RecordExtensionData, ExtType: extTaskAdmitted, Payload: data}); saveErr != nil {
 			c.report("task admission save failed")
 			return nil, errNoAck
 		}
