@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Move shared transport types to `wire`, with compatible aliases in `runtime`.
+  The HTTP and Iroh clients no longer import the runtime or server channels,
+  which removes SQLite and go-git from their dependencies. Kit types remain
+  part of the client API. The NATS client is unchanged.
 - Upgrade Kit to v0.131.1 for public dynamic, content-backed activation and
   request preparation errors, while retaining file-backed tree activation.
 

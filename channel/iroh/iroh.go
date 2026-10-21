@@ -20,10 +20,11 @@ import (
 	"github.com/mark3labs/bonnie/channel"
 	bonniehttp "github.com/mark3labs/bonnie/channel/http"
 	"github.com/mark3labs/bonnie/runtime"
+	"github.com/mark3labs/bonnie/wire"
 )
 
 // ALPN identifies HTTP/1.1 over an Iroh bidirectional stream.
-const ALPN = "bonnie/http/1"
+const ALPN = wire.IrohALPN
 
 // Config configures the endpoint and its initial paired operator peers.
 type Config struct {

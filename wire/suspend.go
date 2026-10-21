@@ -1,0 +1,60 @@
+package wire
+
+// SuspendRequest is what a tool returns to park a run until a human or an
+// external system answers. It rides out of the agent loop in the FinalValue
+// field of [github.com/mark3labs/kit/pkg/kit.TurnResult], via a tool that sets
+// ToolOutput.Halt.
+type SuspendRequest struct {
+	// TurnID identifies the turn that owns this request.
+	TurnID string `json:"turn_id,omitempty"`
+	// Kind distinguishes question, approval, or a host-defined reason.
+	Kind string `json:"kind"`
+	// Prompt is the question or approval text shown to the responder.
+	Prompt string `json:"prompt"`
+	// Options, when non-empty, constrains the answer to a choice.
+	Options []string `json:"options,omitempty"`
+	// ToolCallID identifies the halting tool call.
+	ToolCallID string `json:"tool_call_id,omitempty"`
+}
+
+// InputResponse is a reply to a [SuspendRequest].
+type InputResponse struct {
+	// TurnID identifies the suspension being answered. A stale answer cannot
+	// authorize a request raised by a later turn.
+	TurnID string `json:"turn_id,omitempty"`
+	// Text is the freeform or selected answer.
+	Text string `json:"text"`
+	// Approved answers an approval-kind suspension. Nil means the responder
+	// said nothing about approval and [InputResponse.Text] is the whole answer,
+	// which is what a question-kind suspension gets.
+	//
+	// It is a pointer because a plain bool cannot say "rejected". The zero
+	// value of a bool is false, so a rejection and a response that never
+	// mentioned approval looked identical on the wire, and the field was
+	// read by nothing at all — an approval answered with a bare
+	// `{"approved": true}` resumed the agent with an empty message, because
+	// only Text ever reached the model. Three states are needed and a
+	// pointer is how JSON spells them: absent, true, false.
+	Approved *bool `json:"approved,omitempty"`
+}
+
+// Approve and Reject build an approval answer. They exist so a caller does
+// not have to take the address of a bool literal to answer a question the
+// agent asked.
+func Approve(note string) InputResponse {
+	yes := true
+	return InputResponse{Text: note, Approved: &yes}
+}
+
+// Reject is [Approve]'s refusal. The note, when given, tells the agent why,
+// which is usually what decides what it does next.
+func Reject(note string) InputResponse {
+	no := false
+	return InputResponse{Text: note, Approved: &no}
+}
+
+// Suspension kinds recognised by the runtime.
+const (
+	SuspendQuestion = "question"
+	SuspendApproval = "approval"
+)
