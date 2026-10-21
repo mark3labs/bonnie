@@ -237,179 +237,238 @@ func (e *Engine) fail(ctx context.Context, o Occurrence, err error) error {
 }
 func (e *Engine) execute(ctx context.Context, d Definition, o Occurrence) error {
 	if !o.Prepared {
-		if d.Run != nil {
-			if err := d.Run(ctx, o.Fire); err != nil {
-				return e.fail(ctx, o, err)
-			}
-			// Save success only after the callback returns. Recovery can repeat
-			// the callback with the same Fire.ID if this write does not finish.
-			o.Prepared = true
-			o.State = Completed
-			return e.save(ctx, o)
-		}
-		dispatches := []Dispatch{{Key: "default", Input: runtime.Input{Text: d.Prompt}, Destination: d.Destination}}
-		var err error
-		if d.Prepare != nil {
-			dispatches, err = d.Prepare(ctx, o.Fire)
-		}
-		if err != nil {
-			return e.fail(ctx, o, err)
-		}
-		keys := map[string]bool{}
-		for i, dp := range dispatches {
-			if dp.Key == "" {
-				dp.Key = fmt.Sprint(i)
-			}
-			if keys[dp.Key] {
-				return e.fail(ctx, o, errors.New("bonnie: schedule: duplicate dispatch key"))
-			}
-			keys[dp.Key] = true
-			if dp.Destination.Channel == "" && dp.Destination.Target == nil {
-				dp.Destination = d.Destination
-			}
-			if err := e.validateDestination(dp.Destination); err != nil {
-				return e.fail(ctx, o, err)
-			}
-			if len(dp.Input.Files) > 0 {
-				return e.fail(ctx, o, errors.New("bonnie: schedule: files are unsupported"))
-			}
-			if dp.Auth == nil {
-				dp.Auth = &channel.Principal{Authenticator: "app", Kind: "runtime", ID: "bonnie:app"}
-			}
-			o.Work = append(o.Work, Work{Dispatch: dp})
-		}
-		o.Prepared = true
-		o.State = Running
-		if len(o.Work) == 0 {
-			o.State = Skipped
-		}
-		if err := e.save(ctx, o); err != nil {
+		if done, err := e.prepare(ctx, d, &o); done || err != nil {
 			return err
 		}
 	}
-	waiting := false
-	changed := false
+	waiting, changed := false, false
 	for i := range o.Work {
-		w := &o.Work[i]
-		dp := w.Dispatch
-		did := stableID(o.Fire.ID+"/"+dp.Key, o.Fire.ScheduledAt)
-		receiver := e.destinations[dp.Destination.Channel]
-		if !w.Reserved {
-			if receiver == nil {
-				w.Receipt = channel.DispatchReceipt{DispatchID: did, RunID: did}
-			} else {
-				receipt, err := receiver.PrepareDispatch(ctx, did, dp.Destination.Target)
-				if err != nil {
-					return e.fail(ctx, o, err)
-				}
-				w.Receipt = receipt
-			}
-			w.Reserved = true
-			if err := e.save(ctx, o); err != nil {
-				return err
-			}
+		step, err := e.advance(ctx, d, &o, i)
+		if step.stop || err != nil {
+			return err
 		}
-		trigger := &runtime.Trigger{ScheduleName: d.Name, OccurrenceID: o.Fire.ID, DispatchID: did, ScheduledAt: o.Fire.ScheduledAt, Kind: o.Fire.Kind}
-		if w.Result == nil {
-			// A saved final state after this dispatch's trigger closes the crash gap
-			// between model completion and saving the schedule snapshot.
-			recs, err := e.journal.Replay(ctx, w.Receipt.RunID)
-			if err != nil && !errors.Is(err, runtime.ErrRunNotFound) {
-				return err
-			}
-			seen, boundary := false, false
-			var completedRecords []runtime.Record
-			for index, rec := range recs {
-				if rec.Kind == runtime.RecordTrigger {
-					var t *runtime.Trigger
-					if err := json.Unmarshal(rec.Payload, &t); err != nil {
-						return err
-					}
-					seen = t != nil && t.DispatchID == did
-					boundary = false
-				}
-				// An interrupted turn is not a boundary: it has no outcome yet,
-				// and the retry below continues it.
-				if seen && rec.Kind == runtime.RecordState && rec.State != runtime.RunRunning && rec.State != runtime.RunPending && rec.State != runtime.RunInterrupted {
-					boundary = true
-					completedRecords = recs[:index+1]
-					break
-				}
-			}
-			if boundary {
-				w.Result, err = snapshotRecords(ctx, w.Receipt.RunID, completedRecords)
-			} else {
-				if receiver == nil {
-					if err := chat.NewAddressMap(e.journal).NotePrincipal(ctx, w.Receipt.RunID, dp.Auth); err != nil {
-						return err
-					}
-					input := dp.Input
-					input.Trigger = trigger
-					w.Result, err = e.runner.StartRetry(ctx, w.Receipt.RunID, input)
-				} else {
-					w.Result, err = receiver.RunDispatch(ctx, w.Receipt, dp.Input.Text, channel.SendOptions{Auth: dp.Auth, Context: dp.Input.Context, Title: dp.Input.Title, Trigger: trigger, TurnPolicy: channel.PolicyQueue})
-				}
-			}
+		waiting = waiting || step.waiting
+		changed = changed || step.changed
+	}
+	return e.finish(ctx, &o, waiting, changed)
+}
+
+func (e *Engine) prepare(ctx context.Context, d Definition, o *Occurrence) (bool, error) {
+	if d.Run != nil {
+		if err := d.Run(ctx, o.Fire); err != nil {
+			return true, e.fail(ctx, *o, err)
+		}
+		// Save success only after the callback returns. Recovery can repeat
+		// the callback with the same Fire.ID if this write does not finish.
+		o.Prepared = true
+		o.State = Completed
+		return true, e.save(ctx, *o)
+	}
+	dispatches := []Dispatch{{Key: "default", Input: runtime.Input{Text: d.Prompt}, Destination: d.Destination}}
+	var err error
+	if d.Prepare != nil {
+		dispatches, err = d.Prepare(ctx, o.Fire)
+	}
+	if err != nil {
+		return true, e.fail(ctx, *o, err)
+	}
+	keys := map[string]bool{}
+	for i, dp := range dispatches {
+		if dp.Key == "" {
+			dp.Key = fmt.Sprint(i)
+		}
+		if keys[dp.Key] {
+			return true, e.fail(ctx, *o, errors.New("bonnie: schedule: duplicate dispatch key"))
+		}
+		keys[dp.Key] = true
+		if dp.Destination.Channel == "" && dp.Destination.Target == nil {
+			dp.Destination = d.Destination
+		}
+		if err := e.validateDestination(dp.Destination); err != nil {
+			return true, e.fail(ctx, *o, err)
+		}
+		if len(dp.Input.Files) > 0 {
+			return true, e.fail(ctx, *o, errors.New("bonnie: schedule: files are unsupported"))
+		}
+		if dp.Auth == nil {
+			dp.Auth = &channel.Principal{Authenticator: "app", Kind: "runtime", ID: "bonnie:app"}
+		}
+		o.Work = append(o.Work, Work{Dispatch: dp})
+	}
+	o.Prepared = true
+	o.State = Running
+	if len(o.Work) == 0 {
+		o.State = Skipped
+	}
+	if err := e.save(ctx, *o); err != nil {
+		return false, err
+	}
+	return false, nil
+}
+
+type workStep struct {
+	stop, waiting, changed bool
+}
+
+func (e *Engine) advance(ctx context.Context, d Definition, o *Occurrence, i int) (workStep, error) {
+	w := &o.Work[i]
+	dp := w.Dispatch
+	did := stableID(o.Fire.ID+"/"+dp.Key, o.Fire.ScheduledAt)
+	receiver := e.destinations[dp.Destination.Channel]
+	if step, err := e.reserve(ctx, o, w, receiver, did); step.stop || err != nil {
+		return step, err
+	}
+	trigger := &runtime.Trigger{ScheduleName: d.Name, OccurrenceID: o.Fire.ID, DispatchID: did, ScheduledAt: o.Fire.ScheduledAt, Kind: o.Fire.Kind}
+	if step, err := e.runWork(ctx, o, w, receiver, did, trigger); step.stop || err != nil {
+		return step, err
+	}
+	if step, err := e.deliver(ctx, o, w, receiver); step.stop || err != nil {
+		return step, err
+	}
+	return e.awaitWork(ctx, w)
+}
+
+func (e *Engine) reserve(ctx context.Context, o *Occurrence, w *Work, receiver channel.TrackedReceiver, did string) (workStep, error) {
+	if !w.Reserved {
+		if receiver == nil {
+			w.Receipt = channel.DispatchReceipt{DispatchID: did, RunID: did}
+		} else {
+			receipt, err := receiver.PrepareDispatch(ctx, did, w.Dispatch.Destination.Target)
 			if err != nil {
-				if ctx.Err() != nil {
-					return err
-				}
-				if errors.Is(err, runtime.ErrRunActive) || errors.Is(err, runtime.ErrRunnerDraining) {
-					// Another owner holds the run, or the process is stopping.
-					// The occurrence stays running; Reconcile tries again.
-					return nil
-				}
-				return e.fail(ctx, o, err)
+				return workStep{stop: true}, e.fail(ctx, *o, err)
 			}
-			if w.Result == nil {
-				return e.fail(ctx, o, errors.New("bonnie: schedule: receiver returned no run"))
-			}
-			if w.Result.State == runtime.RunInterrupted {
-				// The process is stopping. The next one continues the turn.
-				w.Result = nil
-				return nil
-			}
-			if w.Result.State == runtime.RunFailed || w.Result.State == runtime.RunCancelled {
-				return e.fail(ctx, o, errors.New("bonnie: schedule: agent execution failed"))
-			}
-			w.Result.Err = nil
-			if err := e.save(ctx, o); err != nil {
-				return err
-			}
+			w.Receipt = receipt
 		}
-		if !w.Delivered {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			if receiver != nil {
-				if err := receiver.DeliverDispatch(ctx, w.Receipt, w.Result); err != nil {
-					w.Error = err.Error()
-					w.Attempts++
-					w.RetryAt = time.Now().Add(e.retryDelay(w.Attempts))
-					o.State = Running
-					return e.save(ctx, o)
-				}
-			}
-			w.Delivered = true
-			w.Error = ""
-			if err := e.save(ctx, o); err != nil {
-				return err
-			}
-		}
-		if w.Result.State == runtime.RunWaiting {
-			current, err := e.runner.Snapshot(ctx, w.Receipt.RunID)
-			if err != nil {
-				return err
-			}
-			if current.State == runtime.RunWaiting || current.State == runtime.RunRunning || current.State == runtime.RunInterrupted {
-				waiting = true
-			} else {
-				w.Result = current
-				w.Result.Err = nil
-				changed = true
-			}
+		w.Reserved = true
+		if err := e.save(ctx, *o); err != nil {
+			return workStep{stop: true}, err
 		}
 	}
+	return workStep{}, nil
+}
+
+func (e *Engine) dispatchBoundary(ctx context.Context, w *Work, did string) ([]runtime.Record, bool, error) {
+	// A saved final state after this dispatch's trigger closes the crash gap
+	// between model completion and saving the schedule snapshot.
+	recs, err := e.journal.Replay(ctx, w.Receipt.RunID)
+	if err != nil && !errors.Is(err, runtime.ErrRunNotFound) {
+		return nil, false, err
+	}
+	seen, boundary := false, false
+	var completedRecords []runtime.Record
+	for index, rec := range recs {
+		if rec.Kind == runtime.RecordTrigger {
+			var t *runtime.Trigger
+			if err := json.Unmarshal(rec.Payload, &t); err != nil {
+				return nil, false, err
+			}
+			seen = t != nil && t.DispatchID == did
+			boundary = false
+		}
+		// An interrupted turn is not a boundary: it has no outcome yet,
+		// and the retry below continues it.
+		if seen && rec.Kind == runtime.RecordState && rec.State != runtime.RunRunning && rec.State != runtime.RunPending && rec.State != runtime.RunInterrupted {
+			boundary = true
+			completedRecords = recs[:index+1]
+			break
+		}
+	}
+	return completedRecords, boundary, nil
+}
+
+func (e *Engine) runWork(ctx context.Context, o *Occurrence, w *Work, receiver channel.TrackedReceiver, did string, trigger *runtime.Trigger) (workStep, error) {
+	dp := w.Dispatch
+	if w.Result == nil {
+		completedRecords, boundary, err := e.dispatchBoundary(ctx, w, did)
+		if err != nil {
+			return workStep{stop: true}, err
+		}
+		if boundary {
+			w.Result, err = snapshotRecords(ctx, w.Receipt.RunID, completedRecords)
+		} else {
+			if receiver == nil {
+				if err := chat.NewAddressMap(e.journal).NotePrincipal(ctx, w.Receipt.RunID, dp.Auth); err != nil {
+					return workStep{stop: true}, err
+				}
+				input := dp.Input
+				input.Trigger = trigger
+				w.Result, err = e.runner.StartRetry(ctx, w.Receipt.RunID, input)
+			} else {
+				w.Result, err = receiver.RunDispatch(ctx, w.Receipt, dp.Input.Text, channel.SendOptions{Auth: dp.Auth, Context: dp.Input.Context, Title: dp.Input.Title, Trigger: trigger, TurnPolicy: channel.PolicyQueue})
+			}
+		}
+		if err != nil {
+			if ctx.Err() != nil {
+				return workStep{stop: true}, err
+			}
+			if errors.Is(err, runtime.ErrRunActive) || errors.Is(err, runtime.ErrRunnerDraining) {
+				// Another owner holds the run, or the process is stopping.
+				// The occurrence stays running; Reconcile tries again.
+				return workStep{stop: true}, nil
+			}
+			return workStep{stop: true}, e.fail(ctx, *o, err)
+		}
+		if w.Result == nil {
+			return workStep{stop: true}, e.fail(ctx, *o, errors.New("bonnie: schedule: receiver returned no run"))
+		}
+		if w.Result.State == runtime.RunInterrupted {
+			// The process is stopping. The next one continues the turn.
+			w.Result = nil
+			return workStep{stop: true}, nil
+		}
+		if w.Result.State == runtime.RunFailed || w.Result.State == runtime.RunCancelled {
+			return workStep{stop: true}, e.fail(ctx, *o, errors.New("bonnie: schedule: agent execution failed"))
+		}
+		w.Result.Err = nil
+		if err := e.save(ctx, *o); err != nil {
+			return workStep{stop: true}, err
+		}
+	}
+	return workStep{}, nil
+}
+
+func (e *Engine) deliver(ctx context.Context, o *Occurrence, w *Work, receiver channel.TrackedReceiver) (workStep, error) {
+	if !w.Delivered {
+		if ctx.Err() != nil {
+			return workStep{stop: true}, ctx.Err()
+		}
+		if receiver != nil {
+			if err := receiver.DeliverDispatch(ctx, w.Receipt, w.Result); err != nil {
+				w.Error = err.Error()
+				w.Attempts++
+				w.RetryAt = time.Now().Add(e.retryDelay(w.Attempts))
+				o.State = Running
+				return workStep{stop: true}, e.save(ctx, *o)
+			}
+		}
+		w.Delivered = true
+		w.Error = ""
+		if err := e.save(ctx, *o); err != nil {
+			return workStep{stop: true}, err
+		}
+	}
+	return workStep{}, nil
+}
+
+func (e *Engine) awaitWork(ctx context.Context, w *Work) (workStep, error) {
+	step := workStep{}
+	if w.Result.State == runtime.RunWaiting {
+		current, err := e.runner.Snapshot(ctx, w.Receipt.RunID)
+		if err != nil {
+			return workStep{stop: true}, err
+		}
+		if current.State == runtime.RunWaiting || current.State == runtime.RunRunning || current.State == runtime.RunInterrupted {
+			step.waiting = true
+		} else {
+			w.Result = current
+			w.Result.Err = nil
+			step.changed = true
+		}
+	}
+	return step, nil
+}
+
+func (e *Engine) finish(ctx context.Context, o *Occurrence, waiting, changed bool) error {
 	state := Completed
 	if len(o.Work) == 0 {
 		state = Skipped
@@ -420,7 +479,7 @@ func (e *Engine) execute(ctx context.Context, d Definition, o Occurrence) error 
 		return nil
 	}
 	o.State = state
-	return e.save(ctx, o)
+	return e.save(ctx, *o)
 }
 
 // Reconcile resumes accepted work and retries deliveries without a fresh model
