@@ -35,18 +35,12 @@ func bindEvents(ctx context.Context, js gonats.JetStreamContext, cfg Config) (ti
 	if err := protocol.EnsureStream(ctx, js, cfg.EventStream, []string{cfg.EventSubject}, cfg.CreateStream); err != nil {
 		return 0, err
 	}
-	ci, err := js.ConsumerInfo(cfg.EventStream, cfg.EventConsumer, gonats.Context(ctx))
-	if errors.Is(err, gonats.ErrConsumerNotFound) {
-		ci, err = js.AddConsumer(cfg.EventStream, &gonats.ConsumerConfig{Durable: cfg.EventConsumer, FilterSubject: cfg.EventSubject, AckPolicy: gonats.AckExplicitPolicy, AckWait: 30 * time.Second, DeliverPolicy: gonats.DeliverAllPolicy, ReplayPolicy: gonats.ReplayInstantPolicy, MaxAckPending: 1, MaxWaiting: 1024}, gonats.Context(ctx))
-		if err != nil {
-			ci, err = js.ConsumerInfo(cfg.EventStream, cfg.EventConsumer, gonats.Context(ctx))
-		}
-	}
+	ci, err := natswire.EnsurePullConsumer(ctx, js, cfg.EventStream, &gonats.ConsumerConfig{Durable: cfg.EventConsumer, FilterSubject: cfg.EventSubject, AckPolicy: gonats.AckExplicitPolicy, AckWait: 30 * time.Second, DeliverPolicy: gonats.DeliverAllPolicy, ReplayPolicy: gonats.ReplayInstantPolicy, MaxAckPending: 1, MaxWaiting: 1024})
 	if err != nil {
 		return 0, fmt.Errorf("bonnie: client/nats: status consumer: %w", err)
 	}
 	cc := ci.Config
-	if cc.Durable != cfg.EventConsumer || cc.DeliverSubject != "" || cc.DeliverGroup != "" || cc.AckPolicy != gonats.AckExplicitPolicy || cc.FilterSubject != cfg.EventSubject || len(cc.FilterSubjects) != 0 || cc.DeliverPolicy != gonats.DeliverAllPolicy || cc.ReplayPolicy != gonats.ReplayInstantPolicy || cc.AckWait < 3*time.Millisecond || cc.MaxDeliver > 0 || len(cc.BackOff) != 0 || cc.MaxAckPending < 1 || cc.HeadersOnly || cc.InactiveThreshold != 0 || (cc.MaxRequestExpires > 0 && cc.MaxRequestExpires < 250*time.Millisecond) || (cc.MaxRequestMaxBytes > 0 && cc.MaxRequestMaxBytes < maxMessageBytes) {
+	if !natswire.CompatiblePullConsumer(cc, cfg.EventConsumer, cfg.EventSubject) {
 		return 0, errors.New("bonnie: client/nats: incompatible status consumer")
 	}
 	return cc.AckWait, nil

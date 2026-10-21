@@ -102,7 +102,7 @@ type Client struct {
 // that fails at once does not spin on the same message.
 const defaultRetryDelay = time.Second
 
-const maxMessageBytes = 1 << 20
+const maxMessageBytes = natswire.MaxMessageBytes
 
 // New validates configuration and binds to JetStream. It creates a durable
 // pull consumer if absent. CreateStream permits stream creation; a root also
@@ -180,18 +180,12 @@ func New(nc *gonats.Conn, cfg Config) (*Client, error) {
 	if !slices.Contains(si.Config.Subjects, cfg.ResultSubject) || si.Config.Retention != gonats.LimitsPolicy {
 		return nil, errors.New("bonnie: client/nats: result stream must retain the literal result subject with limits retention")
 	}
-	ci, err := js.ConsumerInfo(cfg.ResultStream, cfg.ResultConsumer, gonats.Context(ctx))
-	if errors.Is(err, gonats.ErrConsumerNotFound) {
-		ci, err = js.AddConsumer(cfg.ResultStream, &gonats.ConsumerConfig{Durable: cfg.ResultConsumer, FilterSubject: cfg.ResultSubject, AckPolicy: gonats.AckExplicitPolicy, AckWait: 30 * time.Second, DeliverPolicy: gonats.DeliverAllPolicy, ReplayPolicy: gonats.ReplayInstantPolicy, MaxAckPending: 1, MaxWaiting: 1024}, gonats.Context(ctx))
-		if err != nil {
-			ci, err = js.ConsumerInfo(cfg.ResultStream, cfg.ResultConsumer, gonats.Context(ctx))
-		}
-	}
+	ci, err := natswire.EnsurePullConsumer(ctx, js, cfg.ResultStream, &gonats.ConsumerConfig{Durable: cfg.ResultConsumer, FilterSubject: cfg.ResultSubject, AckPolicy: gonats.AckExplicitPolicy, AckWait: 30 * time.Second, DeliverPolicy: gonats.DeliverAllPolicy, ReplayPolicy: gonats.ReplayInstantPolicy, MaxAckPending: 1, MaxWaiting: 1024})
 	if err != nil {
 		return nil, fmt.Errorf("bonnie: client/nats: result consumer: %w", err)
 	}
 	cc := ci.Config
-	if cc.Durable != cfg.ResultConsumer || cc.DeliverSubject != "" || cc.DeliverGroup != "" || cc.AckPolicy != gonats.AckExplicitPolicy || cc.FilterSubject != cfg.ResultSubject || len(cc.FilterSubjects) != 0 || cc.DeliverPolicy != gonats.DeliverAllPolicy || cc.ReplayPolicy != gonats.ReplayInstantPolicy || cc.AckWait < 3*time.Millisecond || cc.MaxDeliver > 0 || len(cc.BackOff) != 0 || cc.MaxAckPending < 1 || cc.HeadersOnly || cc.InactiveThreshold != 0 || (cc.MaxRequestExpires > 0 && cc.MaxRequestExpires < 250*time.Millisecond) || (cc.MaxRequestMaxBytes > 0 && cc.MaxRequestMaxBytes < maxMessageBytes) {
+	if !natswire.CompatiblePullConsumer(cc, cfg.ResultConsumer, cfg.ResultSubject) {
 		return nil, errors.New("bonnie: client/nats: incompatible result pull consumer")
 	}
 	return &Client{js: js, nc: nc, cfg: cfg, ackWait: cc.AckWait, eventAckWait: eventAckWait, retryDelay: defaultRetryDelay}, nil
