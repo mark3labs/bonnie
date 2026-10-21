@@ -360,6 +360,15 @@ func (c *Channel) saveResult(ctx context.Context, key string, result Result) err
 	return err
 }
 
+// reportLive reports a journal failure unless shutdown cancelled ctx. A
+// cancelled read or save leaves the delivery pending for redelivery, which is
+// the correct outcome, so it is not a channel failure.
+func (c *Channel) reportLive(ctx context.Context, message string) {
+	if ctx.Err() == nil {
+		c.report(message)
+	}
+}
+
 // errNoAck leaves a delivery pending for redelivery after an infrastructure
 // failure. Protocol errors become Result.Error and are acknowledged instead.
 var errNoAck = errors.New("bonnie: channel/nats: leave unacknowledged")
@@ -462,7 +471,7 @@ func (c *Channel) processJetStream(ctx context.Context, msg *gonats.Msg, in jsIn
 	key, isAnswer, task, answer, err := in.key, in.isAnswer, in.task, in.answer, in.decodeErr
 	cached, loadErr := c.loadResult(ctx, key)
 	if loadErr != nil {
-		c.report("result cache read failed")
+		c.reportLive(ctx, "result cache read failed")
 		return Result{}, "", nil, errNoAck
 	}
 	if cached != nil {
@@ -476,7 +485,7 @@ func (c *Channel) processJetStream(ctx context.Context, msg *gonats.Msg, in jsIn
 		answerKey = c.cacheKey("answer", answer.RunID, answer.MessageID)
 		cached, loadErr = c.loadResult(ctx, answerKey)
 		if loadErr != nil {
-			c.report("answer cache read failed")
+			c.reportLive(ctx, "answer cache read failed")
 			return Result{}, "", nil, errNoAck
 		}
 		if cached != nil {
@@ -491,7 +500,7 @@ func (c *Channel) processJetStream(ctx context.Context, msg *gonats.Msg, in jsIn
 	if err == nil && !isAnswer {
 		taskAdmission, loadErr = c.loadTaskAdmission(ctx, key)
 		if loadErr != nil {
-			c.report("task admission read failed")
+			c.reportLive(ctx, "task admission read failed")
 			return Result{}, "", nil, errNoAck
 		}
 		if taskAdmission != nil {
@@ -530,7 +539,7 @@ func (c *Channel) admitJetStreamAnswer(ctx context.Context, answer Answer, answe
 	}
 	admission, err := c.loadAdmission(ctx, answerKey)
 	if err != nil {
-		c.report("answer admission read failed")
+		c.reportLive(ctx, "answer admission read failed")
 		return nil, result, errNoAck
 	}
 	if admission != nil {
@@ -561,7 +570,7 @@ func (c *Channel) admitJetStreamAnswer(ctx context.Context, answer Answer, answe
 			return nil, result, errNoAck
 		}
 		if _, saveErr := c.core.Runner().Journal().Append(ctx, runtime.Record{RunID: answerKey, Kind: runtime.RecordExtensionData, ExtType: extAnswerAdmitted, Payload: data}); saveErr != nil {
-			c.report("answer admission save failed")
+			c.reportLive(ctx, "answer admission save failed")
 			return nil, result, errNoAck
 		}
 	}
@@ -600,11 +609,11 @@ func (c *Channel) admitJetStreamTask(ctx context.Context, task Task, key string,
 			return nil, errNoAck
 		}
 		if _, saveErr := c.core.Runner().Journal().Append(ctx, runtime.Record{RunID: key, Kind: runtime.RecordExtensionData, ExtType: extTaskAdmitted, Payload: data}); saveErr != nil {
-			c.report("task admission save failed")
+			c.reportLive(ctx, "task admission save failed")
 			return nil, errNoAck
 		}
 		if err := c.admitTask(ctx, result, runID); err != nil {
-			c.report("task admission index save failed")
+			c.reportLive(ctx, "task admission index save failed")
 			return nil, errNoAck
 		}
 	}
@@ -632,18 +641,18 @@ func (c *Channel) finishJetStream(ctx context.Context, msg *gonats.Msg, key, ans
 	}
 	if result.RunID != "" {
 		if err := c.saveResult(ctx, c.cacheKey("run", result.RunID), result); err != nil {
-			c.report("run route save failed")
+			c.reportLive(ctx, "run route save failed")
 			return errNoAck
 		}
 	}
 	if answerKey != "" {
 		if err := c.saveResult(ctx, answerKey, result); err != nil {
-			c.report("answer result save failed")
+			c.reportLive(ctx, "answer result save failed")
 			return errNoAck
 		}
 	}
 	if err := c.saveResult(ctx, key, result); err != nil {
-		c.report("result cache save failed")
+		c.reportLive(ctx, "result cache save failed")
 		return errNoAck
 	}
 	return c.publishJetStreamResult(ctx, msg, result, key)

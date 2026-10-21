@@ -22,13 +22,23 @@ type jsFailureJournal struct {
 	readAt   int
 	reads    int
 	hit      bool
+	// cancel, when set, is called at the injected failure: shutdown cancels
+	// the handler context while the journal operation is in flight.
+	cancel context.CancelFunc
+}
+
+func (j *jsFailureJournal) fail() {
+	j.hit = true
+	if j.cancel != nil {
+		j.cancel()
+	}
 }
 
 func (j *jsFailureJournal) Replay(ctx context.Context, key string) ([]runtime.Record, error) {
 	if key == j.key && j.readAt > 0 {
 		j.reads++
 		if j.reads == j.readAt {
-			j.hit = true
+			j.fail()
 			return nil, errors.New("injected read failure")
 		}
 	}
@@ -37,7 +47,7 @@ func (j *jsFailureJournal) Replay(ctx context.Context, key string) ([]runtime.Re
 
 func (j *jsFailureJournal) Append(ctx context.Context, rec runtime.Record) (int, error) {
 	if rec.RunID == j.key && rec.ExtType == j.ext && j.ext != "" {
-		j.hit = true
+		j.fail()
 		return 0, errors.New("injected write failure")
 	}
 	return j.Journal.Append(ctx, rec)
@@ -45,13 +55,20 @@ func (j *jsFailureJournal) Append(ctx context.Context, rec runtime.Record) (int,
 
 // Each reported journal failure leaves the delivery pending. Protocol errors
 // from the run lookup and Snapshot are intentionally not infrastructure exits.
+//
+// The shutdown variant cancels the handler context at the failure. The
+// delivery still stays pending, but nothing is reported: CI once failed
+// TestRootStatusesAndQueries because Shutdown cancelled the result cache save
+// and returned "result cache save failed".
 func TestJetStreamJournalFailuresLeaveUnacked(t *testing.T) {
 	t.Parallel()
-	for _, tc := range []struct {
+	type failureCase struct {
 		name, kind, ext, report string
 		readAt                  int
 		answer                  bool
-	}{
+		shutdown                bool
+	}
+	cases := []failureCase{
 		{name: "input read", kind: "input", readAt: 1, report: "result cache read failed"},
 		{name: "task admission read", kind: "input", readAt: 2, report: "task admission read failed"},
 		{name: "task admission save", kind: "input", ext: "nats_task_attempt_admitted", report: "task admission save failed"},
@@ -64,7 +81,12 @@ func TestJetStreamJournalFailuresLeaveUnacked(t *testing.T) {
 		{name: "answer run route save", kind: "run", ext: "nats_result", answer: true, report: "run route save failed"},
 		{name: "answer result save", kind: "answer", ext: "nats_result", answer: true, report: "answer result save failed"},
 		{name: "answer input save", kind: "input", ext: "nats_result", answer: true, report: "result cache save failed"},
-	} {
+	}
+	for _, tc := range cases {
+		tc.name, tc.shutdown = "shutdown "+tc.name, true
+		cases = append(cases, tc)
+	}
+	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			nc, js := jsServer(t)
@@ -136,15 +158,23 @@ func TestJetStreamJournalFailuresLeaveUnacked(t *testing.T) {
 					j.key = c.cacheKey("run", runID)
 				}
 			}
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			if tc.shutdown {
+				j.cancel = cancel
+			}
 			j.ext, j.readAt = tc.ext, tc.readAt
-			c.handleJetStream(t.Context(), msg)
+			c.handleJetStream(ctx, msg)
 			if !j.hit {
 				t.Fatal("failure was not injected")
 			}
 			c.mu.Lock()
 			failure := c.failure
 			c.mu.Unlock()
-			if failure == nil || !strings.HasSuffix(failure.Error(), ": "+tc.report) {
+			switch {
+			case tc.shutdown && failure != nil:
+				t.Fatalf("failure = %v after shutdown, want none", failure)
+			case !tc.shutdown && (failure == nil || !strings.HasSuffix(failure.Error(), ": "+tc.report)):
 				t.Fatalf("failure = %v, want %q", failure, tc.report)
 			}
 			info, err := js.ConsumerInfo("INPUT", consumer)

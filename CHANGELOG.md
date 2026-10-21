@@ -55,6 +55,13 @@ proven in production. Do not use it for work whose loss would hurt.
 - Upgrade Kit to v0.131.1 for public dynamic, content-backed activation and
   request preparation errors, while retaining file-backed tree activation.
 
+### Fixed
+
+- NATS JetStream shutdown no longer reports a journal read or save that it
+  cancelled as a channel failure. `Shutdown` returned errors such as
+  "result cache save failed" when it stopped a handler after a run completed.
+  The delivery still stays unacknowledged for redelivery.
+
 ### Known limits
 
 - **Linux only.** Releases support linux/amd64 and linux/arm64. The default needs
