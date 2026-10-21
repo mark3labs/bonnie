@@ -149,51 +149,19 @@ func (a *Agent) Run(ctx context.Context) (runErr error) {
 			}
 		}
 	}()
-	for _, build := range c.channels {
-		ch, err := build(runner)
-		if ch != nil {
-			channels = append(channels, ch)
-		}
-		if err != nil {
-			return err
-		}
-		if err := refuseReserved(ch); err != nil {
-			return err
-		}
+	channels, err = c.buildChannels(runner)
+	if err != nil {
+		return err
 	}
-	if c.noHTTPListener {
-		if c.listener != nil || c.webUI {
-			return errors.New("bonnie: disabled HTTP listener conflicts with listener or web UI")
-		}
-		for _, ch := range channels {
-			if len(ch.Routes()) != 0 {
-				return fmt.Errorf("bonnie: disabled HTTP listener conflicts with channel %q routes", ch.Name())
-			}
-		}
+	if err := c.checkNoListener(channels); err != nil {
+		return err
 	}
-	info := bonniehttp.Info{Agent: c.name}
-	if !c.noHTTPListener {
-		info.Channels = []string{"http"}
-	}
-	for _, ch := range channels {
-		info.Channels = append(info.Channels, ch.Name())
-	}
+	info := c.hostInfo(channels)
 
-	// The outbound registry: the channels that implement [channel.Receiver]
-	// answer a hand-off from any route handler.
-	out := outbound{byName: make(map[string]channel.Receiver)}
-	for _, ch := range channels {
-		if r, ok := ch.(channel.Receiver); ok {
-			out.byName[ch.Name()] = r
-		}
-	}
+	out := outboundFor(channels)
 
-	for _, ch := range channels {
-		if prepare, ok := ch.(channel.HostPreparer); ok {
-			if err := prepare.PrepareHost(out, channel.HostInfo{Agent: info.Agent, Version: info.Version, Channels: info.Channels}); err != nil {
-				return err
-			}
-		}
+	if err := prepareHosts(out, info, channels); err != nil {
+		return err
 	}
 
 	mux := http.NewServeMux()
@@ -208,21 +176,7 @@ func (a *Agent) Run(ctx context.Context) (runErr error) {
 			runErr = errors.Join(runErr, fmt.Errorf("bonnie: shutdown schedules: %w", err))
 		}
 	}()
-	httpOpts := []bonniehttp.Option{bonniehttp.WithInfo(info)}
-	if c.auth != nil {
-		httpOpts = append(httpOpts, bonniehttp.WithAuthenticator(c.auth))
-	}
-	httpChannel := bonniehttp.New(runner, httpOpts...)
-	mount(mux, httpChannel, out)
-	if c.webUI {
-		handler := web.New(runner, journal, httpChannel)
-		mux.Handle("/web", handler)
-		mux.Handle("/web/", handler)
-	}
-	schedules.mount(mux, c)
-	for _, ch := range channels {
-		mount(mux, ch, out)
-	}
+	httpChannel := c.mountRoutes(mux, runner, journal, out, info, schedules, channels)
 
 	// Bind before the banner, so the banner reports the address the process
 	// actually listens on. A configured ":0" is a request for any free port,
@@ -319,6 +273,94 @@ func (a *Agent) Run(ctx context.Context) (runErr error) {
 	stopDrain := context.AfterFunc(schedulerCtx, runner.BeginDrain)
 	defer stopDrain()
 
+	return c.await(schedulerCtx, mux, ln, prepared, schedules, presenceErr)
+}
+
+func (c *config) buildChannels(runner *runtime.Runner) ([]Channel, error) {
+	var channels []Channel
+	for _, build := range c.channels {
+		ch, err := build(runner)
+		if ch != nil {
+			channels = append(channels, ch)
+		}
+		if err != nil {
+			return channels, err
+		}
+		if err := refuseReserved(ch); err != nil {
+			return channels, err
+		}
+	}
+	return channels, nil
+}
+
+func (c *config) checkNoListener(channels []Channel) error {
+	if c.noHTTPListener {
+		if c.listener != nil || c.webUI {
+			return errors.New("bonnie: disabled HTTP listener conflicts with listener or web UI")
+		}
+		for _, ch := range channels {
+			if len(ch.Routes()) != 0 {
+				return fmt.Errorf("bonnie: disabled HTTP listener conflicts with channel %q routes", ch.Name())
+			}
+		}
+	}
+	return nil
+}
+
+func (c *config) hostInfo(channels []Channel) bonniehttp.Info {
+	info := bonniehttp.Info{Agent: c.name}
+	if !c.noHTTPListener {
+		info.Channels = []string{"http"}
+	}
+	for _, ch := range channels {
+		info.Channels = append(info.Channels, ch.Name())
+	}
+	return info
+}
+
+func outboundFor(channels []Channel) outbound {
+	// The outbound registry: the channels that implement [channel.Receiver]
+	// answer a hand-off from any route handler.
+	out := outbound{byName: make(map[string]channel.Receiver)}
+	for _, ch := range channels {
+		if r, ok := ch.(channel.Receiver); ok {
+			out.byName[ch.Name()] = r
+		}
+	}
+	return out
+}
+
+func prepareHosts(out outbound, info bonniehttp.Info, channels []Channel) error {
+	for _, ch := range channels {
+		if prepare, ok := ch.(channel.HostPreparer); ok {
+			if err := prepare.PrepareHost(out, channel.HostInfo{Agent: info.Agent, Version: info.Version, Channels: info.Channels}); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (c *config) mountRoutes(mux *http.ServeMux, runner *runtime.Runner, journal runtime.Journal, out outbound, info bonniehttp.Info, schedules *scheduleService, channels []Channel) *bonniehttp.Channel {
+	httpOpts := []bonniehttp.Option{bonniehttp.WithInfo(info)}
+	if c.auth != nil {
+		httpOpts = append(httpOpts, bonniehttp.WithAuthenticator(c.auth))
+	}
+	httpChannel := bonniehttp.New(runner, httpOpts...)
+	mount(mux, httpChannel, out)
+	if c.webUI {
+		handler := web.New(runner, journal, httpChannel)
+		mux.Handle("/web", handler)
+		mux.Handle("/web/", handler)
+	}
+	schedules.mount(mux, c)
+	for _, ch := range channels {
+		mount(mux, ch, out)
+	}
+	return httpChannel
+}
+
+func (c *config) await(schedulerCtx context.Context, mux *http.ServeMux, ln net.Listener, prepared *runtimePreparation, schedules *scheduleService, presenceErr <-chan error) error {
 	if c.noHTTPListener {
 		c.banner(os.Stderr, "no TCP listener", prepared.contextFiles, prepared.skills, prepared.dotenv)
 		var scheduleErr <-chan error
