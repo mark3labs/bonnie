@@ -11,7 +11,7 @@ import (
 	"github.com/tmc/go-iroh/endpointticket"
 	goiroh "github.com/tmc/go-iroh/iroh"
 
-	irohchannel "github.com/mark3labs/bonnie/channel/iroh"
+	"github.com/mark3labs/bonnie/wire"
 )
 
 // NewHTTPClient returns an HTTP/1.1 client which sends every request to ticket.
@@ -35,7 +35,7 @@ func NewHTTPClient(ep *goiroh.Endpoint, ticket string) (*http.Client, error) {
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 			dialCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 			defer cancel()
-			conn, err := ep.Connect(dialCtx, addr, irohchannel.ALPN)
+			conn, err := ep.Connect(dialCtx, addr, wire.IrohALPN)
 			if err != nil {
 				return nil, err
 			}

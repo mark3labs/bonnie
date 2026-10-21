@@ -3,9 +3,10 @@ package runtime
 import (
 	"encoding/json"
 	"sync"
-	"time"
 
 	kit "github.com/mark3labs/kit/pkg/kit"
+
+	"github.com/mark3labs/bonnie/wire"
 )
 
 // Event types that the runtime itself publishes. Every other type on an
@@ -13,18 +14,18 @@ import (
 // same vocabulary Kit uses.
 const (
 	// EventTurn reports the durable identity of a new turn.
-	EventTurn = "run_turn"
+	EventTurn = wire.EventTurn
 	// EventCancelRequested reports a durable cancellation command. A cancelled
 	// state confirms completion and withdraws all pending input for that turn.
-	EventCancelRequested = "run_cancel_requested"
+	EventCancelRequested = wire.EventCancelRequested
 	// EventState reports a run-state transition.
-	EventState = "run_state"
+	EventState = wire.EventState
 	// EventSuspend reports that the run parked for input.
-	EventSuspend = "run_suspend"
+	EventSuspend = wire.EventSuspend
 	// EventResume reports the input that released a suspension.
-	EventResume = "run_resume"
+	EventResume = wire.EventResume
 	// EventResponse reports the assistant's final text for a turn.
-	EventResponse = "run_response"
+	EventResponse = wire.EventResponse
 )
 
 // Event is one observable moment in a run's life. It is the unit of
@@ -41,16 +42,7 @@ const (
 // A client's cursor is the last Seq it saw. The stream serves every event
 // past it — from the backlog when it still reaches, from the journal when it
 // does not.
-type Event struct {
-	RunID  string          `json:"run_id"`
-	TurnID string          `json:"turn_id,omitempty"`
-	Seq    int             `json:"seq"`
-	Type   string          `json:"type"`
-	Time   time.Time       `json:"time"`
-	Text   string          `json:"text,omitempty"`
-	State  RunState        `json:"state,omitempty"`
-	Data   json.RawMessage `json:"data,omitempty"`
-}
+type Event = wire.Event
 
 // DefaultEventBuffer is how many recent events a run keeps for reconnecting
 // clients.

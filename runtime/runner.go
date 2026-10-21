@@ -28,6 +28,8 @@ import (
 	"time"
 
 	kit "github.com/mark3labs/kit/pkg/kit"
+
+	"github.com/mark3labs/bonnie/wire"
 )
 
 // Agent is the slice of Kit that the runner drives. *kit.Kit satisfies it.
@@ -217,17 +219,7 @@ type Input struct {
 }
 
 // Run is a snapshot of a durable run after a turn boundary.
-type Run struct {
-	ID string
-	// TurnID identifies the latest turn for scoped controls.
-	TurnID   string
-	State    RunState
-	Response string
-	// Suspend is non-nil when State is [RunWaiting].
-	Suspend *SuspendRequest
-	Usage   *kit.LLMUsage
-	Err     error
-}
+type Run = wire.Run
 
 // Runner executes durable runs against a [Journal].
 //

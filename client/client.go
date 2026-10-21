@@ -42,7 +42,7 @@ import (
 
 	kit "github.com/mark3labs/kit/pkg/kit"
 
-	"github.com/mark3labs/bonnie/runtime"
+	"github.com/mark3labs/bonnie/wire"
 )
 
 // apiPrefix is the framework namespace the channel serves under. It is the
@@ -130,16 +130,16 @@ type Health struct {
 
 // runResponse is the wire form of a run at a turn boundary.
 type runResponse struct {
-	TurnID   string                  `json:"turn_id,omitempty"`
-	RunID    string                  `json:"run_id"`
-	Cursor   int                     `json:"cursor,omitempty"`
-	State    runtime.RunState        `json:"state"`
-	Response string                  `json:"response,omitempty"`
-	Suspend  *runtime.SuspendRequest `json:"suspend,omitempty"`
+	TurnID   string               `json:"turn_id,omitempty"`
+	RunID    string               `json:"run_id"`
+	Cursor   int                  `json:"cursor,omitempty"`
+	State    wire.RunState        `json:"state"`
+	Response string               `json:"response,omitempty"`
+	Suspend  *wire.SuspendRequest `json:"suspend,omitempty"`
 }
 
-func (r runResponse) toRun() *runtime.Run {
-	return &runtime.Run{ID: r.RunID, TurnID: r.TurnID, State: r.State, Response: r.Response, Suspend: r.Suspend}
+func (r runResponse) toRun() *wire.Run {
+	return &wire.Run{ID: r.RunID, TurnID: r.TurnID, State: r.State, Response: r.Response, Suspend: r.Suspend}
 }
 
 // Health reports whether the server is up and routing. It needs no
@@ -186,7 +186,7 @@ func (c *Client) Ensure(ctx context.Context, address string) (string, int, error
 // Start begins a run for an address, or continues it — the channel resolves
 // the address to the same run on every call, so one address is one
 // conversation. The returned run reports the turn's outcome.
-func (c *Client) Start(ctx context.Context, address, text string) (*runtime.Run, error) {
+func (c *Client) Start(ctx context.Context, address, text string) (*wire.Run, error) {
 	var out runResponse
 	err := c.post(ctx, apiPrefix+"/runs", map[string]any{"address": address, "text": text}, &out)
 	if err != nil {
@@ -197,7 +197,7 @@ func (c *Client) Start(ctx context.Context, address, text string) (*runtime.Run,
 
 // Send delivers a message to an existing run as a new turn. It never
 // creates: an unknown run ID answers [ErrNotFound].
-func (c *Client) Send(ctx context.Context, runID, text string) (*runtime.Run, error) {
+func (c *Client) Send(ctx context.Context, runID, text string) (*wire.Run, error) {
 	var out runResponse
 	err := c.post(ctx, apiPrefix+"/runs/"+url.PathEscape(runID), map[string]any{"text": text}, &out)
 	if err != nil {
@@ -207,25 +207,25 @@ func (c *Client) Send(ctx context.Context, runID, text string) (*runtime.Run, er
 }
 
 // Respond answers a suspended run with text. The text is the answer to the
-// prompt the run's [runtime.SuspendRequest] carries.
+// prompt the run's [wire.SuspendRequest] carries.
 //
 // Use [Client.RespondWith] to answer an approval, which needs a verdict and
 // not only words.
-func (c *Client) Respond(ctx context.Context, runID, text string) (*runtime.Run, error) {
-	return c.RespondWith(ctx, runID, []runtime.InputResponse{{Text: text}})
+func (c *Client) Respond(ctx context.Context, runID, text string) (*wire.Run, error) {
+	return c.RespondWith(ctx, runID, []wire.InputResponse{{Text: text}})
 }
 
 // RespondWith answers a suspended run with whatever the suspension asked
 // for: text for a question, a verdict for an approval.
 //
-//	_, err := c.RespondWith(ctx, runID, []runtime.InputResponse{
-//		runtime.Reject("that would drop the production table"),
+//	_, err := c.RespondWith(ctx, runID, []wire.InputResponse{
+//		wire.Reject("that would drop the production table"),
 //	})
 //
 // An approval carries its verdict separately from its words, so "no, and
 // here is why" reaches the agent as a refusal with a reason rather than as
 // prose it has to interpret.
-func (c *Client) RespondWith(ctx context.Context, runID string, responses []runtime.InputResponse) (*runtime.Run, error) {
+func (c *Client) RespondWith(ctx context.Context, runID string, responses []wire.InputResponse) (*wire.Run, error) {
 	var out runResponse
 	err := c.post(ctx, apiPrefix+"/runs/"+url.PathEscape(runID)+"/respond",
 		map[string]any{"responses": responses}, &out)
@@ -236,7 +236,7 @@ func (c *Client) RespondWith(ctx context.Context, runID string, responses []runt
 }
 
 // Get reports a run's durable state without changing it.
-func (c *Client) Get(ctx context.Context, runID string) (*runtime.Run, error) {
+func (c *Client) Get(ctx context.Context, runID string) (*wire.Run, error) {
 	var out runResponse
 	if err := c.get(ctx, apiPrefix+"/runs/"+url.PathEscape(runID), &out); err != nil {
 		return nil, err
@@ -248,13 +248,13 @@ func (c *Client) Get(ctx context.Context, runID string) (*runtime.Run, error) {
 // Cursor is the last record in that replay, not a later position read.
 // Messages contain the selected branch before model-context compaction.
 type Snapshot struct {
-	TurnID   string                  `json:"turn_id,omitempty"`
-	RunID    string                  `json:"run_id"`
-	Cursor   int                     `json:"cursor"`
-	State    runtime.RunState        `json:"state"`
-	Response string                  `json:"response,omitempty"`
-	Suspend  *runtime.SuspendRequest `json:"suspend,omitempty"`
-	Messages []kit.LLMMessage        `json:"messages"`
+	TurnID   string               `json:"turn_id,omitempty"`
+	RunID    string               `json:"run_id"`
+	Cursor   int                  `json:"cursor"`
+	State    wire.RunState        `json:"state"`
+	Response string               `json:"response,omitempty"`
+	Suspend  *wire.SuspendRequest `json:"suspend,omitempty"`
+	Messages []kit.LLMMessage     `json:"messages"`
 }
 
 // Snapshot reads durable history and state without executing a turn.
@@ -276,8 +276,8 @@ func (c *Client) Cancel(ctx context.Context, runID string) error {
 
 // RequestCancel scopes a durable cancellation command to the observed turn.
 // An empty expectedTurnID targets the current turn.
-func (c *Client) RequestCancel(ctx context.Context, runID, expectedTurnID string) (runtime.CancelResult, error) {
-	var out runtime.CancelResult
+func (c *Client) RequestCancel(ctx context.Context, runID, expectedTurnID string) (wire.CancelResult, error) {
+	var out wire.CancelResult
 	err := c.post(ctx, apiPrefix+"/runs/"+url.PathEscape(runID)+"/cancel", map[string]string{"turn_id": expectedTurnID}, &out)
 	return out, err
 }
@@ -311,7 +311,7 @@ func (c *Client) Compact(ctx context.Context, runID string) error {
 // The stream is durable: it replays from the journal up to the live edge,
 // then stays open. A run parked on a human's answer holds it open for as
 // long as the answer takes.
-func (c *Client) Stream(ctx context.Context, runID string, after int) (<-chan runtime.Event, func(), error) {
+func (c *Client) Stream(ctx context.Context, runID string, after int) (<-chan wire.Event, func(), error) {
 	target := c.base + apiPrefix + "/runs/" + url.PathEscape(runID) + "/stream?cursor=" + strconv.Itoa(after)
 	requestCtx, cancel := context.WithCancel(ctx)
 	c.mu.Lock()
@@ -351,13 +351,13 @@ func (c *Client) Stream(ctx context.Context, runID string, after int) (<-chan ru
 		return nil, nil, fmt.Errorf("bonnie: client: stream: %s", strings.TrimSpace(string(body)))
 	}
 
-	ch := make(chan runtime.Event)
+	ch := make(chan wire.Event)
 	go func() {
 		defer close(ch)
 		defer func() { _ = resp.Body.Close() }()
 		dec := json.NewDecoder(bufio.NewReader(resp.Body))
 		for {
-			var ev runtime.Event
+			var ev wire.Event
 			if err := dec.Decode(&ev); err != nil {
 				return
 			}
