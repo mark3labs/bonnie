@@ -1,3 +1,7 @@
+// Command presencesmoke checks agent discovery, HTTP endpoints, shared and
+// targeted NATS tasks, presence deletion after a crash, and graceful shutdown
+// across separate processes. Run it from the repository root with
+// task smoke-presence.
 package main
 
 import (

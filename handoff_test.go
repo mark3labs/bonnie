@@ -22,7 +22,6 @@ import (
 type fakeSlackAPI struct {
 	mu     sync.Mutex
 	sent   []string
-	token  string
 	server *httptest.Server
 }
 
@@ -32,7 +31,6 @@ func newFakeSlackAPI(t *testing.T) *fakeSlackAPI {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /chat.postMessage", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
-		f.token = r.Header.Get("Authorization")
 		var body struct {
 			Channel  string `json:"channel"`
 			ThreadTS string `json:"thread_ts"`

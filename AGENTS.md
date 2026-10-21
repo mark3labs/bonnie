@@ -64,7 +64,7 @@ Layout:
 - Do not vendor Kit, copy internal code, or merge the two repositories.
 
 If Kit exports a type but not a helper for it, write the small helper in
-BONNIE. See `toolResultText` in `runtime/util.go`.
+BONNIE. See `messageText` in `runtime/util.go`.
 
 If the public API cannot do the task:
 

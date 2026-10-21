@@ -132,7 +132,7 @@ func (r *Runner) StreamEventsBounded(ctx context.Context, runID string, after, m
 			replayDone := make(chan error, 1)
 			replayCtx, replayCancel := context.WithCancel(ctx)
 			go func() {
-				replayDone <- r.replayEventsContext(replayCtx, runID, after, replay, replayCtx.Done(), &emitted)
+				replayDone <- r.replayEventsContext(replayCtx, runID, replay, replayCtx.Done(), &emitted)
 				close(replay)
 			}()
 			var err error

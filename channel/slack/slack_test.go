@@ -179,7 +179,6 @@ type harness struct {
 	fake    *fakeAPI
 	server  *httptest.Server
 	secret  string
-	created time.Time
 	journal runtime.Journal
 }
 
@@ -206,7 +205,7 @@ func adapter(t *testing.T, script []*kit.TurnResult) *harness {
 			rt.Handler(w, req, ch, nil)
 		})
 	}
-	h := &harness{ch: ch, agent: agent, fake: fake, server: httptest.NewServer(mux), secret: secret, created: time.Now(), journal: j}
+	h := &harness{ch: ch, agent: agent, fake: fake, server: httptest.NewServer(mux), secret: secret, journal: j}
 	t.Cleanup(h.server.Close)
 	return h
 }

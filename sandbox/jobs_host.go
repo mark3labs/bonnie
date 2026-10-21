@@ -24,13 +24,13 @@ type jobMetadata struct {
 }
 
 type hostJob struct {
-	cmd                *exec.Cmd
-	id, stdout, stderr string
-	mu                 sync.Mutex
-	running            bool
-	exit               *int
-	waitErr            error
-	done               chan struct{}
+	cmd            *exec.Cmd
+	stdout, stderr string
+	mu             sync.Mutex
+	running        bool
+	exit           *int
+	waitErr        error
+	done           chan struct{}
 }
 
 type hostJobs struct {
@@ -126,7 +126,7 @@ func (h *hostJobs) start(ctx context.Context, cmd Command, prepare func(*exec.Cm
 		return "", fmt.Errorf("bonnie: sandbox: start job: %w", err)
 	}
 	launched = true
-	j := &hostJob{cmd: c, id: id, stdout: stdout, stderr: stderr, running: true, done: make(chan struct{})}
+	j := &hostJob{cmd: c, stdout: stdout, stderr: stderr, running: true, done: make(chan struct{})}
 	h.mu.Lock()
 	if h.jobs == nil {
 		h.jobs = make(map[string]*hostJob)

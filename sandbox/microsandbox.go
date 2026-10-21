@@ -93,7 +93,7 @@ func (p *MicrosandboxProvider) Available(ctx context.Context) error {
 	if err := lookPath(p.bin); err != nil {
 		return fmt.Errorf("%w (install it from https://github.com/superradcompany/microsandbox)", err)
 	}
-	_, stderr, code, err := runCLI(ctx, nil, p.bin, "--version")
+	_, stderr, code, err := runCLI(ctx, p.bin, "--version")
 	if err != nil {
 		return fmt.Errorf("%w: %s --version: %v", ErrUnavailable, p.bin, err)
 	}
@@ -165,11 +165,11 @@ func (p *MicrosandboxProvider) Open(ctx context.Context, runID string) (Sandbox,
 		},
 		startFn: p.ensureRunning,
 		killFn: func(ctx context.Context, c *cliSandbox) error {
-			_, stderr, code, err := runCLI(ctx, nil, c.bin, "stop", "--force", c.name)
+			_, stderr, code, err := runCLI(ctx, c.bin, "stop", "--force", c.name)
 			return cliError("kill microsandbox "+c.name, msbError(stderr), code, err)
 		},
 		stopFn: func(ctx context.Context, c *cliSandbox) error {
-			_, stderr, code, err := runCLI(ctx, nil, c.bin, "stop", c.name)
+			_, stderr, code, err := runCLI(ctx, c.bin, "stop", c.name)
 			return cliError("stop microsandbox "+c.name, msbError(stderr), code, err)
 		},
 		deleteFn: func(ctx context.Context, c *cliSandbox) error {
@@ -213,7 +213,7 @@ func (p *MicrosandboxProvider) ensureRunning(ctx context.Context, sb *cliSandbox
 	args = append(args, net...)
 	args = append(args, p.image)
 
-	if _, stderr, code, err := runCLI(ctx, nil, p.bin, args...); err != nil || code != 0 {
+	if _, stderr, code, err := runCLI(ctx, p.bin, args...); err != nil || code != 0 {
 		// Inspect and create are not atomic. Another creator can win the
 		// race, so adopt only an explicit already-exists refusal.
 		if err != nil || !msbAlreadyExists(stderr) {
@@ -290,7 +290,7 @@ func msbError(stderr string) string {
 // and the call is kept because nothing documents create-implies-start as a
 // promise. Only the guest command that follows proves the sandbox is usable.
 func (p *MicrosandboxProvider) start(ctx context.Context, name string) error {
-	_, stderr, code, err := runCLI(ctx, nil, p.bin, "start", name)
+	_, stderr, code, err := runCLI(ctx, p.bin, "start", name)
 	if err == nil && code != 0 && strings.Contains(stderr, "already running") {
 		return nil
 	}
@@ -347,7 +347,7 @@ type msbNetworkPolicy struct {
 // different ways — restore the old policy, or delete the sandbox and lose
 // the work directory.
 func (p *MicrosandboxProvider) checkPolicy(ctx context.Context, sb *cliSandbox) error {
-	stdout, stderr, code, err := runCLI(ctx, nil, p.bin, "inspect", "--format", "json", sb.name)
+	stdout, stderr, code, err := runCLI(ctx, p.bin, "inspect", "--format", "json", sb.name)
 	if err != nil {
 		return err
 	}
@@ -445,7 +445,7 @@ func allowKey(host string) string {
 
 // ensureWorkDir creates the work directory inside the guest.
 func (p *MicrosandboxProvider) ensureWorkDir(ctx context.Context, sb *cliSandbox) error {
-	_, stderr, code, err := runCLI(ctx, nil, p.bin, "exec", sb.name, "--no-tty", "--",
+	_, stderr, code, err := runCLI(ctx, p.bin, "exec", sb.name, "--no-tty", "--",
 		"mkdir", "-p", WorkDir)
 	return cliError("create work directory", msbError(stderr), code, err)
 }
@@ -454,7 +454,7 @@ func (p *MicrosandboxProvider) ensureWorkDir(ctx context.Context, sb *cliSandbox
 // from ps, so an empty list is not proof that a work directory was deleted.
 // Only the explicit missing-sandbox diagnostic proves absence.
 func (p *MicrosandboxProvider) known(ctx context.Context, name string) (bool, error) {
-	stdout, stderr, code, err := runCLI(ctx, nil, p.bin, "inspect", "--format", "json", name)
+	stdout, stderr, code, err := runCLI(ctx, p.bin, "inspect", "--format", "json", name)
 	if err != nil {
 		return false, err
 	}
@@ -477,7 +477,7 @@ func (p *MicrosandboxProvider) known(ctx context.Context, name string) (bool, er
 // remove requires proof of absence after rm. A successful CLI exit alone
 // must not produce a cleanup receipt while the sandbox still exists.
 func (p *MicrosandboxProvider) remove(ctx context.Context, name string) error {
-	_, stderr, code, err := runCLI(ctx, nil, p.bin, "rm", "--force", name)
+	_, stderr, code, err := runCLI(ctx, p.bin, "rm", "--force", name)
 	if err := cliError("rm "+name, msbError(stderr), code, err); err != nil {
 		return err
 	}
@@ -513,7 +513,7 @@ func (p *MicrosandboxProvider) copyOut(ctx context.Context, c *cliSandbox, guest
 	defer func() { _ = os.RemoveAll(tmp) }()
 
 	local := filepath.Join(tmp, "file")
-	_, stderr, code, err := runCLI(ctx, nil, c.bin, "cp", c.name+":"+guestPath, local)
+	_, stderr, code, err := runCLI(ctx, c.bin, "cp", c.name+":"+guestPath, local)
 	if err != nil {
 		return nil, err
 	}
@@ -545,13 +545,13 @@ func (p *MicrosandboxProvider) copyIn(ctx context.Context, c *cliSandbox, guestP
 	}
 
 	// cp does not create the parent, so make it first.
-	_, stderr, code, err := runCLI(ctx, nil, c.bin, "exec", c.name, "--no-tty", "--",
+	_, stderr, code, err := runCLI(ctx, c.bin, "exec", c.name, "--no-tty", "--",
 		"mkdir", "-p", parentDir(guestPath))
 	if err := cliError("create parent of "+guestPath, msbError(stderr), code, err); err != nil {
 		return err
 	}
 
-	_, stderr, code, err = runCLI(ctx, nil, c.bin, "cp", local, c.name+":"+guestPath)
+	_, stderr, code, err = runCLI(ctx, c.bin, "cp", local, c.name+":"+guestPath)
 	if err != nil {
 		return err
 	}

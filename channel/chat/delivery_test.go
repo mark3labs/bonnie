@@ -20,9 +20,6 @@ type deliveryRecorder struct {
 	headers []http.Header
 	status  int
 	answer  string
-	// closed counts how many request bodies the server saw to completion,
-	// which is one per delivery that actually reached it.
-	closed int
 }
 
 func newDeliveryRecorder(t *testing.T, status int, answer string) *deliveryRecorder {
@@ -36,7 +33,6 @@ func newDeliveryRecorder(t *testing.T, status int, answer string) *deliveryRecor
 		r.mu.Lock()
 		r.bodies = append(r.bodies, string(body))
 		r.headers = append(r.headers, req.Header.Clone())
-		r.closed++
 		status, answer := r.status, r.answer
 		r.mu.Unlock()
 

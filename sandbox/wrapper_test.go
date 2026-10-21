@@ -113,7 +113,7 @@ func TestCliErrorSeparatesTheFailureModes(t *testing.T) {
 		t.Parallel()
 		// A binary that is not there: exactly what a host without docker
 		// installed hands DeleteRun.
-		_, stderr, code, err := runCLI(context.Background(), nil,
+		_, stderr, code, err := runCLI(context.Background(),
 			"bonnie-no-such-binary-ever", "rm", "--force", "bonnie-x")
 		if err == nil {
 			t.Fatal("running a missing binary reported no error")

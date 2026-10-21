@@ -99,10 +99,9 @@ func TestExplicitSuspensionAndStaleAnswer(t *testing.T) {
 	}
 }
 
-type receiver struct{ called bool }
+type receiver struct{}
 
 func (r *receiver) Receive(context.Context, any, string, channel.SendOptions) error {
-	r.called = true
 	return nil
 }
 

@@ -412,7 +412,7 @@ func (r *Runner) StreamEvents(runID string, after int) (<-chan Event, func()) {
 		emitted := after
 
 		if needReplay {
-			switch err := r.replayEvents(runID, after, out, done, &emitted); {
+			switch err := r.replayEvents(runID, out, done, &emitted); {
 			case errors.Is(err, errStreamClosed):
 				// The client left during catch-up. Nothing to serve.
 				return
@@ -481,11 +481,11 @@ func sendEvent(out chan<- Event, done <-chan struct{}, ev Event) bool {
 // completed turn — as the last assistant text before the closing state
 // record, anchored to the last message record of the turn. Everything else
 // in the journal is conversation state, not an event.
-func (r *Runner) replayEvents(runID string, after int, out chan<- Event, done <-chan struct{}, emitted *int) error {
-	return r.replayEventsContext(context.Background(), runID, after, out, done, emitted)
+func (r *Runner) replayEvents(runID string, out chan<- Event, done <-chan struct{}, emitted *int) error {
+	return r.replayEventsContext(context.Background(), runID, out, done, emitted)
 }
 
-func (r *Runner) replayEventsContext(ctx context.Context, runID string, after int, out chan<- Event, done <-chan struct{}, emitted *int) error {
+func (r *Runner) replayEventsContext(ctx context.Context, runID string, out chan<- Event, done <-chan struct{}, emitted *int) error {
 	recs, err := r.journal.Replay(ctx, runID)
 	if err != nil {
 		return err

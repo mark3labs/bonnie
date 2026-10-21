@@ -84,6 +84,11 @@ tasks:
     cmds:
       - go test -race -tags integration ./runtime ./sandbox
 
+  smoke-presence:
+    desc: Run the multi-process presence smoke harness (HTTP and NATS)
+    cmds:
+      - go run ./internal/presencesmoke
+
   test-cover:
     desc: Run tests with a coverage report
     cmds:
