@@ -262,437 +262,460 @@ func supports(t *testing.T, f *Fixture, cap Capability) {
 // wires a fresh journal, a fresh [ScriptAgent], and the adapter.
 func RunConformance(t *testing.T, build func(t *testing.T) *Fixture) {
 	t.Helper()
-	t.Run("from creates and resolves one run per address", func(t *testing.T) {
-		f := build(t)
-		ctx := context.Background()
+	for _, c := range conformanceCases {
+		t.Run(c.name, func(t *testing.T) { c.run(t, build) })
+	}
+}
 
-		first := f.Inbound.From("addr-1")
-		run, err := first.Send(ctx, "hello", channel.SendOptions{})
-		if err != nil {
-			t.Fatalf("Send: %v", err)
-		}
-		id, err := first.RunID(ctx)
-		if err != nil {
-			t.Fatalf("RunID: %v", err)
-		}
-		if id != run.ID {
-			t.Fatalf("RunID = %q, want the run the address created (%q)", id, run.ID)
-		}
+var conformanceCases = []struct {
+	name string
+	run  func(t *testing.T, build func(t *testing.T) *Fixture)
+}{
+	{"from creates and resolves one run per address", conformFromCreatesOneRun},
+	{"attach never creates", conformAttachNeverCreates},
+	{"steer injects into the running turn", conformSteer},
+	{"queue waits for the turn to finish", conformQueue},
+	{"unknown turn policy is refused", conformUnknownTurnPolicy},
+	{"respond answers a suspended run", conformRespond},
+	{"cancel stops the turn", conformCancel},
+	{"a turn survives the caller going away", conformCallerGoesAway},
+	{"send records title, origin, and context", conformSendMetadata},
+	{"reset retires the run and frees the address", conformReset},
+	{"clear forgets the conversation and keeps the run", conformClear},
+	{"compact summarises on demand", conformCompact},
+}
 
-		// The same address resolves to the same run; a different address
-		// must not share it.
-		again, err := f.Inbound.From("addr-1").RunID(ctx)
-		if err != nil || again != id {
-			t.Fatalf("second resolve = %q, %v, want %q", again, err, id)
-		}
-		other, err := f.Inbound.From("addr-2").Send(ctx, "hi", channel.SendOptions{})
+func conformFromCreatesOneRun(t *testing.T, build func(t *testing.T) *Fixture) {
+	f := build(t)
+	ctx := context.Background()
+
+	first := f.Inbound.From("addr-1")
+	run, err := first.Send(ctx, "hello", channel.SendOptions{})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	id, err := first.RunID(ctx)
+	if err != nil {
+		t.Fatalf("RunID: %v", err)
+	}
+	if id != run.ID {
+		t.Fatalf("RunID = %q, want the run the address created (%q)", id, run.ID)
+	}
+
+	// The same address resolves to the same run; a different address
+	// must not share it.
+	again, err := f.Inbound.From("addr-1").RunID(ctx)
+	if err != nil || again != id {
+		t.Fatalf("second resolve = %q, %v, want %q", again, err, id)
+	}
+	other, err := f.Inbound.From("addr-2").Send(ctx, "hi", channel.SendOptions{})
+	if err != nil {
+		t.Fatalf("Send on a second address: %v", err)
+	}
+	if other.ID == run.ID {
+		t.Fatal("two addresses resolved to one run")
+	}
+}
+
+func conformAttachNeverCreates(t *testing.T, build func(t *testing.T) *Fixture) {
+	f := build(t)
+	ctx := context.Background()
+
+	if _, err := f.Inbound.Attach("no-such-run").Send(ctx, "hi", channel.SendOptions{}); !errors.Is(err, runtime.ErrRunNotFound) {
+		t.Fatalf("err = %v, want runtime.ErrRunNotFound: attach must never create", err)
+	}
+	// And the failure is the one the contract names, so an adapter can
+	// map it to its own not-found.
+	if _, err := f.Inbound.Attach("no-such-run").RunID(ctx); err == nil {
+		t.Fatal("Attach RunID to an unknown run must fail")
+	}
+}
+
+func conformSteer(t *testing.T, build func(t *testing.T) *Fixture) {
+	f := build(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	release, active := f.Agent.HoldOpen()
+	started := make(chan *runtime.Run, 1)
+	go func() {
+		run, err := f.Inbound.From("steer-addr").Send(ctx, "long work", channel.SendOptions{})
 		if err != nil {
-			t.Fatalf("Send on a second address: %v", err)
+			run = &runtime.Run{Err: err}
 		}
-		if other.ID == run.ID {
-			t.Fatal("two addresses resolved to one run")
+		started <- run
+	}()
+
+	select {
+	case <-active:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the turn never became active")
+	}
+
+	ref := f.Inbound.From("steer-addr")
+	if _, err := ref.Send(ctx, "change of plan", channel.SendOptions{
+		TurnPolicy: channel.PolicySteer,
+	}); err != nil {
+		t.Fatalf("steered Send: %v", err)
+	}
+	release()
+
+	run := <-started
+	if run.Err != nil {
+		t.Fatalf("turn failed: %v", run.Err)
+	}
+	if steered := f.Agent.Steered(); len(steered) != 1 || steered[0] != "change of plan" {
+		t.Fatalf("steered = %v, want the message injected once", steered)
+	}
+	// Steering must not have started a second turn.
+	if calls := f.Agent.Calls(); calls != 1 {
+		t.Fatalf("agent ran %d turns, want 1: steering must not queue", calls)
+	}
+}
+
+func conformQueue(t *testing.T, build func(t *testing.T) *Fixture) {
+	f := build(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	release, active := f.Agent.HoldOpen()
+	first := f.Inbound.From("queue-addr")
+	go func() {
+		_, _ = first.Send(ctx, "long work", channel.SendOptions{})
+		// The turn ends; the lock releases.
+	}()
+
+	select {
+	case <-active:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the turn never became active")
+	}
+
+	// Queue: this Send must wait for the first turn to end, then run
+	// as a new turn.
+	done := make(chan *runtime.Run, 1)
+	go func() {
+		run, err := refSend(ctx, f.Inbound.From("queue-addr"), channel.PolicyQueue)
+		if err != nil {
+			run = &runtime.Run{Err: err}
 		}
+		done <- run
+	}()
+
+	// The queued send must NOT complete while the first turn runs. The
+	// short window only lets a defective queued send reach the agent;
+	// MaxConcurrent below is the assertion. A wait that proves an
+	// absence cannot fail a correct transport, so it stays short.
+	select {
+	case run := <-done:
+		t.Fatalf("the queued message ran while the turn was active: %+v", run)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	release()
+	run := <-done
+	if run.Err != nil {
+		t.Fatalf("queued turn failed: %v", run.Err)
+	}
+	if run.State != runtime.RunCompleted {
+		t.Fatalf("queued run state = %q, want %q: Send returned before its turn ran", run.State, runtime.RunCompleted)
+	}
+	if calls := f.Agent.Calls(); calls != 2 {
+		t.Fatalf("agent ran %d turns, want 2: the queued message must run as its own turn", calls)
+	}
+	if n := f.Agent.MaxConcurrent(); n != 1 {
+		t.Fatalf("%d turns overlapped: the queued message ran while the turn was active", n)
+	}
+}
+
+func conformUnknownTurnPolicy(t *testing.T, build func(t *testing.T) *Fixture) {
+	f := build(t)
+	ctx := context.Background()
+
+	if _, err := refSend(ctx, f.Inbound.From("policy-addr"), "nope"); !errors.Is(err, channel.ErrUnknownTurnPolicy) {
+		t.Fatalf("unknown policy = %v, want ErrUnknownTurnPolicy", err)
+	}
+	ids, err := f.Journal.Runs(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ids) != 0 || f.Agent.Calls() != 0 {
+		t.Fatalf("unknown policy started work: runs = %v, calls = %d", ids, f.Agent.Calls())
+	}
+
+}
+
+func conformRespond(t *testing.T, build func(t *testing.T) *Fixture) {
+	f := build(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	ref := f.Inbound.From("sus-addr")
+	f.Agent.Say(&kit.TurnResult{
+		Response:   "Which region?",
+		FinalValue: runtime.SuspendRequest{Kind: "ask", Prompt: "Which region?"},
 	})
+	parked, err := refSend(ctx, ref, channel.PolicyQueue)
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if parked.State != runtime.RunWaiting {
+		t.Fatalf("state = %q, want waiting", parked.State)
+	}
 
-	t.Run("attach never creates", func(t *testing.T) {
-		f := build(t)
-		ctx := context.Background()
+	f.Agent.Say(&kit.TurnResult{Response: "Deployed to eu-west-1."})
+	resumed, err := ref.Respond(ctx, []runtime.InputResponse{{Text: "eu-west-1"}})
+	if err != nil {
+		t.Fatalf("Respond: %v", err)
+	}
+	if resumed.State != runtime.RunCompleted {
+		t.Fatalf("state after respond = %q, want completed", resumed.State)
+	}
+}
 
-		if _, err := f.Inbound.Attach("no-such-run").Send(ctx, "hi", channel.SendOptions{}); !errors.Is(err, runtime.ErrRunNotFound) {
-			t.Fatalf("err = %v, want runtime.ErrRunNotFound: attach must never create", err)
+func conformCancel(t *testing.T, build func(t *testing.T) *Fixture) {
+	f := build(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	release, active := f.Agent.HoldOpen()
+	ref := f.Inbound.From("cancel-addr")
+	startRef := f.Inbound.From("cancel-addr")
+	started := make(chan error, 1)
+	go func() {
+		_, err := refSend(ctx, startRef, channel.PolicyQueue)
+		started <- err
+	}()
+	select {
+	case <-active:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the turn never became active")
+	}
+
+	if err := ref.Cancel(ctx); err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+	release()
+
+	select {
+	case err := <-started:
+		// A cancelled turn is not a failed one: the runner reports
+		// RunCancelled and Send returns without an error.
+		if err != nil {
+			t.Fatalf("Send after cancel: %v", err)
 		}
-		// And the failure is the one the contract names, so an adapter can
-		// map it to its own not-found.
-		if _, err := f.Inbound.Attach("no-such-run").RunID(ctx); err == nil {
-			t.Fatal("Attach RunID to an unknown run must fail")
+	case <-time.After(10 * time.Second):
+		t.Fatal("the turn never returned after cancel")
+	}
+}
+
+func conformCallerGoesAway(t *testing.T, build func(t *testing.T) *Fixture) {
+	f := build(t)
+	// The context that STARTS the turn is cancelled mid-turn, the way an
+	// HTTP client that hangs up cancels a request context and a webhook
+	// handler's context ends when it answers the platform. Neither is a
+	// decision to stop the agent: the run is durable, and stopping it is
+	// Cancel and nothing else.
+	//
+	// Before the runner detached the turn context, every transport lost
+	// runs this way and the journal kept them at the last checkpoint
+	// instead of at an answer.
+	callerCtx, hangUp := context.WithCancel(context.Background())
+	defer hangUp()
+
+	release, active := f.Agent.HoldOpen()
+	done := make(chan *runtime.Run, 1)
+	go func() {
+		run, err := f.Inbound.From("detach-addr").Send(callerCtx, "long work", channel.SendOptions{})
+		if err != nil {
+			run = &runtime.Run{Err: err}
 		}
-	})
+		done <- run
+	}()
 
-	t.Run("steer injects into the running turn", func(t *testing.T) {
-		f := build(t)
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
+	select {
+	case <-active:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the turn never became active")
+	}
+	hangUp()
 
-		release, active := f.Agent.HoldOpen()
-		started := make(chan *runtime.Run, 1)
-		go func() {
-			run, err := f.Inbound.From("steer-addr").Send(ctx, "long work", channel.SendOptions{})
-			if err != nil {
-				run = &runtime.Run{Err: err}
-			}
-			started <- run
-		}()
+	// No wait is needed here. If the hang-up reached the turn, the
+	// held agent returns the context error once released, and the run
+	// does not end completed: the state checks below fail.
+	release()
 
-		select {
-		case <-active:
-		case <-time.After(10 * time.Second):
-			t.Fatal("the turn never became active")
-		}
-
-		ref := f.Inbound.From("steer-addr")
-		if _, err := ref.Send(ctx, "change of plan", channel.SendOptions{
-			TurnPolicy: channel.PolicySteer,
-		}); err != nil {
-			t.Fatalf("steered Send: %v", err)
-		}
-		release()
-
-		run := <-started
+	select {
+	case run := <-done:
 		if run.Err != nil {
-			t.Fatalf("turn failed: %v", run.Err)
-		}
-		if steered := f.Agent.Steered(); len(steered) != 1 || steered[0] != "change of plan" {
-			t.Fatalf("steered = %v, want the message injected once", steered)
-		}
-		// Steering must not have started a second turn.
-		if calls := f.Agent.Calls(); calls != 1 {
-			t.Fatalf("agent ran %d turns, want 1: steering must not queue", calls)
-		}
-	})
-
-	t.Run("queue waits for the turn to finish", func(t *testing.T) {
-		f := build(t)
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-
-		release, active := f.Agent.HoldOpen()
-		first := f.Inbound.From("queue-addr")
-		go func() {
-			_, _ = first.Send(ctx, "long work", channel.SendOptions{})
-			// The turn ends; the lock releases.
-		}()
-
-		select {
-		case <-active:
-		case <-time.After(10 * time.Second):
-			t.Fatal("the turn never became active")
-		}
-
-		// Queue: this Send must wait for the first turn to end, then run
-		// as a new turn.
-		done := make(chan *runtime.Run, 1)
-		go func() {
-			run, err := refSend(ctx, f.Inbound.From("queue-addr"), channel.PolicyQueue)
-			if err != nil {
-				run = &runtime.Run{Err: err}
-			}
-			done <- run
-		}()
-
-		// The queued send must NOT complete while the first turn runs. The
-		// short window only lets a defective queued send reach the agent;
-		// MaxConcurrent below is the assertion. A wait that proves an
-		// absence cannot fail a correct transport, so it stays short.
-		select {
-		case run := <-done:
-			t.Fatalf("the queued message ran while the turn was active: %+v", run)
-		case <-time.After(50 * time.Millisecond):
-		}
-
-		release()
-		run := <-done
-		if run.Err != nil {
-			t.Fatalf("queued turn failed: %v", run.Err)
+			t.Fatalf("Send: %v", run.Err)
 		}
 		if run.State != runtime.RunCompleted {
-			t.Fatalf("queued run state = %q, want %q: Send returned before its turn ran", run.State, runtime.RunCompleted)
+			t.Fatalf("state = %q, want %q", run.State, runtime.RunCompleted)
 		}
-		if calls := f.Agent.Calls(); calls != 2 {
-			t.Fatalf("agent ran %d turns, want 2: the queued message must run as its own turn", calls)
+		// The durable record is the claim: a later process must find
+		// the finished run, not one stuck mid-turn.
+		state, err := f.Journal.State(context.Background(), run.ID)
+		if err != nil {
+			t.Fatalf("State: %v", err)
 		}
-		if n := f.Agent.MaxConcurrent(); n != 1 {
-			t.Fatalf("%d turns overlapped: the queued message ran while the turn was active", n)
+		if state != runtime.RunCompleted {
+			t.Fatalf("journalled state = %q, want %q", state, runtime.RunCompleted)
 		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the turn never finished after the agent was released")
+	}
+}
+
+func conformSendMetadata(t *testing.T, build func(t *testing.T) *Fixture) {
+	f := build(t)
+	ctx := context.Background()
+
+	ref := f.Inbound.From("norm-addr")
+	run, err := ref.Send(ctx, "what changed?", channel.SendOptions{
+		Title:   "PR #42",
+		Kind:    "pull_request",
+		Context: []string{"event: pull_request.opened"},
 	})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	// A second turn with different metadata and no context.
+	if _, err := ref.Send(ctx, "and now?", channel.SendOptions{Title: "ignored", Kind: "dm"}); err != nil {
+		t.Fatalf("second Send: %v", err)
+	}
 
-	t.Run("unknown turn policy is refused", func(t *testing.T) {
-		f := build(t)
-		ctx := context.Background()
+	sess, err := runtime.Restore(ctx, run.ID, f.Journal)
+	if err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	if sess.Title() != "PR #42" {
+		t.Fatalf("title = %q, want the first turn's", sess.Title())
+	}
+	o := sess.Origin()
+	if o.Channel == "" || o.Kind != "pull_request" {
+		t.Fatalf("origin = %+v, want the channel's name and the first turn's kind", o)
+	}
 
-		if _, err := refSend(ctx, f.Inbound.From("policy-addr"), "nope"); !errors.Is(err, channel.ErrUnknownTurnPolicy) {
-			t.Fatalf("unknown policy = %v, want ErrUnknownTurnPolicy", err)
+	recs, err := f.Journal.Replay(ctx, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var contexts, users []string
+	for _, rec := range recs {
+		switch {
+		case rec.Kind == runtime.RecordContext:
+			contexts = append(contexts, rec.Text)
+		case rec.Kind == runtime.RecordMessage && rec.Role == "user":
+			users = append(users, rec.Text)
 		}
-		ids, err := f.Journal.Runs(ctx, "")
-		if err != nil {
-			t.Fatal(err)
+	}
+	if len(contexts) != 1 || contexts[0] != "event: pull_request.opened" {
+		t.Fatalf("context records = %q, want the first turn's only", contexts)
+	}
+	for _, u := range users {
+		if u != "what changed?" && u != "and now?" {
+			t.Fatalf("user message %q: context leaked into the conversation", u)
 		}
-		if len(ids) != 0 || f.Agent.Calls() != 0 {
-			t.Fatalf("unknown policy started work: runs = %v, calls = %d", ids, f.Agent.Calls())
-		}
+	}
+}
 
-	})
+func conformReset(t *testing.T, build func(t *testing.T) *Fixture) {
+	f := build(t)
+	ctx := context.Background()
 
-	t.Run("respond answers a suspended run", func(t *testing.T) {
-		f := build(t)
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
+	ref := f.Inbound.From("reset-addr")
+	first, err := ref.Send(ctx, "hello", channel.SendOptions{})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if err := ref.Reset(ctx, "start over"); err != nil {
+		t.Fatalf("Reset: %v", err)
+	}
+	if state, _ := f.Journal.State(ctx, first.ID); state != runtime.RunRetired {
+		t.Fatalf("old run state = %q, want retired", state)
+	}
 
-		ref := f.Inbound.From("sus-addr")
-		f.Agent.Say(&kit.TurnResult{
-			Response:   "Which region?",
-			FinalValue: runtime.SuspendRequest{Kind: "ask", Prompt: "Which region?"},
-		})
-		parked, err := refSend(ctx, ref, channel.PolicyQueue)
-		if err != nil {
-			t.Fatalf("Send: %v", err)
-		}
-		if parked.State != runtime.RunWaiting {
-			t.Fatalf("state = %q, want waiting", parked.State)
-		}
+	// The address is free: the next Send creates a new run.
+	second, err := f.Inbound.From("reset-addr").Send(ctx, "again", channel.SendOptions{})
+	if err != nil {
+		t.Fatalf("Send after reset: %v", err)
+	}
+	if second.ID == first.ID {
+		t.Fatal("the address still resolves to the retired run")
+	}
+	// A fixed reference stays pinned to the retired run and is refused.
+	if _, err := f.Inbound.Attach(first.ID).Send(ctx, "more", channel.SendOptions{}); !errors.Is(err, runtime.ErrRunRetired) {
+		t.Fatalf("Send to the retired run = %v, want ErrRunRetired", err)
+	}
+	// Reset on an address that owns nothing is a no-op, not a create.
+	before, err := f.Journal.Runs(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Inbound.From("never-bound").Reset(ctx, ""); err != nil {
+		t.Fatalf("Reset on an unbound address: %v", err)
+	}
+	after, err := f.Journal.Runs(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != len(before) {
+		t.Fatalf("unbound reset created a run: %v -> %v", before, after)
+	}
+	if err := f.Inbound.Attach("no-such-run").Reset(ctx, ""); !errors.Is(err, runtime.ErrRunNotFound) {
+		t.Fatalf("Reset on an unknown run = %v, want ErrRunNotFound", err)
+	}
+}
 
-		f.Agent.Say(&kit.TurnResult{Response: "Deployed to eu-west-1."})
-		resumed, err := ref.Respond(ctx, []runtime.InputResponse{{Text: "eu-west-1"}})
-		if err != nil {
-			t.Fatalf("Respond: %v", err)
-		}
-		if resumed.State != runtime.RunCompleted {
-			t.Fatalf("state after respond = %q, want completed", resumed.State)
-		}
-	})
+func conformClear(t *testing.T, build func(t *testing.T) *Fixture) {
+	f := build(t)
+	ctx := context.Background()
 
-	t.Run("cancel stops the turn", func(t *testing.T) {
-		f := build(t)
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
+	ref := f.Inbound.From("clear-addr")
+	run, err := ref.Send(ctx, "remember this", channel.SendOptions{})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if err := ref.Clear(ctx); err != nil {
+		t.Fatalf("Clear: %v", err)
+	}
+	sess, err := runtime.Restore(ctx, run.ID, f.Journal)
+	if err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	if n := len(sess.GetMessages()); n != 0 {
+		t.Fatalf("%d messages after clear, want 0", n)
+	}
+	again, err := ref.Send(ctx, "fresh start", channel.SendOptions{})
+	if err != nil {
+		t.Fatalf("Send after clear: %v", err)
+	}
+	if again.ID != run.ID {
+		t.Fatalf("clear changed the run: %s -> %s", run.ID, again.ID)
+	}
+}
 
-		release, active := f.Agent.HoldOpen()
-		ref := f.Inbound.From("cancel-addr")
-		startRef := f.Inbound.From("cancel-addr")
-		started := make(chan error, 1)
-		go func() {
-			_, err := refSend(ctx, startRef, channel.PolicyQueue)
-			started <- err
-		}()
-		select {
-		case <-active:
-		case <-time.After(10 * time.Second):
-			t.Fatal("the turn never became active")
-		}
+func conformCompact(t *testing.T, build func(t *testing.T) *Fixture) {
+	f := build(t)
+	supports(t, f, CapCompaction)
+	ctx := context.Background()
 
-		if err := ref.Cancel(ctx); err != nil {
-			t.Fatalf("Cancel: %v", err)
-		}
-		release()
-
-		select {
-		case err := <-started:
-			// A cancelled turn is not a failed one: the runner reports
-			// RunCancelled and Send returns without an error.
-			if err != nil {
-				t.Fatalf("Send after cancel: %v", err)
-			}
-		case <-time.After(10 * time.Second):
-			t.Fatal("the turn never returned after cancel")
-		}
-	})
-	t.Run("a turn survives the caller going away", func(t *testing.T) {
-		f := build(t)
-		// The context that STARTS the turn is cancelled mid-turn, the way an
-		// HTTP client that hangs up cancels a request context and a webhook
-		// handler's context ends when it answers the platform. Neither is a
-		// decision to stop the agent: the run is durable, and stopping it is
-		// Cancel and nothing else.
-		//
-		// Before the runner detached the turn context, every transport lost
-		// runs this way and the journal kept them at the last checkpoint
-		// instead of at an answer.
-		callerCtx, hangUp := context.WithCancel(context.Background())
-		defer hangUp()
-
-		release, active := f.Agent.HoldOpen()
-		done := make(chan *runtime.Run, 1)
-		go func() {
-			run, err := f.Inbound.From("detach-addr").Send(callerCtx, "long work", channel.SendOptions{})
-			if err != nil {
-				run = &runtime.Run{Err: err}
-			}
-			done <- run
-		}()
-
-		select {
-		case <-active:
-		case <-time.After(10 * time.Second):
-			t.Fatal("the turn never became active")
-		}
-		hangUp()
-
-		// No wait is needed here. If the hang-up reached the turn, the
-		// held agent returns the context error once released, and the run
-		// does not end completed: the state checks below fail.
-		release()
-
-		select {
-		case run := <-done:
-			if run.Err != nil {
-				t.Fatalf("Send: %v", run.Err)
-			}
-			if run.State != runtime.RunCompleted {
-				t.Fatalf("state = %q, want %q", run.State, runtime.RunCompleted)
-			}
-			// The durable record is the claim: a later process must find
-			// the finished run, not one stuck mid-turn.
-			state, err := f.Journal.State(context.Background(), run.ID)
-			if err != nil {
-				t.Fatalf("State: %v", err)
-			}
-			if state != runtime.RunCompleted {
-				t.Fatalf("journalled state = %q, want %q", state, runtime.RunCompleted)
-			}
-		case <-time.After(10 * time.Second):
-			t.Fatal("the turn never finished after the agent was released")
-		}
-	})
-
-	t.Run("send records title, origin, and context", func(t *testing.T) {
-		f := build(t)
-		ctx := context.Background()
-
-		ref := f.Inbound.From("norm-addr")
-		run, err := ref.Send(ctx, "what changed?", channel.SendOptions{
-			Title:   "PR #42",
-			Kind:    "pull_request",
-			Context: []string{"event: pull_request.opened"},
-		})
-		if err != nil {
-			t.Fatalf("Send: %v", err)
-		}
-		// A second turn with different metadata and no context.
-		if _, err := ref.Send(ctx, "and now?", channel.SendOptions{Title: "ignored", Kind: "dm"}); err != nil {
-			t.Fatalf("second Send: %v", err)
-		}
-
-		sess, err := runtime.Restore(ctx, run.ID, f.Journal)
-		if err != nil {
-			t.Fatalf("Restore: %v", err)
-		}
-		if sess.Title() != "PR #42" {
-			t.Fatalf("title = %q, want the first turn's", sess.Title())
-		}
-		o := sess.Origin()
-		if o.Channel == "" || o.Kind != "pull_request" {
-			t.Fatalf("origin = %+v, want the channel's name and the first turn's kind", o)
-		}
-
-		recs, err := f.Journal.Replay(ctx, run.ID)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var contexts, users []string
-		for _, rec := range recs {
-			switch {
-			case rec.Kind == runtime.RecordContext:
-				contexts = append(contexts, rec.Text)
-			case rec.Kind == runtime.RecordMessage && rec.Role == "user":
-				users = append(users, rec.Text)
-			}
-		}
-		if len(contexts) != 1 || contexts[0] != "event: pull_request.opened" {
-			t.Fatalf("context records = %q, want the first turn's only", contexts)
-		}
-		for _, u := range users {
-			if u != "what changed?" && u != "and now?" {
-				t.Fatalf("user message %q: context leaked into the conversation", u)
-			}
-		}
-	})
-
-	t.Run("reset retires the run and frees the address", func(t *testing.T) {
-		f := build(t)
-		ctx := context.Background()
-
-		ref := f.Inbound.From("reset-addr")
-		first, err := ref.Send(ctx, "hello", channel.SendOptions{})
-		if err != nil {
-			t.Fatalf("Send: %v", err)
-		}
-		if err := ref.Reset(ctx, "start over"); err != nil {
-			t.Fatalf("Reset: %v", err)
-		}
-		if state, _ := f.Journal.State(ctx, first.ID); state != runtime.RunRetired {
-			t.Fatalf("old run state = %q, want retired", state)
-		}
-
-		// The address is free: the next Send creates a new run.
-		second, err := f.Inbound.From("reset-addr").Send(ctx, "again", channel.SendOptions{})
-		if err != nil {
-			t.Fatalf("Send after reset: %v", err)
-		}
-		if second.ID == first.ID {
-			t.Fatal("the address still resolves to the retired run")
-		}
-		// A fixed reference stays pinned to the retired run and is refused.
-		if _, err := f.Inbound.Attach(first.ID).Send(ctx, "more", channel.SendOptions{}); !errors.Is(err, runtime.ErrRunRetired) {
-			t.Fatalf("Send to the retired run = %v, want ErrRunRetired", err)
-		}
-		// Reset on an address that owns nothing is a no-op, not a create.
-		before, err := f.Journal.Runs(ctx, "")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := f.Inbound.From("never-bound").Reset(ctx, ""); err != nil {
-			t.Fatalf("Reset on an unbound address: %v", err)
-		}
-		after, err := f.Journal.Runs(ctx, "")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(after) != len(before) {
-			t.Fatalf("unbound reset created a run: %v -> %v", before, after)
-		}
-		if err := f.Inbound.Attach("no-such-run").Reset(ctx, ""); !errors.Is(err, runtime.ErrRunNotFound) {
-			t.Fatalf("Reset on an unknown run = %v, want ErrRunNotFound", err)
-		}
-	})
-
-	t.Run("clear forgets the conversation and keeps the run", func(t *testing.T) {
-		f := build(t)
-		ctx := context.Background()
-
-		ref := f.Inbound.From("clear-addr")
-		run, err := ref.Send(ctx, "remember this", channel.SendOptions{})
-		if err != nil {
-			t.Fatalf("Send: %v", err)
-		}
-		if err := ref.Clear(ctx); err != nil {
-			t.Fatalf("Clear: %v", err)
-		}
-		sess, err := runtime.Restore(ctx, run.ID, f.Journal)
-		if err != nil {
-			t.Fatalf("Restore: %v", err)
-		}
-		if n := len(sess.GetMessages()); n != 0 {
-			t.Fatalf("%d messages after clear, want 0", n)
-		}
-		again, err := ref.Send(ctx, "fresh start", channel.SendOptions{})
-		if err != nil {
-			t.Fatalf("Send after clear: %v", err)
-		}
-		if again.ID != run.ID {
-			t.Fatalf("clear changed the run: %s -> %s", run.ID, again.ID)
-		}
-	})
-
-	t.Run("compact summarises on demand", func(t *testing.T) {
-		f := build(t)
-		supports(t, f, CapCompaction)
-		ctx := context.Background()
-
-		ref := f.Inbound.From("compact-addr")
-		run, err := ref.Send(ctx, "a long story", channel.SendOptions{})
-		if err != nil {
-			t.Fatalf("Send: %v", err)
-		}
-		if err := ref.Compact(ctx); err != nil {
-			t.Fatalf("Compact: %v", err)
-		}
-		sess, err := runtime.Restore(ctx, run.ID, f.Journal)
-		if err != nil {
-			t.Fatalf("Restore: %v", err)
-		}
-		if c := sess.GetLastCompaction(); c == nil || c.Summary != "scripted summary" {
-			t.Fatalf("last compaction = %+v, want the scripted summary", c)
-		}
-	})
+	ref := f.Inbound.From("compact-addr")
+	run, err := ref.Send(ctx, "a long story", channel.SendOptions{})
+	if err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	if err := ref.Compact(ctx); err != nil {
+		t.Fatalf("Compact: %v", err)
+	}
+	sess, err := runtime.Restore(ctx, run.ID, f.Journal)
+	if err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	if c := sess.GetLastCompaction(); c == nil || c.Summary != "scripted summary" {
+		t.Fatalf("last compaction = %+v, want the scripted summary", c)
+	}
 }
 
 // refSend is Send with an explicit policy, so the table cases stay flat.
