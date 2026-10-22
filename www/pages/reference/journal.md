@@ -89,7 +89,7 @@ For a store without `StepJournal`, Session falls back to individual Append calls
 
 | Constant | Stored kind | Purpose |
 | --- | --- | --- |
-| `RecordTurn` | `turn` | Durable turn identity |
+| `RecordTurn` | `turn` | Durable turn identity; an optional payload holds the turn's W3C trace context |
 | `RecordCancel` | `cancel` | Turn-scoped cancellation command |
 | `RecordMessage` | `message` | Lossless conversation message |
 | `RecordStep` | `step` | Finished-step checkpoint |

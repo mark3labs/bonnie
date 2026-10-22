@@ -270,6 +270,8 @@ Activity logging is off by default. Enable it with:
 bonnie.WithActivityLogger(bonnie.NewActivityLogger(nil)),
 ```
 
+For traces in an OpenTelemetry backend or Langfuse, see [Observability](/guides/observability). Traces record metadata only unless you allow content.
+
 Info logs include final responses and run activity. Debug logs can include prompts, tool arguments, results, and reasoning. Protect and limit log retention. Logging is synchronous, so a slow writer delays work. Journal replay does not log old activity again.
 
 Monitor disk space, failed runs, waiting approvals, sandbox resources, provider errors, and schedule delivery failures. Core NATS does not retain offline tasks or retry result delivery; durable run state alone does not make it a durable broker queue. If you deploy NATS, read the adapter's current Core NATS and JetStream contracts separately.

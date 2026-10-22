@@ -37,6 +37,7 @@ Layout:
 | `client/` | Go clients: HTTP wire API (`client`), JetStream (`client/nats`), HTTP transports (`client/iroh`, `client/natsapi`) |
 | `presence/` | agent presence records; memory and NATS KV registries |
 | `schedule/` | durable cron jobs |
+| `observe/` | OpenTelemetry tracing of turns (`runtime.Observer`); `observe/langfuse` adapter |
 | `selfmod/` | self-modification tools: `Local` (`bonnie dev`) and `Remote` (draft pull request) |
 | `web/` | optional operator web UI (templ) |
 | `agent/` | agent-tree scaffold and code generation |
@@ -244,6 +245,13 @@ before you change `runtime/`.
   `kit.LLMMessage`. `Record.Text` is a display-only projection. Never rebuild
   a message from `Text` alone, because that drops tool calls silently. Guard
   test: `runtime/replay_fidelity_test.go`.
+- **Tracing is an observer, not a Kit seam.** `runtime.Observer` sees live
+  turns only; replay, snapshots, and rebuilt streams must never reach it. The
+  runtime imports no tracing library: package `observe` implements the
+  interface with OpenTelemetry. A `RecordTurn` payload holds the turn's W3C
+  trace carrier, so a recovering process continues the trace. A turn record
+  without a payload stays valid. Guard tests: `runtime/observer_test.go`,
+  `observe/observe_test.go`.
 
 ### The journal is SQLite and must stay CGO-free
 

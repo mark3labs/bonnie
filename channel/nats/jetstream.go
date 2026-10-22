@@ -18,6 +18,7 @@ import (
 
 	"github.com/mark3labs/bonnie/channel"
 	"github.com/mark3labs/bonnie/internal/natswire"
+	"github.com/mark3labs/bonnie/internal/tracectx"
 	"github.com/mark3labs/bonnie/runtime"
 )
 
@@ -385,6 +386,8 @@ type jsInput struct {
 }
 
 func (c *Channel) handleJetStream(ctx context.Context, msg *gonats.Msg) {
+	// A publisher that sends traceparent makes the turn a child of its span.
+	ctx = tracectx.Extract(ctx, msg.Header)
 	stop := c.heartbeat(ctx, msg)
 	defer stop()
 	in, err := c.decodeJetStream(msg)

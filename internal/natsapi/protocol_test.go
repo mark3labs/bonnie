@@ -27,6 +27,15 @@ func TestValidation(t *testing.T) {
 	if Headers(http.Header{"X-Operator-Token": []string{"x"}}, []string{"X-Operator-Token"}) != nil {
 		t.Fatal("additional credential header rejected")
 	}
+	// W3C trace context crosses the transport, so a turn can join the
+	// caller's trace.
+	trace := http.Header{
+		"Traceparent": {"00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"},
+		"Tracestate":  {"vendor=x"},
+	}
+	if err := Headers(trace, nil); err != nil {
+		t.Fatalf("trace context rejected: %v", err)
+	}
 	prefix := DefaultInboxPrefix
 	for _, inbox := range []string{"tasks", "", prefix + ".*", prefix + ".short", prefix + "." + Token(16) + ".extra"} {
 		if Inbox(inbox, prefix) {

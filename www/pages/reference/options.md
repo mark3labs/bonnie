@@ -133,6 +133,7 @@ See [Agent Commands](/guides/agent-commands) for a complete example and scoped j
 | `WithHTTPAuthenticator(fn bonniehttp.Authenticator)` | Verifies callers of the framework HTTP API and supplies their principal. Health remains unauthenticated. |
 | `Quiet()` | Suppresses the startup banner, not authentication or isolation checks. |
 | `WithActivityLogger(logger runtime.ActivityLogger)` | Enables live activity logging across channels. Nil disables it. Replay is not logged again. |
+| `WithTracing(tp trace.TracerProvider, opts ...observe.Option)` | Records each turn as OpenTelemetry spans. Metadata only unless `observe.WithCapture` allows content. Nil disables it. See [Observability](/guides/observability). |
 
 Without an HTTP authenticator, the API verifies no caller. Use an authenticator or a trusted authentication layer before exposing it. An authentication callback is not a sandbox policy. See [HTTP](/channels/http), [Deployment](/guides/deployment), and [Events](/reference/events).
 
