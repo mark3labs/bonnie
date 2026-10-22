@@ -123,8 +123,10 @@ directory is a base, not a jail; that is why the managed default uses Landlock.
 ### HTTP channel: optional identity verification, not run authorization
 
 Configure `http.WithAuthenticator` or `bonnie.WithHTTPAuthenticator` to verify
-requests. Every route except health requires verification when configured.
-The verifier supplies the principal; a body principal cannot override it.
+requests. Every route except health invokes the authenticator when configured.
+Returning `(nil, nil)` permits an unattributed request. If authenticated access
+is required, return a non-nil principal for accepted requests and an error for
+rejected requests. A body principal cannot override the verifier result.
 Without a verifier, body identity is self-asserted, not verified. Use a trusted
 authentication layer or the verifier before exposing the API to untrusted callers.
 

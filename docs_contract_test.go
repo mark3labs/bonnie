@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-// Inventory tracked root sources, including constructors outside options.go,
+// Inventory root sources, including untracked files and constructors outside options.go,
 // so a new Option cannot silently disappear from the all-options reference.
 func TestDocumentationOptionCoverage(t *testing.T) {
 	t.Parallel()
@@ -18,7 +18,7 @@ func TestDocumentationOptionCoverage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	files, err := exec.CommandContext(t.Context(), "git", "ls-files", "-z", "--", "*.go").Output()
+	files, err := exec.CommandContext(t.Context(), "git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "*.go").Output()
 	if err != nil {
 		t.Fatal(err)
 	}

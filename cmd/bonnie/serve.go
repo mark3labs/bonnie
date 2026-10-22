@@ -162,10 +162,10 @@ func sandboxProvider(ctx context.Context, kind, image string) (sandbox.Provider,
 		// whose script still passes it learns what replaced it instead of
 		// getting a silent change of behaviour.
 		return nil, fmt.Errorf("--sandbox none is gone: managed file and command tools require a backend; " +
-			"the default, --sandbox landlock, needs nothing installed and confines tool " +
-			"calls to the run's sandbox; if you really want tool calls to run as this " +
-			"process with its files, network, and credentials, that is --sandbox local, " +
-			"which provides NO isolation")
+			"the default, --sandbox landlock, needs nothing installed and confines managed file " +
+			"and command tools; --sandbox local runs those tools with host files, network, " +
+			"and credentials and provides NO isolation. Custom Go callbacks run on the host " +
+			"with either backend")
 
 	case "docker":
 		var o []sandbox.DockerOption
