@@ -57,6 +57,8 @@ API/control subjects and publish only to allowed inboxes. Default reply prefix i
 Use restrictive ACLs and TLS: broad inbox reading exposes private conversations,
 and API/control eavesdropping exposes bearer credentials and control capabilities.
 Frames are not independently signed. Do not trust caller-supplied identity headers.
+The W3C `Traceparent` and `Tracestate` headers cross the transport, so a turn
+can join the caller's trace. An agent from before this change rejects them.
 
 ## Streams and failures
 

@@ -48,7 +48,7 @@ type Agent interface {
 
 Optional capabilities include `FileAgent` for file prompts, `Compactor` for compaction, `CompletionAgent` for completion checks, and Kit event subscription for live activity. Unsupported files fail with `ErrFilesUnsupported`; unsupported compaction fails with `ErrCompactionUnsupported`.
 
-Runner options include `WithEventBuffer`, `WithActivityLogger`, `WithCompletionHook(hook, limit)`, and `WithCompletionLimit(limit)`. These are runtime options, not root `bonnie.Option` values. A Runner completion hook takes precedence over an agent's completion capability. The default continuation limit is zero; a negative runtime limit becomes zero.
+Runner options include `WithEventBuffer`, `WithActivityLogger`, `WithObserver`, `WithCompletionHook(hook, limit)`, and `WithCompletionLimit(limit)`. These are runtime options, not root `bonnie.Option` values. A Runner completion hook takes precedence over an agent's completion capability. The default continuation limit is zero; a negative runtime limit becomes zero.
 
 ## Run states
 
@@ -85,12 +85,19 @@ The caller must retain the command as undelivered: BONNIE does not queue it. A s
 | `Title` | First non-empty title is retained for operator listings |
 | `Origin` | First supplied conversation location is retained |
 | `Trigger` | Structured turn provenance, such as schedule, occurrence, dispatch, and scheduled time |
+| `Trace` | W3C trace context (`traceparent`, `tracestate`) of the request that delivered the input. An observer makes the turn a child of it. Submissions journal it. Trace alone does not start a turn |
 
 Per-turn context is injected by the context-prepare hook. It does not become ordinary conversation history on later turns. Origin and principal identity are distinct from trigger provenance.
 
 `Run` returns `ID`, `TurnID`, `State`, `Response`, optional `Suspend`, model `Usage`, and `Err`. Examine both the returned error and outcome. `Snapshot(ctx, runID)` reads saved status without starting a turn. A snapshot response can be a draft from history while completion checks are pending.
 
 Start refuses a waiting run with `ErrRunWaiting`. Resume refuses a non-waiting run with `ErrNotWaiting`. Both refuse retired runs with `ErrRunRetired`. Concurrent execution of one run through one Runner fails with `ErrRunActive`. Use `errors.Is` for sentinel errors.
+
+## Observers
+
+`WithObserver(o Observer)` reports each executed turn to `o`. `Observer.StartTurn` receives a `TurnStart`: run ID, turn ID, kind (`new`, `recovery`, or `resume`), title, origin, prompt, the input's trace context, the trace carrier of the run's last turn, and the answers that resume a waiting run. It returns the context the turn runs in and a `TurnObservation`. The runtime calls `Attach` when the turn's agent exists and `End` when the turn reaches a boundary or fails.
+
+`Carrier` returns the trace context to journal with the turn record. The next turn receives it as `TurnStart.Previous`, also in another process. An observer sees live turns only: replay, snapshots, and rebuilt event streams never reach it. It runs on the turn's goroutine and must return promptly. Package `observe` implements it with OpenTelemetry; see [Observability](/guides/observability).
 
 Start and Resume execute synchronously for the caller, but their execution context is detached from caller cancellation and deadlines. An HTTP disconnect must not destroy durable work. Stop execution through runtime controls; do not assume cancelling the caller's context stops its turn. A host must arrange its own drain and cancellation policy.
 

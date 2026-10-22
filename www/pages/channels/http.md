@@ -145,6 +145,10 @@ The verifier covers every HTTP channel route except health, including routes mou
 
 Low-level servers can build `bonniehttp.New(runner, bonniehttp.WithAuthenticator(fn))` and mount `ch.Handler()`. `HandlerWithOutbound` also supplies a registry for hand-offs. Custom channels cannot mount routes under the reserved `/bonnie/` namespace.
 
+## Trace context
+
+Every route reads the W3C `traceparent` and `tracestate` headers. With tracing on, a turn that a request starts is a child of the caller's span. A submission or a spawned child run journals the headers with its input, so the turn keeps its parent when it runs later or in another process. A span that the host already put in the request context takes precedence. See [Observability](/guides/observability).
+
 ## Idempotent starts
 
 `operation_id` requires a non-nil verified principal from the channel authenticator. A reverse proxy alone does not make the field valid unless the channel verifier returns a proven principal.

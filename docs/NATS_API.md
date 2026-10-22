@@ -102,7 +102,8 @@ prefixes are needed). Broad inbox read permissions expose private responses;
 API/control eavesdropping exposes bearer credentials and cancellation secrets.
 
 Only GET, HEAD, POST and DELETE, origin-form paths under `/bonnie/v1/`, and
-Authorization, Content-Type, Accept headers are accepted. Optional
+Authorization, Content-Type, Accept, and the W3C trace context headers
+Traceparent and Tracestate are accepted. Optional
 `AuthenticationHeaders` permits additional credential headers, not Host,
 hop-by-hop, proxy, forwarded/identity, or NATS headers. Invalid paths, dot
 segments, CR/LF and invalid reply routes are rejected; an invalid inbox receives

@@ -90,6 +90,8 @@ A `Result` contains:
 | `agent_id` | Owning JetStream agent |
 | `answer_subject` | JetStream agent answer route |
 
+A task or answer message can carry W3C `traceparent` and `tracestate` NATS headers, in any letter case. With tracing on, the turn is a child of the publisher's span. See [Observability](/guides/observability).
+
 Do not infer success only from `state`; check `error` too. A validation error can have no run ID or state. All task and answer results go to the configured `ResultSubject`, never `Msg.Reply` or a publisher-supplied destination. `reply_to` is not a supported JSON field.
 
 ## Core behavior and answers
