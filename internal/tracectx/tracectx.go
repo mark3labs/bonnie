@@ -27,15 +27,17 @@ func Extract(ctx context.Context, h map[string][]string) context.Context {
 	return propagator.Extract(ctx, carrierOf(h))
 }
 
-// Carrier returns the W3C trace context in h as the map that
-// runtime.Input.Trace holds, or nil when h has no valid traceparent.
-func Carrier(h map[string][]string) map[string]string {
-	ctx := propagator.Extract(context.Background(), carrierOf(h))
-	if !trace.SpanContextFromContext(ctx).IsValid() {
+// FromContext returns the span context in ctx as the map that
+// runtime.Input.Trace holds, or nil when ctx has no valid span context. A
+// channel passes the context [Extract] returned, so a deferred turn gets the
+// same parent that a direct turn from that request gets.
+func FromContext(ctx context.Context) map[string]string {
+	sc := trace.SpanContextFromContext(ctx)
+	if !sc.IsValid() {
 		return nil
 	}
 	carrier := propagation.MapCarrier{}
-	propagator.Inject(ctx, carrier)
+	propagator.Inject(trace.ContextWithSpanContext(context.Background(), sc), carrier)
 	return carrier
 }
 

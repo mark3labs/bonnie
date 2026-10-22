@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -105,5 +106,44 @@ func TestTraceparentIsJournalledWithASubmission(t *testing.T) {
 	}
 	if got := items[0].Input.Trace["traceparent"]; got != testTraceparent {
 		t.Fatalf("journalled traceparent = %q, want %q", got, testTraceparent)
+	}
+}
+
+// A span the host put around the request wins over the caller's header, for
+// a deferred turn as for a direct one. Before, a submission journalled the
+// header and its turn got a different parent than a direct turn would.
+func TestHostSpanWinsForASubmission(t *testing.T) {
+	t.Parallel()
+	agent := &stubAgent{turns: []*kit.TurnResult{{Response: "hello"}}}
+	r := runtime.NewRunner(runtime.NewMemoryJournal(), func(_ context.Context, s *runtime.Session) (runtime.Agent, error) {
+		agent.mu.Lock()
+		agent.session = s
+		agent.mu.Unlock()
+		return agent, nil
+	})
+	host := trace.NewSpanContext(trace.SpanContextConfig{
+		TraceID: trace.TraceID{7}, SpanID: trace.SpanID{7}, TraceFlags: trace.FlagsSampled,
+	})
+	h := New(r).Handler()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		h.ServeHTTP(w, req.WithContext(trace.ContextWithSpanContext(req.Context(), host)))
+	}))
+	t.Cleanup(srv.Close)
+
+	start := postTraced(t, srv.URL+"/bonnie/v1/runs", StartRequest{Text: "hi"})
+	var run RunResponse
+	if err := json.NewDecoder(start.Body).Decode(&run); err != nil || run.RunID == "" {
+		t.Fatalf("start = %+v, %v", run, err)
+	}
+	if resp := postTraced(t, srv.URL+"/bonnie/v1/runs/"+run.RunID+"/submissions", SubmissionRequest{RequestID: "r1", Text: "later"}); resp.StatusCode/100 != 2 {
+		t.Fatalf("submit status = %d", resp.StatusCode)
+	}
+	items, err := r.Submissions(context.Background(), run.RunID)
+	if err != nil || len(items) != 1 {
+		t.Fatalf("submissions = %+v, %v", items, err)
+	}
+	got := items[0].Input.Trace["traceparent"]
+	if got == testTraceparent || !strings.Contains(got, host.TraceID().String()) {
+		t.Fatalf("journalled traceparent = %q, want the host span %s", got, host.TraceID())
 	}
 }

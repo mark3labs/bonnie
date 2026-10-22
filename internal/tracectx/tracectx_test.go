@@ -24,7 +24,7 @@ func TestExtractReadsHTTPAndNATSHeaders(t *testing.T) {
 		if !sc.IsRemote() || sc.TraceID().String() != traceID {
 			t.Fatalf("%s: span context = %v", name, sc)
 		}
-		if c := Carrier(h); c["traceparent"] != parent {
+		if c := FromContext(Extract(context.Background(), h)); c["traceparent"] != parent {
 			t.Fatalf("%s: carrier = %v", name, c)
 		}
 	}
@@ -36,7 +36,7 @@ func TestExtractIgnoresMissingAndMalformed(t *testing.T) {
 		if sc := trace.SpanContextFromContext(Extract(context.Background(), h)); sc.IsValid() {
 			t.Fatalf("headers %v gave span context %v", h, sc)
 		}
-		if c := Carrier(h); c != nil {
+		if c := FromContext(Extract(context.Background(), h)); c != nil {
 			t.Fatalf("headers %v gave carrier %v", h, c)
 		}
 	}
@@ -48,8 +48,11 @@ func TestExtractKeepsAnExistingSpan(t *testing.T) {
 	t.Parallel()
 	own := trace.NewSpanContext(trace.SpanContextConfig{TraceID: trace.TraceID{9}, SpanID: trace.SpanID{9}})
 	ctx := trace.ContextWithSpanContext(context.Background(), own)
-	got := trace.SpanContextFromContext(Extract(ctx, http.Header{"Traceparent": {parent}}))
-	if got.TraceID() != own.TraceID() {
+	ctx = Extract(ctx, http.Header{"Traceparent": {parent}})
+	if got := trace.SpanContextFromContext(ctx); got.TraceID() != own.TraceID() {
 		t.Fatalf("trace = %s, want the context's own", got.TraceID())
+	}
+	if c := FromContext(ctx); c["traceparent"] == parent || c["traceparent"] == "" {
+		t.Fatalf("carrier = %v, want the context's own span", c)
 	}
 }

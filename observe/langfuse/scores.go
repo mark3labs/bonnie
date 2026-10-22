@@ -21,6 +21,11 @@ const ScoresPath = "/api/public/scores"
 // ApprovalScore is the name of the score a [Scorer] records.
 const ApprovalScore = "approval"
 
+// scoreTimeout bounds one score request. The request outlives the turn that
+// made it, so it cannot use the turn's deadline, and Config.HTTPClient can
+// have no timeout of its own.
+const scoreTimeout = 30 * time.Second
+
 // Scorer records each human approval as a BOOLEAN Langfuse score on the
 // trace and observation of the turn that asked for it. Pass its Answer
 // method to observe.WithAnswerHook. Answers that are not approvals are not
@@ -31,9 +36,10 @@ const ApprovalScore = "approval"
 // Call [Scorer.Close] before the process exits to wait for the scores in
 // flight.
 type Scorer struct {
-	cfg    Config
-	client *http.Client
-	wg     sync.WaitGroup
+	cfg     Config
+	client  *http.Client
+	timeout time.Duration
+	wg      sync.WaitGroup
 }
 
 // NewScorer returns a Scorer for cfg.
@@ -45,7 +51,7 @@ func NewScorer(cfg Config) (*Scorer, error) {
 	if client == nil {
 		client = &http.Client{Timeout: 10 * time.Second}
 	}
-	return &Scorer{cfg: cfg, client: client}, nil
+	return &Scorer{cfg: cfg, client: client, timeout: scoreTimeout}, nil
 }
 
 // score is the body of POST /api/public/scores (CreateScoreRequest).
@@ -77,6 +83,8 @@ func (s *Scorer) Answer(ctx context.Context, a observe.Answer) {
 	}
 	ctx = context.WithoutCancel(ctx)
 	s.wg.Go(func() {
+		ctx, cancel := context.WithTimeout(ctx, s.timeout)
+		defer cancel()
 		if err := s.post(ctx, body); err != nil {
 			otel.Handle(err)
 		}
