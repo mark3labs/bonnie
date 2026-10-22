@@ -2,6 +2,7 @@ package http
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -243,5 +244,34 @@ func TestMappedErrorsKeepTheirText(t *testing.T) {
 	}
 	if !strings.Contains(body, runtime.ErrRunNotFound.Error()) {
 		t.Fatalf("body = %s, want the sentinel's own text", body)
+	}
+}
+
+// The turn's caller is verified only when the authenticator proved it. An
+// identity in the body of an unauthenticated request is recorded as a claim,
+// so a tool that gates on Verified refuses it.
+func TestTurnCallerVerification(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	open := newTestServer(t, &stubAgent{turns: []*kit.TurnResult{{Response: "ok"}}})
+	_, run := open.post(t, "/bonnie/v1/runs", StartRequest{Text: "hi", Auth: &channel.Principal{Authenticator: "admin", ID: "release-bot"}})
+	s, err := runtime.Restore(ctx, run.RunID, open.runner.Journal())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := s.Caller(); c == nil || c.ID != "release-bot" || c.Verified {
+		t.Fatalf("claimed caller = %+v, want unverified release-bot", c)
+	}
+
+	guarded := newTestServer(t, &stubAgent{turns: []*kit.TurnResult{{Response: "ok"}, {Response: "ok"}}}, WithAuthenticator(headerAuth))
+	_, run = guarded.postAs(t, "alice", "/bonnie/v1/runs", StartRequest{Text: "hi"})
+	_, _ = guarded.postAs(t, "bob", "/bonnie/v1/runs/"+run.RunID, SendRequest{Text: "again"})
+	s, err = runtime.Restore(ctx, run.RunID, guarded.runner.Journal())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := s.Caller(); c == nil || c.ID != "bob" || !c.Verified {
+		t.Fatalf("authenticated caller = %+v, want verified bob", c)
 	}
 }

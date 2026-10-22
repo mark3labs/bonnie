@@ -38,6 +38,7 @@ Layout:
 | `presence/` | agent presence records; memory and NATS KV registries |
 | `schedule/` | durable cron jobs |
 | `observe/` | OpenTelemetry tracing of turns (`runtime.Observer`); `observe/langfuse` adapter |
+| `selfmod/` | self-modification tools: `Local` (`bonnie dev`) and `Remote` (draft pull request) |
 | `web/` | optional operator web UI (templ) |
 | `agent/` | agent-tree scaffold and code generation |
 | `sandbox/` | tool sandboxes: local, exec, docker, landlock, microsandbox |

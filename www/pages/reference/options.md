@@ -20,8 +20,11 @@ Configuration is code, not a manifest. The tree provides instructions, skills, c
 | `DefaultInstructions` | `instructions.md` | System prompt file |
 | `DefaultSkills` | `skills` | Skill directory |
 | `DefaultContextFiles` | `context` | Files copied into each new run |
+| `DevRootEnv` | `BONNIE_DEV_ROOT` | Environment variable that `bonnie dev` sets on its child to the tree root |
 
 The default backend is Landlock. Human-input tools are enabled. Shutdown timeout is 30 seconds. Activity logging and automatic working-file cleanup are disabled. The schedule clock is enabled unless disabled explicitly. Kit selects its default model when no model is given.
+
+`RegisterDefaults(opts ...Option)` adds options that `New` applies before its own arguments. Generated code calls it from `init`; `bonnie dev` uses it to add the default self-modification tool. An option in `main.go` applies later, so it replaces a default in the same slot. A default tool factory is dropped, not refused, beside `WithAgentFactory`.
 
 Most scalar options replace an earlier value. Additive options and options with stricter validation are identified below.
 
@@ -84,12 +87,13 @@ Injected credentials are not encrypted or hidden from sandbox commands. A comman
 | Exact API | Behavior |
 | --- | --- |
 | `WithToolFactory(factory ToolFactory)` | Appends factories that build tools with the current Kit instance and run scope. Runs after discovered factories and before setup callbacks on each Start or Resume. |
+| `WithNamedToolFactory(name string, factory ToolFactory)` | As `WithToolFactory`, but a later option with the same name replaces the factory in its place. An empty name is the same as `WithToolFactory`. |
 | `WithKitSetup(setup KitSetup)` | Appends setup callbacks in registration order. Runs after BONNIE installs its session and hooks, before the first prompt, on each Start or Resume. |
 | `WithCompletionHook(policy CompletionPolicy)` | Installs one policy that checks a normal model response before BONNIE publishes a final outcome. |
 
 `ToolFactory` has signature `func(context.Context, ToolScope) ([]kit.Tool, error)`. `ToolScope` embeds `RunScope` and adds `Kit *kit.Kit`. Factories run before the first prompt, after BONNIE installs its session and checkpoint hooks. A nil factory, a returned error, or a nil returned tool stops construction. A nil or empty tool slice is permitted. Closure state is local to the execution, not durable. Do not retain the scope after execution ends. Use `Kit.Subagent`, not `Kit.Prompt`, for calls from an active tool. Child calls are not durable BONNIE runs. See [Tools and Skills](/guides/tools-and-skills#call-a-model-from-a-tool) for examples.
 
-`KitSetup` has signature `func(context.Context, *kit.Kit, RunScope) error`. `RunScope` provides `RunID string`, `Session *runtime.Session`, and `Exec func(context.Context, sandbox.Command) (*sandbox.Result, error)`. `Exec` opens the sandbox lazily and shares the tools' handle. BONNIE owns cleanup. Do not retain `Exec` after execution ends. Callback code itself runs on the host.
+`KitSetup` has signature `func(context.Context, *kit.Kit, RunScope) error`. `RunScope` provides `RunID string`, `Session *runtime.Session`, and `Exec func(context.Context, sandbox.Command) (*sandbox.Result, error)`. `Session.Caller()` returns the `*runtime.Caller` that sent the current turn's input, or nil. The channel passes it with the input, so a later message cannot change it. Its `Verified` field is true only when the channel proved the identity; an identity in the body of an unauthenticated HTTP request is not verified. `Exec` opens the sandbox lazily and shares the tools' handle. BONNIE owns cleanup. Do not retain `Exec` after execution ends. Callback code itself runs on the host.
 
 `CompletionPolicy` has:
 

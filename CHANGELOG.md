@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Package `selfmod`: an agent can change its own source. `selfmod.Local` adds
+  `modify_agent` under `bonnie dev`, which installs it by default. A subagent
+  edits a staged copy of the authored files with sandbox tools, the change
+  must generate and build (`go build -overlay` in the tree), and then each
+  changed file is written with one atomic rename. A file that changed in the
+  tree meanwhile is a conflict, and nothing is written. The dev loop rebuilds,
+  and the next message on the run is answered by the new build.
+- `selfmod.Remote` adds `propose_agent_change` for a deployed agent: it clones
+  the repository, stages and builds the change when the host has Go, pushes
+  its own branch, and opens a draft pull request. It never changes the running
+  deployment. `Authorize` and `Credentials` are required, and the tool is
+  hidden from an unverified sender before `Authorize` runs. The token stays in
+  the BONNIE process; the subagent's sandbox holds only a copy of the
+  authored files.
+- `bonnie dev --no-self-modify` leaves the default tool out of the dev build.
+  The dev child gets `BONNIE_DEV_ROOT` (`bonnie.DevRootEnv`).
+- `bonnie.WithNamedToolFactory`: a later factory with the same name replaces
+  the earlier one in place.
+- `bonnie.RegisterDefaults`: options that `New` applies before its own. A
+  default tool factory is dropped, not refused, beside `WithAgentFactory`.
+- `runtime.Caller`, `Input.Caller`, and `Session.Caller()`: the sender of a
+  turn is journalled with the turn (`RecordCaller`) and restored on resume.
+  `channel.SendOptions.AuthVerified` and `chat.Turn.AuthVerified` mark an
+  identity the channel proved: an HTTP authenticator, or a platform's signed
+  event. An identity in an unauthenticated HTTP body is not verified.
+- `runtime.Session.AddReplaySafeTools` adds to the replay-safe set.
 - OpenTelemetry tracing with `WithTracing`. Package `observe` records each
   turn as an `invoke_agent` span, with a `chat` span per model step and an
   `execute_tool` span per tool call, in GenAI semantic-convention names. Spans
@@ -24,6 +50,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `runtime.Input.Trace` carries W3C trace context. The HTTP and NATS channels
   read `traceparent`, and a submission or spawned child run journals it.
   The NATS API transport now accepts `Traceparent` and `Tracestate` headers.
+
+### Fixed
+
+- Two `WithReplaySafeTools` options now declare the union of their tools.
+  Before, the last option replaced the set of the first.
 
 ## [0.31.0] — 2026-10-21
 

@@ -344,6 +344,9 @@ type Turn struct {
 	Context []string
 	// Auth is the platform-asserted identity of the sender.
 	Auth *channel.Principal
+	// AuthVerified reports that the channel proved Auth. An adapter sets it
+	// for an identity from a signed platform event; a hand-off copies it.
+	AuthVerified bool
 	// Title names the run in operator-facing listings.
 	Title string
 	// Kind is one of the Kind constants.
@@ -355,11 +358,12 @@ type Turn struct {
 // Options is the [channel.SendOptions] form of the turn, for the wire.
 func (t Turn) Options() channel.SendOptions {
 	return channel.SendOptions{
-		Auth:       t.Auth,
-		TurnPolicy: t.TurnPolicy,
-		Title:      t.Title,
-		Context:    t.Context,
-		Kind:       t.Kind,
+		Auth:         t.Auth,
+		AuthVerified: t.AuthVerified,
+		TurnPolicy:   t.TurnPolicy,
+		Title:        t.Title,
+		Context:      t.Context,
+		Kind:         t.Kind,
 	}
 }
 
@@ -605,7 +609,23 @@ func (s *Ref) send(ctx context.Context, text string, opts channel.SendOptions, r
 		Title:   opts.Title,
 		Origin:  runtime.Origin{Channel: s.core.name, Kind: opts.Kind},
 		Trigger: opts.Trigger,
+		Caller:  callerFor(opts),
 	})
+}
+
+// callerFor is the turn's [runtime.Caller], or nil when the message names no
+// sender.
+func callerFor(opts channel.SendOptions) *runtime.Caller {
+	if opts.Auth == nil {
+		return nil
+	}
+	return &runtime.Caller{
+		Authenticator: opts.Auth.Authenticator,
+		Kind:          opts.Auth.Kind,
+		ID:            opts.Auth.ID,
+		Attributes:    opts.Auth.Attributes,
+		Verified:      opts.AuthVerified,
+	}
 }
 
 // Respond implements [channel.SessionRef].

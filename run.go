@@ -42,9 +42,15 @@ type Agent struct {
 // With no options that is a complete agent: instructions.md is the system
 // prompt, context/ is the agent's root for files, .bonnie is the journal,
 // the tools under tools/ are wired by codegen, and the HTTP channel is
-// served on :8080. Each [Option] replaces one of those.
+// served on :8080. Each [Option] replaces one of those. Options from
+// [RegisterDefaults] apply first, so an argument here wins over them.
 func New(opts ...Option) *Agent {
 	c := defaults()
+	c.applyingDefaults = true
+	for _, o := range registeredDefaults() {
+		o(c)
+	}
+	c.applyingDefaults = false
 	for _, o := range opts {
 		o(c)
 	}
@@ -729,7 +735,7 @@ func (c *config) agentConflicts() string {
 		return "WithTools"
 	case len(c.kitOpts) > 0:
 		return "WithKit"
-	case len(c.toolFactories) > 0:
+	case slices.ContainsFunc(c.toolFactories, func(f namedToolFactory) bool { return !f.fromDefault }):
 		return "WithToolFactory"
 	case len(c.kitSetup) > 0:
 		return "WithKitSetup"

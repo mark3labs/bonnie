@@ -43,6 +43,21 @@ func (s *Session) SetReplaySafeTools(names ...string) {
 	}
 }
 
+// AddReplaySafeTools adds tools to the replay-safe set without removing the
+// tools already in it. Independent setup code, such as two options that each
+// own one tool, calls it so neither clears the other's declaration. The same
+// rules as [Session.SetReplaySafeTools] apply.
+func (s *Session) AddReplaySafeTools(names ...string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.replaySafe == nil {
+		s.replaySafe = make(map[string]bool, len(names))
+	}
+	for _, name := range names {
+		s.replaySafe[name] = true
+	}
+}
+
 func appendToolRecord(ctx context.Context, s *Session, kind RecordKind, data any) error {
 	payload, err := json.Marshal(data)
 	if err != nil {

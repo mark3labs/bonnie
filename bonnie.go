@@ -62,6 +62,12 @@ const (
 
 	// DefaultAddr is the address the HTTP channel binds when none is given.
 	DefaultAddr = ":8080"
+
+	// DevRootEnv names the environment variable `bonnie dev` sets on the
+	// child it serves. Its value is the absolute tree root. A process that
+	// `bonnie dev` did not start does not have it, and dev-only behaviour,
+	// such as local self-modification, keys on it.
+	DevRootEnv = "BONNIE_DEV_ROOT"
 )
 
 // Tree is what codegen discovered in an agent tree: the code it wired and the
@@ -95,9 +101,29 @@ type Tree struct {
 }
 
 var (
-	treeMu sync.RWMutex
-	tree   Tree
+	treeMu      sync.RWMutex
+	tree        Tree
+	defaultOpts []Option
 )
+
+// RegisterDefaults adds options that [New] applies before its own arguments.
+// Generated code calls it from init. `bonnie dev` uses it to install dev-only
+// defaults without a change to main.go. An option in main.go is applied
+// later, so it replaces a default with the same slot. A default tool factory
+// is dropped, not refused, beside [WithAgentFactory]: the host's agent owns
+// its tools, and a default must not stop a tree that worked without it.
+func RegisterDefaults(opts ...Option) {
+	treeMu.Lock()
+	defer treeMu.Unlock()
+	defaultOpts = append(defaultOpts, opts...)
+}
+
+// registeredDefaults returns a copy of the options from [RegisterDefaults].
+func registeredDefaults() []Option {
+	treeMu.RLock()
+	defer treeMu.RUnlock()
+	return append([]Option(nil), defaultOpts...)
+}
 
 // Register hands the generated wiring to the runtime. The generated
 // bonnie_gen.go calls it from init, before main runs.
