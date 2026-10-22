@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/mark3labs/bonnie/observe"
 	"github.com/mark3labs/bonnie/runtime"
 )
 
@@ -152,6 +153,10 @@ func (c *config) runnerOptions() []runtime.RunnerOption {
 	opts := []runtime.RunnerOption{runtime.WithActivityLogger(c.activityLogger)}
 	if c.completion != nil {
 		opts = append(opts, runtime.WithCompletionLimit(c.completion.MaxContinuations))
+	}
+	if c.tracerProvider != nil {
+		traceOpts := append([]observe.Option{observe.WithAgentName(c.name)}, c.traceOptions...)
+		opts = append(opts, runtime.WithObserver(observe.New(c.tracerProvider, traceOpts...)))
 	}
 	return opts
 }

@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/mark3labs/bonnie/channel"
+	"github.com/mark3labs/bonnie/internal/tracectx"
 	"github.com/mark3labs/bonnie/runtime"
 )
 
@@ -37,7 +38,7 @@ func (c *Channel) handleSubmit(w http.ResponseWriter, r *http.Request, _ channel
 	if !decode(w, r, &req) {
 		return
 	}
-	item, err := c.runner.Submit(r.Context(), r.PathValue("id"), req.RequestID, runtime.Input{Text: req.Text, Context: req.Context}, req.Policy)
+	item, err := c.runner.Submit(r.Context(), r.PathValue("id"), req.RequestID, runtime.Input{Text: req.Text, Context: req.Context, Trace: tracectx.Carrier(r.Header)}, req.Policy)
 	if err != nil {
 		writeError(w, err)
 		return
@@ -88,7 +89,7 @@ func (c *Channel) handleSpawnChild(w http.ResponseWriter, r *http.Request, _ cha
 	if !decode(w, r, &req) {
 		return
 	}
-	child, err := c.runner.SpawnChild(r.Context(), r.PathValue("id"), req.Key, runtime.Input{Text: req.Text}, req.Background)
+	child, err := c.runner.SpawnChild(r.Context(), r.PathValue("id"), req.Key, runtime.Input{Text: req.Text, Trace: tracectx.Carrier(r.Header)}, req.Background)
 	if err != nil {
 		writeError(w, err)
 		return

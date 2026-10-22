@@ -102,6 +102,9 @@ func (r *Runner) Continue(ctx context.Context, runID string) (*Run, error) {
 	plan := planContinuation(s, recs)
 	turnID, _, _ := cancellationState(recs)
 	book := context.WithoutCancel(turnCtx)
+	act.control.Lock()
+	act.kind = TurnRecovery
+	act.control.Unlock()
 
 	switch {
 	case plan.suspend != nil:

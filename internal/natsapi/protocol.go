@@ -209,10 +209,14 @@ func ResponseHeaders(h http.Header) http.Header {
 }
 
 // Headers validates request headers. It allows Authorization, Content-Type,
-// Accept, and the names in extra. It rejects hop-by-hop, proxy, and
-// identity headers, and it limits the count and total size.
+// Accept, the W3C trace context headers (Traceparent, Tracestate), and the
+// names in extra. It rejects hop-by-hop, proxy, and identity headers, and it
+// limits the count and total size.
 func Headers(h http.Header, extra []string) error {
-	allowed := map[string]bool{"Authorization": true, "Content-Type": true, "Accept": true}
+	allowed := map[string]bool{
+		"Authorization": true, "Content-Type": true, "Accept": true,
+		"Traceparent": true, "Tracestate": true,
+	}
 	for _, k := range extra {
 		k = http.CanonicalHeaderKey(k)
 		if denied(k) || !headerName(k) {

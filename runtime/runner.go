@@ -216,6 +216,12 @@ type Input struct {
 	Origin Origin `json:"origin,omitzero"`
 	// Trigger is structured provenance for this turn.
 	Trigger *Trigger `json:"trigger,omitempty"`
+	// Trace is the W3C trace context ("traceparent", "tracestate") of the
+	// request that delivered the input. An [Observer] makes the turn a
+	// child of it. It is journalled with a submission, so a queued or
+	// spawned input keeps its parent after a restart. Trace alone is not
+	// input: it does not start a turn.
+	Trace map[string]string `json:"trace,omitempty"`
 }
 
 // Run is a snapshot of a durable run after a turn boundary.
@@ -234,6 +240,7 @@ type Runner struct {
 	activityLogger  ActivityLogger
 	completionHook  CompletionHook
 	completionLimit int
+	observer        Observer
 
 	mu         sync.Mutex
 	active     map[string]*activeTurn
@@ -252,6 +259,12 @@ type activeTurn struct {
 	interrupt bool
 	ready     chan struct{}
 	readyOnce sync.Once
+
+	// What the next turn tells the observer. The turn reads them under
+	// control before its turn record is written.
+	kind      TurnKind
+	trace     map[string]string
+	responses []InputResponse
 
 	mu    sync.Mutex
 	agent Agent
@@ -690,6 +703,9 @@ func (r *Runner) startAcquired(turnCtx context.Context, act *activeTurn, runID s
 		return nil, err
 	}
 	s.SetTurnContext(in.Context)
+	act.control.Lock()
+	act.trace = in.Trace
+	act.control.Unlock()
 	// Continue an interrupted turn without adding input that is already
 	// durable. RunRunning here is also interrupted work: acquire proved this
 	// Runner does not execute the run, and one Runner owns a journal, so the
@@ -704,6 +720,9 @@ func (r *Runner) startAcquired(turnCtx context.Context, act *activeTurn, runID s
 		if !continueSaved {
 			prompt, files = in.Text, in.Files
 		}
+		act.control.Lock()
+		act.kind = TurnRecovery
+		act.control.Unlock()
 		return r.turn(turnCtx, act, s, prompt, files, false, continueSaved)
 	}
 	return r.turn(turnCtx, act, s, in.Text, in.Files, false, false)
@@ -780,6 +799,9 @@ func (r *Runner) Resume(ctx context.Context, runID string, responses []InputResp
 		return nil, err
 	}
 	r.bus.Publish(Event{RunID: runID, Type: EventResume, Seq: seq, Text: answer})
+	act.control.Lock()
+	act.kind, act.responses = TurnResume, responses
+	act.control.Unlock()
 	return r.turn(turnCtx, act, s, answer, nil, true, false)
 }
 
@@ -945,14 +967,15 @@ func (r *Runner) Snapshot(ctx context.Context, runID string) (*Run, error) {
 }
 
 // turn runs one agent turn and classifies the outcome.
-func (r *Runner) turn(ctx context.Context, act *activeTurn, s *Session, prompt string, files []kit.LLMFilePart, resumed, continueSaved bool) (*Run, error) {
+func (r *Runner) turn(ctx context.Context, act *activeTurn, s *Session, prompt string, files []kit.LLMFilePart, resumed, continueSaved bool) (run *Run, err error) {
 	runID := s.runID
 	// Terminal bookkeeping must outlive a cancelled turn, or a cancel would
 	// leave the run stuck in "running" for ever.
 	book := context.WithoutCancel(ctx)
+	ctx, obs := r.observe(ctx, act, s, prompt)
+	defer func() { obs.End(TurnEnd{Run: run, Err: err}) }()
 	act.control.Lock()
-	act.turnID = rand.Text()
-	seq, turnErr := r.journal.Append(book, Record{RunID: runID, Text: act.turnID, Kind: RecordTurn, Timestamp: now()})
+	seq, turnErr := r.journal.Append(book, Record{RunID: runID, Text: act.turnID, Kind: RecordTurn, Timestamp: now(), Payload: encodeTurnPayload(obs.Carrier())})
 	if turnErr == nil {
 		r.bus.Publish(Event{RunID: runID, TurnID: act.turnID, Type: EventTurn, Seq: seq})
 	}
@@ -995,6 +1018,7 @@ func (r *Runner) turn(ctx context.Context, act *activeTurn, s *Session, prompt s
 	}
 	defer func() { _ = agent.Close() }()
 	act.setAgent(agent)
+	defer obs.Attach(agent)()
 
 	stop := forwardAgentEvents(agent, r.bus, runID, act.turnID)
 	defer stop()
@@ -1092,6 +1116,38 @@ func (r *Runner) turn(ctx context.Context, act *activeTurn, s *Session, prompt s
 		ID: runID, TurnID: act.turnID, State: RunCompleted,
 		Response: res.Response, Usage: res.TotalUsage,
 	}, nil
+}
+
+// observe assigns the turn its identity and starts its observation. The
+// observer learns how the turn relates to the run's last turn from the
+// journal, so a turn that a second process recovers continues the trace of
+// the turn that the first process left.
+func (r *Runner) observe(ctx context.Context, act *activeTurn, s *Session, prompt string) (context.Context, TurnObservation) {
+	// Hold control only to take the turn's identity: Cancel and Interrupt
+	// take it too, and must not wait for the journal or the observer.
+	act.control.Lock()
+	act.turnID = rand.Text()
+	start := TurnStart{
+		RunID: s.runID, TurnID: act.turnID, Kind: act.kind,
+		Title: s.Title(), Origin: s.Origin(), Prompt: prompt,
+		Parent: act.trace, Responses: act.responses,
+	}
+	act.kind, act.trace, act.responses = "", nil, nil
+	act.control.Unlock()
+	if r.observer == nil {
+		return ctx, nopObservation{}
+	}
+	if start.Kind == "" {
+		start.Kind = TurnNew
+	}
+	if recs, err := replayKinds(ctx, r.journal, s.runID, RecordTurn); err == nil {
+		start.Previous = lastTurnCarrier(recs)
+	}
+	obsCtx, obs := r.observer.StartTurn(ctx, start)
+	if obsCtx == nil || obs == nil {
+		return ctx, nopObservation{}
+	}
+	return obsCtx, obs
 }
 
 // checkpoint moves the run state in the journal and announces it. The state

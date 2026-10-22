@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- OpenTelemetry tracing with `WithTracing`. Package `observe` records each
+  turn as an `invoke_agent` span, with a `chat` span per model step and an
+  `execute_tool` span per tool call, in GenAI semantic-convention names. Spans
+  carry metadata only unless `observe.WithCapture` allows content.
+  `observe.NewExporter` filters or redacts what one destination receives.
+- Package `observe/langfuse`: an OTLP exporter and tracer provider for
+  Langfuse that map turns to agent, generation, and tool observations and the
+  run to a session, and a `Scorer` that records approvals as scores.
+- `runtime.Observer` and `runtime.WithObserver`, the tracing seam of the
+  runner. A turn record now journals its trace context, so a turn that another
+  process recovers continues the same trace. A resume after a human answer
+  starts a new trace with a link to the turn that waited.
+- `runtime.Input.Trace` carries W3C trace context. The HTTP and NATS channels
+  read `traceparent`, and a submission or spawned child run journals it.
+  The NATS API transport now accepts `Traceparent` and `Tracestate` headers.
+
 ## [0.31.0] — 2026-10-21
 
 **Discover skills in the run workspace.** This is a MINOR release under the

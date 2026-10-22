@@ -73,6 +73,7 @@ import (
 
 	"github.com/mark3labs/bonnie/channel"
 	"github.com/mark3labs/bonnie/channel/chat"
+	"github.com/mark3labs/bonnie/internal/tracectx"
 	"github.com/mark3labs/bonnie/presence"
 	"github.com/mark3labs/bonnie/runtime"
 )
@@ -284,6 +285,9 @@ func (c *Channel) Routes() []channel.Route {
 		{Method: http.MethodPost, Path: p + "/runs/{id}/children", Handler: c.handleSpawnChild},
 		{Method: http.MethodPost, Path: p + "/runs/{id}/cancel-owned", Handler: c.handleCancelOwned},
 	}
+	for i, route := range routes {
+		routes[i].Handler = traced(route.Handler)
+	}
 	if c.auth == nil {
 		return routes
 	}
@@ -306,6 +310,15 @@ func (c *Channel) Protect(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		}
 	})
+}
+
+// traced puts the request's W3C trace context (traceparent, tracestate) in
+// its context. A turn the request starts runs in that context, so a tracer
+// makes the turn a child of the caller's span.
+func traced(next channel.RouteHandler) channel.RouteHandler {
+	return func(w http.ResponseWriter, r *http.Request, in channel.Inbound, out channel.Outbound) {
+		next(w, r.WithContext(tracectx.Extract(r.Context(), r.Header)), in, out)
+	}
 }
 
 // guard wraps one route handler in the configured [Authenticator].

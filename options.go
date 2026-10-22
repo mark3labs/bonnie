@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/mark3labs/bonnie/channel"
 	"github.com/mark3labs/bonnie/channel/discord"
@@ -20,6 +21,7 @@ import (
 	"github.com/mark3labs/bonnie/channel/natsapi"
 	"github.com/mark3labs/bonnie/channel/slack"
 	"github.com/mark3labs/bonnie/channel/telegram"
+	"github.com/mark3labs/bonnie/observe"
 	"github.com/mark3labs/bonnie/runtime"
 	"github.com/mark3labs/bonnie/sandbox"
 	"github.com/mark3labs/bonnie/schedule"
@@ -83,6 +85,8 @@ type config struct {
 	listener            net.Listener
 	noHTTPListener      bool
 	activityLogger      runtime.ActivityLogger
+	tracerProvider      trace.TracerProvider
+	traceOptions        []observe.Option
 	quiet               bool
 	webUI               bool
 	noHumanInput        bool

@@ -35,6 +35,7 @@ import (
 	"github.com/mark3labs/bonnie/channel"
 	"github.com/mark3labs/bonnie/channel/chat"
 	"github.com/mark3labs/bonnie/internal/natswire"
+	"github.com/mark3labs/bonnie/internal/tracectx"
 	"github.com/mark3labs/bonnie/presence"
 	"github.com/mark3labs/bonnie/runtime"
 )
@@ -520,6 +521,8 @@ func (c *Channel) claim(id string) bool {
 }
 
 func (c *Channel) handle(ctx context.Context, msg *gonats.Msg) {
+	// A publisher that sends traceparent makes the turn a child of its span.
+	ctx = tracectx.Extract(ctx, msg.Header)
 	var task Task
 	var answer Answer
 	var err error
