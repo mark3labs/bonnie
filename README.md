@@ -386,8 +386,8 @@ human-input wait that is already in the journal closes the turn without a model
 call. A durable human answer that the model has not seen is sent to it. Other
 runs continue the saved conversation through `ContinuationAgent`. A tool call
 that the crash left without a result gets an "effect unknown" result and is
-not run again, unless both the saved intent and the current `WithReplaySafeTools`
-policy permit replay. Adding a tool only to the current policy is not enough.
+not run again, unless both the saved run's replay-safe policy and the current
+`WithReplaySafeTools` policy permit the tool. Adding a tool only to the current policy is not enough.
 A run whose input never
 became durable fails with `runtime.ErrRecoveryInputLost`; send it again.
 

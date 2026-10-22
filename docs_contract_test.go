@@ -27,7 +27,14 @@ func TestDocumentationOptionCoverage(t *testing.T) {
 		if name == "" || strings.Contains(name, "/") || strings.HasSuffix(name, "_test.go") {
 			continue
 		}
-		file, err := parser.ParseFile(token.NewFileSet(), name, nil, 0)
+		src, err := os.ReadFile(name)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		file, err := parser.ParseFile(token.NewFileSet(), name, src, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
