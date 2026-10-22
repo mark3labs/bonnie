@@ -114,8 +114,13 @@ type Principal struct {
 
 // SendOptions tunes a single inbound message.
 type SendOptions struct {
-	Auth       *Principal
-	TurnPolicy TurnPolicy
+	Auth *Principal
+	// AuthVerified reports that the channel proved Auth: a configured
+	// authenticator, or an identity taken from a platform's signed event.
+	// An identity the caller only claimed is not verified. The runtime
+	// records both with the turn as [runtime.Caller].
+	AuthVerified bool
+	TurnPolicy   TurnPolicy
 	// Title names the run for operator-facing listings. It is recorded on
 	// the run's first turn and ignored after that.
 	Title string

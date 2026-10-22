@@ -48,6 +48,8 @@ Review the change as you review any source change: `git diff`. Nothing is commit
 | `bonnie_gen.go` | No: the dev loop regenerates it |
 | Hidden files and directories (`.env`, `.bonnie`, `.git`) | No |
 | Other paths, such as `README.md` | No |
+| A file larger than 1 MiB | No: it is left out of the staged copy, and the build reads it from the tree |
+| A path through a symbolic link | No: the write is refused |
 
 The tool result names a file that the subagent wrote outside this layout. Such a file is not applied. `selfmod.Authored` is the exact rule.
 
@@ -117,7 +119,8 @@ func main() {
             Config: selfmod.Config{
                 Authorize: func(_ context.Context, c selfmod.Caller) (bool, error) {
                     return c.Origin.Channel == "http" &&
-                        c.Principal != nil && c.Principal.ID == "release-bot", nil
+                        c.Principal.Authenticator == "bearer" &&
+                        c.Principal.ID == "release-bot", nil
                 },
             },
             Repository:  "github.com/acme/agents",
@@ -165,9 +168,11 @@ The BONNIE process is the only user of the token. Git gets it as an HTTP header 
 | --- | --- |
 | `RunID` | The run that would call the tool |
 | `Origin` | The channel and surface of the conversation, such as `http` or `slack` |
-| `Principal` | The identity that sent the run's most recent message, or `nil` |
+| `Principal` | The `*runtime.Caller` that sent the current turn, or `nil` |
 
-`Principal` comes from `RunScope.Caller`, which reads the identity that the channel layer records for each message. Most channels record a verified identity only with an authenticator. Without one, the HTTP channel records the identity in the request body, which any caller can set. **An authorizer that accepts a nil principal accepts each caller that can reach the agent.** See [HTTP](/channels/http) for `WithHTTPAuthenticator`.
+`Principal` is bound to the turn: the channel passes it with the input, and BONNIE journals it with the turn. A message from another sender that arrives while the turn waits cannot change it.
+
+`Principal.Verified` is true only when the channel proved the identity: an HTTP authenticator, or a platform's signed event (Slack, Discord, Telegram, GitHub). Without an authenticator, the HTTP channel records the identity in the request body as a claim, and `Verified` is false. **`Remote` hides its tool from an unverified or missing principal before `Authorize` runs.** For `Local`, your authorizer must check `Verified` itself. See [HTTP](/channels/http) for `WithHTTPAuthenticator`.
 
 `Authorize` is optional for `Local`. A dev server is local, but channels such as Slack or GitHub can also be mounted under `bonnie dev`, and their messages can ask the agent to change itself. Set `Authorize` when the dev server takes messages from other people.
 

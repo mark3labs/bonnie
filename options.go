@@ -92,9 +92,6 @@ type config struct {
 	scheduleClockSet    bool
 	scheduleAuthorizer  func(*http.Request) error
 	presence            *PresenceConfig
-	// journalHandle is the journal openRuntime opened. Tool scopes read it
-	// lazily, after the runner has started.
-	journalHandle runtime.Journal
 	// applyingDefaults is set while [New] applies [RegisterDefaults].
 	applyingDefaults bool
 }

@@ -49,6 +49,7 @@ type Session struct {
 	// session only for the duration of the turn; see [Session.SetTurnContext].
 	turnContext      []string
 	trigger          *Trigger
+	caller           *Caller
 	replaySafe       map[string]bool
 	interruptedTools map[string]bool
 }
@@ -126,6 +127,14 @@ func Restore(ctx context.Context, runID string, j Journal) (*Session, error) {
 				return nil, fmt.Errorf("bonnie: invalid workspace catalogue revision")
 			}
 			s.workspaceSkills = catalogue
+			continue
+		}
+		if rec.Kind == RecordCaller {
+			var caller *Caller
+			if err := json.Unmarshal(rec.Payload, &caller); err != nil {
+				return nil, fmt.Errorf("bonnie: decode caller: %w", err)
+			}
+			s.caller = caller
 			continue
 		}
 		if rec.Kind == RecordTrigger {

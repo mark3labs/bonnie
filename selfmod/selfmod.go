@@ -33,7 +33,6 @@ import (
 	kit "github.com/mark3labs/kit/pkg/kit"
 
 	"github.com/mark3labs/bonnie"
-	"github.com/mark3labs/bonnie/channel"
 	"github.com/mark3labs/bonnie/runtime"
 	"github.com/mark3labs/bonnie/sandbox"
 )
@@ -58,10 +57,11 @@ type Caller struct {
 	RunID string
 	// Origin is the channel and surface the run's conversation is on.
 	Origin runtime.Origin
-	// Principal is the identity that sent the run's most recent message,
-	// or nil when the channel recorded none. A channel without an
-	// authenticator records no verified identity.
-	Principal *channel.Principal
+	// Principal is the identity that sent the current turn, or nil. It is
+	// bound to the turn, so a later message cannot change it. Check
+	// Principal.Verified: an identity that a caller only claimed, such as
+	// the auth field of an unauthenticated HTTP request, is not verified.
+	Principal *runtime.Caller
 }
 
 // Authorizer decides whether a caller may use a tool. The tool is hidden from
@@ -145,18 +145,17 @@ func authorize(ctx context.Context, fn Authorizer, scope bonnie.ToolScope) (bool
 	if fn == nil {
 		return true, nil
 	}
+	return fn(ctx, callerOf(scope))
+}
+
+// callerOf is what the run's session knows about the current turn.
+func callerOf(scope bonnie.ToolScope) Caller {
 	caller := Caller{RunID: scope.RunID}
 	if scope.Session != nil {
 		caller.Origin = scope.Session.Origin()
+		caller.Principal = scope.Session.Caller()
 	}
-	if scope.Caller != nil {
-		p, err := scope.Caller(ctx)
-		if err != nil {
-			return false, err
-		}
-		caller.Principal = p
-	}
-	return fn(ctx, caller)
+	return caller
 }
 
 // Local adds modify_agent, which changes the agent's own tree in local

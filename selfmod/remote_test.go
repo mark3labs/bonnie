@@ -15,7 +15,7 @@ import (
 	kit "github.com/mark3labs/kit/pkg/kit"
 
 	"github.com/mark3labs/bonnie"
-	"github.com/mark3labs/bonnie/channel"
+	"github.com/mark3labs/bonnie/runtime"
 )
 
 func gitRun(t *testing.T, dir string, args ...string) string {
@@ -105,11 +105,22 @@ func remoteTestConfig(t *testing.T, s *scripted, origin, api string) RemoteConfi
 	return cfg
 }
 
-func remoteScope(principal *channel.Principal) bonnie.ToolScope {
-	return bonnie.ToolScope{
-		RunID:  "run-remote",
-		Caller: func(context.Context) (*channel.Principal, error) { return principal, nil },
+// remoteScope is the scope of a run whose current turn was sent by caller.
+func remoteScope(t *testing.T, caller *runtime.Caller) bonnie.ToolScope {
+	t.Helper()
+	journal := runtime.NewMemoryJournal()
+	payload, err := json.Marshal(caller)
+	if err != nil {
+		t.Fatal(err)
 	}
+	if _, err := journal.Append(context.Background(), runtime.Record{RunID: "run-remote", Kind: runtime.RecordCaller, Payload: payload}); err != nil {
+		t.Fatal(err)
+	}
+	s, err := runtime.Restore(context.Background(), "run-remote", journal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return bonnie.ToolScope{RunID: "run-remote", Session: s}
 }
 
 func noEnv(string) string { return "" }
@@ -121,13 +132,18 @@ func TestRemoteAuthorization(t *testing.T) {
 	cfg := remoteTestConfig(t, &scripted{t: t}, "unused", "unused")
 	ctx := context.Background()
 
-	if tools, err := remoteFactory(cfg, noEnv)(ctx, remoteScope(nil)); err != nil || len(tools) != 0 {
+	if tools, err := remoteFactory(cfg, noEnv)(ctx, remoteScope(t, nil)); err != nil || len(tools) != 0 {
 		t.Fatalf("anonymous caller: %d tools, %v", len(tools), err)
 	}
-	if tools, err := remoteFactory(cfg, noEnv)(ctx, remoteScope(&channel.Principal{ID: "someone"})); err != nil || len(tools) != 0 {
+	if tools, err := remoteFactory(cfg, noEnv)(ctx, remoteScope(t, &runtime.Caller{ID: "someone", Verified: true})); err != nil || len(tools) != 0 {
 		t.Fatalf("other caller: %d tools, %v", len(tools), err)
 	}
-	bot := remoteScope(&channel.Principal{ID: "release-bot"})
+	// An authorizer that accepts this identity is not enough: the sender
+	// only claimed it.
+	if tools, err := remoteFactory(cfg, noEnv)(ctx, remoteScope(t, &runtime.Caller{ID: "release-bot"})); err != nil || len(tools) != 0 {
+		t.Fatalf("unverified caller: %d tools, %v", len(tools), err)
+	}
+	bot := remoteScope(t, &runtime.Caller{ID: "release-bot", Verified: true})
 	if tools, err := remoteFactory(cfg, noEnv)(ctx, bot); err != nil || len(tools) != 1 || tools[0].Info().Name != RemoteTool {
 		t.Fatalf("authorized caller: %d tools, %v", len(tools), err)
 	}
@@ -175,7 +191,7 @@ func TestRemoteOpensADraftPullRequest(t *testing.T) {
 		},
 	}}
 	cfg := remoteTestConfig(t, s, origin, api.URL)
-	tools, err := remoteFactory(cfg, noEnv)(context.Background(), remoteScope(&channel.Principal{ID: "release-bot"}))
+	tools, err := remoteFactory(cfg, noEnv)(context.Background(), remoteScope(t, &runtime.Caller{ID: "release-bot", Verified: true}))
 	if err != nil || len(tools) != 1 {
 		t.Fatalf("factory: %d tools, %v", len(tools), err)
 	}

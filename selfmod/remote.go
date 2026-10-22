@@ -135,9 +135,10 @@ func (c RemoteConfig) validate() (owner, repo string, err error) {
 // effect only after a human reviews, merges and deploys it.
 //
 // Config.Authorize is required: the tool is hidden from a caller it does not
-// accept. Most channels record a verified identity only with an
-// authenticator, so an authorizer that accepts a nil principal accepts
-// anyone who can reach the agent.
+// accept. The tool is also hidden, before Authorize runs, from a turn whose
+// sender is not verified ([runtime.Caller].Verified): an identity that a
+// caller only claimed, such as the auth field of an HTTP request with no
+// authenticator, is never enough.
 //
 // The tool is never offered in a process that `bonnie dev` started; use
 // [Local] there. Mount both: they use different names and do not replace
@@ -169,6 +170,11 @@ func remoteFactory(cfg RemoteConfig, getenv func(string) string) bonnie.ToolFact
 		owner, repo, err := cfg.validate()
 		if err != nil {
 			return nil, err
+		}
+		// A remote change needs a proven sender, whatever the authorizer
+		// says: an unverified identity is a claim any caller can make.
+		if p := callerOf(scope).Principal; p == nil || !p.Verified {
+			return nil, nil
 		}
 		ok, err := authorize(ctx, cfg.Authorize, scope)
 		if err != nil || !ok {

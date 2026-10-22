@@ -19,7 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `selfmod.Remote` adds `propose_agent_change` for a deployed agent: it clones
   the repository, stages and builds the change when the host has Go, pushes
   its own branch, and opens a draft pull request. It never changes the running
-  deployment. `Authorize` and `Credentials` are required. The token stays in
+  deployment. `Authorize` and `Credentials` are required, and the tool is
+  hidden from an unverified sender before `Authorize` runs. The token stays in
   the BONNIE process; the subagent's sandbox holds only a copy of the
   authored files.
 - `bonnie dev --no-self-modify` leaves the default tool out of the dev build.
@@ -28,8 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the earlier one in place.
 - `bonnie.RegisterDefaults`: options that `New` applies before its own. A
   default tool factory is dropped, not refused, beside `WithAgentFactory`.
-- `RunScope.Caller` and `chat.LatestPrincipal` return the identity that sent
-  a run's most recent message.
+- `runtime.Caller`, `Input.Caller`, and `Session.Caller()`: the sender of a
+  turn is journalled with the turn (`RecordCaller`) and restored on resume.
+  `channel.SendOptions.AuthVerified` and `chat.Turn.AuthVerified` mark an
+  identity the channel proved: an HTTP authenticator, or a platform's signed
+  event. An identity in an unauthenticated HTTP body is not verified.
 - `runtime.Session.AddReplaySafeTools` adds to the replay-safe set.
 
 ### Fixed

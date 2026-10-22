@@ -253,10 +253,11 @@ func (c *Channel) handleUpdate(w http.ResponseWriter, r *http.Request, _ channel
 		kind = chat.KindThread
 	}
 	chat.Dispatch(r.Context(), c.core, chat.Turn{
-		Address: c.address(u.Message),
-		Text:    text,
-		Kind:    kind,
-		Context: []string{fmt.Sprintf("Telegram user %s wrote in a %s chat.", u.Message.From.Username, u.Message.Chat.Type)},
+		Address:      c.address(u.Message),
+		Text:         text,
+		Kind:         kind,
+		Context:      []string{fmt.Sprintf("Telegram user %s wrote in a %s chat.", u.Message.From.Username, u.Message.Chat.Type)},
+		AuthVerified: true,
 		Auth: &channel.Principal{
 			Authenticator: "telegram",
 			Kind:          "user",
@@ -388,13 +389,14 @@ func (c *Channel) Receive(ctx context.Context, target any, text string, opts cha
 		kind = chat.KindDM
 	}
 	return c.core.Proactive(ctx, chat.Turn{
-		Address:    s,
-		Text:       text,
-		Kind:       kind,
-		Context:    opts.Context,
-		Title:      opts.Title,
-		TurnPolicy: opts.TurnPolicy,
-		Auth:       opts.Auth,
+		Address:      s,
+		Text:         text,
+		Kind:         kind,
+		Context:      opts.Context,
+		Title:        opts.Title,
+		TurnPolicy:   opts.TurnPolicy,
+		Auth:         opts.Auth,
+		AuthVerified: opts.AuthVerified,
 	}, c.deliver)
 }
 

@@ -3,6 +3,7 @@ package selfmod
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -423,5 +424,47 @@ func TestLandlockWorkspaceConfinesTheSubagent(t *testing.T) {
 	}
 	if res.OK() || strings.Contains(res.Stdout, "secret") {
 		t.Fatalf("the subagent read a file outside the staged copy: %+v", res)
+	}
+}
+
+// A file over the size limit stays out of the snapshot instead of failing
+// it: a large data file in context/ must not stop self-modification.
+func TestSnapshotSkipsOversizedFiles(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	if err := writeFileAtomic(filepath.Join(root, "context", "big.bin"), make([]byte, maxFileBytes+1)); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeFileAtomic(filepath.Join(root, "instructions.md"), []byte("hi\n")); err != nil {
+		t.Fatal(err)
+	}
+	snap, err := takeSnapshot(root)
+	if err != nil {
+		t.Fatalf("snapshot: %v", err)
+	}
+	if _, ok := snap["context/big.bin"]; ok || len(snap) != 1 {
+		t.Fatalf("snapshot = %v, want only instructions.md", snap)
+	}
+}
+
+// A change whose path passes through a symbolic link is refused before
+// anything is read, written, or deleted: a linked folder in a cloned
+// repository must not take a write outside the tree.
+func TestApplyRefusesSymlinkedPaths(t *testing.T) {
+	t.Parallel()
+	root, outside, staged := t.TempDir(), t.TempDir(), t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(root, "tools")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+	if err := writeFileAtomic(filepath.Join(staged, "tools", "x", "tool.go"), []byte("package x\n")); err != nil {
+		t.Fatal(err)
+	}
+	hash, _ := currentHash(filepath.Join(staged, "tools", "x", "tool.go"))
+	err := applyChanges(root, staged, []change{{Path: "tools/x/tool.go", Op: opAdd, Hash: hash}})
+	if !errors.Is(err, errSymlink) {
+		t.Fatalf("apply = %v, want errSymlink", err)
+	}
+	if entries, _ := os.ReadDir(outside); len(entries) != 0 {
+		t.Fatalf("a file was written outside the tree: %v", entries)
 	}
 }

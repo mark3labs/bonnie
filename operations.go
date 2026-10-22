@@ -162,7 +162,6 @@ func (c *config) openRuntime(factory runtime.AgentFactory) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
-	c.journalHandle = journal
 	return &Runtime{journal: journal, runner: runtime.NewRunner(journal, factory, c.runnerOptions()...)}, nil
 }
 

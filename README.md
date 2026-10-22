@@ -584,8 +584,8 @@ model calls through `scope.Kit.Subagent`.
 
 For tools registered in application code, use
 `bonnie.WithToolFactory(func(context.Context, bonnie.ToolScope) ([]kit.Tool, error))`.
-The scope also provides `RunID`, `Session`, `Exec` for sandbox commands, and
-`Caller`, the identity that sent the run's most recent message.
+The scope also provides `RunID`, `Session`, and `Exec` for sandbox commands.
+`scope.Session.Caller()` is who sent the current turn; check `Verified`.
 Factories run before `WithKitSetup` callbacks. Do not retain a scope after its
 execution ends or call `Kit.Prompt` from an active tool on the same Kit instance.
 Child calls are not durable BONNIE runs and can repeat after interruption.

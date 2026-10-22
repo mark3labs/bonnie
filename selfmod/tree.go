@@ -15,10 +15,14 @@ import (
 	"github.com/mark3labs/bonnie"
 )
 
-// maxFileBytes bounds one authored file. A tree's source is small; a larger
-// file is data that belongs in context/ of a real deployment, not a change
-// a model proposes.
+// maxFileBytes bounds one file that self-modification reads or changes. A
+// tree's source is small. A larger file, such as a data file in context/, is
+// left out of the staged copy: the subagent cannot see or change it, and the
+// verification build still reads it from the live tree.
 const maxFileBytes = 1 << 20
+
+// errTooLarge marks a file over maxFileBytes. A snapshot skips such a file.
+var errTooLarge = errors.New("file too large")
 
 // generatedFile is the wiring codegen writes. It is never authored: the dev
 // loop and verification regenerate it from the other files.
@@ -88,6 +92,9 @@ func takeSnapshot(root string) (snapshot, error) {
 			return nil
 		}
 		hash, err := hashFile(p)
+		if errors.Is(err, errTooLarge) {
+			return nil
+		}
 		if err != nil {
 			return err
 		}
@@ -106,7 +113,7 @@ func hashFile(p string) (string, error) {
 		return "", err
 	}
 	if info.Size() > maxFileBytes {
-		return "", fmt.Errorf("%s is larger than %d bytes", p, maxFileBytes)
+		return "", fmt.Errorf("%w: %s is larger than %d bytes", errTooLarge, p, maxFileBytes)
 	}
 	b, err := os.ReadFile(p)
 	if err != nil {
@@ -177,6 +184,11 @@ var errConflict = errors.New("bonnie: selfmod: the tree changed while the change
 // off can run again. A file whose content is neither the base nor the target
 // is a conflict, and nothing is written.
 func applyChanges(root, staged string, changes []change) error {
+	for _, c := range changes {
+		if err := noSymlinkIn(root, c.Path); err != nil {
+			return err
+		}
+	}
 	var conflicts []string
 	for _, c := range changes {
 		current, err := currentHash(filepath.Join(root, filepath.FromSlash(c.Path)))
@@ -210,6 +222,31 @@ func applyChanges(root, staged string, changes []change) error {
 		}
 		if err := writeFileAtomic(target, b); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// errSymlink reports a change whose path passes through a symbolic link.
+var errSymlink = errors.New("bonnie: selfmod: path passes through a symbolic link")
+
+// noSymlinkIn refuses rel when root/rel, or a folder on the way to it, is a
+// symbolic link. Authored checks a path by its text only; a linked folder in
+// the tree — in a cloned repository, one its author chose — would otherwise
+// take a read, a write, or a delete outside root.
+func noSymlinkIn(root, rel string) error {
+	p := root
+	for part := range strings.SplitSeq(rel, "/") {
+		p = filepath.Join(p, part)
+		info, err := os.Lstat(p)
+		if os.IsNotExist(err) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("bonnie: selfmod: check %s: %w", rel, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("%w: %s", errSymlink, rel)
 		}
 	}
 	return nil

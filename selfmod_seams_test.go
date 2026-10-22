@@ -7,8 +7,6 @@ import (
 
 	kit "github.com/mark3labs/kit/pkg/kit"
 
-	"github.com/mark3labs/bonnie/channel"
-	"github.com/mark3labs/bonnie/channel/chat"
 	"github.com/mark3labs/bonnie/internal/fakemodel"
 	"github.com/mark3labs/bonnie/runtime"
 	"github.com/mark3labs/bonnie/sandbox"
@@ -79,46 +77,47 @@ func TestRegisterDefaultsApplyFirst(t *testing.T) {
 	}
 }
 
-// RunScope.Caller returns the principal the channel layer recorded for the
-// run's most recent message, and nil for a run with none.
-func TestRunScopeCaller(t *testing.T) {
+// Each turn's tools see the sender of that turn's input, as the channel layer
+// passed it with the input. A later message from someone else cannot change
+// it: the CodeRabbit finding on #53 was that a principal read from the
+// address journal after admission could be a newer sender's. New input with
+// no sender clears it, and a restored session (a second process) has the
+// latest turn's caller.
+func TestTurnCallerReachesToolFactories(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	journal := runtime.NewMemoryJournal()
-	addresses := chat.NewAddressMap(journal)
-	for _, p := range []*channel.Principal{{ID: "first"}, {ID: "latest", Kind: "user"}} {
-		if err := addresses.NotePrincipal(ctx, "known", p); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := addresses.NotePrincipal(ctx, "other", &channel.Principal{ID: "other"}); err != nil {
-		t.Fatal(err)
-	}
-	seen := map[string]*channel.Principal{}
+	var seen []*runtime.Caller
 	cfg := resolve(
 		WithSandbox(sandbox.Local(sandbox.WithLocalRoot(t.TempDir()))),
-		WithKit(completionKitOptions(fakemodel.New(fakemodel.Say("one"), fakemodel.Say("two")))...),
-		WithToolFactory(func(ctx context.Context, scope ToolScope) ([]kit.Tool, error) {
-			p, err := scope.Caller(ctx)
-			seen[scope.RunID] = p
-			return nil, err
+		WithKit(completionKitOptions(fakemodel.New(fakemodel.Say("one"), fakemodel.Say("two"), fakemodel.Say("three")))...),
+		WithToolFactory(func(_ context.Context, scope ToolScope) ([]kit.Tool, error) {
+			seen = append(seen, scope.Session.Caller())
+			return nil, nil
 		}),
 	)
-	cfg.journalHandle = journal
 	factory, err := cfg.agentFactory(ctx, "", cfg.kitOptions("", ""))
 	if err != nil {
 		t.Fatal(err)
 	}
-	runner := runtime.NewRunner(journal, factory)
-	for _, id := range []string{"known", "unknown"} {
-		if _, err := runner.Start(ctx, id, runtime.Input{Text: "hi"}); err != nil {
+	alice := &runtime.Caller{Authenticator: "http", ID: "alice", Verified: true}
+	bob := &runtime.Caller{Authenticator: "http", ID: "bob"}
+	for _, in := range []runtime.Input{{Text: "a", Caller: alice}, {Text: "b", Caller: bob}} {
+		if _, err := runtime.NewRunner(journal, factory).Start(ctx, "r", in); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if p := seen["known"]; p == nil || p.ID != "latest" {
-		t.Fatalf("known caller = %+v, want latest", p)
+	restored, err := runtime.Restore(ctx, "r", journal)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if p, ok := seen["unknown"]; !ok || p != nil {
-		t.Fatalf("unknown caller = %+v (%v), want nil", p, ok)
+	if c := restored.Caller(); c == nil || c.ID != "bob" || c.Verified {
+		t.Fatalf("restored caller = %+v, want unverified bob", c)
+	}
+	if _, err := runtime.NewRunner(journal, factory).Start(ctx, "r", runtime.Input{Text: "c"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(seen) != 3 || seen[0].ID != "alice" || !seen[0].Verified || seen[1].ID != "bob" || seen[2] != nil {
+		t.Fatalf("callers = %+v, want alice, bob, nil", seen)
 	}
 }
