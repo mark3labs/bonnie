@@ -633,11 +633,12 @@ func (c *Channel) handleStart(w http.ResponseWriter, r *http.Request, in channel
 	}
 
 	run, err := sess.Send(r.Context(), req.Text, channel.SendOptions{
-		Auth:       auth,
-		TurnPolicy: req.TurnPolicy,
-		Title:      req.Title,
-		Kind:       req.Kind,
-		Context:    req.Context,
+		Auth:         auth,
+		AuthVerified: verified,
+		TurnPolicy:   req.TurnPolicy,
+		Title:        req.Title,
+		Kind:         req.Kind,
+		Context:      req.Context,
 	})
 	if err != nil {
 		writeError(w, err)
@@ -723,13 +724,14 @@ func (c *Channel) handleSend(w http.ResponseWriter, r *http.Request, in channel.
 	if !decode(w, r, &req) {
 		return
 	}
-	auth, _ := c.principalFor(r, req.Auth)
+	auth, verified := c.principalFor(r, req.Auth)
 	// Attach, not From: a message addressed to a run ID must never create one.
 	sess := in.Attach(r.PathValue("id"))
 	run, err := sess.Send(r.Context(), req.Text, channel.SendOptions{
-		Auth:       auth,
-		TurnPolicy: req.TurnPolicy,
-		Context:    req.Context,
+		Auth:         auth,
+		AuthVerified: verified,
+		TurnPolicy:   req.TurnPolicy,
+		Context:      req.Context,
 	})
 	if err != nil {
 		writeError(w, err)
@@ -1029,7 +1031,8 @@ func (c *Channel) handleOperation(w http.ResponseWriter, r *http.Request, req St
 		run, err = c.core.Runner().Snapshot(r.Context(), id)
 	} else {
 		run, err = c.core.Attach(id).Send(r.Context(), req.Text, channel.SendOptions{
-			Auth: auth, TurnPolicy: req.TurnPolicy, Title: req.Title, Kind: req.Kind, Context: req.Context,
+			// handleStart admits an operation only with a verified principal.
+			Auth: auth, AuthVerified: true, TurnPolicy: req.TurnPolicy, Title: req.Title, Kind: req.Kind, Context: req.Context,
 		})
 	}
 	if err != nil {

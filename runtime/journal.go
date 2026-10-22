@@ -88,6 +88,9 @@ const (
 	RecordSandboxDeleted RecordKind = "workspace_deleted"
 	// RecordTrigger records structured provenance for one turn. A trigger and the following state record identify whether a dispatch completed before a crash.
 	RecordTrigger RecordKind = "trigger"
+	// RecordCaller records the identity that sent one turn's input, or null
+	// for a turn with none. The latest record is the current turn's caller.
+	RecordCaller RecordKind = "caller"
 	// RecordContext records the per-turn context a channel handed the
 	// runner with one input: facts for the model that are not conversation
 	// history — the pull-request diff a comment refers to, who sent a

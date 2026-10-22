@@ -55,7 +55,7 @@ does not do a side effect a second time.
 ## Contents
 
 - [Install](#install) · [Scaffold an agent](#scaffold-an-agent) · [Use the library](#use-the-library) · [Park and resume](#park-and-resume)
-- [Your own tools](#your-own-tools) · [Sandboxes](#sandboxes) · [HTTP API](#http-api) · [Chat channels](#chat-channels)
+- [Your own tools](#your-own-tools) · [Self-modification](#self-modification) · [Sandboxes](#sandboxes) · [HTTP API](#http-api) · [Chat channels](#chat-channels)
 - [Agent presence](#host-agent-presence) · [CLI](#cli) · [Journal](#journal) · [Events](#events) · [Session controls](#session-controls)
 - [Run states](#run-states) · [How it works](#how-it-works) · [Limits](#limits) · [Docs](#documentation)
 
@@ -585,12 +585,27 @@ model calls through `scope.Kit.Subagent`.
 For tools registered in application code, use
 `bonnie.WithToolFactory(func(context.Context, bonnie.ToolScope) ([]kit.Tool, error))`.
 The scope also provides `RunID`, `Session`, and `Exec` for sandbox commands.
+`scope.Session.Caller()` is who sent the current turn; check `Verified`.
 Factories run before `WithKitSetup` callbacks. Do not retain a scope after its
 execution ends or call `Kit.Prompt` from an active tool on the same Kit instance.
 Child calls are not durable BONNIE runs and can repeat after interruption.
 Custom Go tool code runs on the host; use `scope.Exec` for sandbox commands.
 See [Tools and Skills](https://go-bonnie.dev/guides/tools-and-skills#call-a-model-from-a-tool)
 for a complete tree tool and application factory example.
+
+## Self-modification
+
+Under `bonnie dev`, ask the agent to change itself — "add a tool that converts
+temperatures" — and its `modify_agent` tool does it. A subagent edits a staged
+copy of the tree's authored files, the changed tree must build, and only then
+is the change written to the tree. The dev loop rebuilds, and the next message
+on the run is answered by the new build. A binary from `bonnie build` never
+has the tool. `bonnie dev --no-self-modify` leaves it out.
+
+A deployed agent can propose a change instead, with `selfmod.Remote`: it opens
+a draft pull request and never changes the running deployment. It needs an
+`Authorize` function and GitHub credentials. See
+[Self-Modification](https://go-bonnie.dev/guides/self-modification).
 
 ## Sandboxes
 

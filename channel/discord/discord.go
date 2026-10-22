@@ -324,8 +324,9 @@ func (c *Channel) handleInteraction(w http.ResponseWriter, r *http.Request, _ ch
 		// Discord's webhook does not say whether the channel is a thread;
 		// the interaction carries only its ID. One channel is one
 		// conversation either way.
-		Kind:    chat.KindChannel,
-		Context: []string{"Discord user " + user.Username + " used /" + c.cfg.Command + " in channel " + in.ChannelID + "."},
+		Kind:         chat.KindChannel,
+		Context:      []string{"Discord user " + user.Username + " used /" + c.cfg.Command + " in channel " + in.ChannelID + "."},
+		AuthVerified: true,
 		Auth: &channel.Principal{
 			Authenticator: "discord",
 			Kind:          "user",
@@ -425,13 +426,14 @@ func (c *Channel) Receive(ctx context.Context, target any, text string, opts cha
 		return fmt.Errorf("bonnie: channel/discord: the target of a hand-off is the channel ID, not %T", target)
 	}
 	return c.core.Proactive(ctx, chat.Turn{
-		Address:    channelID,
-		Text:       text,
-		Kind:       chat.KindChannel,
-		Context:    opts.Context,
-		Title:      opts.Title,
-		TurnPolicy: opts.TurnPolicy,
-		Auth:       opts.Auth,
+		Address:      channelID,
+		Text:         text,
+		Kind:         chat.KindChannel,
+		Context:      opts.Context,
+		Title:        opts.Title,
+		TurnPolicy:   opts.TurnPolicy,
+		Auth:         opts.Auth,
+		AuthVerified: opts.AuthVerified,
 	}, c.deliver)
 }
 

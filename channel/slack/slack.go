@@ -272,6 +272,7 @@ func (c *Channel) handleEvent(w http.ResponseWriter, r *http.Request, _ channel.
 	if !ok {
 		return
 	}
+	turn.AuthVerified = true
 	turn.Auth = &channel.Principal{
 		Authenticator: "slack",
 		Kind:          "user",
@@ -481,13 +482,14 @@ func (c *Channel) Receive(ctx context.Context, target any, text string, opts cha
 		return errors.New("bonnie: channel/slack: the thread could not be opened")
 	}
 	return c.core.Proactive(ctx, chat.Turn{
-		Address:    channelID + "/" + root,
-		Text:       text,
-		Kind:       chat.KindThread,
-		Context:    opts.Context,
-		Title:      opts.Title,
-		TurnPolicy: opts.TurnPolicy,
-		Auth:       opts.Auth,
+		Address:      channelID + "/" + root,
+		Text:         text,
+		Kind:         chat.KindThread,
+		Context:      opts.Context,
+		Title:        opts.Title,
+		TurnPolicy:   opts.TurnPolicy,
+		Auth:         opts.Auth,
+		AuthVerified: opts.AuthVerified,
 	}, c.deliver)
 }
 

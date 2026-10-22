@@ -193,6 +193,27 @@ type Trigger struct {
 	Kind         string    `json:"kind,omitempty"`
 }
 
+// Caller is the identity that sent a turn's input. The channel layer sets it;
+// the runtime journals it with the turn and restores it on resume. It is
+// bound to the admitted turn, so a later message from another sender cannot
+// change the identity a turn's tools see.
+type Caller struct {
+	// Authenticator names the verifier or platform that produced the
+	// identity, such as "slack" or the name an HTTP authenticator gives.
+	Authenticator string `json:"authenticator,omitempty"`
+	// Kind is "user", "app", or "runtime".
+	Kind string `json:"kind,omitempty"`
+	// ID is stable for the lifetime of the identity.
+	ID string `json:"id,omitempty"`
+	// Attributes carries profile claims such as email or team.
+	Attributes map[string]any `json:"attributes,omitempty"`
+	// Verified reports that the channel proved the identity: a configured
+	// HTTP authenticator, or a platform's signed event. An identity that a
+	// caller only claimed, such as the auth field of an unauthenticated
+	// HTTP request, is not verified. Gate on it before you trust ID.
+	Verified bool `json:"verified,omitempty"`
+}
+
 // Input supplies new input to Start or redelivery data to StartRetry.
 // Any nonzero field is explicit input to Start, including whitespace Text.
 // Empty slices and zero-value metadata do not count. Input{} retains legacy recovery.
@@ -216,6 +237,9 @@ type Input struct {
 	Origin Origin `json:"origin,omitzero"`
 	// Trigger is structured provenance for this turn.
 	Trigger *Trigger `json:"trigger,omitempty"`
+	// Caller is who sent this input, or nil. New input replaces the
+	// previous turn's caller; recovery without a caller keeps it.
+	Caller *Caller `json:"caller,omitempty"`
 }
 
 // Run is a snapshot of a durable run after a turn boundary.
@@ -627,7 +651,7 @@ const (
 
 func (in Input) nonempty() bool {
 	return in.Text != "" || len(in.Files) != 0 || len(in.Context) != 0 ||
-		in.Title != "" || in.Origin != (Origin{}) || in.Trigger != nil
+		in.Title != "" || in.Origin != (Origin{}) || in.Trigger != nil || in.Caller != nil
 }
 
 func (r *Runner) startAcquired(turnCtx context.Context, act *activeTurn, runID string, in Input, intent startIntent) (*Run, error) {
@@ -686,6 +710,13 @@ func (r *Runner) startAcquired(turnCtx context.Context, act *activeTurn, runID s
 	s.mu.Lock()
 	s.trigger = in.Trigger
 	s.mu.Unlock()
+	// New input names its sender, also when that is nobody. Recovery with
+	// no caller continues the turn that already has one.
+	if intent == startNewInput || in.Caller != nil {
+		if err := s.recordCaller(turnCtx, in.Caller); err != nil {
+			return nil, err
+		}
+	}
 	if err := s.journalContext(turnCtx, in.Context); err != nil {
 		return nil, err
 	}

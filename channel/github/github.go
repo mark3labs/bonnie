@@ -712,11 +712,12 @@ func (c *Channel) turnForComment(env *envelope, owner, repoName string) (*chat.T
 		return nil, 0
 	}
 	return &chat.Turn{
-		Address: address,
-		Text:    stripInvocation(body, c.cfg.BotName),
-		Kind:    kind,
-		Title:   titleFor(env.Issue.Title, isPR),
-		Context: c.contextFor(env, owner, repoName, mentioned, isPR),
+		Address:      address,
+		Text:         stripInvocation(body, c.cfg.BotName),
+		Kind:         kind,
+		Title:        titleFor(env.Issue.Title, isPR),
+		Context:      c.contextFor(env, owner, repoName, mentioned, isPR),
+		AuthVerified: true,
 		Auth: &channel.Principal{
 			Authenticator: "github",
 			Kind:          "user",
@@ -746,11 +747,12 @@ func (c *Channel) turnForReviewComment(env *envelope, owner, repoName string) (*
 		return nil, 0
 	}
 	return &chat.Turn{
-		Address: address,
-		Text:    stripInvocation(env.Comment.Body, c.cfg.BotName),
-		Kind:    chat.KindReviewThread,
-		Title:   titleFor(env.PullRequest.Title, true),
-		Context: c.contextFor(env, owner, repoName, mentioned, true),
+		Address:      address,
+		Text:         stripInvocation(env.Comment.Body, c.cfg.BotName),
+		Kind:         chat.KindReviewThread,
+		Title:        titleFor(env.PullRequest.Title, true),
+		Context:      c.contextFor(env, owner, repoName, mentioned, true),
+		AuthVerified: true,
 		Auth: &channel.Principal{
 			Authenticator: "github",
 			Kind:          "user",
@@ -1200,13 +1202,14 @@ func (c *Channel) Receive(ctx context.Context, target any, text string, opts cha
 		Installation: &installation{ID: c.cfg.InstallationID},
 	}
 	return c.core.Proactive(ctx, chat.Turn{
-		Address:    address,
-		Text:       text,
-		Kind:       kind,
-		Context:    opts.Context,
-		Title:      opts.Title,
-		TurnPolicy: opts.TurnPolicy,
-		Auth:       opts.Auth,
+		Address:      address,
+		Text:         text,
+		Kind:         kind,
+		Context:      opts.Context,
+		Title:        opts.Title,
+		TurnPolicy:   opts.TurnPolicy,
+		Auth:         opts.Auth,
+		AuthVerified: opts.AuthVerified,
 	}, func(delivered string, run *runtime.Run, err error) {
 		c.deliver(env, delivered, run, err)
 	})

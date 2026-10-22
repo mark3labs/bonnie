@@ -125,7 +125,9 @@ func (c *config) managedFactory(provider sandbox.Provider, opts []kit.Option) ru
 				if discovered := Registered().ToolFactory; discovered != nil {
 					factories = append(factories, discovered)
 				}
-				factories = append(factories, c.toolFactories...)
+				for _, entry := range c.toolFactories {
+					factories = append(factories, entry.factory)
+				}
 				for _, factory := range factories {
 					if factory == nil {
 						return fmt.Errorf("bonnie: nil tool factory")

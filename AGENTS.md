@@ -37,6 +37,7 @@ Layout:
 | `client/` | Go clients: HTTP wire API (`client`), JetStream (`client/nats`), HTTP transports (`client/iroh`, `client/natsapi`) |
 | `presence/` | agent presence records; memory and NATS KV registries |
 | `schedule/` | durable cron jobs |
+| `selfmod/` | self-modification tools: `Local` (`bonnie dev`) and `Remote` (draft pull request) |
 | `web/` | optional operator web UI (templ) |
 | `agent/` | agent-tree scaffold and code generation |
 | `sandbox/` | tool sandboxes: local, exec, docker, landlock, microsandbox |
