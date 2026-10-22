@@ -8,6 +8,22 @@ description: Add custom Cobra flags and subcommands, apply parsed configuration,
 `bonnie build` compiles the agent's Go module. Commands and flags registered
 in `main.go` are part of that binary. No CLI manifest is needed.
 
+## Built-in operator commands
+
+`Agent.Serve` includes explicit `serve`, provider `auth login/status/logout`,
+`chat`, `runs list/show/inspect`, `schedules list/show/history/trigger`, and
+`version`. With no subcommand it serves the agent. Other commands do not start
+an agent server. Help and version do not open storage or require a model.
+
+`runs` uses the configured local journal and accepts `--journal`. `chat` and
+`schedules` use the configured HTTP address and accept `--token`. Provider login
+is separate from HTTP authentication; see [Provider login](/installation#provider-login).
+
+Disable commands with `WithAuthCommand(false)`, `WithChatCommand(false)`,
+`WithRunsCommand(false)`, `WithSchedulesCommand(false)`, or `WithVersionCommand(false)`.
+This does not restrict credentials, files or HTTP routes, or remove dependencies.
+Disable a built-in before registering a command with the same name.
+
 ## Register commands and apply parsed flags
 
 `WithCommand` gives a callback the root Cobra command and the configured
@@ -31,6 +47,7 @@ import (
 
 func main() {
     bonnie.New(
+        bonnie.WithRunsCommand(false), // Replace the built-in runs command.
         bonnie.WithCommand(func(root *cobra.Command, agent *bonnie.Agent) {
             var journal string
             root.PersistentFlags().StringVar(&journal, "journal", ".bonnie", "journal directory")

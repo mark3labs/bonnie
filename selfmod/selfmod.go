@@ -13,8 +13,10 @@
 //     effect only after a human reviews, merges and deploys it.
 //
 // Both tools run the subagent with BONNIE's sandbox tools in a staged copy
-// that holds only authored files (see [Authored]). The subagent never sees
-// the live tree, the journal, a .env file, or a credential.
+// that holds only authored files (see [Authored]); staging excludes the live
+// journal and .env files. The default Landlock backend confines filesystem
+// access to the staged copy. A custom Workspace defines its own boundary:
+// Local has no isolation, and injected credentials can reach tool output.
 //
 // Both tools are replay-safe. A call that a crash or a dev restart cut off
 // continues from its durable state in the journal directory, and a repeated

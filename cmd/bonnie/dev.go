@@ -35,7 +35,7 @@ type devOpts struct {
 	// noSelfModify leaves the default self-modification tool out of the
 	// dev build.
 	noSelfModify bool
-	// addr is the explicit address to bind. Empty starts at :8080 and
+	// addr is the explicit address to bind. Empty starts at 127.0.0.1:8080 and
 	// walks 8081, 8082, … until one is free.
 	addr string
 }
@@ -89,7 +89,7 @@ is still honoured.
 	f.BoolVar(&o.web, "web", false, "open the browser interface against the child")
 	f.BoolVar(&o.tui, "tui", true, "open the built-in terminal interface against the child")
 	f.BoolVar(&o.scheduleClock, "schedule-clock", false, "enable schedule clock in the child")
-	f.StringVar(&o.addr, "addr", "", "address to bind (empty = :8080, then :8081, …)")
+	f.StringVar(&o.addr, "addr", "", "address to bind (empty = loopback ports 8080–8179)")
 	f.BoolVar(&o.noSelfModify, "no-self-modify", false, "leave the default self-modification tool out of the dev build")
 	f.DurationVar(&o.shutdown, "shutdown-timeout", 30*time.Second, "how long to wait for in-flight turns on restart")
 	return cmd
@@ -177,7 +177,7 @@ func newDevServer(root string, o devOpts) *devServer {
 }
 
 // pickListenAddr returns the first free loopback address. An explicit --addr
-// is used as-is. Otherwise it tries :8080, then :8081, then :8082, and so on.
+// is used as-is. Otherwise it tries 127.0.0.1 ports 8080 through 8179.
 func pickListenAddr(explicit string) (string, error) {
 	if explicit != "" {
 		return explicit, nil

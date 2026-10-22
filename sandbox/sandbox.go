@@ -1,8 +1,10 @@
-// Package sandbox gives a BONNIE run an isolated place to run tool calls.
+// Package sandbox provides backends for BONNIE's managed file and command tools.
+// Isolation depends on the backend: Local provides none. Custom Go callbacks
+// execute on the host, outside this boundary.
 //
 // BONNIE executes the tool calls a model chooses. Without a sandbox those
 // calls run as the host process, with its files, its network, and its
-// credentials. This package is the seam that stops that.
+// credentials. This package lets the host choose a boundary for managed tools.
 //
 // # The layers
 //
@@ -11,8 +13,9 @@
 //	Tools      the model-facing shell, file, search, and edit tools, which proxy in
 //
 // Tools run in the BONNIE process and proxy into the sandbox. The model never
-// holds a handle to the sandbox and never sees a credential: it drives work
-// through tool calls and reads their results. That keeps every sandbox call on
+// holds a handle to the sandbox: it drives work through tool calls and reads
+// their results. Commands can expose injected credentials in those results.
+// That keeps every sandbox call on
 // the same journalling, approval, and event path as any other tool.
 //
 // # Lifetimes are decoupled
@@ -25,8 +28,8 @@
 // # One path namespace
 //
 // Backends normally give each run its own files at [WorkDir]. The explicit
-// shared work directory mode on the local development provider is an exception: it
-// reuses one directory and must not be used for concurrent runs. A path has
+// shared work directory modes on Local and Landlock are exceptions: they
+// reuse one directory and must not be used for concurrent runs. A path has
 // the same meaning whether a backend is local, Docker, or microsandbox.
 package sandbox
 
@@ -132,7 +135,8 @@ func (r *Result) Output() string {
 	return r.Stdout
 }
 
-// Sandbox is one isolated work directory, bound to one run.
+// Sandbox is a command and file handle. Its provider defines isolation and
+// whether working files are per-run or explicitly shared.
 //
 // Implementations must be safe for concurrent use: an agent may run tools in
 // parallel.

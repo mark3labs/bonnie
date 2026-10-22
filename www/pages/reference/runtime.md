@@ -11,6 +11,10 @@ The code and exported godoc define the contract. BONNIE is experimental, pre-1.0
 
 For normal hosting, use `bonnie.New(...).Serve()` or `Agent.Run(ctx)`. They install the managed sandbox, SQLite storage, and HTTP channel. See [Options](/reference/options), [Deployment](/guides/deployment), and [Channels](/channels/overview).
 
+Clients should prefer executor-independent `wire` types for shared transport
+contracts. Runtime compatibility aliases such as `runtime.CancelResult`,
+`runtime.RunState`, and `runtime.Event` remain valid.
+
 ## Scoped agent operations
 
 The root `bonnie.Agent` exposes resources for custom commands without starting a server:

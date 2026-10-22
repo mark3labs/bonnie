@@ -129,8 +129,8 @@ bonnie dev --addr 127.0.0.1:8081 --tui=false
 
 Two flags matter, and the defaults are wrong for a webhook bot:
 
-- `--addr` is **required**. Without it `bonnie dev` starts at `:8080` and walks
-  `:8081`, `:8082`, … until it finds a free port; your tunnel points at one
+- `--addr` is **required**. Without it the current `bonnie dev` CLI tries loopback
+  `127.0.0.1` ports 8080 through 8179 until it finds a free port; your tunnel points at one
   fixed port, so a walk silently breaks every delivery. The port here must be
   the one from step 1.
 - `--tui=false` keeps the terminal for delivery logs. Drop it to chat with the

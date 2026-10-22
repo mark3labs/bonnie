@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Correct security and durability limits, provider login and compiled-agent
+  command guidance, root option coverage, and contributor test instructions.
+  Add contract tests for option references and the custom `runs` example.
+
 ## [0.32.0] — 2026-10-22
 
 **Let an agent change itself, and trace its turns.** This is a MINOR release

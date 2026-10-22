@@ -277,7 +277,8 @@ func WithSharedDirectory(dir string) Option {
 	return func(c *config) { c.sharedDirectory, c.sharedDirectorySet = dir, true }
 }
 
-// WithSandbox selects the backend every tool call runs in.
+// WithSandbox selects the backend for managed command and file tools.
+// Custom Go callbacks still run on the host.
 //
 // It SELECTS a sandbox, it does not enable one. Leaving it out does not give
 // the model this process's filesystem: a run with no explicit backend gets

@@ -75,6 +75,25 @@ ANTHROPIC_API_KEY=your-provider-key
 
 Do not commit credential files. Do not put credentials in `context/`, skills, prompts, or the sandbox environment. The host needs the model key; sandbox commands do not.
 
+### Provider login
+
+For OpenAI ChatGPT/Codex subscription OAuth instead of an API key:
+
+```bash
+bonnie auth login openai
+bonnie auth status
+bonnie auth logout openai
+```
+
+Compiled agents include the same commands by default. Credentials are shared
+with Kit. This is not general OpenAI API OAuth, HTTP bearer authentication, or
+MCP authentication. Login prints a browser URL. The browser must reach
+`localhost:1455` on the login host; forward loopback port 1455 for a remote
+host. There is no manual code-entry fallback, and login ends after at most
+five minutes. Status reports stored credentials only, not environment keys or
+token validity. Logout removes stored credentials, not environment variables.
+See [CLI](/reference/cli#provider-login).
+
 ## Check the installation
 
 ```bash

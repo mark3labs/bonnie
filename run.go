@@ -844,10 +844,8 @@ func embedRel(path string) string {
 // the listener really bound. An operator must never have to guess what is
 // running.
 //
-// There is no no-sandbox warning any more, because there is no unsandboxed
-// run to warn about. The backend is always named instead: the warning existed
-// to make a dangerous default visible, and naming the confinement in force is
-// what replaces it.
+// The backend is always named. A selected backend need not isolate execution:
+// Local is explicit host execution, and custom callbacks run on the host.
 func (c *config) banner(out io.Writer, addr, contextFiles, skills string, dotenv bool) {
 	if c.quiet {
 		return

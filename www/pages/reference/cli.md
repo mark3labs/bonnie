@@ -37,6 +37,7 @@ Generates tool wiring, builds the tree, starts a serving child, and watches for 
 | --- | --- | --- |
 | `--dry-run` | `false` | Print discovery without writing, building, or watching |
 | `--tui` | `true` | Open terminal chat; use `--tui=false` for a non-interactive host |
+| `--web` | `false` | Enable the child's browser interface and open it in a browser; turns off the default TUI. Explicit `--tui=true` with `--web` is refused. |
 | `--schedule-clock` | `false` | Enable the child's cron schedule clock |
 | `--addr` | empty | Explicit bind address; otherwise try loopback ports 8080 through 8179 |
 | `--shutdown-timeout` | `30s` | Parent wait before killing the old child during restart |
@@ -110,6 +111,32 @@ flag. `bonnie chat` does not accept Iroh tickets. Pairing is programmatic;
 there is no built-in `bonnie pair` command. See [Iroh](/channels/iroh) for
 peer approval, stable keys, and the Go client.
 
+## Provider login
+
+Both the CLI and compiled agents include `auth login openai`, `auth status`, and
+`auth logout openai`. These manage Kit's shared stored model-provider credentials,
+not HTTP bearer tokens or MCP authentication. Login supports ChatGPT/Codex
+subscription OAuth, not general OpenAI API OAuth. It prints a URL rather than
+opening a browser. The browser must reach `localhost:1455` on the login host;
+forward that loopback port for remote use. There is no manual code-entry fallback.
+Login has a five-minute limit. Status reports stored credentials only: it does
+not check environment keys or token validity. See [Installation](/installation#provider-login).
+
+## Compiled-agent commands
+
+By default, compiled agents include `serve`, `auth login/status/logout`, `chat`,
+`runs list/show/inspect`, `schedules list/show/history/trigger`, and `version`.
+With no subcommand, the binary serves the agent; explicit `serve` has the same action and flags.
+Other commands do not start a server. Help and version do not require a model
+or open storage. `chat` and `schedules` use the configured HTTP address; `runs`
+uses the configured local journal and accepts `--journal`.
+
+Disable operator commands with `WithAuthCommand(false)`, `WithChatCommand(false)`,
+`WithRunsCommand(false)`, `WithSchedulesCommand(false)`, or `WithVersionCommand(false)`.
+This does not restrict stored credentials, files or HTTP routes, or remove
+command dependencies. Disable a built-in before registering the same name.
+See [Agent Commands](/guides/agent-commands).
+
 ## Compiled-agent flags
 
 An agent that calls `Agent.Serve()` registers these framework flags. A host can register additional Go flags before Serve; existing names are retained. Use `WithCommand` to add Cobra root flags, persistent flags, subcommands, and hooks. `bonnie build` includes them in the agent binary, not in the developer `bonnie` CLI. See [Agent Commands](/guides/agent-commands).
@@ -122,19 +149,21 @@ Keep the root serving action and `-addr` support for `bonnie dev`. Apply parsed 
 | `--model` | empty | Non-empty value overrides `WithModel` |
 | `--sandbox` | empty | Select a provider permitted by `WithSandboxes` or `WithSandbox`; otherwise only Landlock is permitted |
 | `--schedule-clock` | `true` | Controls cron evaluation for this process |
+| `--web` | `false` | Serve `/web`; an explicit flag overrides `WithWebUI`. Does not open a browser. |
 
-Single-dash long names such as `-addr` remain supported. With no sandbox flag, the first permitted provider is used. Selection retains that provider's configured options. Compiled agents do not automatically inherit generic serve flags such as `--journal`, `--system-prompt`, or `--sandbox-image`. The framework disables its own version, completion, and manpage commands on this surface. Help does not open storage or check backend availability.
+Single-dash long names such as `-addr` remain supported. With no sandbox flag, the first permitted provider is used. Selection retains that provider's configured options. Compiled agents do not automatically inherit generic serve flags such as `--journal`, `--system-prompt`, or `--sandbox-image`. Fang's automatic version, completion, and manpage features are disabled on this surface; BONNIE's explicit `version` subcommand is separate and enabled by default. Help does not open storage or check backend availability.
 
 `Agent.Run(ctx)` reads none of these flags. It uses code options, including the first permitted sandbox and the configured clock setting.
 
 ## `bonnie runs`
 
-These commands open the journal directly and work with the server stopped. Both use `--journal .bonnie` by default. Opening storage can create the SQLite database or import legacy JSONL records; this is not a read-only filesystem tool.
+These commands open the journal directly and work with the server stopped. All use `--journal .bonnie` by default in the developer CLI. Opening storage can create the SQLite database or import legacy JSONL records; this is not a read-only filesystem tool.
 
 | Command | Flags | Output |
 | --- | --- | --- |
 | `runs list` | `--journal`, `--state` (empty means all), `--json` (false) | Run ID, title, state, step count, and recent text |
 | `runs show <run-id>` | `--journal`, `--json` (false) | Timeline; JSON gives raw records |
+| `runs inspect [run-id]` | `--journal` | Read-only terminal inspector with filtering, refresh and record payload view; opening the journal can still create or migrate storage |
 
 Reserved `bonnie.*` bookkeeping runs are hidden from list output. The table labels the count `STEPS`; the JSON field is named `turns` but counts `RecordStep` records, not logical user turns. Raw records can contain private prompts, tool input, and media payloads.
 

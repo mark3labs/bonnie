@@ -49,8 +49,10 @@ run, _ := runner.Resume(ctx, "deploy-42",
 fmt.Println(run.Response) // "Deployed to eu-west-1."
 ```
 
-The agent keeps the full conversation, and the tools it already called. Thus it
-does not do a side effect a second time.
+The journal keeps the full conversation, including saved tool calls and results.
+Replay does not repeat completed steps. An external effect can occur before its
+result is saved, however; recovery cannot prove its outcome. Use external
+idempotency keys for actions that must not repeat. See [Durable work](docs/DURABLE_WORK.md).
 
 ## Contents
 
@@ -384,7 +386,9 @@ human-input wait that is already in the journal closes the turn without a model
 call. A durable human answer that the model has not seen is sent to it. Other
 runs continue the saved conversation through `ContinuationAgent`. A tool call
 that the crash left without a result gets an "effect unknown" result and is
-not run again, unless it is in `WithReplaySafeTools`. A run whose input never
+not run again, unless both the saved run's replay-safe policy and the current
+`WithReplaySafeTools` policy permit the tool. Adding a tool only to the current policy is not enough.
+A run whose input never
 became durable fails with `runtime.ErrRecoveryInputLost`; send it again.
 
 A host that owns the runner calls `Runner.Recover` at startup and
@@ -610,8 +614,9 @@ a draft pull request and never changes the running deployment. It needs an
 ## Sandboxes
 
 Built-in file and command tools run in a sandbox. Custom Go tool code runs on
-the host. There is no unsandboxed mode for the built-in tools. `WithSandbox`
-**selects** a backend, it does not enable one. If you do not call it, you get
+the host. Explicit `sandbox.Local()` provides no isolation, and the low-level
+`runtime.KitAgent` factory is unsandboxed. `WithSandbox` selects a backend.
+If you do not call it, you get
 `sandbox.Landlock()`, and not your process.
 
 The default confines tool calls to the run's own working files with the Linux
@@ -735,8 +740,10 @@ A custom `sandbox.WithMicrosandboxBinary` path is never downloaded or replaced.
 Thus BONNIE stays one static binary.
 
 > **The default is containment, not isolation.** Landlock confines the
-> filesystem and keeps the host environment away from a command. Thus a model
-> cannot read your journal or your API keys. It does **not** confine the
+> filesystem and does not inherit host environment credentials by default.
+> Keep journals and secrets outside permitted paths. Injected environment values
+> can be printed into model-visible tool results; injection is not secret protection.
+> Landlock does **not** confine the
 > network, and it does **not** give the command its own kernel. For hostile
 > code, use Docker or microsandbox, and stop egress.
 
@@ -1342,9 +1349,14 @@ conversation and continues with `Start`. To retire is permanent: `Start` and
 pending → running → completed
                   → waiting    (parked for a human; continue with Resume)
                   → cancelled  (stopped by an operator; continue with Start)
+                  → interrupted (host stopped; continue with Continue or Recover)
                   → failed     (the agent could not finish the turn)
                   → retired    (closed for good; Start and Resume refuse it)
 ```
+
+A persisted `running` state can remain after a crash; it does not prove a live
+executor. Use `Runner.IsActive` for this process. Served agents recover unfinished
+`running` and `interrupted` work at startup.
 
 ## How it works
 
@@ -1362,13 +1374,15 @@ Three properties are the difference between a demonstration and something you
 can deploy:
 
 - **Replay is lossless.** A journalled message keeps its typed parts, thus a
-  resumed run knows which tools it called and what they returned. It does not
-  do a side effect a second time.
-- **A step commits atomically.** A tool call and its result reach the journal
-  as one write and one fsync (`kit.StepAppender`, from Kit `v0.106.0`). Thus a
-  crash cannot leave a tool call with no answer. If a torn step is on disk —
-  from an older journal, a journal that does not batch, or a short write —
-  restore removes that incomplete step and records the repair.
+  resumed run knows which tools it called and what they returned. This is not
+  exactly-once execution of external effects.
+- **A step commits atomically.** SQLite saves a tool-calling step in one
+  transaction through `kit.StepAppender`, not one file write and fsync.
+  An effect can occur before the result is saved. Recovery supplies an
+  "effect unknown" result rather than repeating an uncertain call, unless both
+  saved and current policy permit it through `WithReplaySafeTools`.
+  Replay-safe tools must enforce authorization and external idempotency themselves.
+  Restore can also repair incomplete trailing steps from legacy or custom journals.
 - **To cancel keeps finished work.** A step is written before the context is
   examined, thus a cancelled turn loses only the step in progress.
 
