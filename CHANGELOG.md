@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.32.0] — 2026-10-22
+
+**Let an agent change itself, and trace its turns.** This is a MINOR release
+under the pre-1.0 convention: it adds the `selfmod` package, OpenTelemetry
+tracing with a Langfuse adapter, and a journalled caller for each turn. No
+existing public symbol is removed or changed. One fix changes behaviour: two
+`WithReplaySafeTools` options now declare the union of their tools. BONNIE
+remains early and experimental. No release is proven in production. Do not use
+it for work whose loss would hurt.
+
+### The claims
+
+- **A run survives process death.** A served agent continues unfinished runs
+  at startup from the journalled conversation, including typed tool calls and
+  results. SQLite commits each tool-calling step atomically. The sender of a
+  turn and its trace context are journalled with the turn and restored on
+  resume, so a recovered turn keeps its caller and its trace. Unsaved input
+  cannot be recovered; execution is not exactly once.
+- **A run parks indefinitely.** A human-input wait needs no live agent process
+  or running sandbox compute. Resume supplies the answer after restart. Keep
+  the journal and sandbox data. JetStream waits need their original agent.
+- **A run is reachable over HTTP.** Routes under `/bonnie/v1` expose runs,
+  snapshots, events, durable submissions, and owned child runs. Terminal chat
+  and the optional `/web` interface use the same channel and run executor.
+  Iroh serves the HTTP wire API over authenticated QUIC streams for approved
+  peers. The same authenticated API is also reachable over Core NATS subjects.
+
 ### Added
 
 - Package `selfmod`: an agent can change its own source. `selfmod.Local` adds
@@ -60,6 +87,165 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Two `WithReplaySafeTools` options now declare the union of their tools.
   Before, the last option replaced the set of the first.
+
+### Known limits
+
+- **Linux only.** Releases support linux/amd64 and linux/arm64. The default needs
+  kernel 5.13 or newer with Landlock enabled; otherwise select Docker.
+- **Containment is not isolation.** Landlock confines files, not the network,
+  and shares the host kernel. Do not run as a user in the `docker` group:
+  access to its socket permits host escape. Docker uses namespaces, not a
+  separate kernel. Microsandbox needs Linux and KVM. Local provides no isolation.
+- **Sandbox egress is open** until a policy is set. Landlock refuses policies it
+  cannot enforce. Microsandbox policy is fixed at creation; reattachment with a
+  different policy fails. Automatic runtime installation needs network access
+  and does not upgrade existing installations or remove runtime requirements.
+- **Custom tools and completion callbacks are trusted host code.** Use scoped
+  `Exec` for commands; do not retain scopes after execution. Use `Kit.Subagent`,
+  not `Kit.Prompt`, from active tools. Closure state is not durable; interrupted
+  calls and checks can repeat. Child model calls are not durable BONNIE runs.
+  Enforce authorization and idempotency in tool code. Keep completion policy and
+  limits stable after restart. Usage can be undercounted; unsaved attachments
+  are lost, accepted events can repeat, and drafts can appear before acceptance.
+  Checks skip suspension and model failure. Managed setup, scoped factories, and
+  completion options cannot use `WithAgentFactory`.
+- **A halt stops the turn, not the step.** Sibling tool calls still run before
+  suspension. Omitting human-input tools does not change permissions.
+- **A skill's bundled files stay on the host.** Put required text in the skill
+  body and required sandbox files in `context/`. Workspace skills are the
+  exception: their assets are live sandbox files, not journal snapshots.
+- **Workspace skills are untrusted input.** Repository descriptions and bodies
+  enter model context and can contain hostile instructions; activation does not
+  authorize execution. Discovery is opt-in and opens sandbox compute at startup.
+  Only Local, Landlock, and custom `sandbox.SkillDiscovery` implementations
+  support it; built-in Docker and Microsandbox discovery returns an unsupported
+  error, and the packaged `bonnie-skillfs` helper does not enable it. Linux
+  `openat2` is required. Over-limit skills are skipped, not truncated; a scan
+  that fails or times out keeps the last complete catalogue. Saved catalogues
+  hold instruction text, so protect the journal.
+- **HTTP authentication is opt-in.** Protect TCP HTTP separately; Iroh approval
+  does not authenticate or disable it. Health remains public on TCP HTTP.
+  Verified ownership is required for `operation_id`. CSRF checks do not replace
+  authentication. Chat webhooks verify the platform, not the person.
+- **Iroh pairing grants access to all runs, not tenant isolation.** Verify peer
+  IDs out of band. Persist approved IDs and stable endpoint keys on the host;
+  pairing and revocation are process-local. Revocation blocks later requests,
+  not requests already accepted. Tickets provide reachability, not permission.
+  There is no built-in Iroh CLI, pairing command, or presence advertisement.
+  Loopback tests do not prove Internet relays or Rust-client interoperability.
+- **Run ownership is per host.** Use one process and one submission scheduler per
+  journal. SQLite protects transactions, not execution coordination. Do not mix
+  direct Start and scheduler delivery to the same run. Network filesystems need
+  reliable POSIX locks and are unsafe for the journal.
+- **Events are journal-anchored.** Durable events replay; transient assistant
+  deltas do not. Web chat does not show reasoning deltas. Another process's
+  writes do not publish live events in this host.
+- **Cleanup is opt-in and deletes files, not history.** Waiting and interrupted
+  runs are kept;
+  publish output before completion. CLI serve does not sweep sandboxes. Locks
+  are local to one Runner; deletion callbacks must be safe to repeat. Shared
+  directories and custom factories cannot use automatic cleanup. Only Landlock
+  and Local support shared directories; use one server and no context seeding.
+- **Tool recovery is not exactly once.** Saved and current policies must allow
+  replay; no tool is replay-safe by default. Replay bypasses interactive approval
+  hooks. Different arguments can evade uncertain-action blocks. Outcomes saved
+  before a step retain text, not media. Custom factories need their own recovery.
+- **Submission deduplication covers admission, not effects.** Human waits park
+  inputs; failed work is not retried automatically. The scheduler recovers recorded
+  submissions; the served host recovers unfinished synchronous runs. Steering supports text only. Atomic
+  markers and child creation need `runtime.StepJournal`. Background children do
+  not keep parents busy or grant approval. Unsaved callbacks can repeat.
+- **Logs can contain sensitive data.** Info includes final responses; Debug
+  includes prompts, arguments, results, and reasoning. Synchronous logging can
+  delay runs; replay does not log events again.
+- **Authoring needs Go and public module access.** Static agents need neither Go
+  nor BONNIE installed, but their sandbox can need a separate runtime. Scoped
+  command operations own resources; do not retain them after return.
+- **Cancellation is cooperative, not rollback.** Models, tools, and callbacks
+  must observe contexts. Detached children can escape process-group signals.
+  Route controls to the execution owner. Legacy text answers cannot identify
+  delayed questions; chat retry can repeat effects. Served hosts recover interrupted HTTP
+  work at startup; address and operation_id cannot be combined.
+- **NATS credentials and routes need protection.** Use TLS, broker permissions,
+  and one authentication method. Payloads do not verify identity. Other connection
+  options need a caller-supplied connection. Core NATS can lose tasks and results;
+  the host continues interrupted runs, but does not retry result publication.
+  Ordinary subscribers get copies.
+- **JetStream delivery is at least once.** Recovery needs the original journal,
+  sandbox data, unique agent identity, and one owner. Waiting runs need their
+  original agent. Deduplication and retention are bounded; there is no global
+  attempt lookup. Consumer changes can replay messages. Targeted tasks have no
+  fallback; task IDs deduplicate per route, not across routes.
+- **Publish receipts confirm storage, not execution.** Existing streams are not
+  changed. Filter task IDs and respect cancellation; invalid messages need
+  correction. Deduplicate status event IDs and order by sequence. Statuses and
+  results have no cross-stream ordering. Queries and cancellation are not durable
+  commands; timeouts do not prove failure. Custom reply prefixes are unsupported.
+- **The NATS run API is operator access, not tenant isolation.** API access
+  covers all runs; per-run ownership authorization is not supplied. It needs an
+  HTTP authenticator and restrictive broker ACLs and TLS; broker authentication
+  alone does not identify a publisher. Assign one bridge per journal-owning agent
+  subject; it is not a shared worker queue. Requests are not retried, reply loss
+  does not prove failure, and API delivery is not durable. Missed live-only
+  activity cannot be replayed.
+- **Schedules have one journal owner.** Change Revision when policy changes.
+  Waiting work blocks default overlap. Latest catch-up needs saved cron history,
+  not every missed occurrence. Delivery and callbacks can repeat. Only mounted
+  tracked chat receivers are supported, not scheduled files or NATS. Execution
+  has 16 active occurrences. Manual and HTTP triggers need separate authorization.
+- **Browser validation is incomplete.** CI excludes the live-state and end-to-end
+  browser tests. They need Chromium and Node WebSocket support and otherwise skip.
+  CI green does not prove other browsers or production authentication.
+- **Presence is advisory, not execution ownership.** Polling can miss changes;
+  expiry does not prove work stopped. It adds no scheduler, routing, or failover.
+  Protect registries; labels are not authorization. Keep caller-owned connections
+  open through shutdown. Existing storage and history are not validated. Memory
+  presence is process-local with no default renewal; readiness is local only.
+- **Saved-input continuation needs agent support.** Custom agents must implement
+  `runtime.ContinuationAgent` and resolve pending tool calls first. Retry APIs
+  need one owner and provide no process lease or reversal of effects.
+- **Job output has no disk-use limit.** Model output is bounded to 32 KiB per
+  stream, but saved files can fill storage. Fresh providers cannot establish
+  unfinished host job outcomes. Guest reconnection needs files and identity;
+  stopping a sandbox need not preserve jobs.
+- **Provider login uses a shared credential store.** Only OpenAI ChatGPT/Codex
+  login is supported. Protect and persist credentials; they can override
+  environment keys. Login needs a loopback callback on port 1455 with no manual
+  fallback. Restart agents to load changes. Logout does not revoke provider access.
+- **Search can be partial.** `grep` and `find` ignore `.gitignore`, include
+  dotfiles, and stop at entry, time, result, or response limits. Files above
+  1 MiB make grep results partial. Whole-file reads do not bound backend memory.
+- **File mutations are not transactions.** The mutation gate covers `edit` and
+  `write_file` in one tool set only, not shell commands or external writers.
+  Writes do not promise rollback or exactly-once effects after a crash. Check
+  current content before retrying an uncertain edit.
+- **New input is not queued by Start.** Retain `ErrInputDeferred` commands
+  durably, recover admitted work with `StartRetry`, and submit new input only
+  after the old logical turn closes. Zero-value Start keeps legacy recovery.
+- **Automatic recovery needs durable input and a mounted owner.** Input lost
+  before it reached the journal must be sent again. Pending, waiting, failed,
+  and cancelled runs are not automatically executed. Opening a journal alone
+  executes nothing; custom hosts must call `Runner.Recover` and `Runner.Drain`.
+  Keep agent configuration stable after restart. Recovery delivery is
+  fire-and-log, not a durable outbox. GitHub needs `GITHUB_INSTALLATION_ID` to
+  post a recovered reply. Core NATS results can remain only in the journal.
+
+- **Self-modification output is not reviewed for you.** Read the diff before
+  you commit a local change or merge a pull request; a change to `main.go` can
+  change the model, channels, and sandbox. The subagent cannot download a
+  module, so a change that needs a new dependency fails to build. Calls on one
+  tree run one after the other. A remote proposal from a host without `go` is
+  not built before it is proposed. `Remote` hides its tool from an unverified
+  caller; a `Local` authorizer must check `Verified` itself. The subagent is a
+  `Kit.Subagent` call, not a durable run: an interrupted attempt is repeated,
+  not resumed.
+- **Tracing is incomplete.** Provider HTTP spans are not children of the
+  `chat` span ([mark3labs/kit#248](https://github.com/mark3labs/kit/issues/248)).
+  A model change during a turn is not shown. Inbound `traceparent` is accepted
+  from every caller that passes the channel's authentication. Captured content
+  can hold personal or secret data; capture is off by default. Langfuse can
+  show an approval score up to ten minutes late, and a failed score does not
+  fail the run.
 
 ## [0.31.0] — 2026-10-21
 
