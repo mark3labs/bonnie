@@ -33,7 +33,7 @@ func TestRunsInspectCommand(t *testing.T) {
 func TestRunsInspectJournalError(t *testing.T) {
 	t.Parallel()
 	err := execute(newRunsCmd(), "inspect", "--journal", "\x00")
-	if err == nil || !strings.Contains(err.Error(), "open inspector journal") {
+	if err == nil || !strings.Contains(err.Error(), "open console journal") {
 		t.Fatalf("error = %v", err)
 	}
 }

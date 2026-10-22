@@ -294,9 +294,11 @@ The agent binary also includes its operator commands:
 ./my-agent auth logout openai
 ./my-agent serve                      # same action as ./my-agent
 ./my-agent chat --run <run-id>        # continue a run on the HTTP server
+./my-agent runs                       # the run console: inspect, trace, act
 ./my-agent runs list                  # read the configured local journal
 ./my-agent runs show <run-id> --json
-./my-agent runs inspect
+./my-agent runs trace <run-id>        # a turn's trace as a waterfall
+./my-agent runs answer <run-id> --approve
 ./my-agent schedules list             # use the running server's HTTP API
 ./my-agent version                    # agent and BONNIE build information
 ```
@@ -447,18 +449,33 @@ or process must own each run.
 Examine what occurred, with no server:
 
 ```bash
+bonnie runs --journal .bonnie                 # the interactive console
+bonnie runs inspect --journal .bonnie run-1   # the console, on one run
 bonnie runs list --journal .bonnie
 bonnie runs show --journal .bonnie run-1
-bonnie runs inspect --journal .bonnie
-bonnie runs inspect --journal .bonnie run-1
+bonnie runs trace --journal .bonnie run-1 --turn 2
 ```
 
-`runs inspect` opens a read-only terminal inspector. Use `/` to filter runs,
-Tab to change panel focus, and the arrow keys to select runs or scroll details.
-Press `v` in the detail panel to show record payloads, `r` to refresh, and
-Ctrl+C to exit. The inspector checks for journal updates every two seconds
-when the list is not filtered. It works with a stopped server. Wide terminals
-show both panels; narrow terminals show the focused panel.
+`bonnie runs` opens the run console on a terminal (without one, it prints the
+list). The left side lists runs and the turns of the selected run; the main
+panel has four tabs:
+
+- **Overview**: state, origin, caller, sandbox, trace ID, counts, the open
+  question of a waiting run, tool usage, and turn durations.
+- **Conversation**: the transcript, with each tool call and its result,
+  reasoning, suspensions, and answers. `/` searches it.
+- **Trace**: a waterfall of the selected turn — `invoke_agent`, a `chat` span
+  per step, an `execute_tool` span per call — rebuilt from journal times, so
+  it needs no tracing backend. A call with no journalled outcome reads as
+  unknown, not done.
+- **Journal**: every record; Enter opens its payload.
+
+The console reads the journal, refreshes every second, and works with a
+stopped server. When the HTTP channel at `--addr` answers, it can also act on
+the selected run: `a` answers a waiting run, `n` sends a message, `c` cancels
+the turn, `x` retires the run, `C` clears and `m` compacts the context. The
+same actions are commands — `runs answer`, `send`, `cancel`, `retire`,
+`clear`, `compact` — for scripts. `?` lists every key; the mouse works too.
 
 ```
 RUN    TITLE              STATE      STEPS  LAST
@@ -1144,7 +1161,7 @@ bonnie dev      Run an agent tree with hot reload and the built-in TUI
 bonnie build    Compile an agent tree into one static binary
 bonnie serve    Mount the HTTP channel and serve durable runs, with no tree
 bonnie chat     Interact with an agent over the HTTP channel in a terminal
-bonnie runs     List and inspect durable runs
+bonnie runs     Inspect and manage durable runs
 bonnie sandbox  Reclaim the sandboxes of finished runs
 bonnie version  Print the BONNIE version
 ```
@@ -1169,9 +1186,12 @@ bonnie serve --addr :8080 --journal .bonnie \
              --sandbox docker --sandbox-deny-network \
              --slack --discord --telegram
 
+bonnie runs --journal .bonnie --addr 127.0.0.1:8080
 bonnie runs list --journal .bonnie --state waiting
 bonnie runs show --journal .bonnie run-1
 bonnie runs show --journal .bonnie run-1 --json | jq '.[] | select(.kind=="message")'
+bonnie runs trace --journal .bonnie run-1 --json
+bonnie runs answer run-1 --reject "not on a Friday" --addr 127.0.0.1:8080
 
 bonnie sandbox prune --journal .bonnie --sandbox docker --dry-run
 ```

@@ -191,8 +191,16 @@ func TestRunsRejectsUnknownSubcommand(t *testing.T) {
 	if err := execute(newRunsCmd(), "frobnicate"); err == nil {
 		t.Fatal("want an error for an unknown subcommand")
 	}
-	if err := execute(newRunsCmd()); err == nil {
-		t.Fatal("want an error when no subcommand is given")
+}
+
+// Without a terminal, bare `runs` cannot open the console, so it prints the
+// list: a pipe or a script gets the same rows `runs list` gives.
+func TestRunsWithoutTerminalPrintsTheList(t *testing.T) {
+	dir := seedJournal(t)
+
+	out := capture(t, func() error { return execute(newRunsCmd(), "--journal", dir) })
+	if !strings.Contains(out, "run-1") || !strings.Contains(out, "STATE") {
+		t.Fatalf("bare runs output:\n%s", out)
 	}
 }
 

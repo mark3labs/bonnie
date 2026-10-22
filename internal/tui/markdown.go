@@ -100,6 +100,13 @@ func (m Model) textWidth() int {
 // newline herald leaves behind is trimmed so an entry does not add a blank
 // line before the next one.
 func renderMarkdown(content string, width int) string {
+	return RenderMarkdown(content, width)
+}
+
+// RenderMarkdown renders markdown with the TUI's typography and wraps it to
+// width. The run console shares it, so a transcript reads the same in
+// `bonnie chat` and `bonnie runs`.
+func RenderMarkdown(content string, width int) string {
 	if strings.TrimSpace(content) == "" {
 		return ""
 	}

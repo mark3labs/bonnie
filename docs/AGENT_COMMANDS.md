@@ -5,12 +5,15 @@ in `main.go` are part of that binary. No CLI manifest is needed.
 
 ## Built-in operator commands
 
-`Agent.Serve` includes `auth login/status/logout`, `chat`, `runs list/show/inspect`, `schedules
+`Agent.Serve` includes `auth login/status/logout`, `chat`, `runs` (the run
+console, and `list/show/trace/inspect/answer/send/cancel/retire/clear/compact`), `schedules
 list/show/history/trigger`, and `version`. With no subcommand, it serves the
 agent. The explicit `serve` command has the same action and framework flags.
 These commands also work in agents compiled with `go build`.
 
-`runs` reads the configured local journal and accepts `--journal`. `chat`
+`runs` reads the configured local journal and accepts `--journal`. Its
+actions, and the console's, go to the HTTP server at the configured address
+with `--addr` and `--token`; without a server the console is read only. `chat`
 and `schedules` connect to a running HTTP server at the configured address;
 they accept `--token` for bearer authentication. They do not start a server.
 Help and version do not open the journal or require a model.

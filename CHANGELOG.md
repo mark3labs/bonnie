@@ -7,8 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`bonnie runs` is a run console.** On a terminal, `runs` with no
+  subcommand opens a full-screen console: runs and their turns on the left,
+  and Overview, Conversation, Trace, and Journal tabs on the right. The Trace
+  tab draws each turn as a waterfall of `invoke_agent`, `chat`, and
+  `execute_tool` spans rebuilt from journal times. The console refreshes
+  live, searches, filters by text and state, sorts, copies IDs, and works
+  with the mouse. When the HTTP channel at `--addr` answers, it also answers,
+  sends to, cancels, retires, clears, and compacts the selected run. Without
+  a terminal, `runs` prints the list.
+- **`runs trace`, `answer`, `send`, `cancel`, `retire`, `clear`, and
+  `compact`.** `trace` prints a turn's waterfall, or its spans with `--json`.
+  The others are the console's actions as commands for scripts.
+
 ### Changed
 
+- **`runs inspect` opens the new console.** Its keys changed; `?` lists
+  them. `runs list` sorts by last update and adds TURNS and UPDATED columns.
+  In its JSON, `turns` now counts turns; it used to count step records,
+  which are now in `steps`. The JSON also adds `origin`, `updated`, and
+  `waiting`.
+- **`agentcmd.NewRunsCommand` takes the default server address.** Agents
+  built with `Agent.Serve` pass their own.
 - Correct security and durability limits, provider login and compiled-agent
   command guidance, root option coverage, and contributor test instructions.
   Add contract tests for option references and the custom `runs` example.

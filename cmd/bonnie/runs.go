@@ -8,7 +8,7 @@ import (
 
 // newRunsCmd uses the same journal commands as compiled agents.
 func newRunsCmd() *cobra.Command {
-	return agentcmd.NewRunsCommand(defaultJournalDir)
+	return agentcmd.NewRunsCommand(defaultJournalDir, "127.0.0.1:8080")
 }
 
 // Keep these constructors for CLI tests that execute one command at a time.

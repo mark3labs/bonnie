@@ -80,7 +80,7 @@ func (a *Agent) serveCommand(fs *flag.FlagSet) *cobra.Command {
 		cmd.AddCommand(agentcmd.NewChatCommand(a.cfg.addr))
 	}
 	if !a.cfg.noRunsCommand {
-		cmd.AddCommand(agentcmd.NewRunsCommand(a.cfg.journal))
+		cmd.AddCommand(agentcmd.NewRunsCommand(a.cfg.journal, a.cfg.addr))
 	}
 	if !a.cfg.noSchedulesCommand {
 		cmd.AddCommand(agentcmd.NewSchedulesCommand(a.cfg.addr))

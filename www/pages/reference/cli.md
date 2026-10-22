@@ -125,11 +125,12 @@ not check environment keys or token validity. See [Installation](/installation#p
 ## Compiled-agent commands
 
 By default, compiled agents include `serve`, `auth login/status/logout`, `chat`,
-`runs list/show/inspect`, `schedules list/show/history/trigger`, and `version`.
+`runs` (the console and its subcommands), `schedules list/show/history/trigger`, and `version`.
 With no subcommand, the binary serves the agent; explicit `serve` has the same action and flags.
 Other commands do not start a server. Help and version do not require a model
 or open storage. `chat` and `schedules` use the configured HTTP address; `runs`
-uses the configured local journal and accepts `--journal`.
+uses the configured local journal and accepts `--journal`, and sends its actions
+to the configured HTTP address.
 
 Disable operator commands with `WithAuthCommand(false)`, `WithChatCommand(false)`,
 `WithRunsCommand(false)`, `WithSchedulesCommand(false)`, or `WithVersionCommand(false)`.
@@ -157,19 +158,31 @@ Single-dash long names such as `-addr` remain supported. With no sandbox flag, t
 
 ## `bonnie runs`
 
-These commands open the journal directly and work with the server stopped. All use `--journal .bonnie` by default in the developer CLI. Opening storage can create the SQLite database or import legacy JSONL records; this is not a read-only filesystem tool.
+The read commands open the journal directly and work with the server stopped. All use `--journal .bonnie` by default in the developer CLI. Opening storage can create the SQLite database or import legacy JSONL records; this is not a read-only filesystem tool. The action commands, and the console's actions, use the HTTP channel at `--addr` (default `127.0.0.1:8080`) with an optional `--token`.
 
 | Command | Flags | Output |
 | --- | --- | --- |
-| `runs list` | `--journal`, `--state` (empty means all), `--json` (false) | Run ID, title, state, step count, and recent text |
+| `runs` | `--journal`, `--addr`, `--token`, `--read-only` | On a terminal, the run console; otherwise the `runs list` table |
+| `runs inspect [run-id]` | as `runs` | The console with one run selected |
+| `runs list` | `--journal`, `--state` (empty means all), `--json` (false) | Run ID, title, state, turn and step counts, last update, and the open question or recent text, newest first |
 | `runs show <run-id>` | `--journal`, `--json` (false) | Timeline; JSON gives raw records |
-| `runs inspect [run-id]` | `--journal` | Read-only terminal inspector with filtering, refresh and record payload view; opening the journal can still create or migrate storage |
+| `runs trace <run-id>` | `--journal`, `--turn` (latest), `--width`, `--json` (false) | Waterfall of one turn's spans, rebuilt from journal times; JSON gives the spans |
+| `runs answer <run-id> [text]` | `--addr`, `--token`, `--approve`, `--reject`, `--turn` | Answers a waiting run and prints the outcome |
+| `runs send <run-id> <message>` | `--addr`, `--token` | Starts a turn and prints the reply |
+| `runs cancel <run-id>` | `--addr`, `--token` | Requests cancellation of the active turn |
+| `runs retire <run-id>` | `--addr`, `--token`, `--reason` | Closes the run for good |
+| `runs clear <run-id>` | `--addr`, `--token` | Drops the conversation from the model's context |
+| `runs compact <run-id>` | `--addr`, `--token` | Summarises older messages now |
 
-Reserved `bonnie.*` bookkeeping runs are hidden from list output. The table labels the count `STEPS`; the JSON field is named `turns` but counts `RecordStep` records, not logical user turns. Raw records can contain private prompts, tool input, and media payloads.
+The console lists runs and the turns of the selected run, with Overview, Conversation, Trace, and Journal tabs. It refreshes every second. Without a reachable server, or with `--read-only`, it is read only. Press `?` for its keys.
+
+Reserved `bonnie.*` bookkeeping runs are hidden from list output. In `runs list --json`, `turns` counts turns and `steps` counts `RecordStep` records. Raw records can contain private prompts, tool input, and media payloads.
 
 ```bash
 bonnie runs list --journal /var/lib/report-agent --state waiting
 bonnie runs show RUN_ID --journal /var/lib/report-agent --json
+bonnie runs trace RUN_ID --journal /var/lib/report-agent
+bonnie runs answer RUN_ID --approve --addr 127.0.0.1:8080
 ```
 
 ## `bonnie sandbox prune`

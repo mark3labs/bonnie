@@ -40,7 +40,7 @@ func TestRunsCommandOutput(t *testing.T) {
 	}
 	for _, args := range [][]string{{"list"}, {"list", "--json"}, {"show", "run-1"}, {"show", "run-1", "--json"}} {
 		var out bytes.Buffer
-		if err := executeCommand(t.Context(), NewRunsCommand(dir), &out, args...); err != nil {
+		if err := executeCommand(t.Context(), NewRunsCommand(dir, "127.0.0.1:1"), &out, args...); err != nil {
 			t.Fatalf("%v: %v", args, err)
 		}
 		if !strings.Contains(out.String(), "run-1") {
@@ -54,7 +54,7 @@ func TestRunsCommandCancellation(t *testing.T) {
 	for _, args := range [][]string{{"list"}, {"show", "run-1"}} {
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
-		err := executeCommand(ctx, NewRunsCommand(t.TempDir()), io.Discard, args...)
+		err := executeCommand(ctx, NewRunsCommand(t.TempDir(), "127.0.0.1:1"), io.Discard, args...)
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("%v error: %v", args, err)
 		}
@@ -71,7 +71,7 @@ func (failingWriter) Write([]byte) (int, error) { return 0, errWrite }
 func TestRunsCommandWriterError(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	if err := executeCommand(t.Context(), NewRunsCommand(dir), failingWriter{}, "list"); !errors.Is(err, errWrite) {
+	if err := executeCommand(t.Context(), NewRunsCommand(dir, "127.0.0.1:1"), failingWriter{}, "list"); !errors.Is(err, errWrite) {
 		t.Fatalf("empty list error: %v", err)
 	}
 	journal, err := runtime.OpenSQLiteJournal(dir)
@@ -85,19 +85,27 @@ func TestRunsCommandWriterError(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, args := range [][]string{{"list"}, {"list", "--json"}, {"show", "run-1"}, {"show", "run-1", "--json"}} {
-		if err := executeCommand(t.Context(), NewRunsCommand(dir), failingWriter{}, args...); !errors.Is(err, errWrite) {
+		if err := executeCommand(t.Context(), NewRunsCommand(dir, "127.0.0.1:1"), failingWriter{}, args...); !errors.Is(err, errWrite) {
 			t.Fatalf("%v error: %v", args, err)
 		}
 	}
 }
 
-func TestRunsCommandDefaultJournal(t *testing.T) {
+// Every runs command reads the journal, talks to the server, or both, and
+// each one takes the defaults the agent was built with.
+func TestRunsCommandDefaults(t *testing.T) {
 	t.Parallel()
-	cmd := NewRunsCommand("custom-journal")
-	for _, child := range cmd.Commands() {
-		flag := child.Flags().Lookup("journal")
-		if flag == nil || flag.DefValue != "custom-journal" {
-			t.Fatalf("%s journal flag: %+v", child.Name(), flag)
+	cmd := NewRunsCommand("custom-journal", "custom:1234")
+	for _, c := range append(cmd.Commands(), cmd) {
+		journal, addr := c.Flags().Lookup("journal"), c.Flags().Lookup("addr")
+		if journal == nil && addr == nil {
+			t.Fatalf("%s has neither --journal nor --addr", c.Name())
+		}
+		if journal != nil && journal.DefValue != "custom-journal" {
+			t.Fatalf("%s journal flag: %+v", c.Name(), journal)
+		}
+		if addr != nil && addr.DefValue != "custom:1234" {
+			t.Fatalf("%s addr flag: %+v", c.Name(), addr)
 		}
 	}
 }

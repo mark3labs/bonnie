@@ -11,11 +11,12 @@ in `main.go` are part of that binary. No CLI manifest is needed.
 ## Built-in operator commands
 
 `Agent.Serve` includes explicit `serve`, provider `auth login/status/logout`,
-`chat`, `runs list/show/inspect`, `schedules list/show/history/trigger`, and
+`chat`, `runs` (the run console and its subcommands), `schedules list/show/history/trigger`, and
 `version`. With no subcommand it serves the agent. Other commands do not start
 an agent server. Help and version do not open storage or require a model.
 
-`runs` uses the configured local journal and accepts `--journal`. `chat` and
+`runs` uses the configured local journal and accepts `--journal`; its actions
+use the configured HTTP address. `chat` and
 `schedules` use the configured HTTP address and accept `--token`. Provider login
 is separate from HTTP authentication; see [Provider login](/installation#provider-login).
 
