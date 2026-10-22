@@ -3,7 +3,7 @@ module slack-bot
 go 1.27.0
 
 require (
-	github.com/mark3labs/bonnie v0.32.0
+	github.com/mark3labs/bonnie v0.33.0
 	github.com/mark3labs/kit v0.135.0
 )
 
@@ -113,7 +113,6 @@ require (
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/sagikazarmark/locafero v0.12.0 // indirect
-	github.com/sahilm/fuzzy v0.1.3 // indirect
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3 // indirect
 	github.com/spf13/afero v1.15.0 // indirect
 	github.com/spf13/cast v1.10.0 // indirect
