@@ -51,6 +51,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   read `traceparent`, and a submission or spawned child run journals it.
   The NATS API transport now accepts `Traceparent` and `Tracestate` headers.
 
+### Changed
+
+- Upgrade Kit to v0.135.0, `modernc.org/sqlite` to v1.61.0, and the other
+  Go dependencies to their latest compatible versions.
+
 ### Fixed
 
 - Two `WithReplaySafeTools` options now declare the union of their tools.
