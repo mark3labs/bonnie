@@ -34,6 +34,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Correct security and durability limits, provider login and compiled-agent
   command guidance, root option coverage, and contributor test instructions.
   Add contract tests for option references and the custom `runs` example.
+- **The `chat` span is in the provider request context.** `observe` opens
+  each step's `chat` span in Kit's step-context hook
+  ([mark3labs/kit#248](https://github.com/mark3labs/kit/issues/248)), so a
+  provider HTTP span from `bonnie.WithKit(kit.WithHTTPTransport(...))` with
+  `otelhttp` is its child. A span that a tool starts itself is now also a
+  child of `chat`.
+- **The model on a `chat` span is the model of that step.** It comes from
+  Kit's step events, so a model change during a turn is shown.
 
 ## [0.32.0] — 2026-10-22
 

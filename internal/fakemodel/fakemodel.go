@@ -79,6 +79,9 @@ type Request struct {
 	Tools []string
 	// ToolSchemas holds each model-facing tool definition as JSON.
 	ToolSchemas map[string]json.RawMessage
+	// Context is the context Kit gave the request, so a test can read what
+	// a kit.StepContextHook put into it.
+	Context context.Context
 }
 
 // System returns the text of the request's system messages: the system
@@ -159,14 +162,14 @@ func (m *Model) factory(context.Context, *kit.ProviderConfig, string) (*kit.Prov
 	return &kit.ProviderResult{Model: languageModel{m}}, nil
 }
 
-// answer records call and returns the next reply, with a call ID for each
+// answer records call and its context, and returns the next reply, with a call ID for each
 // tool call. The IDs are unique across the model's life, because a replayed
 // conversation that repeats an ID is a defect a provider would reject.
-func (m *Model) answer(call fantasy.Call) (Reply, []string, error) {
+func (m *Model) answer(ctx context.Context, call fantasy.Call) (Reply, []string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	req := Request{Messages: append([]kit.LLMMessage(nil), call.Prompt...), ToolSchemas: make(map[string]json.RawMessage)}
+	req := Request{Messages: append([]kit.LLMMessage(nil), call.Prompt...), ToolSchemas: make(map[string]json.RawMessage), Context: ctx}
 	for _, t := range call.Tools {
 		req.Tools = append(req.Tools, t.GetName())
 		definition, err := json.Marshal(t)
@@ -206,8 +209,8 @@ type languageModel struct{ m *Model }
 
 var _ fantasy.LanguageModel = languageModel{}
 
-func (l languageModel) Generate(_ context.Context, call fantasy.Call) (*fantasy.Response, error) {
-	reply, ids, err := l.m.answer(call)
+func (l languageModel) Generate(ctx context.Context, call fantasy.Call) (*fantasy.Response, error) {
+	reply, ids, err := l.m.answer(ctx, call)
 	if err != nil {
 		return nil, err
 	}
@@ -221,8 +224,8 @@ func (l languageModel) Generate(_ context.Context, call fantasy.Call) (*fantasy.
 	return &fantasy.Response{Content: content, FinishReason: finishReason(reply), Usage: usage}, nil
 }
 
-func (l languageModel) Stream(_ context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
-	reply, ids, err := l.m.answer(call)
+func (l languageModel) Stream(ctx context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
+	reply, ids, err := l.m.answer(ctx, call)
 	if err != nil {
 		return nil, err
 	}

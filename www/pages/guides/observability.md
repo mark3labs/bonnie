@@ -67,6 +67,21 @@ func main() {
 }
 ```
 
+### Provider HTTP spans
+
+BONNIE puts each `chat` span into the context of the step's provider request. To record the HTTP request as a child of `chat`, wrap the provider transport with `otelhttp`:
+
+```go
+bonnie.New(
+    bonnie.WithTracing(tp),
+    bonnie.WithKit(kit.WithHTTPTransport(func(base http.RoundTripper) http.RoundTripper {
+        return otelhttp.NewTransport(base, otelhttp.WithTracerProvider(tp))
+    })),
+).Serve()
+```
+
+Kit applies the wrapper to its built-in providers only, not to a provider you register with `kit.WithProvider`. `otelhttp` sends the `traceparent` header to the provider only if you set a global propagator. The step context also reaches the tools of the step, so a span that a tool starts itself is a child of `chat`.
+
 ## Content
 
 By default, spans record **metadata only**: names, models, token counts, tool names, states, and errors. Prompts, model messages, tool arguments, tool results, and responses can contain personal or secret data. BONNIE records them only when a capture policy allows it:
@@ -148,6 +163,4 @@ tp := sdktrace.NewTracerProvider(sdktrace.WithBatcher(
 
 ## Limits
 
-- Kit does not yet let BONNIE put the `chat` span into the provider request context, or wrap the provider's HTTP transport. Provider HTTP spans (for example from `otelhttp`) are therefore not children of `chat`. See [mark3labs/kit#248](https://github.com/mark3labs/kit/issues/248).
-- The model on a `chat` span is the agent's model when the turn's agent starts. A model change during a turn is not shown.
 - Inbound `traceparent` is accepted from every caller that passes the channel's authentication.

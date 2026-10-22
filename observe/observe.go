@@ -141,8 +141,8 @@ type (
 	eventSource interface {
 		Subscribe(listener kit.EventListener) func()
 	}
-	modelSource interface {
-		GetModelString() string
+	stepContexter interface {
+		OnStepContext(p kit.HookPriority, h func(kit.StepContextHook) context.Context) func()
 	}
 	stepPreparer interface {
 		OnPrepareStep(p kit.HookPriority, h func(kit.PrepareStepHook) *kit.PrepareStepResult) func()

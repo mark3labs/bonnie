@@ -96,11 +96,12 @@ type turn struct {
 	common  []attribute.KeyValue
 	capture Capture
 
-	mu       sync.Mutex
-	provider string
-	model    string
-	input    string // the next step's input messages, from PrepareStep
-	step     trace.Span
+	mu    sync.Mutex
+	input string // the next step's input messages, from PrepareStep
+	step  trace.Span
+	// opened is true from the step-context hook that opened step until its
+	// StepStartEvent, which then must not open a second span.
+	opened   bool
 	stepText strings.Builder
 	calls    []genAIPart
 	tools    map[string]trace.Span
@@ -114,22 +115,14 @@ func (o *turn) Carrier() map[string]string {
 
 // Attach implements [runtime.TurnObservation].
 func (o *turn) Attach(agent runtime.Agent) func() {
-	if m, ok := agent.(modelSource); ok {
-		// TODO(kit): mark3labs/kit#248 adds the model to each step event.
-		// The model a step used can differ when SetModel runs during a
-		// turn, which BONNIE never does.
-		model := m.GetModelString()
-		o.mu.Lock()
-		if provider, id, err := kit.ParseModelString(model); err == nil {
-			o.provider, o.model = provider, id
-		} else {
-			o.model = model
-		}
-		o.mu.Unlock()
-	}
 	var stops []func()
 	if src, ok := agent.(eventSource); ok {
 		stops = append(stops, src.Subscribe(o.event))
+	}
+	if sc, ok := agent.(stepContexter); ok {
+		// Low priority runs last, so the chat span is the active span of the
+		// provider request even when another hook adds a span of its own.
+		stops = append(stops, sc.OnStepContext(kit.HookPriorityLow, o.stepContext))
 	}
 	if p, ok := agent.(stepPreparer); ok && o.capture.Inputs {
 		// High priority runs first, and a nil result lets every other hook
@@ -158,8 +151,12 @@ func (o *turn) event(ev kit.Event) {
 	}
 	switch e := ev.(type) {
 	case kit.StepStartEvent:
+		if o.opened {
+			o.opened = false
+			return
+		}
 		o.endStep(codes.Error, "step superseded")
-		o.startStep(e.StepNumber)
+		o.startStep(e.StepNumber, e.Model)
 	case kit.MessageUpdateEvent:
 		if o.step != nil && o.capture.Outputs {
 			o.stepText.WriteString(e.Chunk)
@@ -243,28 +240,48 @@ func (o *turn) event(ev kit.Event) {
 	}
 }
 
-// startStep opens a chat span for one model step. Callers hold mu.
-func (o *turn) startStep(number int) {
+// stepContext opens the chat span of a step before the step starts, and
+// puts it into the step's context. Kit gives that context to the provider
+// request, so an HTTP span (for example from an otelhttp transport set with
+// kit.WithHTTPTransport) is a child of the chat span. Kit calls the hook
+// again for a resumed step, after the StepResumeEvent that ended its span.
+func (o *turn) stepContext(h kit.StepContextHook) context.Context {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.ended {
+		return nil
+	}
+	o.endStep(codes.Error, "step superseded")
+	o.startStep(h.StepNumber, h.Model)
+	o.opened = true
+	return trace.ContextWithSpan(h.Context, o.step)
+}
+
+// startStep opens a chat span for one model step. model is the
+// "provider/model" string Kit reports for the step. Callers hold mu.
+func (o *turn) startStep(number int, model string) {
+	provider, id, err := kit.ParseModelString(model)
+	if err != nil {
+		provider, id = "", model
+	}
 	name := OperationChat
-	if o.model != "" {
-		name += " " + o.model
+	if id != "" {
+		name += " " + id
 	}
 	attrs := append([]attribute.KeyValue{
 		KeyOperationName.String(OperationChat),
 		KeyStepNumber.Int(number),
 	}, o.common...)
-	if o.provider != "" {
-		attrs = append(attrs, KeyProviderName.String(o.provider))
+	if provider != "" {
+		attrs = append(attrs, KeyProviderName.String(provider))
 	}
-	if o.model != "" {
-		attrs = append(attrs, KeyRequestModel.String(o.model))
+	if id != "" {
+		attrs = append(attrs, KeyRequestModel.String(id))
 	}
 	if o.input != "" {
 		attrs = append(attrs, KeyInputMessages.String(o.input))
 		o.input = ""
 	}
-	// TODO(kit): mark3labs/kit#248 lets this span reach the provider
-	// request, so an HTTP span can be its child.
 	_, o.step = o.tracer.Start(o.ctx, name,
 		trace.WithSpanKind(trace.SpanKindClient),
 		trace.WithAttributes(attrs...),
@@ -283,6 +300,7 @@ func (o *turn) endStep(code codes.Code, why string) {
 	}
 	o.step.End()
 	o.step = nil
+	o.opened = false
 	o.stepText.Reset()
 	o.calls = nil
 }

@@ -147,6 +147,33 @@ func TestTurnSpanTreeWithRealKit(t *testing.T) {
 	}
 }
 
+// TestChatSpanReachesTheProviderRequest proves that each step's request
+// context carries that step's chat span, so a provider HTTP span (from a
+// transport set with kit.WithHTTPTransport) is its child. Before
+// mark3labs/kit#248 the request had the turn's context only.
+func TestChatSpanReachesTheProviderRequest(t *testing.T) {
+	t.Parallel()
+	sr, tp := recorder()
+	model := fakemodel.New(fakemodel.Call("deploy", `{}`), fakemodel.Say("Done."))
+	r := runtime.NewRunner(runtime.NewMemoryJournal(), scriptedKit(model, kit.WithExtraTools(deployTool())),
+		runtime.WithObserver(observe.New(tp)))
+
+	if _, err := r.Start(context.Background(), "trace-ctx", runtime.Input{Text: "Deploy."}); err != nil {
+		t.Fatal(err)
+	}
+	chats := byOperation(sr.Ended(), observe.OperationChat)
+	requests := model.Requests()
+	if len(chats) != 2 || len(requests) != 2 {
+		t.Fatalf("%d chat spans, %d requests; want 2 of each", len(chats), len(requests))
+	}
+	for i, req := range requests {
+		got := trace.SpanContextFromContext(req.Context)
+		if got.SpanID() != chats[i].SpanContext().SpanID() {
+			t.Fatalf("request %d active span %v, want chat span %v", i, got.SpanID(), chats[i].SpanContext().SpanID())
+		}
+	}
+}
+
 func TestCaptureAllRecordsContent(t *testing.T) {
 	t.Parallel()
 	sr, tp := recorder()
