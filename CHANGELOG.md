@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Package `selfmod`: an agent can change its own source. `selfmod.Local` adds
+  `modify_agent` under `bonnie dev`, which installs it by default. A subagent
+  edits a staged copy of the authored files with sandbox tools, the change
+  must generate and build (`go build -overlay` in the tree), and then each
+  changed file is written with one atomic rename. A file that changed in the
+  tree meanwhile is a conflict, and nothing is written. The dev loop rebuilds,
+  and the next message on the run is answered by the new build.
+- `selfmod.Remote` adds `propose_agent_change` for a deployed agent: it clones
+  the repository, stages and builds the change when the host has Go, pushes
+  its own branch, and opens a draft pull request. It never changes the running
+  deployment. `Authorize` and `Credentials` are required. The token stays in
+  the BONNIE process; the subagent's sandbox holds only a copy of the
+  authored files.
+- `bonnie dev --no-self-modify` leaves the default tool out of the dev build.
+  The dev child gets `BONNIE_DEV_ROOT` (`bonnie.DevRootEnv`).
+- `bonnie.WithNamedToolFactory`: a later factory with the same name replaces
+  the earlier one in place.
+- `bonnie.RegisterDefaults`: options that `New` applies before its own. A
+  default tool factory is dropped, not refused, beside `WithAgentFactory`.
+- `RunScope.Caller` and `chat.LatestPrincipal` return the identity that sent
+  a run's most recent message.
+- `runtime.Session.AddReplaySafeTools` adds to the replay-safe set.
+
+### Fixed
+
+- Two `WithReplaySafeTools` options now declare the union of their tools.
+  Before, the last option replaced the set of the first.
+
 ## [0.31.0] — 2026-10-21
 
 **Discover skills in the run workspace.** This is a MINOR release under the

@@ -40,8 +40,11 @@ Generates tool wiring, builds the tree, starts a serving child, and watches for 
 | `--schedule-clock` | `false` | Enable the child's cron schedule clock |
 | `--addr` | empty | Explicit bind address; otherwise try loopback ports 8080 through 8179 |
 | `--shutdown-timeout` | `30s` | Parent wait before killing the old child during restart |
+| `--no-self-modify` | `false` | Leave the default `modify_agent` tool out of the dev build |
 
 Changes to code, instructions, skills, and module files cause regeneration and rebuild. Generated files, `.bonnie`, `.git`, and `.direnv` are excluded. The authored context directory is not watched: seed changes affect later runs, not existing working files. A failed rebuild leaves the current child running. A successful rebuild sends SIGTERM to the old child and restarts it at the same address. The journal retains the conversation; the TUI reconnects.
+
+The dev build gives the agent the `modify_agent` tool from package `selfmod`: ask the agent to change its own instructions, tools, skills, or context files. The tool is added with `go build -overlay`, so no file is written to the tree and `bonnie build` never includes it. The child gets `BONNIE_DEV_ROOT`, the absolute tree root. See [Self-Modification](/guides/self-modification).
 
 The dev restart timeout is not a new root option in the child. Set `WithShutdownTimeout` in code when you need to change the child's own drain period.
 

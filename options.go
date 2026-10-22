@@ -74,7 +74,7 @@ type config struct {
 	tools               []kit.Tool
 	kitOpts             []kit.Option
 	kitSetup            []KitSetup
-	toolFactories       []ToolFactory
+	toolFactories       []namedToolFactory
 	completion          *CompletionPolicy
 	completionDuplicate bool
 	channels            []ChannelFunc
@@ -92,6 +92,11 @@ type config struct {
 	scheduleClockSet    bool
 	scheduleAuthorizer  func(*http.Request) error
 	presence            *PresenceConfig
+	// journalHandle is the journal openRuntime opened. Tool scopes read it
+	// lazily, after the runner has started.
+	journalHandle runtime.Journal
+	// applyingDefaults is set while [New] applies [RegisterDefaults].
+	applyingDefaults bool
 }
 
 // Option configures [New] or [Agent.Configure]. This is where a setting that is not a

@@ -6,6 +6,8 @@ import (
 
 	kit "github.com/mark3labs/kit/pkg/kit"
 
+	"github.com/mark3labs/bonnie/channel"
+	"github.com/mark3labs/bonnie/channel/chat"
 	"github.com/mark3labs/bonnie/runtime"
 	"github.com/mark3labs/bonnie/sandbox"
 )
@@ -19,6 +21,11 @@ type RunScope struct {
 	Session *runtime.Session
 	// Exec opens the sandbox lazily and uses the same handle as agent tools.
 	Exec func(context.Context, sandbox.Command) (*sandbox.Result, error)
+	// Caller returns the identity that sent the most recent message on this
+	// run, or nil when no channel recorded one. A channel without an
+	// authenticator records no verified identity, so a tool that gates on
+	// the caller must refuse nil. It reads the journal on each call.
+	Caller func(context.Context) (*channel.Principal, error)
 }
 
 // KitSetup registers SDK hooks after BONNIE installs its durable session and
@@ -120,12 +127,19 @@ func (c *config) managedFactory(provider sandbox.Provider, opts []kit.Option) ru
 						return nil, err
 					}
 					return sb.Exec(ctx, cmd)
+				}, Caller: func(ctx context.Context) (*channel.Principal, error) {
+					if c.journalHandle == nil {
+						return nil, nil
+					}
+					return chat.LatestPrincipal(ctx, c.journalHandle, s.RunID())
 				}}
 				factories := make([]ToolFactory, 0, len(c.toolFactories)+1)
 				if discovered := Registered().ToolFactory; discovered != nil {
 					factories = append(factories, discovered)
 				}
-				factories = append(factories, c.toolFactories...)
+				for _, entry := range c.toolFactories {
+					factories = append(factories, entry.factory)
+				}
 				for _, factory := range factories {
 					if factory == nil {
 						return fmt.Errorf("bonnie: nil tool factory")

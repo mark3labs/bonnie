@@ -277,6 +277,33 @@ func (m *AddressMap) NotePrincipal(ctx context.Context, runID string, p *channel
 	return nil
 }
 
+// LatestPrincipal returns the identity that sent the most recent message on
+// runID, or nil when no channel recorded one. It reads the records that
+// [AddressMap.NotePrincipal] writes. A message from an unauthenticated
+// caller records no identity, so nil is the normal answer without an
+// authenticator; a caller that gates on identity must refuse nil.
+func LatestPrincipal(ctx context.Context, journal runtime.Journal, runID string) (*channel.Principal, error) {
+	recs, err := journal.Replay(ctx, AddressRun)
+	if err != nil {
+		if errors.Is(err, runtime.ErrRunNotFound) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("bonnie: read principals: %w", err)
+	}
+	var latest *channel.Principal
+	for _, rec := range recs {
+		if rec.Kind != runtime.RecordExtensionData || rec.ExtType != PrincipalExtType || rec.Text != runID {
+			continue
+		}
+		var note principalNote
+		if err := json.Unmarshal(rec.Payload, &note); err != nil || note.RunID != runID {
+			continue
+		}
+		latest = note.Principal
+	}
+	return latest, nil
+}
+
 // Locks serialises turns per run. A queued message waits here instead of
 // racing an active turn.
 type Locks struct {

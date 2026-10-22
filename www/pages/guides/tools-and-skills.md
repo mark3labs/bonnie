@@ -106,7 +106,7 @@ func Tool(scope bonnie.ToolScope) kit.Tool {
 
 Run `bonnie dev` or `bonnie build` to generate the scoped registration. Do not register the tree tool again in `main.go`. Existing zero-argument tools need no change.
 
-`scope.Kit` is the current `*kit.Kit`. The embedded `RunScope` supplies `RunID`, `Session`, and `Exec`. Use `scope.Exec` for sandbox commands. Do not retain the scope after execution ends. Use `Kit.Subagent`, not `Kit.Prompt`, from an active tool: the child has a separate agent loop and conversation. With no `Model` override, it uses the parent's model and provider settings. Set `SubagentConfig.Model` to select another model. An explicit empty `Tools` slice prevents tool use; omitted tools use Kit's inherited default tool set.
+`scope.Kit` is the current `*kit.Kit`. The embedded `RunScope` supplies `RunID`, `Session`, `Exec`, and `Caller`, which returns the identity that sent the run's most recent message, or nil. Use `scope.Exec` for sandbox commands. Do not retain the scope after execution ends. Use `Kit.Subagent`, not `Kit.Prompt`, from an active tool: the child has a separate agent loop and conversation. With no `Model` override, it uses the parent's model and provider settings. Set `SubagentConfig.Model` to select another model. An explicit empty `Tools` slice prevents tool use; omitted tools use Kit's inherited default tool set.
 
 **Child calls are not durable BONNIE runs.** `NoSession: true` prevents a child session file; it does not add crash recovery. The outer tool result enters BONNIE's journal, but unfinished child work does not. An interrupted outer tool can cause another model call and another charge. Pass the tool context to the child and make any external effects safe to repeat.
 
