@@ -5,7 +5,7 @@ in `main.go` are part of that binary. No CLI manifest is needed.
 
 ## Built-in operator commands
 
-`Agent.Serve` includes `chat`, `runs list/show/inspect`, `schedules
+`Agent.Serve` includes `auth login/status/logout`, `chat`, `runs list/show/inspect`, `schedules
 list/show/history/trigger`, and `version`. With no subcommand, it serves the
 agent. The explicit `serve` command has the same action and framework flags.
 These commands also work in agents compiled with `go build`.
@@ -15,7 +15,13 @@ and `schedules` connect to a running HTTP server at the configured address;
 they accept `--token` for bearer authentication. They do not start a server.
 Help and version do not open the journal or require a model.
 
-Disable commands with `WithChatCommand(false)`, `WithRunsCommand(false)`,
+Provider `auth` commands manage Kit's shared stored credentials, not HTTP or
+MCP authentication. Only OpenAI ChatGPT/Codex login is supported. Login prints
+a URL; the browser must reach loopback port 1455 on the login host. Status
+reports storage, not environment keys or token validity. See
+[Provider login](https://go-bonnie.dev/installation#provider-login).
+
+Disable commands with `WithAuthCommand(false)`, `WithChatCommand(false)`, `WithRunsCommand(false)`,
 `WithSchedulesCommand(false)`, and `WithVersionCommand(false)`. Disabling a
 command does not restrict HTTP routes or file access, or guarantee a smaller
 binary. Disable a built-in before adding a custom command with the same name.

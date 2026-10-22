@@ -104,6 +104,15 @@ Injected credentials are not encrypted or hidden from sandbox commands. A comman
 
 The hook is skipped on suspension and model failure. Hook errors fail the run. A second policy, nil factory, negative limit, nil setup callback, or factory returning a nil hook is invalid. Setup and completion factory errors prevent execution. Closure state is not durable. Interrupted callbacks can repeat, so external effects must be safe to retry. See [Runtime](/reference/runtime) for recovery limits.
 
+## Recovery policy
+
+`WithReplaySafeTools(names ...string)` adds names to the permitted recovery set;
+repeated calls form a union. The default is none. Both saved and current policy
+must permit replay. Tools must enforce their own authorization and external
+idempotency: recovery calls the implementation directly, not interactive Kit
+approval hooks. Do not mark shell or payment tools safe by default. This managed
+setup option cannot be combined with `WithAgentFactory`. See [Runtime](/reference/runtime).
+
 ## Custom agent factory
 
 `WithAgentFactory(f runtime.AgentFactory)` replaces the managed model agent. The factory receives the restored session and builds a `runtime.Agent` for each execution.
@@ -113,6 +122,21 @@ It cannot be combined with `WithModel`, `WithSystemPrompt`, `WithSandbox`, `With
 Tree instructions, skills, and generated tools do not automatically reach the custom factory. Use `Registered()` if the host needs them. BONNIE still owns journal storage, working files, channels, and shutdown. The host owns its agent's isolation.
 
 ## Command configuration
+
+These scalar options replace earlier values. All five commands are enabled by
+default in `Serve`; they do not affect `Run`.
+
+| Exact API | Behavior |
+| --- | --- |
+| `WithAuthCommand(enabled bool)` | Controls provider `auth login/status/logout`. Does not prevent stored credential loading. |
+| `WithChatCommand(enabled bool)` | Controls terminal `chat` against a running HTTP server. |
+| `WithRunsCommand(enabled bool)` | Controls local `runs list/show/inspect`. Does not restrict journal access. |
+| `WithSchedulesCommand(enabled bool)` | Controls HTTP schedule operator commands, not schedule routes. |
+| `WithVersionCommand(enabled bool)` | Controls the explicit build-information `version` command. |
+
+Disabling commands does not remove their dependencies, limit underlying API or
+file access, or guarantee smaller binaries. Disable a built-in before registering
+a replacement with the same name.
 
 `WithCommand(fn func(*cobra.Command, *Agent))` appends a root command configuration callback. Callbacks run in registration order after BONNIE adds its built-in and host Go flags, but before argument parsing. They run only in `Serve`, not in `Run`. Add custom flags, subcommands, and Cobra hooks here.
 
@@ -127,6 +151,8 @@ See [Agent Commands](/guides/agent-commands) for a complete example and scoped j
 | Exact API | Behavior |
 | --- | --- |
 | `WithAddr(addr string)` | Replaces the listen address when non-empty. |
+| `WithWebUI(enabled bool)` | Enables `/web` on the HTTP listener; false by default. Replaces the earlier setting; does not open a browser. |
+| `WithHTTPListenerDisabled()` | Disables TCP API and schedule routes. Rejects web UI, injected listeners, and channels with TCP routes. See [NATS API](/channels/nats-api#host-and-client). |
 | `WithJournal(dir string)` | Replaces the journal directory when non-empty. Root hosting uses SQLite. |
 | `WithListener(ln net.Listener)` | Serves on an already-bound listener instead of binding the configured address. Useful for tests with port zero. |
 | `WithShutdownTimeout(d time.Duration)` | Replaces the 30-second shutdown timeout when positive. Shutdown phases use this bound, including the wait for each interrupted turn to record its state. |
@@ -150,6 +176,7 @@ Without an HTTP authenticator, the API verifies no caller. Use an authenticator 
 | `WithTelegram(cfg telegram.Config)` | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, optional `TELEGRAM_API_URL` |
 | `WithGitHub(cfg github.Config)` | `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, `GITHUB_WEBHOOK_SECRET`, optional `GITHUB_INSTALLATION_ID` and `GITHUB_API_URL` |
 | `WithIroh(cfg irohchannel.Config)` | None; supply endpoint options and approved peer IDs in code |
+| `WithNATSAPI(cfg natsapi.Config)` | None; appends an API channel with an explicit agent-specific Core NATS subject and required verifier. Broker authentication is not API authentication. See [NATS API](/channels/nats-api). |
 | `WithNATS(cfg natschannel.Config)` | `NATS_URL`, `NATS_NKEY_SEED`, `NATS_TOKEN`, `NATS_USERNAME`, `NATS_PASSWORD` |
 
 Explicit non-empty fields win. Missing required platform verification credentials fail startup. GitHub webhook events carry installation identity; hand-offs need a configured installation ID. A non-numeric `GITHUB_INSTALLATION_ID` fails validation. The GitHub bot name is a code setting, not an environment fallback.

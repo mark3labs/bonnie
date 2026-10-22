@@ -17,20 +17,19 @@ BONNIE is pre-1.0 and follows semantic versioning.
 
 Only the latest tag receives security fixes. If you run an older version, upgrade.
 
-| Version | Supported |
-|---------|-----------|
-| 0.1.x   | ✅ Yes    |
-| 0.0.x   | ❌ No     |
-
 ## Security caveats
 
 ⚠️ **Important: read before deployment.**
 
-### Every run is sandboxed — but the floor is containment, not isolation
+### Managed tools use a backend — containment is not isolation
 
-BONNIE executes tool calls that the language model chooses. **Every tool call
-runs in a sandbox.** There is no unsandboxed mode: `bonnie.WithSandbox`
-selects a backend, it does not enable one, and `--sandbox none` is refused.
+BONNIE's managed built-in file and command tools use a sandbox backend.
+`bonnie.WithSandbox` selects that backend; `--sandbox none` is refused.
+Explicit `sandbox.Local()` execution provides no isolation. Custom Go tool
+callbacks run on the host, and `runtime.KitAgent` is a low-level unsandboxed
+factory. Hosts that replace the managed factory own its isolation.
+Environment injection is configuration, not secret protection: a command can
+print injected values into tool results, which the model and journal can see.
 
 The default backend is `Landlock`. Read what it does and does not do, because
 the difference decides whether it is enough for your deployment:
@@ -119,21 +118,20 @@ repository working directory. Later, with tool calls rooted at the work director
 a live Slack agent ran `find` over its own tree by **absolute path** and read
 `main.go`, `instructions.md`, and `.bonnie/journal.db` — the journal that made
 its own runs durable. Nothing failed and nothing warned either time. A work
-directory is a base, not a jail; that is why the sandbox is no longer
-optional.
+directory is a base, not a jail; that is why the managed default uses Landlock.
 
-### HTTP channel: no authentication verification in v0.1.0
+### HTTP channel: optional identity verification, not run authorization
 
-When you use `channel/http`, the HTTP channel carries a Principal for audit and
-access control. **The channel does not verify it.**
+Configure `http.WithAuthenticator` or `bonnie.WithHTTPAuthenticator` to verify
+requests. Every route except health requires verification when configured.
+The verifier supplies the principal; a body principal cannot override it.
+Without a verifier, body identity is self-asserted, not verified. Use a trusted
+authentication layer or the verifier before exposing the API to untrusted callers.
 
-You must authenticate requests **before they reach the HTTP channel**. Examples:
-
-- Run the server behind a load balancer that checks OAuth tokens or API keys.
-- Require authentication in your reverse proxy or gateway.
-- Use a service mesh that enforces identity.
-
-Failing to do so means any client can send requests on behalf of any principal.
+Authentication does not provide automatic per-run or per-tenant authorization.
+The host must enforce access policy. Provider `auth` commands manage model
+credentials, not HTTP credentials. See the [HTTP guide](https://go-bonnie.dev/channels/http)
+for verifier and authorization contracts.
 
 ### Chat channels: platform signatures are verified, users are asserted
 

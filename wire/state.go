@@ -8,7 +8,8 @@ type RunState string
 const (
 	// RunPending means the run is recorded but has not executed a step yet.
 	RunPending RunState = "pending"
-	// RunRunning means a turn is executing now.
+	// RunRunning records a turn with no saved stop reason. It can survive a
+	// crashed executor and does not prove that execution is active.
 	RunRunning RunState = "running"
 	// RunWaiting means the run suspended and needs external input to continue.
 	RunWaiting RunState = "waiting"

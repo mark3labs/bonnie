@@ -93,6 +93,18 @@ release works for users who have no local checkout.
 go build ./...
 ```
 
+### Quality loop
+
+Run `task check` before committing and `task ci` before pushing. The first runs
+format checks, lint, vet, and race tests. The second also builds, vets the
+integration-tagged code, proves the CGO-free build, and builds pinned examples.
+Both run the full local tests. Hosted CI explicitly skips `TestBrowserLiveState`
+and `TestBrowserEndToEnd`; it is not the same test selection. Browser, Docker,
+Landlock and KVM tests depend on host support. Report skips or setup failures.
+
+The documentation site has separate checks: run `bun install --frozen-lockfile`
+and `bun run test` in `www` (or `task docs-check`). Do not commit generated `out/`.
+
 ### Test all
 
 ```sh
@@ -175,7 +187,7 @@ feat: add Runner.Cancel for interrupting active turns
 
 1. Create a branch from `master`.
 2. Make your changes. Follow the code style and test rules.
-3. Run `go test -race ./...` and `golangci-lint run`.
+3. Run `task check` and `task ci`; report environment-dependent limitations.
 4. Verify no new direct imports of `kit/internal/*` or `charm.land/fantasy`.
 5. Open a pull request.
 6. Ensure every commit message describes *what changed and why*, not the

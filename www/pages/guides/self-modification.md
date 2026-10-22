@@ -12,7 +12,7 @@ Package `selfmod` lets an agent change its own source. It has two tools with two
 | `modify_agent` | `selfmod.Local` | `bonnie dev` only | The agent tree on disk. The dev loop rebuilds and restarts the agent. |
 | `propose_agent_change` | `selfmod.Remote` | A deployed agent | Nothing in the deployment. It opens a draft pull request for human review. |
 
-In both tools, a coding subagent does the work in a staged copy of the tree. The copy holds only authored files. The subagent never sees the live tree, the journal, a `.env` file, or a credential.
+In both tools, a coding subagent does the work in a staged copy of the tree. The copy holds only authored files. Staging excludes the live journal and `.env` files. The default Landlock backend confines filesystem access to the staged copy. A custom `Workspace` defines its own boundary: Local has no isolation, and injected credentials can reach tool output. The Landlock network and privileged-socket limits still apply; see [Sandboxes](/guides/sandboxes).
 
 ## Change the agent in development
 

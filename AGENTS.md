@@ -15,7 +15,8 @@ crash, waits days for a human answer, and replies over HTTP.
 - Language: Go 1.27
 - Entry point for an agent tree: `bonnie.New().Serve()`
 
-**The code is the spec.** There is no specification document and no task file.
+**The code is the spec.** There is no separate behavioral specification.
+`Taskfile.yml` defines development commands, not runtime behavior.
 The godoc on each exported symbol, and the comments on the tests, carry the
 reasoning — many of them record a real defect and why the shape is what it is.
 Read them before you change the shape.
@@ -116,7 +117,7 @@ release is always proven against the version a user gets.
 ## Build and test commands
 
 - Full quality loop: `task check` (format check, lint, test)
-- CI parity, run it before you push: `task ci`
+- Local pre-push checks: `task ci` (includes more checks than hosted CI)
 - Build: `go build ./...`
 - Test all: `go test -race ./...`
 - Test one test: `go test -race ./runtime -run TestResumeAcrossProcessBoundary`
@@ -160,6 +161,9 @@ CGO_ENABLED=0 go build ./...
 
 - CI is in [`.github/workflows/ci.yml`](.github/workflows/ci.yml). The `test`
   job builds, vets, tests with `-race`, and builds again with `CGO_ENABLED=0`.
+  Hosted CI skips `TestBrowserLiveState` and `TestBrowserEndToEnd`; local
+  `task check` and `task ci` do not. Browser, Docker, Landlock and KVM checks
+  depend on host support; report skips and setup failures, not assumed passes.
   The `lint` job runs `golangci-lint`.
 - Use `t.Parallel()` by default.
 - Use `fakeAgent` from `runtime/runner_test.go` to test the executor. Do not

@@ -10,8 +10,9 @@ import (
 // a run a credential or a setting the model must not choose: a database URL, a
 // registry token, a feature flag.
 //
-// The variables are configured once, out of band, and the model never sees
-// them as values. The model-facing shell tool builds a [Command] with only a
+// The variables are configured once, out of band. This does not hide secrets:
+// a command can print values into model-visible and journalled output.
+// The model-facing shell tool builds a [Command] with only a
 // working directory, so it cannot set env itself; this wrapper injects below
 // the tool, on the [Sandbox] layer, the same way [Seeded] mirrors files below
 // it. The injection travels over the [Command.Env] seam every backend already
@@ -21,8 +22,8 @@ import (
 // The injected values win. They are appended after any [Command.Env] the
 // caller set, and every backend resolves a later entry over an earlier one, so
 // an operator-configured secret cannot be clobbered by a per-command variable
-// of the same name. This is the honest default for a security control: the
-// value the operator fixed is the value the command gets.
+// of the same name. This is configuration precedence, not protection against
+// a command that reads or changes its own environment.
 //
 // An empty map is a no-op: the provider is returned unwrapped, because a
 // wrapper that changes nothing should cost nothing. A key that is empty is

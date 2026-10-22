@@ -94,8 +94,8 @@ func lazyOpener(p Provider, s *runtime.Session) (Opener, func() error) {
 // grep, find, and edit. Core host tools remain disabled by Agent.
 //
 // The tools run in the BONNIE process and proxy into the sandbox. The model
-// never holds a sandbox handle and never sees a credential — it drives the
-// work through tool calls and reads the results. Every sandbox call therefore
+// never holds a sandbox handle: it drives work through tool calls and reads
+// results, which can expose injected credentials. Every sandbox call therefore
 // travels the same journalling and approval path as any other tool.
 func Tools(open Opener) []kit.Tool {
 	gate := make(mutationGate, 1)

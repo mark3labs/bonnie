@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -17,6 +18,62 @@ import (
 	"github.com/mark3labs/bonnie/runtime"
 	"github.com/mark3labs/bonnie/sandbox"
 )
+
+// The custom runs example in docs/AGENT_COMMANDS.md and
+// www/pages/guides/agent-commands.md must replace, not duplicate, the built-in.
+// It must open only the requested journal, without a server or provider setup.
+func TestDocumentedCustomRunsCommand(t *testing.T) {
+	t.Parallel()
+	journalDir := t.TempDir()
+	selected := false
+	a := New(WithRunsCommand(false), WithInstructions("missing.md"),
+		WithCommand(func(root *cobra.Command, agent *Agent) {
+			var journal string
+			root.PersistentFlags().StringVar(&journal, "journal", ".bonnie", "journal directory")
+			root.PersistentPreRunE = func(_ *cobra.Command, _ []string) error {
+				agent.Configure(WithJournal(journal))
+				return nil
+			}
+			root.AddCommand(&cobra.Command{
+				Use: "runs", Args: cobra.NoArgs,
+				RunE: func(cmd *cobra.Command, _ []string) error {
+					selected = true
+					return agent.WithJournal(cmd.Context(), func(ctx context.Context, journal runtime.Journal) error {
+						ids, err := journal.Runs(ctx, "")
+						if err != nil {
+							return err
+						}
+						for _, id := range ids {
+							if _, err := fmt.Fprintln(cmd.OutOrStdout(), id); err != nil {
+								return err
+							}
+						}
+						return nil
+					})
+				},
+			})
+		}))
+	cmd := a.serveCommand(flag.NewFlagSet(t.Name(), flag.ContinueOnError))
+	count := 0
+	for _, child := range cmd.Commands() {
+		if child.Name() == "runs" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("runs commands = %d, want 1", count)
+	}
+	cmd.SetArgs([]string{"--journal", journalDir, "runs"})
+	if err := cmd.ExecuteContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if !selected {
+		t.Fatal("custom runs handler was not selected")
+	}
+	if _, err := os.Stat(filepath.Join(journalDir, "journal.db")); err != nil {
+		t.Fatal(err)
+	}
+}
 
 // Registration runs once per command, in option order, after all built-in and
 // host flags exist. A later callback can use what an earlier callback added.

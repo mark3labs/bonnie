@@ -161,7 +161,7 @@ func sandboxProvider(ctx context.Context, kind, image string) (sandbox.Provider,
 		// name rather than mapping it onto something weaker, so an operator
 		// whose script still passes it learns what replaced it instead of
 		// getting a silent change of behaviour.
-		return nil, fmt.Errorf("--sandbox none is gone: every tool call runs in a sandbox now; " +
+		return nil, fmt.Errorf("--sandbox none is gone: managed file and command tools require a backend; " +
 			"the default, --sandbox landlock, needs nothing installed and confines tool " +
 			"calls to the run's sandbox; if you really want tool calls to run as this " +
 			"process with its files, network, and credentials, that is --sandbox local, " +

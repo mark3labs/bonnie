@@ -49,7 +49,7 @@ Never commit a replace directive. Final checks must use the pinned dependency a 
 
 `task test-pkg -- ./runtime` runs a package with verbose race tests. `task test-run -- TestResumeAcrossProcessBoundary` selects a test name across packages. Correct test, lint, and type errors before completing a change.
 
-Run `task check` before each commit and `task ci` before pushing. CI has test, lint, and examples jobs. The test job builds, vets, runs race tests, and builds again without CGO. The examples job builds each tree against its released pin. Live providers are not required for ordinary CI.
+Run `task check` before each commit and `task ci` before pushing. CI has test, lint, and examples jobs. The test job builds, vets, runs race tests with `TestBrowserLiveState` and `TestBrowserEndToEnd` explicitly skipped, and builds again without CGO. Local `task check` and `task ci` do not skip those browser tests. Browser, Docker, Landlock and KVM tests depend on host support; report skips and setup failures. The examples job builds each tree against its released pin. Live providers are not required for ordinary CI.
 
 ## Avoid the module cache in file checks
 

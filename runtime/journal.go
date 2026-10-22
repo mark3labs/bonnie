@@ -19,7 +19,8 @@ type RunState = wire.RunState
 const (
 	// RunPending means the run is recorded but has not executed a step yet.
 	RunPending = wire.RunPending
-	// RunRunning means a turn is executing now.
+	// RunRunning records a turn with no saved stop reason. It can survive a
+	// crashed executor; use [Runner.IsActive] to check this process.
 	RunRunning = wire.RunRunning
 	// RunWaiting means the run suspended and needs external input to continue.
 	RunWaiting = wire.RunWaiting

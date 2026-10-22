@@ -181,7 +181,7 @@ go generate ./web
 ```
 
 The generator is pinned to templ v0.3.1070. The UI calls the prebuilt APIs in
-`github.com/axadrn/shadcn-templ/v2` v2.0.0-beta.13:
+`github.com/axadrn/shadcn-templ/v2` v2.0.0-beta.15:
 
 - `card.Card`, `Header`, `Title`, `Description`, and `Content` for panels.
   Native sections and h1/h2 headings retain the document structure.

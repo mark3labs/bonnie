@@ -150,8 +150,8 @@ func (j *job) stage(ctx context.Context, st *state) error {
 }
 
 // runSubagent runs one subagent turn on the staged tree. The subagent's
-// tools are BONNIE's sandbox tools, confined to the staged copy: it never
-// sees the live tree, the journal, or a credential.
+// tools are BONNIE's sandbox tools rooted at the staged copy. The configured
+// Workspace provider defines containment; Local does not isolate host access.
 func (j *job) runSubagent(ctx context.Context, prompt string) (string, error) {
 	provider, err := j.cfg.Workspace(ctx, j.treeDir())
 	if err != nil {
