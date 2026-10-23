@@ -15,6 +15,7 @@ Each turn gives one trace:
 invoke_agent <agent>          one turn
   ├── chat <model>            one model step
   ├── execute_tool <tool>     one tool call
+  │     └── decide <model>    a decision model call the tool made
   └── chat <model>            the next step
 ```
 
@@ -25,6 +26,7 @@ The names and attributes follow the OpenTelemetry GenAI semantic conventions (`g
 | `invoke_agent` | run ID, turn ID, turn kind, title, origin, final state, total tokens, suspension |
 | `chat` | provider, model, step number, input, output, cache and reasoning tokens, finish reason, retries |
 | `execute_tool` | tool name, tool call ID, tool kind, error state |
+| `decide` | provider, model, input tokens, decision key and source, tool call ID, error class. A key answered from the journal makes no span |
 
 Every span has `gen_ai.conversation.id`, which is the run ID. A backend can group the turns of one run into one session with it.
 
@@ -99,7 +101,7 @@ bonnie.WithTracing(tp, observe.WithCapture(func(t runtime.TurnStart) observe.Cap
 | Direction | Attributes |
 | --- | --- |
 | Inputs | `gen_ai.input.messages`, `gen_ai.tool.call.arguments`, human answer text |
-| Outputs | `gen_ai.output.messages`, `gen_ai.tool.call.result`, the question of a suspension |
+| Outputs | `gen_ai.output.messages`, `gen_ai.tool.call.result`, the question of a suspension, `bonnie.decision.answers` |
 
 The capture policy is a ceiling for all destinations. To send one destination less, wrap its exporter with `observe.NewExporter`. A destination cannot get back content that the capture policy removed.
 

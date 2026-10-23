@@ -108,6 +108,7 @@ For a store without `StepJournal`, Session falls back to individual Append calls
 | `RecordContext` | `context` | Per-turn context strings, separate from history |
 | `RecordClear` | `clear` | Prior messages leave model context; journal remains |
 | `RecordCompletion` | `completion` | Completion orchestration phases and budget |
+| `RecordDecision` | `decision` | One decision model call: key, model, input hash, questions, answers, usage, or error class. Never the state or a provider error body |
 
 Every tree entry with an EntryID must reach the journal. Branches, compaction, and metadata are needed to restore the active model context, not only user and assistant text. Clear is append-only forgetting: it records a new root selection rather than deleting prior records.
 
