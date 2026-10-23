@@ -20,8 +20,8 @@ type RunScope struct {
 	// Exec opens the sandbox lazily and uses the same handle as agent tools.
 	Exec func(context.Context, sandbox.Command) (*sandbox.Result, error)
 	// Decide asks the decision model of [WithDecisionModel] or
-	// [WithDecider] and journals each call that a key does not answer from
-	// the journal. It is nil when neither option is set. See
+	// [WithDecider] and journals each call that reaches the provider call,
+	// also a failed one. It is nil when neither option is set. See
 	// [runtime.Session.Decide].
 	Decide func(context.Context, DecisionRequest) (*kit.DecisionResult, error)
 }

@@ -59,8 +59,8 @@ type DecisionCall struct {
 //
 // It does not keep the state the questions were about: the state can be
 // large, contain images, or be sensitive. InputSHA256 identifies it, with the
-// model and the questions, so a key used again for different input is
-// detected. A failed call keeps the class of its error only, never the
+// model, the questions and the provider options, so a key used again for
+// different input is detected. A failed call keeps the class of its error only, never the
 // provider's response body.
 type DecisionRecord struct {
 	Key         string                 `json:"key,omitempty"`
@@ -116,7 +116,9 @@ func (s *Session) observeDecisions(o DecisionObservation) {
 }
 
 // Decide asks a decision model and journals a [RecordDecision] for each call
-// that reaches d, also for a call that fails.
+// that reaches d, also for a call that fails. A call that does not reach d
+// writes no record: a key answered from the journal, a key used again with
+// different input, a nil d, or input that cannot be encoded.
 //
 // A call with a Key is idempotent within the run: a stored successful answer
 // for the same key and input is returned without a model call, also by a
@@ -264,14 +266,16 @@ func (s *Session) storedDecision(ctx context.Context, key string) (DecisionRecor
 	return d, ok, nil
 }
 
-// decisionInputHash identifies the model, state and questions of a request.
+// decisionInputHash identifies the model, state, questions and provider
+// options of a request.
 // encoding/json sorts map keys, so equal input gives an equal hash.
 func decisionInputHash(req kit.DecisionRequest) (string, error) {
 	data, err := json.Marshal(struct {
-		Model     string                 `json:"model"`
-		State     kit.DecisionState      `json:"state"`
-		Questions []kit.DecisionQuestion `json:"questions"`
-	}{req.Model, req.State, req.Questions})
+		Model           string                 `json:"model"`
+		State           kit.DecisionState      `json:"state"`
+		Questions       []kit.DecisionQuestion `json:"questions"`
+		ProviderOptions map[string]any         `json:"provider_options,omitempty"`
+	}{req.Model, req.State, req.Questions, req.ProviderOptions})
 	if err != nil {
 		return "", fmt.Errorf("%w: encode state: %v", kit.ErrInvalidDecisionRequest, err)
 	}

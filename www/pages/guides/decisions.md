@@ -35,9 +35,9 @@ The option gives decisions to three places:
 
 ## Durable decisions
 
-`RunScope.Decide` writes a `decision` record for each call that is not answered from the journal, also for a failed or rejected call. The record holds the model, the questions, the answers, the token usage, and a hash of the input. It does not hold the state, which can be large or sensitive, or a provider's error body. The run console shows each record in the Journal and Trace tabs, and tracing gives a `decide` span.
+`RunScope.Decide` writes a `decision` record for each call that reaches the decision model or the `Decider`, also for a failed call. A call that does not reach it writes no record: a key answered from the journal, a key used again with different input, or input that cannot be encoded. The record holds the model, the questions, the answers, the token usage, and a hash of the input. It does not hold the state, which can be large or sensitive, or a provider's error body. The run console shows each record in the Journal and Trace tabs, and tracing gives a `decide` span.
 
-Set `Key` to make a call idempotent in the run. When the run has a successful answer with the same key and the same input, `Decide` returns it from the journal and does not ask the model. This is also true in a new process after a crash, so a gate gives the same answer when its turn is recovered. Use a key that is unique in the run, for example the ID of the tool call the decision gates.
+Set `Key` to make a call idempotent in the run. When the run has a successful answer with the same key and the same input (model, state, questions, and provider options), `Decide` returns it from the journal and does not ask the model. This is also true in a new process after a crash, so a gate gives the same answer when its turn is recovered. Use a key that is unique in the run, for example the ID of the tool call the decision gates.
 
 - A key used again with different input returns `runtime.ErrDecisionKeyReused`. A stored answer is never given for different input.
 - A failed call is not stored as an answer. The next call with its key asks again.

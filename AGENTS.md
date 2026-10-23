@@ -252,11 +252,11 @@ before you change `runtime/`.
   a message from `Text` alone, because that drops tool calls silently. Guard
   test: `runtime/replay_fidelity_test.go`.
 - **Decisions are journalled metadata.** `Session.Decide`
-  (`runtime/decision.go`) writes one `RecordDecision` for each call that a
-  key does not answer from the journal, also for a failure. Restore skips
-  it. A keyed call returns the stored answer, also in a new process; a key
-  reused with different input is an error. The record never holds the
-  state or a provider error body. Guard tests: `TestDecideKeyAcrossProcessBoundary`,
+  (`runtime/decision.go`) writes one `RecordDecision` for each call that
+  reaches the `Decider`, also for a failure. Restore skips it. A keyed call
+  returns the stored answer, also in a new process; a key reused with
+  different input is an error. The record never holds the state or a
+  provider error body. Guard tests: `TestDecideKeyAcrossProcessBoundary`,
   `TestDecideToolRecoversFromJournal`.
 - **Tracing is an observer, not a Kit seam.** `runtime.Observer` sees live
   turns only; replay, snapshots, and rebuilt streams must never reach it. The

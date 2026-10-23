@@ -142,6 +142,15 @@ func TestDecideKey(t *testing.T) {
 	if _, err := s.Decide(ctx, d.decide, other); !errors.Is(err, ErrDecisionKeyReused) {
 		t.Fatalf("error = %v, want ErrDecisionKeyReused", err)
 	}
+	// Provider options are input too: they can route to another model.
+	routed := DecisionCall{Request: decisionRequest("x"), Key: "gate:1"}
+	routed.Request.ProviderOptions = map[string]any{"gateway": map[string]any{"order": []string{"other"}}}
+	if _, err := s.Decide(ctx, d.decide, routed); !errors.Is(err, ErrDecisionKeyReused) {
+		t.Fatalf("error = %v, want ErrDecisionKeyReused for other provider options", err)
+	}
+	if got := len(decisionRecords(t, j, "run")); got != 1 {
+		t.Fatalf("records = %d, want 1: a reused key writes no record", got)
+	}
 
 	failing := &scriptedDecider{err: kit.ErrDecisionRefused}
 	failed := DecisionCall{Request: decisionRequest("z"), Key: "gate:2"}

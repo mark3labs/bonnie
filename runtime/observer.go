@@ -41,9 +41,8 @@ type TurnObservation interface {
 }
 
 // DecisionObservation is an optional interface of a [TurnObservation]. The
-// runtime calls Decision once for each decision call of the turn that a key
-// does not answer from the journal, after its record is written or has
-// failed to be. ctx is the caller's context, so a span made from it has the
+// runtime calls Decision once for each decision call of the turn that
+// reaches the [Decider], after its record is written or has failed to be. ctx is the caller's context, so a span made from it has the
 // caller's span as its parent.
 type DecisionObservation interface {
 	Decision(ctx context.Context, d DecisionRecord, start, end time.Time)

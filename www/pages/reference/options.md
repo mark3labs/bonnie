@@ -114,7 +114,7 @@ The hook is skipped on suspension and model failure. Hook errors fail the run. A
 
 `Decider` has signature `func(context.Context, kit.DecisionRequest) (*kit.DecisionResult, error)`. `DecisionRequest` has `Model`, `State`, `Questions`, and `ProviderOptions`, as `kit.DecisionRequest`, and `Key string`.
 
-`RunScope.Decide` writes a `decision` journal record for each call that is not answered from the journal, also for a failed or rejected call. A request with a `Key` is idempotent in the run: a successful answer for the same key and input is returned from the journal, also after a restart, and the model is not asked again. A key used again with different input returns `runtime.ErrDecisionKeyReused`. If the record cannot be written, `Decide` returns an error and no result.
+`RunScope.Decide` writes a `decision` journal record for each call that reaches the decision model or the `Decider`, also for a failed call. A call that does not reach it writes no record: a key answered from the journal, a key used again with different input (`runtime.ErrDecisionKeyReused`), or input that cannot be encoded. A request with a `Key` is idempotent in the run: a successful answer for the same key and input (model, state, questions, and provider options) is returned from the journal, also after a restart, and the model is not asked again. A key used again with different input returns `runtime.ErrDecisionKeyReused`. If the record cannot be written, `Decide` returns an error and no result.
 
 `Agent.Decide(ctx, req)` asks the model outside a run, for example in a schedule's `Prepare`. It writes no record and ignores `Key`. It uses Kit's default settings, not the transport from `WithKit`. It works beside `WithAgentFactory`.
 
