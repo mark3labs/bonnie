@@ -1468,6 +1468,11 @@ Stated plainly, because the failure modes are not obvious:
   command does not sweep them. Cleanup keeps waiting runs and history, but deletes
   earlier files of eligible finished runs. Publish output before completion.
   Cleanup locks do not coordinate separate processes or Runner instances.
+- **A decision is a probability, not an authorization.** Enforce access rules
+  in host code. A keyed decision is not exactly once: if the process stops
+  after the model answers and before the record is written, the next call
+  asks again. `Agent.Decide` has no run and writes no record. The startup
+  check proves that Kit can call the model, not that its credentials work.
 - **The mark3labs modules are publicly fetchable.** A scaffolded module runs
   `go mod tidy` and resolves `bonnie` and `kit` from the proxy; no `GOPRIVATE`.
   To author an agent needs Go on your machine. The binary that `bonnie build`
