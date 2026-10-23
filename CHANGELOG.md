@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `examples/triage-desk` routes a sample support inbox with a decision model:
+  keyed, journalled routing in a tool, and the `decide` tool for the model.
+
 ## [0.34.0] — 2026-10-23
 
 **Decision models are a durable primitive.** This is a MINOR release under the

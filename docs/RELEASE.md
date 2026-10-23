@@ -76,6 +76,31 @@ indefinitely**, **reachable over HTTP**. State the limits from the current
 
 ## History
 
+### `v0.34.0`, 2026-10-23 — publication verified
+
+- [x] Before tagging, `task release-check` and `task release-snapshot` pass at
+      `a007352`. The static amd64 snapshot binary prints its injected version.
+- [x] No `replace` directive is committed in framework or example modules.
+- [x] `test`, `examples`, and `lint` pass on master at tagged commit
+      `a0073527969954e958d1b72929767237009aa6a6` (CI run `39944664216`).
+- [x] The dated changelog section states the claims, the current limits, and
+      a new limit for decisions; `scripts/release-notes.sh v0.34.0` extracts it.
+- [x] Annotated tag pushed; release run `39945608974` passes. Both downloaded
+      archive checksums verify. The static amd64 binary prints `bonnie 0.34.0`
+      and refuses `--sandbox none`, naming alternatives.
+- [x] The downloaded binary builds `examples/triage-desk`, which uses the new
+      decision API, against the published `v0.34.0` module.
+- [x] All three examples pin v0.34.0 after publication; `task examples` passes.
+
+**Version choice.** MINOR under the pre-1.0 convention: decision models
+(`WithDecisionModel`, `WithDecisionTool`, `WithDecider`, `RunScope.Decide`,
+`Agent.Decide`) and the `decision` journal record are added. `RunScope` gains
+a field. The Kit pin moves to `v0.136.0`.
+
+**Order.** `examples/triage-desk` needs the new API, so it could not pass the
+`examples` job before the tag. It was added in the pin commit, after the tag,
+not in the tagged commit.
+
 ### `v0.31.0`, 2026-10-21 — publication verified
 
 - [x] Before preparation, `task release-check`, `task release-snapshot`, and

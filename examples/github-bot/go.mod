@@ -3,8 +3,8 @@ module github-bot
 go 1.27.0
 
 require (
-	github.com/mark3labs/bonnie v0.33.0
-	github.com/mark3labs/kit v0.135.0
+	github.com/mark3labs/bonnie v0.34.0
+	github.com/mark3labs/kit v0.136.0
 )
 
 require (

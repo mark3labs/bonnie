@@ -52,6 +52,20 @@ bonnie dev --addr 127.0.0.1:8081 --tui=false
 It needs a Slack app and a public URL. See
 [slack-bot/README.md](slack-bot/README.md) for how to make the app by hand.
 
+## triage-desk
+
+A support triage agent that routes each ticket in a sample inbox with a
+decision model. Each routing is journalled and keyed on the ticket ID, so it
+is the same after a restart. It needs no outside service.
+
+```bash
+cd examples/triage-desk
+bonnie dev
+```
+
+It needs a chat model key and a decision model: `OPENROUTER_API_KEY`, or a
+local Ollama model. See [triage-desk/README.md](triage-desk/README.md).
+
 ## Start your own from an example
 
 An example is a tree, so you can copy it and start from there:
