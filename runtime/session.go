@@ -52,6 +52,8 @@ type Session struct {
 	caller           *Caller
 	replaySafe       map[string]bool
 	interruptedTools map[string]bool
+
+	decisions decisionIndex
 }
 
 type sessionEntry struct {

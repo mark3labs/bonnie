@@ -178,8 +178,10 @@ CGO_ENABLED=0 go build ./...
   spirit: make a second `Runner` that shares the journal only. See
   `TestResumeAcrossProcessBoundary`.
 - Live-model tests use the `integration` build tag and a provider key
-  (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GEMINI_API_KEY`). They must skip
-  cleanly without a key, never fail. Run them with `task test-live`.
+  (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GEMINI_API_KEY`). The
+  decision-model test uses `OPENROUTER_API_KEY` or
+  `BONNIE_TEST_DECISION_MODEL`. They must skip cleanly without a key, never
+  fail. Run them with `task test-live`.
 - Add or update tests for the code you change, also when nobody asks.
 - Disable an intermittent test with `flaky.Skip(t, "<symptom>")` from
   `internal/flaky`; do not delete it or loop on re-runs. Run the disabled
@@ -249,6 +251,13 @@ before you change `runtime/`.
   `kit.LLMMessage`. `Record.Text` is a display-only projection. Never rebuild
   a message from `Text` alone, because that drops tool calls silently. Guard
   test: `runtime/replay_fidelity_test.go`.
+- **Decisions are journalled metadata.** `Session.Decide`
+  (`runtime/decision.go`) writes one `RecordDecision` for each call that
+  reaches the `Decider`, also for a failure. Restore skips it. A keyed call
+  returns the stored answer, also in a new process; a key reused with
+  different input is an error. The record never holds the state or a
+  provider error body. Guard tests: `TestDecideKeyAcrossProcessBoundary`,
+  `TestDecideToolRecoversFromJournal`.
 - **Tracing is an observer, not a Kit seam.** `runtime.Observer` sees live
   turns only; replay, snapshots, and rebuilt streams must never reach it. The
   runtime imports no tracing library: package `observe` implements the

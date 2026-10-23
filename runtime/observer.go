@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"slices"
+	"time"
 )
 
 // Observer watches each turn a [Runner] executes. It is the seam for
@@ -37,6 +38,14 @@ type TurnObservation interface {
 	Attach(agent Agent) (detach func())
 	// End is called once when the turn reaches a boundary or fails.
 	End(TurnEnd)
+}
+
+// DecisionObservation is an optional interface of a [TurnObservation]. The
+// runtime calls Decision once for each decision call of the turn that
+// reaches the [Decider], after its record is written or has failed to be. ctx is the caller's context, so a span made from it has the
+// caller's span as its parent.
+type DecisionObservation interface {
+	Decision(ctx context.Context, d DecisionRecord, start, end time.Time)
 }
 
 // TurnKind says how a turn relates to the turns before it.

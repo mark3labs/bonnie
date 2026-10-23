@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Decision models are a primitive.** `WithDecisionModel` sets a Kit
+  decision model, which answers typed boolean, choice, and score questions
+  with probabilities. `RunScope.Decide` gives it to tool factories, Kit setup
+  callbacks, and completion hooks; `Agent.Decide` gives it to host code with
+  no run, such as a schedule's `Prepare`; `WithDecisionTool` gives the model
+  a `decide` tool. BONNIE decides no policy.
+- **Each decision in a run is journalled.** A `decision` record holds the
+  model, questions, answers, usage, and an input hash, or the error class of
+  a failed call. It never holds the state or a provider error body. A call
+  with a `Key` is idempotent in the run, also after a restart: the stored
+  answer is returned and the model is not asked again. The `decide` tool
+  uses its tool call ID as the key and is replay-safe.
+- `WithDecider` replaces the provider call, for tests and for models Kit
+  cannot call.
+- The run console shows decisions in the Journal and Trace tabs, and
+  `observe` records a `decide` span. Answers are output content.
+
+### Changed
+
+- The Kit pin is `v0.136.0`, which adds the Decide API.
+
 ## [0.33.0] — 2026-10-22
 
 **Inspect and act on runs from the terminal.** This is a MINOR release under

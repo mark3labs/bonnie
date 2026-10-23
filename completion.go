@@ -19,6 +19,11 @@ type RunScope struct {
 	Session *runtime.Session
 	// Exec opens the sandbox lazily and uses the same handle as agent tools.
 	Exec func(context.Context, sandbox.Command) (*sandbox.Result, error)
+	// Decide asks the decision model of [WithDecisionModel] or
+	// [WithDecider] and journals each call that reaches the provider call,
+	// also a failed one. It is nil when neither option is set. See
+	// [runtime.Session.Decide].
+	Decide func(context.Context, DecisionRequest) (*kit.DecisionResult, error)
 }
 
 // KitSetup registers SDK hooks after BONNIE installs its durable session and
@@ -121,6 +126,12 @@ func (c *config) managedFactory(provider sandbox.Provider, opts []kit.Option) ru
 					}
 					return sb.Exec(ctx, cmd)
 				}}
+				decide := c.runDecide(k, s)
+				scope.Decide = hostDecide(decide)
+				if c.decisionTool {
+					k.AddTools(decideTool(decide))
+					s.AddReplaySafeTools(DecideToolName)
+				}
 				factories := make([]ToolFactory, 0, len(c.toolFactories)+1)
 				if discovered := Registered().ToolFactory; discovered != nil {
 					factories = append(factories, discovered)

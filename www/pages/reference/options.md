@@ -93,7 +93,7 @@ Injected credentials are not encrypted or hidden from sandbox commands. A comman
 
 `ToolFactory` has signature `func(context.Context, ToolScope) ([]kit.Tool, error)`. `ToolScope` embeds `RunScope` and adds `Kit *kit.Kit`. Factories run before the first prompt, after BONNIE installs its session and checkpoint hooks. A nil factory, a returned error, or a nil returned tool stops construction. A nil or empty tool slice is permitted. Closure state is local to the execution, not durable. Do not retain the scope after execution ends. Use `Kit.Subagent`, not `Kit.Prompt`, for calls from an active tool. Child calls are not durable BONNIE runs. See [Tools and Skills](/guides/tools-and-skills#call-a-model-from-a-tool) for examples.
 
-`KitSetup` has signature `func(context.Context, *kit.Kit, RunScope) error`. `RunScope` provides `RunID string`, `Session *runtime.Session`, and `Exec func(context.Context, sandbox.Command) (*sandbox.Result, error)`. `Session.Caller()` returns the `*runtime.Caller` that sent the current turn's input, or nil. The channel passes it with the input, so a later message cannot change it. Its `Verified` field is true only when the channel proved the identity; an identity in the body of an unauthenticated HTTP request is not verified. `Exec` opens the sandbox lazily and shares the tools' handle. BONNIE owns cleanup. Do not retain `Exec` after execution ends. Callback code itself runs on the host.
+`KitSetup` has signature `func(context.Context, *kit.Kit, RunScope) error`. `RunScope` provides `RunID string`, `Session *runtime.Session`, `Exec func(context.Context, sandbox.Command) (*sandbox.Result, error)`, and `Decide func(context.Context, DecisionRequest) (*kit.DecisionResult, error)`. `Decide` is nil unless a decision model is configured; see [Decision models](#decision-models). `Session.Caller()` returns the `*runtime.Caller` that sent the current turn's input, or nil. The channel passes it with the input, so a later message cannot change it. Its `Verified` field is true only when the channel proved the identity; an identity in the body of an unauthenticated HTTP request is not verified. `Exec` opens the sandbox lazily and shares the tools' handle. BONNIE owns cleanup. Do not retain `Exec` after execution ends. Callback code itself runs on the host.
 
 `CompletionPolicy` has:
 
@@ -103,6 +103,22 @@ Injected credentials are not encrypted or hidden from sandbox commands. A comman
 `CompletionHook` accepts a `CompletionCandidate` and returns `CompletionFeedback` and an error. The candidate contains `Response` and `ContinuationsUsed`. Empty `ContinueWith` accepts it; non-empty `ContinueWith` requests another model prompt. Suspension and recovery do not reset the saved budget. A request beyond the limit fails with `ErrContinuationLimit`; test it with `errors.Is`.
 
 The hook is skipped on suspension and model failure. Hook errors fail the run. A second policy, nil factory, negative limit, nil setup callback, or factory returning a nil hook is invalid. Setup and completion factory errors prevent execution. Closure state is not durable. Interrupted callbacks can repeat, so external effects must be safe to retry. See [Runtime](/reference/runtime) for recovery limits.
+
+## Decision models
+
+| Exact API | Behavior |
+| --- | --- |
+| `WithDecisionModel(model string)` | Sets the decision model, in `provider/model` format. `RunScope.Decide` and `Agent.Decide` use it when a request names no model. `Agent.Run` refuses a model that Kit cannot call as a decision model; it does not check credentials. |
+| `WithDecider(d Decider)` | Replaces the provider call with `d`, for tests or a model Kit cannot call. Calls in a run are still journalled. The model is not checked against the catalog. |
+| `WithDecisionTool()` | Gives the model the `decide` tool. Needs `WithDecisionModel` or `WithDecider`. Cannot be combined with `WithAgentFactory`. |
+
+`Decider` has signature `func(context.Context, kit.DecisionRequest) (*kit.DecisionResult, error)`. `DecisionRequest` has `Model`, `State`, `Questions`, and `ProviderOptions`, as `kit.DecisionRequest`, and `Key string`.
+
+`RunScope.Decide` writes a `decision` journal record for each call that reaches the decision model or the `Decider`, also for a failed call. A call that does not reach it writes no record: a key answered from the journal, a key used again with different input (`runtime.ErrDecisionKeyReused`), or input that cannot be encoded. A request with a `Key` is idempotent in the run: a successful answer for the same key and input (model, state, questions, and provider options) is returned from the journal, also after a restart, and the model is not asked again. A key used again with different input returns `runtime.ErrDecisionKeyReused`. If the record cannot be written, `Decide` returns an error and no result.
+
+`Agent.Decide(ctx, req)` asks the model outside a run, for example in a schedule's `Prepare`. It writes no record and ignores `Key`. It uses Kit's default settings, not the transport from `WithKit`. It works beside `WithAgentFactory`.
+
+A probability is not an authorization. Enforce access rules in host code. See [Decisions](/guides/decisions).
 
 ## Recovery policy
 
@@ -117,7 +133,7 @@ setup option cannot be combined with `WithAgentFactory`. See [Runtime](/referenc
 
 `WithAgentFactory(f runtime.AgentFactory)` replaces the managed model agent. The factory receives the restored session and builds a `runtime.Agent` for each execution.
 
-It cannot be combined with `WithModel`, `WithSystemPrompt`, `WithSandbox`, `WithSandboxes`, `WithSandboxEnv`, `WithNetwork`, `WithTools`, `WithToolFactory`, `WithKit`, `WithoutHumanInput`, `WithKitSetup`, `WithCompletionHook`, `WithWorkspaceSkills`, or `WithRunSandboxCleanup`. BONNIE refuses agent settings that it would otherwise ignore.
+It cannot be combined with `WithModel`, `WithSystemPrompt`, `WithSandbox`, `WithSandboxes`, `WithSandboxEnv`, `WithNetwork`, `WithTools`, `WithToolFactory`, `WithKit`, `WithoutHumanInput`, `WithKitSetup`, `WithCompletionHook`, `WithDecisionTool`, `WithWorkspaceSkills`, or `WithRunSandboxCleanup`. BONNIE refuses agent settings that it would otherwise ignore.
 
 Tree instructions, skills, and generated tools do not automatically reach the custom factory. Use `Registered()` if the host needs them. BONNIE still owns journal storage, working files, channels, and shutdown. The host owns its agent's isolation.
 

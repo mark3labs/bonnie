@@ -147,3 +147,53 @@ func TestWaterfallFitsWidth(t *testing.T) {
 		t.Fatalf("RenderTrace:\n%s", out)
 	}
 }
+
+// A decision is an instant span: under its tool when a tool made it, after
+// the step otherwise. The journal tab shows its answers in one line.
+func TestBuildTraceDecisions(t *testing.T) {
+	t.Parallel()
+	b := newBuilder(t, "run-d")
+	decision := func(d runtime.DecisionRecord) runtime.Record {
+		return runtime.Record{Kind: runtime.RecordDecision, Payload: b.payload(d)}
+	}
+	questions := []kit.DecisionQuestion{
+		kit.BooleanQuestion("risky", "Risky?"),
+		kit.ScoreQuestion("urgency", "Urgent?", "low", "high"),
+	}
+	b.state(runtime.RunPending).turn("T1", "").state(runtime.RunRunning).
+		message("user", kit.LLMTextPart{Text: "triage"}).
+		after(time.Second).intent("c1", "decide", `{}`).
+		after(100*time.Millisecond).add(decision(runtime.DecisionRecord{
+		Key: "tool:c1", Source: runtime.DecisionSourceTool, ToolCallID: "c1", Model: "ollama/pplx-decider",
+		Questions: questions,
+		Answers: []kit.DecisionAnswer{
+			{ID: "risky", Type: kit.DecisionBoolean, Probability: 0.25},
+			{ID: "urgency", Type: kit.DecisionScore, Score: 0.9, Level: 1},
+		},
+		Usage: kit.DecisionUsage{InputTokens: 12},
+	})).
+		outcome("c1", "{}", false).
+		message("assistant", kit.LLMToolCallPart{ToolCallID: "c1", ToolName: "decide", Input: `{}`}).
+		message("tool", kit.LLMToolResultPart{ToolCallID: "c1", Output: kit.LLMToolResultOutputContentText{Text: "{}"}}).
+		step(0, "tool-calls").
+		after(time.Second).add(decision(runtime.DecisionRecord{Source: runtime.DecisionSourceHost, Model: "ollama/pplx-decider", Questions: questions, Error: "http_429"})).
+		state(runtime.RunCompleted)
+	r := Summarize("run-d", runtime.RunCompleted, b.recs)
+	tr := BuildTrace(r, r.Turns[0], t0.Add(time.Hour))
+
+	want := []string{"invoke_agent", "chat · step 1", "execute_tool decide", "decide ollama/pplx-decider", "decide ollama/pplx-decider"}
+	if got := names(tr); strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("spans = %v, want %v", got, want)
+	}
+	inTool, host := tr.Spans[3], tr.Spans[4]
+	if inTool.Depth != 3 || !inTool.Instant() || !hasAttr(inTool, "decision.answers", "risky=0.25 urgency=high") || !hasAttr(inTool, "decision.key", "tool:c1") {
+		t.Fatalf("tool decision = %+v", inTool)
+	}
+	if host.Depth != 1 || host.Status != StatusError || !hasAttr(host, "decision.error", "http_429") {
+		t.Fatalf("host decision = %+v", host)
+	}
+	line := ansi.Strip(journalLine(b.recs[5], time.Time{}, 200))
+	if !strings.Contains(line, "decision") || !strings.Contains(line, "ollama/pplx-decider · risky=0.25 urgency=high") {
+		t.Fatalf("journal line = %q", line)
+	}
+}
