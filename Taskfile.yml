@@ -82,7 +82,7 @@ tasks:
   test-live:
     desc: "Run the integration-tagged tests against a live model (needs a provider key)"
     cmds:
-      - go test -race -tags integration ./runtime ./sandbox
+      - go test -race -tags integration . ./runtime ./sandbox
 
   smoke-presence:
     desc: Run the multi-process presence smoke harness (HTTP and NATS)

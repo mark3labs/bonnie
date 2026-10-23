@@ -78,6 +78,9 @@ type config struct {
 	kitSetup            []KitSetup
 	toolFactories       []namedToolFactory
 	completion          *CompletionPolicy
+	decisionModel       string
+	decider             Decider
+	decisionTool        bool
 	completionDuplicate bool
 	channels            []ChannelFunc
 	factory             runtime.AgentFactory
@@ -385,7 +388,7 @@ func WithKit(opts ...kit.Option) Option {
 // It cannot be combined with the options that configure the agent BONNIE
 // would have built ([WithModel], [WithSystemPrompt], [WithSandbox], [WithSandboxes],
 // [WithSandboxEnv], [WithNetwork], [WithTools], [WithToolFactory], [WithKit],
-// [WithKitSetup], [WithCompletionHook], [WithoutHumanInput]): the factory owns
+// [WithKitSetup], [WithCompletionHook], [WithDecisionTool], [WithoutHumanInput]): the factory owns
 // the agent, so those settings would be accepted and ignored. [Agent.Run]
 // refuses instead, naming both.
 //

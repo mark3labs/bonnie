@@ -618,6 +618,9 @@ func unpackSkills(files fs.FS, dest string) (string, error) {
 // are not a system prompt or a shared working directory. [WithSharedDirectory]
 // instead configures a Landlock or Local provider to use one host directory.
 func (c *config) agentFactory(ctx context.Context, contextFiles string, opts []kit.Option) (runtime.AgentFactory, error) {
+	if err := c.checkDecision(); err != nil {
+		return nil, err
+	}
 	if c.factory != nil {
 		if conflict := c.agentConflicts(); conflict != "" {
 			return nil, fmt.Errorf("bonnie: WithAgentFactory owns the agent, so %s cannot apply: drop one of the two", conflict)
@@ -741,6 +744,8 @@ func (c *config) agentConflicts() string {
 		return "WithKitSetup"
 	case c.completion != nil:
 		return "WithCompletionHook"
+	case c.decisionTool:
+		return "WithDecisionTool"
 	case c.noHumanInput:
 		return "WithoutHumanInput"
 	case c.sharedDirectorySet:
