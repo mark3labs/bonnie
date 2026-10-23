@@ -2,8 +2,10 @@ package observe
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"sync"
+	"time"
 
 	kit "github.com/mark3labs/kit/pkg/kit"
 	"go.opentelemetry.io/otel/attribute"
@@ -421,4 +423,53 @@ func usageAttributes(u kit.LLMUsage) []attribute.KeyValue {
 		attrs = append(attrs, KeyUsageReasoningTokens.Int64(u.ReasoningTokens))
 	}
 	return attrs
+}
+
+// Decision implements [runtime.DecisionObservation]. The span is a child
+// of the tool that made the call, else of the caller's span, else of the
+// turn's agent span.
+func (o *turn) Decision(ctx context.Context, d runtime.DecisionRecord, start, end time.Time) {
+	o.mu.Lock()
+	parent := ctx
+	if span, ok := o.tools[d.ToolCallID]; ok && d.ToolCallID != "" {
+		parent = trace.ContextWithSpan(ctx, span)
+	} else if !trace.SpanFromContext(ctx).SpanContext().IsValid() {
+		parent = o.ctx
+	}
+	o.mu.Unlock()
+
+	provider, id, err := kit.ParseModelString(d.Model)
+	if err != nil {
+		provider, id = "", d.Model
+	}
+	attrs := append([]attribute.KeyValue{
+		KeyOperationName.String(OperationDecide),
+		KeyRequestModel.String(id),
+		KeyDecisionSrc.String(d.Source),
+		KeyUsageInputTokens.Int64(d.Usage.InputTokens),
+	}, o.common...)
+	if provider != "" {
+		attrs = append(attrs, KeyProviderName.String(provider))
+	}
+	if d.Key != "" {
+		attrs = append(attrs, KeyDecisionKey.String(d.Key))
+	}
+	if d.ToolCallID != "" {
+		attrs = append(attrs, KeyToolCallID.String(d.ToolCallID))
+	}
+	if o.capture.Outputs && len(d.Answers) > 0 {
+		if answers, err := json.Marshal(d.Answers); err == nil {
+			attrs = append(attrs, KeyDecisionAnswers.String(string(answers)))
+		}
+	}
+	_, span := o.tracer.Start(parent, OperationDecide+" "+id,
+		trace.WithSpanKind(trace.SpanKindClient),
+		trace.WithTimestamp(start),
+		trace.WithAttributes(attrs...),
+	)
+	if d.Error != "" {
+		span.SetAttributes(KeyErrorType.String(d.Error))
+		span.SetStatus(codes.Error, "decision failed")
+	}
+	span.End(trace.WithTimestamp(end))
 }

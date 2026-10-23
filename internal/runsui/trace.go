@@ -275,6 +275,30 @@ func BuildTrace(r Run, turn Turn, now time.Time) Trace {
 			}
 			spans = append(spans, event(rec, "resumed", Attr{"answer", rec.Text}))
 			cursor = rec.Timestamp
+		case runtime.RecordDecision:
+			d, err := runtime.DecodeDecisionRecord(rec)
+			if err != nil {
+				continue
+			}
+			span := event(rec, "decide "+d.Model,
+				Attr{"decision.key", d.Key}, Attr{"decision.source", d.Source},
+				Attr{"decision.answers", decisionSummary(d)}, Attr{"decision.error", d.Error},
+				Attr{"decision.input_tokens", fmt.Sprint(d.Usage.InputTokens)})
+			if d.Error != "" {
+				span.Status = StatusError
+			}
+			// A decision in a step follows the step's buffered chat and
+			// tool spans; one made by a tool sits under that tool.
+			switch _, inTool := toolAt[d.ToolCallID]; {
+			case inTool:
+				span.Depth = 3
+				tools = append(tools, span)
+			case chat != nil:
+				span.Depth = 2
+				tools = append(tools, span)
+			default:
+				spans = append(spans, span)
+			}
 		case runtime.RecordSandbox:
 			spans = append(spans, event(rec, "sandbox", Attr{"detail", rec.Text}))
 		case runtime.RecordCompaction:
@@ -317,6 +341,36 @@ func BuildTrace(r Run, turn Turn, now time.Time) Trace {
 	}
 	tr.Spans = spans
 	return tr
+}
+
+// decisionSummary is one line of a decision's answers, for example
+// "risky=0.80 team=billing urgency=high", or its error class.
+func decisionSummary(d runtime.DecisionRecord) string {
+	if d.Error != "" {
+		return "error: " + d.Error
+	}
+	levels := map[string][]string{}
+	for _, q := range d.Questions {
+		levels[q.ID] = q.Levels
+	}
+	parts := make([]string, 0, len(d.Answers))
+	for _, a := range d.Answers {
+		var v string
+		switch {
+		case a.Refused:
+			v = "refused"
+		case a.Type == kit.DecisionBoolean:
+			v = fmt.Sprintf("%.2f", a.Probability)
+		case a.Type == kit.DecisionChoice:
+			v = a.Choice
+		case a.Type == kit.DecisionScore && a.Level >= 0 && a.Level < len(levels[a.ID]):
+			v = levels[a.ID][a.Level]
+		default:
+			v = fmt.Sprintf("%.2f", a.Score)
+		}
+		parts = append(parts, a.ID+"="+v)
+	}
+	return strings.Join(parts, " ")
 }
 
 func event(rec runtime.Record, name string, attrs ...Attr) Span {

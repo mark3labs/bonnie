@@ -13,6 +13,9 @@ const (
 	OperationInvokeAgent = "invoke_agent"
 	OperationChat        = "chat"
 	OperationExecuteTool = "execute_tool"
+	// OperationDecide is a call to a decision model. It is not a GenAI
+	// semantic-convention operation.
+	OperationDecide = "decide"
 )
 
 // Attribute keys. The gen_ai.* keys are from the OpenTelemetry GenAI
@@ -50,6 +53,8 @@ const (
 	KeySuspendTool  = attribute.Key("bonnie.suspend.tool_call_id")
 	KeyTurnInputTok = attribute.Key("bonnie.usage.input_tokens")
 	KeyTurnOutTok   = attribute.Key("bonnie.usage.output_tokens")
+	KeyDecisionKey  = attribute.Key("bonnie.decision.key")
+	KeyDecisionSrc  = attribute.Key("bonnie.decision.source")
 )
 
 // Content attribute keys. They are set only when the [CapturePolicy] allows
@@ -70,6 +75,8 @@ const (
 	KeyToolResult = attribute.Key("gen_ai.tool.call.result")
 	// KeySuspendPrompt holds the question a suspension asks.
 	KeySuspendPrompt = attribute.Key("bonnie.suspend.prompt")
+	// KeyDecisionAnswers holds a decision's answers as a JSON array.
+	KeyDecisionAnswers = attribute.Key("bonnie.decision.answers")
 )
 
 // Span event names.
@@ -89,7 +96,7 @@ func IsInput(key attribute.Key) bool {
 
 // IsOutput reports whether key is output content.
 func IsOutput(key attribute.Key) bool {
-	return key == KeyOutputMessages || key == KeyToolResult || key == KeySuspendPrompt
+	return key == KeyOutputMessages || key == KeyToolResult || key == KeySuspendPrompt || key == KeyDecisionAnswers
 }
 
 // propagator reads and writes W3C trace context only. BONNIE does not use

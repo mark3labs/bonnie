@@ -582,6 +582,8 @@ func kindColor(rec runtime.Record) color.Color {
 		return colorCyan
 	case runtime.RecordSuspend, runtime.RecordResume:
 		return colorYellow
+	case runtime.RecordDecision:
+		return colorPurple
 	default:
 		return colorMuted
 	}
@@ -625,6 +627,10 @@ func recordDetail(rec runtime.Record) string {
 	case runtime.RecordStep:
 		req := suspendOf(rec)
 		return req.Prompt + " · " + rec.Text
+	case runtime.RecordDecision:
+		if d, err := runtime.DecodeDecisionRecord(rec); err == nil {
+			return d.Model + " · " + decisionSummary(d)
+		}
 	case kindCompletion:
 		var c struct {
 			Phase string `json:"phase"`
