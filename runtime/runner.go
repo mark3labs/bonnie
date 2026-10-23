@@ -1005,6 +1005,10 @@ func (r *Runner) turn(ctx context.Context, act *activeTurn, s *Session, prompt s
 	book := context.WithoutCancel(ctx)
 	ctx, obs := r.observe(ctx, act, s, prompt)
 	defer func() { obs.End(TurnEnd{Run: run, Err: err}) }()
+	if do, ok := obs.(DecisionObservation); ok {
+		s.observeDecisions(do)
+		defer s.observeDecisions(nil)
+	}
 	act.control.Lock()
 	seq, turnErr := r.journal.Append(book, Record{RunID: runID, Text: act.turnID, Kind: RecordTurn, Timestamp: now(), Payload: encodeTurnPayload(obs.Carrier())})
 	if turnErr == nil {
