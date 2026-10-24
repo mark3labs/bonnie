@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/mark3labs/bonnie/runtime"
 )
@@ -59,37 +60,56 @@ func TestRenderMarkdownEmptyIsEmpty(t *testing.T) {
 	}
 }
 
-// TestClosedAssistantEntryIsCachedPerWidth: transcript() rebuilds every frame,
-// so a closed entry must render once per width and reuse the cache after —
-// even when the underlying text would render differently.
-func TestClosedAssistantEntryIsCachedPerWidth(t *testing.T) {
+// TestClosedAssistantEntryIsCachedOnce: transcript() rebuilds every frame,
+// so a closed entry must render once and reuse the cache after — even when
+// the underlying text would render differently. The render does not depend
+// on the width, so a resize reuses it too; the viewport wraps the transcript
+// to the new width.
+func TestClosedAssistantEntryIsCachedOnce(t *testing.T) {
 	t.Parallel()
 	m := newTestModel(&fakeClient{})
 	m.commit(kindAssistant, "first")
 	if got := m.transcript(); !strings.Contains(got, "first") {
 		t.Fatalf("transcript misses the entry:\n%s", got)
 	}
-	e := m.entries[0]
-	if e.rendered == "" || e.renderedWidth != m.textWidth() {
-		t.Fatalf("entry = %+v, want a cached render at width %d", e, m.textWidth())
+	if m.entries[0].rendered == "" {
+		t.Fatalf("entry = %+v, want a cached render", m.entries[0])
 	}
 
-	// Same width: the cache answers even though the text changed underneath.
+	// The cache answers even though the text changed underneath, also at a
+	// new width.
+	e := m.entries[0]
 	e.text = "changed"
 	m.entries[0] = e
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 60, Height: 30})
+	m = next.(Model)
 	if got := m.transcript(); strings.Contains(got, "changed") {
 		t.Errorf("cache was not used:\n%s", got)
 	}
+}
 
-	// A new width re-renders.
-	next, _ := m.Update(tea.WindowSizeMsg{Width: 60, Height: 30})
+// TestTranscriptWrapsToTheWidth: entries render unwrapped, so the viewport
+// must wrap them. A long assistant paragraph fills rows no wider than the
+// terminal and keeps every word.
+func TestTranscriptWrapsToTheWidth(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(&fakeClient{})
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 40, Height: 30})
 	m = next.(Model)
-	if got := m.transcript(); !strings.Contains(got, "changed") {
-		t.Errorf("a new width did not re-render:\n%s", got)
+	m.commit(kindAssistant, strings.Repeat("word ", 100))
+	m.syncViewport()
+	if len(m.rows.Rows) < 10 {
+		t.Fatalf("long prose made %d rows at width 40", len(m.rows.Rows))
 	}
-	if m.entries[0].renderedWidth != 60 {
-		t.Errorf("renderedWidth = %d, want 60 (full terminal width)",
-			m.entries[0].renderedWidth)
+	words := 0
+	for _, row := range m.rows.Rows {
+		if w := ansi.StringWidth(row); w > 40 {
+			t.Errorf("row is %d cells wide; want at most 40: %q", w, row)
+		}
+		words += strings.Count(row, "word")
+	}
+	if words != 100 {
+		t.Errorf("wrapped transcript holds %d of 100 words", words)
 	}
 }
 

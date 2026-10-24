@@ -182,6 +182,13 @@ Chat uses the full terminal width and an alternate-screen transcript. Use
 Page Up/Down or the mouse wheel to scroll. New output follows the bottom only
 when you are already there. Ctrl+Home goes to the first output; Ctrl+End goes
 to the latest output. Enter sends a message; Shift+Enter adds a new line.
+Drag over the transcript to select text; release the button to copy it. A
+wrapped paragraph is copied as one line. The copy uses OSC 52, so the
+terminal must support it (kitty, WezTerm, iTerm2, Ghostty, Alacritty,
+Windows Terminal, and zellij do; GNOME Terminal does not). Inside tmux, the
+copy also goes through `tmux load-buffer -w`, so it works whatever
+`set-clipboard` is. In other terminals, Shift+drag uses the terminal's own
+selection.
 
 Local commands: `/help`, `/new`, `/retry`, `/cancel`, and `/exit` (or `/quit`).
 `/new` starts a separate conversation and keeps the old run on the server.
@@ -476,6 +483,7 @@ the selected run: `a` answers a waiting run, `n` sends a message, `c` cancels
 the turn, `x` retires the run, `C` clears and `m` compacts the context. The
 same actions are commands — `runs answer`, `send`, `cancel`, `retire`,
 `clear`, `compact` — for scripts. `?` lists every key; the mouse works too.
+A drag in the main panel selects text and copies it, as in chat.
 
 ```
 RUN    TITLE              STATE      STEPS  LAST
