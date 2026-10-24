@@ -11,6 +11,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `examples/triage-desk` routes a sample support inbox with a decision model:
   keyed, journalled routing in a tool, and the `decide` tool for the model.
+- `bonnie chat`, `bonnie dev`, and `bonnie runs` select text with the mouse.
+  The interfaces capture the mouse so that the wheel scrolls, which stopped the
+  terminal from selecting text. Drag to select; release to copy with OSC 52.
+  Chat copies a wrapped paragraph as one line, and a drag past the edge of the
+  transcript scrolls it. In `bonnie runs` a selection stays inside the main
+  panel.
+
+### Fixed
+
+- A paste in `bonnie chat` and `bonnie dev` was dropped. The terminal sends a
+  bracketed paste as one message, and the chat model did not give it to the
+  input. A paste now reaches the input with its newlines and does not send the
+  message. The `bonnie runs` filter, search, and dialogs also accept a paste.
 
 ## [0.34.0] — 2026-10-23
 

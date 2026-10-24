@@ -18,6 +18,7 @@ var styles = struct {
 	err            lipgloss.Style
 	spinner        lipgloss.Style
 	cursor         lipgloss.Style
+	selection      lipgloss.Style
 }{
 	header:         lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("205")).MaxWidth(100),
 	user:           lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true),
@@ -32,4 +33,7 @@ var styles = struct {
 	err:            lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true),
 	spinner:        lipgloss.NewStyle().Foreground(lipgloss.Color("205")),
 	cursor:         lipgloss.NewStyle().Foreground(lipgloss.Color("205")),
+	// Reverse video reads on any terminal theme, as a terminal's own
+	// selection does.
+	selection: lipgloss.NewStyle().Reverse(true),
 }

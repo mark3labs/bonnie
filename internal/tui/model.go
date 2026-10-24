@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"charm.land/bubbles/v2/cursor"
 	"charm.land/bubbles/v2/textarea"
@@ -16,6 +18,7 @@ import (
 	kit "github.com/mark3labs/kit/pkg/kit"
 
 	"github.com/mark3labs/bonnie/client"
+	"github.com/mark3labs/bonnie/internal/selection"
 	"github.com/mark3labs/bonnie/runtime"
 )
 
@@ -33,7 +36,7 @@ const (
 
 // entry is one line of the transcript. An assistant entry may be "open" while
 // it is still streaming; the view renders it live while open and from the
-// markdown cache once closed.
+// markdown render cache once closed.
 type entry struct {
 	kind       entryKind
 	text       string
@@ -43,11 +46,11 @@ type entry struct {
 	toolDone   bool
 	toolError  bool
 
-	// rendered caches the markdown render of a closed assistant entry, keyed
-	// by the width it was rendered at. The open streaming entry re-renders
-	// every frame instead, because its text is still growing.
-	rendered      string
-	renderedWidth int
+	// rendered caches the markdown render of a closed assistant entry. The
+	// render does not depend on the width: the transcript is wrapped as a
+	// whole afterwards (see [Model.syncViewport]). The open streaming entry
+	// re-renders every frame instead, because its text is still growing.
+	rendered string
 }
 
 type status int
@@ -176,6 +179,18 @@ type Model struct {
 	width  int
 	height int
 
+	// rows is the transcript as the viewport shows it, wrapped to the width,
+	// with the plain text and soft breaks that a mouse selection copies.
+	rows selection.Wrapped
+	// sel is the mouse selection, in content rows of the transcript, so it
+	// stays on its text while the transcript scrolls.
+	sel selection.Selection
+	// followAfter records that the reader was at the bottom when the button
+	// went down. The transcript stops following new output during a drag,
+	// so the text under the pointer stays still; a click that selects
+	// nothing goes back to following.
+	followAfter bool
+
 	quitting bool
 	// loading prevents a send from racing the initial history read.
 	loading bool
@@ -259,6 +274,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
+		if msg.Width != m.width {
+			// The rows wrap again at a new width, so the selected cells no
+			// longer hold the selected text.
+			m.sel.Clear()
+		}
 		m.width, m.height = msg.Width, msg.Height
 		m.layout()
 		return m, nil
@@ -383,6 +403,23 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewport, cmd = m.viewport.Update(msg)
 		return m, cmd
 
+	case tea.MouseClickMsg:
+		return m.mouseDown(msg.Mouse())
+
+	case tea.MouseMotionMsg:
+		return m.mouseDrag(msg.Mouse())
+
+	case tea.MouseReleaseMsg:
+		return m.mouseUp()
+
+	case tea.PasteMsg:
+		// A terminal with bracketed paste sends a paste as one message, not
+		// as key presses. The textarea inserts it, newlines included; a key
+		// press per character would send the message at the first newline.
+		var cmd tea.Cmd
+		m.input, cmd = m.input.Update(msg)
+		return m, cmd
+
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 
@@ -426,6 +463,8 @@ func (m Model) View() tea.View {
 // handleKey routes a key press: the textarea owns typing, the model owns the
 // keys that send, cancel, or quit.
 func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	// The highlight shows what the last drag copied; a key press moves on.
+	m.sel.Clear()
 	switch msg.String() {
 	case "pgup", "pgdown":
 		var cmd tea.Cmd
@@ -969,13 +1008,83 @@ func (m *Model) layout() {
 	}
 }
 
-// syncViewport follows output only while the reader is at the bottom.
+// syncViewport follows output only while the reader is at the bottom, and
+// never during a drag.
+//
+// The transcript is wrapped here, once, and not inside each entry's render:
+// [selection.Wrap] records which row breaks it made, so a selection copies a
+// wrapped paragraph or code line as the one line it is.
 func (m *Model) syncViewport() {
-	bottom := m.viewport.AtBottom()
-	m.viewport.SetContent(lipgloss.Wrap(m.transcript(), m.textWidth(), ""))
+	bottom := m.viewport.AtBottom() && !m.sel.Dragging()
+	m.rows = selection.Wrap(m.transcript(), m.textWidth())
+	m.viewport.SetContentLines(m.sel.Highlight(m.rows.Rows, 0, styles.selection))
 	if bottom {
 		m.viewport.GotoBottom()
 	}
+}
+
+// transcriptTop is the screen row of the first transcript row, below the
+// header.
+const transcriptTop = 1
+
+// contentPoint maps a screen cell to a transcript row and column.
+func (m *Model) contentPoint(x, y int) selection.Point {
+	return selection.Point{Line: m.viewport.YOffset() + y - transcriptTop, Col: max(0, x)}
+}
+
+// mouseDown starts a selection when the left button goes down on the
+// transcript. Anywhere else it only drops the old selection.
+func (m Model) mouseDown(ms tea.Mouse) (tea.Model, tea.Cmd) {
+	m.sel.Clear()
+	if ms.Button != tea.MouseLeft || (m.height > 0 && m.height < 5) {
+		return m, nil
+	}
+	if ms.Y < transcriptTop || ms.Y >= transcriptTop+m.viewport.Height() {
+		return m, nil
+	}
+	m.followAfter = m.viewport.AtBottom()
+	m.sel.Press(m.contentPoint(ms.X, ms.Y))
+	return m, nil
+}
+
+// mouseDrag extends the selection. Above or below the transcript it scrolls
+// one row for each motion event, so a selection can be longer than the
+// screen.
+func (m Model) mouseDrag(ms tea.Mouse) (tea.Model, tea.Cmd) {
+	if !m.sel.Dragging() {
+		return m, nil
+	}
+	y := ms.Y
+	bottom := transcriptTop + m.viewport.Height() - 1
+	switch {
+	case y < transcriptTop:
+		m.viewport.ScrollUp(1)
+		y = transcriptTop
+	case y > bottom:
+		m.viewport.ScrollDown(1)
+		y = bottom
+	}
+	m.sel.Drag(m.contentPoint(ms.X, y))
+	return m, nil
+}
+
+// mouseUp ends the drag and copies the selection. The highlight stays until
+// the next click or key press, so the reader can see what was copied.
+func (m Model) mouseUp() (tea.Model, tea.Cmd) {
+	if !m.sel.Dragging() {
+		return m, nil
+	}
+	m.sel.Release()
+	text := m.sel.Text(m.rows.Plain, m.rows.Joined)
+	if text == "" {
+		m.sel.Clear()
+		if m.followAfter {
+			m.viewport.GotoBottom()
+		}
+		return m, nil
+	}
+	m.label = fmt.Sprintf("copied %d characters", utf8.RuneCountInString(text))
+	return m, selection.Copy(text)
 }
 
 func (m *Model) render() string {
@@ -992,19 +1101,21 @@ func (m *Model) renderPrefix() string {
 
 // assistantText renders one assistant entry as markdown. The open streaming
 // entry re-renders on every frame — its text is still growing, so any cache
-// would go stale on the next chunk. A closed entry renders once per
-// text-and-width and caches the result on the entry, because transcript()
-// rebuilds the whole transcript every frame and herald parsing must not run
-// per frame for a transcript that no longer changes.
+// would go stale on the next chunk. A closed entry renders once per text and
+// caches the result on the entry, because transcript() rebuilds the whole
+// transcript every frame and herald parsing must not run per frame for a
+// transcript that no longer changes.
+//
+// The render is not wrapped (width 0). [Model.syncViewport] wraps the whole
+// transcript and records the soft breaks; a break made here would look the
+// same but copy as a hard newline in the middle of a sentence.
 func (m *Model) assistantText(i int) string {
 	e := &m.entries[i]
-	w := m.textWidth()
 	if e.streamed {
-		return renderMarkdown(e.text, w)
+		return renderMarkdown(e.text, 0)
 	}
-	if e.rendered == "" || e.renderedWidth != w {
-		e.rendered = renderMarkdown(e.text, w)
-		e.renderedWidth = w
+	if e.rendered == "" {
+		e.rendered = renderMarkdown(e.text, 0)
 		m.entries[i] = *e
 	}
 	return e.rendered
@@ -1054,7 +1165,7 @@ func (m *Model) transcript() string {
 }
 
 func (m Model) helpFooter() string {
-	return "\n" + lipgloss.NewStyle().MaxWidth(m.textWidth()).MaxHeight(1).Render("/help · pgup/pgdown scroll · ctrl+c exit") + "\n"
+	return "\n" + lipgloss.NewStyle().MaxWidth(m.textWidth()).MaxHeight(1).Render("/help · pgup/pgdown scroll · drag to copy · ctrl+c exit") + "\n"
 }
 
 func renderTool(e entry, frame int) string {
