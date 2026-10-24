@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `bonnie chat`, `bonnie dev`, and `bonnie runs` select text with the mouse.
   The interfaces capture the mouse so that the wheel scrolls, which stopped the
   terminal from selecting text. Drag to select; release to copy with OSC 52.
+  Inside tmux the copy also uses `tmux load-buffer -w`, because tmux drops
+  OSC 52 from an application at its default `set-clipboard external`.
   Chat copies a wrapped paragraph as one line, and a drag past the edge of the
   transcript scrolls it. In `bonnie runs` a selection stays inside the main
   panel.

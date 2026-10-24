@@ -185,8 +185,10 @@ to the latest output. Enter sends a message; Shift+Enter adds a new line.
 Drag over the transcript to select text; release the button to copy it. A
 wrapped paragraph is copied as one line. The copy uses OSC 52, so the
 terminal must support it (kitty, WezTerm, iTerm2, Ghostty, Alacritty,
-Windows Terminal, and tmux with `set-clipboard on` do; GNOME Terminal does
-not). In other terminals, Shift+drag uses the terminal's own selection.
+Windows Terminal, and zellij do; GNOME Terminal does not). Inside tmux, the
+copy also goes through `tmux load-buffer -w`, so it works whatever
+`set-clipboard` is. In other terminals, Shift+drag uses the terminal's own
+selection.
 
 Local commands: `/help`, `/new`, `/retry`, `/cancel`, and `/exit` (or `/quit`).
 `/new` starts a separate conversation and keeps the old run on the server.

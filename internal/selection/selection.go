@@ -15,7 +15,11 @@
 package selection
 
 import (
+	"context"
+	"os"
+	"os/exec"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -187,15 +191,41 @@ func (s Selection) Text(plain []string, joined []bool) string {
 // Copy returns the command that puts text on the system clipboard.
 //
 // It uses OSC 52, which the terminal carries out: kitty, WezTerm, iTerm2,
-// Ghostty, Alacritty, foot, Windows Terminal, and tmux with set-clipboard
-// enabled support it, also over SSH. Some terminals, such as those built on
-// VTE (GNOME Terminal, Tilix), ignore it, and the terminal sends back no
-// answer, so a caller cannot know whether the copy worked. Every copy goes
-// through this function, so a native clipboard fallback can be added here
-// without a change at any call site.
+// Ghostty, Alacritty, foot, Windows Terminal, and zellij support it, also
+// over SSH. Some terminals, such as those built on VTE (GNOME Terminal,
+// Tilix), ignore it, and the terminal sends back no answer, so a caller
+// cannot know whether the copy worked. Every copy goes through this
+// function, so a native clipboard fallback can be added here without a
+// change at any call site.
+//
+// Inside tmux, Copy also gives the text to tmux. tmux drops OSC 52 from an
+// application unless set-clipboard is "on", and its default is "external",
+// so OSC 52 alone silently copied nothing for most tmux users.
+// `tmux load-buffer -w` sets a tmux buffer and sends it on to the outer
+// terminal's clipboard whatever set-clipboard is.
 func Copy(text string) tea.Cmd {
 	if text == "" {
 		return nil
 	}
-	return tea.SetClipboard(text)
+	if os.Getenv("TMUX") == "" {
+		return tea.SetClipboard(text)
+	}
+	return tea.Batch(tea.SetClipboard(text), func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		// The copy is best effort, as OSC 52 is: there is nothing useful
+		// to do with an error, and no message for the model.
+		_ = loadTmuxBuffer(ctx, text)
+		return nil
+	})
+}
+
+// loadTmuxBuffer gives text to the tmux server of this session. A test
+// replaces it, so that it does not change the developer's tmux buffers.
+var loadTmuxBuffer = defaultLoadTmuxBuffer
+
+func defaultLoadTmuxBuffer(ctx context.Context, text string) error {
+	cmd := exec.CommandContext(ctx, "tmux", "load-buffer", "-w", "-")
+	cmd.Stdin = strings.NewReader(text)
+	return cmd.Run()
 }
