@@ -48,6 +48,8 @@ var (
 	sLabel   = lipgloss.NewStyle().Foreground(colorMuted).Width(12)
 	sReason  = lipgloss.NewStyle().Foreground(colorMuted).Italic(true)
 	sBadgeOn = lipgloss.NewStyle().Foreground(lipgloss.Color("0")).Background(colorAccent).Bold(true).Padding(0, 1)
+	// sSelection marks text selected with the mouse, as internal/tui does.
+	sSelection = lipgloss.NewStyle().Reverse(true)
 )
 
 // stateColor is the color of a run state everywhere it appears.

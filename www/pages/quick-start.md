@@ -49,7 +49,7 @@ Prepare a deployment plan for my web service.
 
 The model decides whether to call `ask_human`. When it does, the run becomes `waiting`. Enter an answer to continue. Approval is not an automatic policy; prompts alone do not enforce it.
 
-Use `/help` for terminal commands. Enter sends a message; Shift+Enter adds a line. `/new` starts a separate conversation. `/retry` sends the last message again as a new turn and can repeat external actions.
+Use `/help` for terminal commands. Enter sends a message; Shift+Enter adds a line, and the input grows to show it. Drag over the transcript to copy text. `/new` starts a separate conversation. `/retry` sends the last message again as a new turn and can repeat external actions.
 
 ## 3. Use HTTP instead
 

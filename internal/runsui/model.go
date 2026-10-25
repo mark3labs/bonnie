@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
@@ -16,6 +17,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/mark3labs/bonnie/client"
+	"github.com/mark3labs/bonnie/internal/selection"
 	"github.com/mark3labs/bonnie/runtime"
 )
 
@@ -149,6 +151,27 @@ type model struct {
 	// Regions from the last layout, for the mouse.
 	rRuns, rTurns, rMain, rTabs rect
 	tabX                        []int
+
+	// textSel is a mouse selection inside selArea: the body of the main
+	// panel, without its border. On the tabs that scroll (selScroll), its
+	// lines are rows of mainRows, so it stays on its text while the panel
+	// scrolls. On the trace and journal tabs, which are lists drawn for
+	// each frame, its lines are screen rows: it marks cells, and anything
+	// that moves the list drops it.
+	textSel   selection.Selection
+	selArea   rect
+	selScroll bool
+	// mainRows is what main holds on the tabs that scroll, with the plain
+	// text and soft breaks that a selection copies. mainShape is the run,
+	// tab, width, and options it was built for: when one changes, the rows
+	// move, and the selection is dropped.
+	mainRows  selection.Wrapped
+	mainShape string
+	// pressAt is where the left button went down in the main panel. The
+	// panel's own click (select a span, open a record) runs on release, and
+	// only when the press did not drag: a drag that started with a click
+	// would change the text it is selecting.
+	pressAt tea.Mouse
 }
 
 func newModel(ctx context.Context, opts Options) model {
@@ -344,6 +367,11 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.mainKey = ""
+		if !m.selScroll {
+			// The panels move. A selection of rows in main stays, unless
+			// the new width wraps them again (see mainShape).
+			m.textSel.Clear()
+		}
 		return m, nil
 
 	case spinner.TickMsg:
@@ -414,17 +442,48 @@ func (m model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.key(msg)
 
 	case tea.MouseClickMsg:
-		return m.click(msg.Mouse())
+		return m.press(msg.Mouse())
+
+	case tea.MouseMotionMsg:
+		return m.drag(msg.Mouse())
+
+	case tea.MouseReleaseMsg:
+		return m.release()
 
 	case tea.MouseWheelMsg:
+		if !m.selScroll {
+			m.textSel.Clear()
+		}
 		return m.wheel(msg.Mouse())
+
+	case tea.PasteMsg:
+		return m.paste(msg)
 	}
 	return m, nil
+}
+
+// paste sends a bracketed paste to the text field that has the keys: a
+// modal's input, the filter, or the search. Elsewhere a paste does nothing.
+// A textarea that is not focused, or not set up, ignores it.
+func (m model) paste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	switch {
+	case m.modal != nil:
+		m.modal.input, cmd = m.modal.input.Update(msg)
+	case m.filtering:
+		m.filter, cmd = m.filter.Update(msg)
+		m.rebuild()
+		m.mainKey = ""
+	case m.searching:
+		m.search, cmd = m.search.Update(msg)
+	}
+	return m, cmd
 }
 
 // key routes a key press. An open modal, filter, or search owns the keys;
 // otherwise global keys apply, then the focused panel's.
 func (m model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	m.textSel.Clear()
 	k := msg.String()
 	if m.modal != nil {
 		cmd, submit, closed := m.modal.update(msg)
@@ -795,6 +854,126 @@ func (m model) click(ms tea.Mouse) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// mainBody is the main panel without its border: the cells a selection may
+// cover.
+func (m model) mainBody() rect {
+	r := m.rMain
+	return rect{r.x + 1, r.y + 1, max(0, r.w-2), max(0, r.h-2)}
+}
+
+// mainScrolls reports whether the main panel shows main, the viewport: the
+// overview and conversation tabs of a run.
+func (m model) mainScrolls() bool {
+	_, ok := m.current()
+	return ok && (m.tab == tabOverview || m.tab == tabConversation)
+}
+
+// selPoint maps a screen cell in selArea to a point in the selection's
+// space. y is clamped to selArea by the caller.
+func (m model) selPoint(x, y int) selection.Point {
+	if m.selScroll {
+		a := m.selArea
+		return selection.Point{Line: m.main.YOffset() + y - a.y, Col: x - a.x}
+	}
+	return selection.Point{Line: y, Col: x}
+}
+
+// press starts a selection when the left button goes down in the main
+// panel's body. Anywhere else it is a click.
+func (m model) press(ms tea.Mouse) (tea.Model, tea.Cmd) {
+	m.textSel.Clear()
+	body := m.mainBody()
+	if m.modal != nil || ms.Button != tea.MouseLeft || !body.has(ms.X, ms.Y) {
+		return m.click(ms)
+	}
+	m.selArea, m.pressAt = body, ms
+	m.selScroll = m.mainScrolls()
+	if m.selScroll {
+		m.textSel = selection.Selection{Margin: m.mainRows.Margin}
+	} else {
+		m.textSel = selection.Selection{Left: body.x, Right: body.x + body.w}
+	}
+	m.textSel.Press(m.selPoint(ms.X, ms.Y))
+	return m, nil
+}
+
+// drag extends the selection, held inside the panel it started in. On a tab
+// that scrolls, a drag above or below the panel scrolls it one row for each
+// motion event, so a selection can be longer than the panel.
+func (m model) drag(ms tea.Mouse) (tea.Model, tea.Cmd) {
+	if !m.textSel.Dragging() {
+		return m, nil
+	}
+	a := m.selArea
+	x := min(max(ms.X, a.x), a.x+a.w-1)
+	y := min(max(ms.Y, a.y), a.y+a.h-1)
+	if m.selScroll {
+		switch {
+		case ms.Y < a.y:
+			m.main.ScrollUp(1)
+		case ms.Y >= a.y+a.h:
+			m.main.ScrollDown(1)
+		}
+	}
+	m.textSel.Drag(m.selPoint(x, y))
+	return m, nil
+}
+
+// release ends the drag and copies the selection. A press that never moved
+// is the panel's click.
+func (m model) release() (tea.Model, tea.Cmd) {
+	if !m.textSel.Dragging() {
+		return m, nil
+	}
+	m.textSel.Release()
+	if m.textSel.Empty() {
+		m.textSel.Clear()
+		return m.click(m.pressAt)
+	}
+	var text string
+	if m.selScroll {
+		text = m.textSel.Text(m.mainRows.Plain, m.mainRows.Joined)
+	} else {
+		text = m.textSel.Text(strings.Split(ansi.Strip(m.render()), "\n"), nil)
+	}
+	if text == "" {
+		m.textSel.Clear()
+		return m, nil
+	}
+	return m, tea.Batch(selection.Copy(text), m.setToast(fmt.Sprintf("copied %d characters", utf8.RuneCountInString(text)), false))
+}
+
+// highlight draws the selection over the frame. A selection of main's rows
+// is drawn only on the rows and cells of the panel's body: the frame around
+// it holds other text.
+func (m model) highlight(frame string) string {
+	lines := strings.Split(frame, "\n")
+	if !m.selScroll {
+		return strings.Join(m.textSel.Highlight(lines, 0, sSelection), "\n")
+	}
+	a := m.selArea
+	if a != m.mainBody() || !m.mainScrolls() {
+		return frame
+	}
+	top, bottom := a.y, min(len(lines), a.y+a.h)
+	if m.searching {
+		bottom-- // the search field is on the last row
+	}
+	if top >= bottom {
+		return frame
+	}
+	cells := make([]string, 0, bottom-top)
+	for _, l := range lines[top:bottom] {
+		cells = append(cells, ansi.Cut(l, a.x, a.x+a.w))
+	}
+	cells = m.textSel.Highlight(cells, m.main.YOffset(), sSelection)
+	for i, c := range cells {
+		l := lines[top+i]
+		lines[top+i] = ansi.Cut(l, 0, a.x) + c + ansi.Cut(l, a.x+a.w, ansi.StringWidth(l))
+	}
+	return strings.Join(lines, "\n")
+}
+
 func (m model) wheel(ms tea.Mouse) (tea.Model, tea.Cmd) {
 	if m.modal != nil {
 		return m, nil
@@ -842,6 +1021,9 @@ func (m model) View() tea.View {
 	}
 	base := m.render()
 	if m.modal == nil {
+		if !m.textSel.Empty() {
+			base = m.highlight(base)
+		}
 		v.SetContent(base)
 		return v
 	}
@@ -1085,18 +1267,30 @@ func (m *model) mainPanel(w, h int) string {
 	}
 	m.main.SetWidth(inner)
 	m.main.SetHeight(rows)
+	if shape := fmt.Sprintf("%s|%d|%d|%v|%v", r.ID, m.tab, inner, m.reasoning, m.allResults); shape != m.mainShape {
+		m.mainShape = shape
+		if m.selScroll {
+			m.textSel.Clear()
+		}
+	}
 	if key != m.mainKey {
-		follow := m.main.AtBottom() && m.mainKey != "" && m.tab == tabConversation
-		var content string
+		// A drag holds the text still: following new output would move the
+		// rows under the pointer.
+		dragging := m.selScroll && m.textSel.Dragging()
+		follow := m.main.AtBottom() && m.mainKey != "" && m.tab == tabConversation && !dragging
 		if m.tab == tabOverview {
-			content = overview(r, inner, m.now())
+			m.mainRows = selection.Lines(overview(r, inner, m.now()))
 		} else {
 			lines := 6
 			if m.allResults {
 				lines = 0
 			}
-			content = conversation(r, inner, conversationOptions{reasoning: m.reasoning, toolLines: lines})
+			m.mainRows = conversation(r, inner, conversationOptions{reasoning: m.reasoning, toolLines: lines})
 		}
+		if m.selScroll {
+			m.textSel.Margin = m.mainRows.Margin
+		}
+		content := strings.Join(m.mainRows.Rows, "\n")
 		off := m.main.YOffset()
 		m.main.SetContent(content)
 		m.main.ClearHighlights()
@@ -1289,7 +1483,7 @@ func helpText(w int) string {
 			{"g G", "first · last"},
 			{"[ ]", "previous · next tab"},
 			{"z", "zoom the main panel"},
-			{"mouse", "click · wheel"},
+			{"mouse", "click · wheel · drag to copy"},
 		}},
 		{"Runs", [][2]string{
 			{"/", "filter by text"},
