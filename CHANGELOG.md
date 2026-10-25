@@ -27,6 +27,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- In `bonnie runs`, the mouse wheel over the detail pane of the trace and
+  journal tabs scrolls the span detail or the record payload. Before, the
+  wheel moved the cursor everywhere, so a long detail could not be read with
+  the mouse. On the trace tab, `pgdown`/`pgup` and `ctrl+d`/`ctrl+u` scroll
+  the detail by a page; `J`/`K` still scroll one line.
+
 - A paste in `bonnie chat` and `bonnie dev` was dropped. The terminal sends a
   bracketed paste as one message, and the chat model did not give it to the
   input. A paste now reaches the input with its newlines and does not send the

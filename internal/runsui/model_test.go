@@ -453,3 +453,58 @@ func TestConsoleConversationAndSearch(t *testing.T) {
 		t.Fatalf("query %q:\n%s", h.m.query, h.screen())
 	}
 }
+
+// The wheel over the detail pane of the trace and journal tabs scrolls the
+// detail. Over the list above it, the wheel still moves the cursor. Before,
+// the wheel moved the cursor everywhere, and a long detail could not be read
+// with the mouse.
+func TestConsoleWheelScrollsTheDetail(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, twoRuns(t), nil)
+	wheel := func(y int, b tea.MouseButton) {
+		h.send(tea.MouseWheelMsg{X: h.m.rMain.x + 3, Y: y, Button: b})
+	}
+
+	h.send(tea.MouseClickMsg{X: h.m.tabX[tabJournal] + 1, Y: h.m.rTabs.y, Button: tea.MouseLeft})
+	h.keys("enter") // open the first record's payload
+	h.screen()      // the view measures the detail pane
+	r, _ := h.m.current()
+	long := -1
+	for i, rec := range r.Records {
+		if strings.Count(recordBody(rec, h.m.rMain.w-2), "\n") > h.m.detailH+3 {
+			long = i
+			break
+		}
+	}
+	if long < 0 {
+		t.Fatal("the sample run has no record longer than the detail pane")
+	}
+	h.m.recCursor = long
+	h.screen()
+	if h.m.detailY == 0 {
+		t.Fatal("the journal shows no detail pane")
+	}
+	wheel(h.m.detailY+1, tea.MouseWheelDown)
+	if h.m.detailTop != 3 || h.m.recCursor != long {
+		t.Fatalf("wheel on the payload: detailTop %d cursor %d", h.m.detailTop, h.m.recCursor)
+	}
+	wheel(h.m.detailY+1, tea.MouseWheelUp)
+	if h.m.detailTop != 0 {
+		t.Fatalf("wheel up on the payload: detailTop %d", h.m.detailTop)
+	}
+	wheel(h.m.rMain.y+3, tea.MouseWheelDown)
+	if h.m.recCursor != long+1 {
+		t.Fatalf("wheel on the list: cursor %d, want %d", h.m.recCursor, long+1)
+	}
+
+	h.send(tea.MouseClickMsg{X: h.m.tabX[tabTrace] + 1, Y: h.m.rTabs.y, Button: tea.MouseLeft})
+	h.screen()
+	if h.m.detailY == 0 {
+		t.Fatal("the trace shows no detail pane")
+	}
+	cursor := h.m.spanCursor
+	wheel(h.m.detailY, tea.MouseWheelDown)
+	if h.m.spanCursor != cursor {
+		t.Fatalf("wheel on the span detail moved the cursor to %d", h.m.spanCursor)
+	}
+}

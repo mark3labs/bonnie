@@ -130,6 +130,8 @@ type model struct {
 	spanCursor int
 	spanTop    int
 	detailTop  int
+	detailY    int // screen row of the detail pane's first line; 0 when none shows
+	detailH    int // rows the detail pane shows
 	recCursor  int
 	recTop     int
 	recOpen    bool
@@ -726,10 +728,14 @@ func (m model) mainKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.spanCursor, m.detailTop = 0, 0
 		case "G", "end":
 			m.spanCursor, m.detailTop = len(tr.Spans)-1, 0
-		case "J", "ctrl+d", "pgdown":
+		case "J":
 			m.detailTop++
-		case "K", "ctrl+u", "pgup":
+		case "K":
 			m.detailTop = max(0, m.detailTop-1)
+		case "ctrl+d", "pgdown":
+			m.detailTop += max(1, m.detailH-1)
+		case "ctrl+u", "pgup":
+			m.detailTop = max(0, m.detailTop-max(1, m.detailH-1))
 		case "left", "h":
 			m.focus = focusTurns
 		}
@@ -990,12 +996,15 @@ func (m model) wheel(ms tea.Mouse) (tea.Model, tea.Cmd) {
 		m.turnSel = min(max(m.turnSel+step, 0), max(0, len(m.turns())-1))
 		m.mainKey = ""
 	case m.rMain.has(x, y):
-		switch m.tab {
-		case tabTrace:
+		switch {
+		case m.detailY > 0 && y >= m.detailY && (m.tab == tabTrace || m.tab == tabJournal):
+			// The view clamps detailTop to the end of the detail.
+			m.detailTop = max(0, m.detailTop+3*step)
+		case m.tab == tabTrace:
 			if tr, ok := m.currentTrace(); ok {
 				m.spanCursor = min(max(m.spanCursor+step, 0), len(tr.Spans)-1)
 			}
-		case tabJournal:
+		case m.tab == tabJournal:
 			if r, ok := m.current(); ok {
 				m.recCursor = min(max(m.recCursor+step, 0), len(r.Records)-1)
 			}
@@ -1243,6 +1252,7 @@ func (m *model) tabsTitle(x0 int) string {
 
 func (m *model) mainPanel(w, h int) string {
 	focused := m.focus == focusMain
+	m.detailY = 0 // the trace and journal views set it when they show a detail
 	inner, rows := w-2, h-2
 	r, ok := m.current()
 	title := m.tabsTitle(m.rMain.x)
@@ -1349,6 +1359,16 @@ func (m *model) traceFooter() string {
 	return f
 }
 
+// bodyRows is the number of screen rows the lines in out take: one line
+// may hold more than one row.
+func bodyRows(out []string) int {
+	n := 0
+	for _, l := range out {
+		n += strings.Count(l, "\n") + 1
+	}
+	return n
+}
+
 func (m *model) traceView(r Run, w, h int, focused bool) string {
 	tr, ok := m.currentTrace()
 	if !ok {
@@ -1371,6 +1391,7 @@ func (m *model) traceView(r Run, w, h int, focused bool) string {
 		out = append(out, "")
 	}
 	out = append(out, sFaint.Render(strings.Repeat("─", w)))
+	m.detailY, m.detailH = m.rMain.y+1+bodyRows(out), detailH
 	detail := strings.Split(spanDetail(tr.Spans[m.spanCursor], tr, w), "\n")
 	m.detailTop = min(m.detailTop, max(0, len(detail)-detailH))
 	out = append(out, detail[m.detailTop:min(len(detail), m.detailTop+detailH)]...)
@@ -1408,6 +1429,7 @@ func (m *model) journalView(r Run, w, h int, focused bool) string {
 		out = append(out, sFaint.Render(strings.Repeat("─", w)))
 		detail := strings.Split(recordBody(r.Records[m.recCursor], w), "\n")
 		dh := h - listH - 1
+		m.detailY, m.detailH = m.rMain.y+1+bodyRows(out), dh
 		m.detailTop = min(m.detailTop, max(0, len(detail)-dh))
 		out = append(out, detail[m.detailTop:min(len(detail), m.detailTop+dh)]...)
 	}
@@ -1441,7 +1463,7 @@ func (m *model) footer() string {
 	case m.tab == tabTrace:
 		hints = []hint{{"↑↓", "span"}, {"J/K", "scroll detail"}, {"[ ]", "tab"}, {"z", "zoom"}}
 	case m.tab == tabJournal:
-		hints = []hint{{"↑↓", "record"}, {"enter", "payload"}, {"[ ]", "tab"}, {"z", "zoom"}}
+		hints = []hint{{"↑↓", "record"}, {"enter", "payload"}, {"J/K", "scroll payload"}, {"[ ]", "tab"}, {"z", "zoom"}}
 	default:
 		hints = []hint{{"↑↓", "scroll"}, {"/", "search"}, {"R", "reasoning"}, {"T", "full results"}, {"[ ]", "tab"}}
 	}
