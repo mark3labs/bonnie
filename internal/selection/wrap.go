@@ -24,10 +24,15 @@ type Wrapped struct {
 	Margin []int
 }
 
-// Append adds the rows of v after the rows of w.
+// Append adds the rows of v after the rows of w. Once w has margins, it has
+// one for each row, so only the new rows' margins are added: a transcript
+// built from many blocks does not copy its margins again for each block.
 func (w *Wrapped) Append(v Wrapped) {
 	if v.Margin != nil || w.Margin != nil {
-		w.Margin = append(w.margins(), v.margins()...)
+		if w.Margin == nil {
+			w.Margin = make([]int, len(w.Rows), len(w.Rows)+len(v.Rows))
+		}
+		w.Margin = append(w.Margin, v.margins()...)
 	}
 	w.Rows = append(w.Rows, v.Rows...)
 	w.Plain = append(w.Plain, v.Plain...)

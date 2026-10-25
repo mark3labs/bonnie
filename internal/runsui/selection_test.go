@@ -16,8 +16,9 @@ import (
 
 // copied runs cmd and returns the text it puts on the clipboard, looking
 // inside a batch. tea.SetClipboard's message type is not exported, so the
-// test matches it by name. A command that does not return at once is a
-// timer, such as the toast's, and is skipped.
+// test matches it by name. A command that does not return soon is a timer,
+// such as the toast's 4 s, and is skipped. The wait is long enough that a
+// slow -race run does not skip the clipboard write.
 func copied(t *testing.T, cmd tea.Cmd) string {
 	t.Helper()
 	if cmd == nil {
@@ -34,7 +35,7 @@ func copied(t *testing.T, cmd tea.Cmd) string {
 		var msg tea.Msg
 		select {
 		case msg = <-done:
-		case <-time.After(50 * time.Millisecond):
+		case <-time.After(500 * time.Millisecond):
 			return
 		}
 		switch msg := msg.(type) {
