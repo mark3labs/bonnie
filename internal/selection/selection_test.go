@@ -177,3 +177,44 @@ func TestWrapStyledText(t *testing.T) {
 		t.Errorf("Text() = %q", got)
 	}
 }
+
+// A row's margin is a decoration, such as a quote bar: a selection neither
+// copies it nor draws over it, also when the drag starts left of it.
+func TestMarginIsNotSelected(t *testing.T) {
+	t.Parallel()
+	w := Wrap("one two three four", 9)
+	w.Indent("┃ ")
+	s := Selection{Margin: w.Margin}
+	drag(&s, Point{0, 0}, Point{len(w.Rows) - 1, 20})
+	if got := s.Text(w.Plain, w.Joined); got != "one two three four" {
+		t.Errorf("Text() = %q; want the text without the bar", got)
+	}
+	for i, row := range s.Highlight(w.Rows, 0, lipgloss.NewStyle().Reverse(true)) {
+		before, _, ok := strings.Cut(row, "\x1b[7m")
+		if !ok || ansi.Strip(before) != "┃ " {
+			t.Errorf("row %d: the highlight does not start after the bar: %q", i, row)
+		}
+	}
+}
+
+// Append keeps each row's margin and soft break, also for rows that have
+// no margin.
+func TestAppendKeepsMarginsAndBreaks(t *testing.T) {
+	t.Parallel()
+	var w Wrapped
+	w.Append(Lines("header"))
+	quote := Wrap("one two three", 7)
+	quote.Indent("> ")
+	w.Append(quote)
+	w.Append(Lines("footer"))
+	if len(w.Rows) != len(w.Plain) || len(w.Rows) != len(w.Joined) || len(w.Rows) != len(w.Margin) {
+		t.Fatalf("rows %d, plain %d, joined %d, margin %d", len(w.Rows), len(w.Plain), len(w.Joined), len(w.Margin))
+	}
+	last := len(w.Rows) - 1
+	if w.Margin[0] != 0 || w.Margin[1] != 2 || w.Margin[last] != 0 {
+		t.Errorf("margins = %v; want 0, then 2 for the quote, then 0", w.Margin)
+	}
+	if w.Joined[1] || !w.Joined[2] || w.Joined[last] {
+		t.Errorf("joined = %v; want a break only inside the quote", w.Joined)
+	}
+}

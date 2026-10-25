@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	kit "github.com/mark3labs/kit/pkg/kit"
 
+	"github.com/mark3labs/bonnie/internal/selection"
 	"github.com/mark3labs/bonnie/internal/tui"
 	"github.com/mark3labs/bonnie/runtime"
 )
@@ -187,8 +188,13 @@ type conversationOptions struct {
 // conversation renders the run's messages as a transcript: user and
 // assistant turns, each tool call with its result, suspensions, answers,
 // and the boundaries between turns.
-func conversation(r Run, w int, opt conversationOptions) string {
-	var b strings.Builder
+//
+// The rows carry what a mouse selection needs to copy them back as text:
+// each block's bar is a margin the copy skips, and a paragraph that wraps to
+// the width copies as the one line it is. Thus the text is wrapped here,
+// with [selection.Wrap], and not by lipgloss or the markdown render.
+func conversation(r Run, w int, opt conversationOptions) selection.Wrapped {
+	var out selection.Wrapped
 	results := map[string]kit.LLMToolResultPart{}
 	for _, rec := range r.Records {
 		if rec.Kind != runtime.RecordMessage || rec.Role != "tool" {
@@ -202,13 +208,20 @@ func conversation(r Run, w int, opt conversationOptions) string {
 			}
 		}
 	}
-	bar := func(c lipgloss.Style, text string) string {
-		return lipgloss.NewStyle().Border(lipgloss.ThickBorder(), false, false, false, true).BorderForeground(c.GetForeground()).PaddingLeft(1).Width(max(4, w-1)).Render(text)
+	// Text in a bar wraps to the cells the bar and its gap leave.
+	inner := max(4, w-3)
+	wrap := func(text string) selection.Wrapped { return selection.Wrap(text, inner) }
+	bar := func(c lipgloss.Style, body selection.Wrapped) {
+		body.Indent(lipgloss.NewStyle().Foreground(c.GetForeground()).Render(lipgloss.ThickBorder().Left) + " ")
+		out.Append(body)
+		out.Append(selection.Lines(""))
 	}
+	line := func(s string) { out.Append(selection.Lines(s)) }
 	divider := func(label string, c lipgloss.Style) {
 		label = " " + label + " "
 		side := max(2, (w-ansi.StringWidth(label))/2)
-		b.WriteString(sFaint.Render(strings.Repeat("─", side)) + c.Render(label) + sFaint.Render(strings.Repeat("─", max(0, w-side-ansi.StringWidth(label)))) + "\n\n")
+		line(sFaint.Render(strings.Repeat("─", side)) + c.Render(label) + sFaint.Render(strings.Repeat("─", max(0, w-side-ansi.StringWidth(label)))))
+		line("")
 	}
 	turnState := map[int]Turn{}
 	for _, t := range r.Turns {
@@ -225,7 +238,7 @@ func conversation(r Run, w int, opt conversationOptions) string {
 			msg, ok := decodeMessage(rec.Payload)
 			if !ok {
 				if rec.Text != "" {
-					b.WriteString(bar(sMuted, rec.Text) + "\n\n")
+					bar(sMuted, wrap(rec.Text))
 				}
 				continue
 			}
@@ -235,10 +248,10 @@ func conversation(r Run, w int, opt conversationOptions) string {
 				if text == "" {
 					continue
 				}
-				b.WriteString(sBlue.Bold(true).Render("▍you") + sFaint.Render("  "+rec.Timestamp.Local().Format("15:04:05")) + "\n")
-				b.WriteString(bar(sBlue, lipgloss.Wrap(text, max(4, w-3), "")) + "\n\n")
+				line(sBlue.Bold(true).Render("▍you") + sFaint.Render("  "+rec.Timestamp.Local().Format("15:04:05")))
+				bar(sBlue, wrap(text))
 			case "assistant":
-				var body []string
+				var body selection.Wrapped
 				for _, part := range msg.Content {
 					switch p := part.(type) {
 					case kit.LLMReasoningPart:
@@ -246,25 +259,29 @@ func conversation(r Run, w int, opt conversationOptions) string {
 						if text == "" {
 							continue
 						}
+						var rows selection.Wrapped
 						if !opt.reasoning {
-							text = "∴ " + oneLine(text, max(4, w-6))
+							rows = selection.Lines("∴ " + oneLine(text, max(4, w-6)))
 						} else {
-							text = "∴ " + lipgloss.Wrap(text, max(4, w-5), "")
+							rows = wrap("∴ " + text)
 						}
-						body = append(body, sReason.Render(text))
+						for j := range rows.Rows {
+							rows.Rows[j] = sReason.Render(rows.Rows[j])
+						}
+						body.Append(rows)
 					case kit.LLMTextPart:
 						if strings.TrimSpace(p.Text) != "" {
-							body = append(body, tui.RenderMarkdown(p.Text, max(4, w-3)))
+							body.Append(wrap(tui.RenderMarkdown(p.Text, 0)))
 						}
 					case kit.LLMToolCallPart:
-						body = append(body, toolCall(p, results[p.ToolCallID], w-3, opt.toolLines))
+						body.Append(selection.Lines(toolCall(p, results[p.ToolCallID], w-3, opt.toolLines)))
 					}
 				}
-				if len(body) == 0 {
+				if len(body.Rows) == 0 {
 					continue
 				}
-				b.WriteString(sAccent.Bold(true).Render("▍agent") + sFaint.Render("  "+rec.Timestamp.Local().Format("15:04:05")) + "\n")
-				b.WriteString(bar(sAccent, strings.Join(body, "\n")) + "\n\n")
+				line(sAccent.Bold(true).Render("▍agent") + sFaint.Render("  "+rec.Timestamp.Local().Format("15:04:05")))
+				bar(sAccent, body)
 			}
 		case runtime.RecordSuspend:
 			req := suspendOf(rec)
@@ -272,19 +289,28 @@ func conversation(r Run, w int, opt conversationOptions) string {
 			if len(req.Options) > 0 {
 				text += "\n" + sMuted.Render("options: "+strings.Join(req.Options, " · "))
 			}
-			b.WriteString(bar(sYellow, text) + "\n\n")
+			bar(sYellow, wrap(text))
 		case runtime.RecordResume:
-			b.WriteString(bar(sGreen, sGreen.Bold(true).Render("▶ answered")+"  "+rec.Text) + "\n\n")
+			bar(sGreen, wrap(sGreen.Bold(true).Render("▶ answered")+"  "+rec.Text))
 		case runtime.RecordClear:
 			divider("context cleared", sYellow)
 		case runtime.RecordCompaction:
 			divider("context compacted", sPurple)
 		}
 	}
-	if b.Len() == 0 {
-		return sMuted.Render("No conversation yet.")
+	// Drop the blank rows after the last block.
+	n := len(out.Rows)
+	for n > 0 && out.Plain[n-1] == "" {
+		n--
 	}
-	return strings.TrimRight(b.String(), "\n")
+	if n == 0 {
+		return selection.Lines(sMuted.Render("No conversation yet."))
+	}
+	out.Rows, out.Plain, out.Joined = out.Rows[:n], out.Plain[:n], out.Joined[:n]
+	if out.Margin != nil {
+		out.Margin = out.Margin[:n]
+	}
+	return out
 }
 
 func messageTextOf(msg kit.LLMMessage) string {

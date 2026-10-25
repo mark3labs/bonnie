@@ -1,17 +1,23 @@
 package runsui
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
+	kit "github.com/mark3labs/kit/pkg/kit"
+
+	"github.com/mark3labs/bonnie/runtime"
 )
 
 // copied runs cmd and returns the text it puts on the clipboard, looking
 // inside a batch. tea.SetClipboard's message type is not exported, so the
-// test matches it by name.
+// test matches it by name. A command that does not return at once is a
+// timer, such as the toast's, and is skipped.
 func copied(t *testing.T, cmd tea.Cmd) string {
 	t.Helper()
 	if cmd == nil {
@@ -23,7 +29,15 @@ func copied(t *testing.T, cmd tea.Cmd) string {
 		if c == nil {
 			return
 		}
-		switch msg := c().(type) {
+		done := make(chan tea.Msg, 1)
+		go func() { done <- c() }()
+		var msg tea.Msg
+		select {
+		case msg = <-done:
+		case <-time.After(50 * time.Millisecond):
+			return
+		}
+		switch msg := msg.(type) {
 		case tea.BatchMsg:
 			for _, c := range msg {
 				walk(c)
@@ -125,9 +139,125 @@ func TestConsoleClickInMainPanelStillActs(t *testing.T) {
 	}
 }
 
-// The selection marks screen cells, so anything that moves the text drops
-// it.
-func TestConsoleSelectionClearsOnScrollAndKey(t *testing.T) {
+// longRun is a run with a user message that wraps in the main panel, then
+// enough replies to scroll it.
+func longRun(t *testing.T, msg string) *fakeJournal {
+	b := newBuilder(t, "run-1")
+	b.turn("T1", "").state(runtime.RunRunning).message("user", kit.LLMTextPart{Text: msg})
+	for i := range 30 {
+		b.message("assistant", kit.LLMTextPart{Text: fmt.Sprintf("reply %d", i)})
+	}
+	b.state(runtime.RunCompleted)
+	j := newFakeJournal()
+	j.put("run-1", runtime.RunCompleted, b.recs)
+	return j
+}
+
+// selectRows drags from the start of the row that holds from to the end of
+// the row that holds to, both in the main panel, and returns the command of
+// the release.
+func selectRows(t *testing.T, h *harness, from, to string) tea.Cmd {
+	t.Helper()
+	body := h.m.mainBody()
+	_, y0 := cellOf(t, h, from)
+	_, y1 := cellOf(t, h, to)
+	h.update(tea.MouseClickMsg{X: body.x, Y: y0, Button: tea.MouseLeft})
+	h.update(tea.MouseMotionMsg{X: body.x + body.w - 1, Y: y1, Button: tea.MouseLeft})
+	return h.update(tea.MouseReleaseMsg{X: body.x + body.w - 1, Y: y1, Button: tea.MouseLeft})
+}
+
+// A message that wraps to the panel is one line in the journal. It must be
+// copied as one line, without the bar drawn at the left of each row.
+func TestConsoleDragCopiesWrappedMessageAsOneLine(t *testing.T) {
+	t.Parallel()
+	msg := strings.Repeat("the deploy needs a second look ", 12) + "before noon"
+	h := newHarness(t, longRun(t, msg), nil)
+	h.keys("]", "3")
+	got := copied(t, selectRows(t, h, "the deploy needs", "before noon"))
+	if got != msg {
+		t.Errorf("copied %q; want the message as one line: %q", got, msg)
+	}
+}
+
+// On the tabs that scroll, a selection is held in rows of the text, so a
+// scroll moves the highlight with its text and keeps the selection.
+func TestConsoleSelectionStaysOnItsTextWhenScrolled(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, longRun(t, "first message"), nil)
+	h.keys("]", "3")
+	h.m.main.GotoTop()
+	body := h.m.mainBody()
+	wheel := tea.MouseWheelMsg{X: body.x, Y: body.y, Button: tea.MouseWheelDown}
+	// Select after a scroll, so the rows of the text are not the rows of the
+	// panel.
+	h.send(wheel)
+	if got := copied(t, selectRows(t, h, "reply 3", "reply 3")); got != "reply 3" {
+		t.Fatalf("copied %q; want %q", got, "reply 3")
+	}
+	_, before := cellOf(t, h, "reply 3")
+	h.send(wheel)
+	if h.m.textSel.Empty() {
+		t.Fatal("the wheel dropped the selection")
+	}
+	_, after := cellOf(t, h, "reply 3")
+	if after >= before {
+		t.Fatalf("the wheel did not scroll: row %d, then %d", before, after)
+	}
+	rows := strings.Split(h.m.View().Content, "\n")
+	if !strings.Contains(rows[after], "\x1b[7m") {
+		t.Errorf("the highlight did not move with its text to row %d", after)
+	}
+	for i, r := range rows {
+		if i != after && strings.Contains(r, "\x1b[7m") {
+			t.Errorf("row %d is highlighted, and only row %d holds the selection", i, after)
+		}
+	}
+}
+
+// A drag below the panel scrolls it, so a selection can be longer than the
+// panel.
+func TestConsoleDragPastThePanelScrolls(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, longRun(t, "first message"), nil)
+	h.keys("]", "3")
+	h.m.main.GotoTop()
+	body := h.m.mainBody()
+	h.update(tea.MouseClickMsg{X: body.x, Y: body.y, Button: tea.MouseLeft})
+	h.update(tea.MouseMotionMsg{X: body.x, Y: body.y + body.h + 2, Button: tea.MouseLeft})
+	if got := h.m.main.YOffset(); got != 1 {
+		t.Errorf("YOffset = %d; want one row of scroll", got)
+	}
+}
+
+// A key press moves on, and a new width wraps the rows again, so both drop
+// the selection. A new height does not move the text.
+func TestConsoleScrolledSelectionClears(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		msg  tea.Msg
+		kept bool
+	}{
+		{"key", keyPress("j"), false},
+		{"width", tea.WindowSizeMsg{Width: 120, Height: 40}, false},
+		{"height", tea.WindowSizeMsg{Width: 140, Height: 30}, true},
+	} {
+		h := newHarness(t, longRun(t, "first message"), nil)
+		h.keys("]", "3")
+		selectRows(t, h, "first message", "first message")
+		if h.m.textSel.Empty() {
+			t.Fatalf("%s: no selection", tc.name)
+		}
+		h.send(tc.msg)
+		if kept := !h.m.textSel.Empty(); kept != tc.kept {
+			t.Errorf("%s: kept the selection = %v; want %v", tc.name, kept, tc.kept)
+		}
+	}
+}
+
+// The journal and trace tabs are lists drawn for each frame, so their
+// selection marks screen cells: anything that moves the list drops it.
+func TestConsoleListSelectionClearsOnScrollAndKey(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
 		name string
@@ -137,16 +267,16 @@ func TestConsoleSelectionClearsOnScrollAndKey(t *testing.T) {
 			return tea.MouseWheelMsg{X: h.m.mainBody().x, Y: h.m.mainBody().y, Button: tea.MouseWheelDown}
 		}},
 		{"key", func(*harness) tea.Msg { return keyPress("j") }},
-		{"resize", func(*harness) tea.Msg { return tea.WindowSizeMsg{Width: 120, Height: 40} }},
+		{"resize", func(*harness) tea.Msg { return tea.WindowSizeMsg{Width: 140, Height: 30} }},
 	} {
 		h := newHarness(t, twoRuns(t), nil)
-		h.keys("]", "3")
+		h.send(tea.MouseClickMsg{X: h.m.tabX[tabJournal] + 1, Y: h.m.rTabs.y, Button: tea.MouseLeft})
 		body := h.m.mainBody()
 		h.update(tea.MouseClickMsg{X: body.x, Y: body.y, Button: tea.MouseLeft})
 		h.update(tea.MouseMotionMsg{X: body.x + 4, Y: body.y, Button: tea.MouseLeft})
 		h.update(tea.MouseReleaseMsg{X: body.x + 4, Y: body.y, Button: tea.MouseLeft})
-		if h.m.textSel.Empty() {
-			t.Fatalf("%s: no selection to clear", tc.name)
+		if h.m.textSel.Empty() || h.m.selScroll {
+			t.Fatalf("%s: no list selection to clear", tc.name)
 		}
 		h.send(tc.msg(h))
 		if !h.m.textSel.Empty() {

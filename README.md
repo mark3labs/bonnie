@@ -484,7 +484,10 @@ the selected run: `a` answers a waiting run, `n` sends a message, `c` cancels
 the turn, `x` retires the run, `C` clears and `m` compacts the context. The
 same actions are commands — `runs answer`, `send`, `cancel`, `retire`,
 `clear`, `compact` — for scripts. `?` lists every key; the mouse works too.
-A drag in the main panel selects text and copies it, as in chat.
+A drag in the main panel selects text and copies it, as in chat. On the
+overview and conversation tabs the selection stays on its text when you
+scroll, and a wrapped message copies as one line. On the trace and journal
+tabs it marks the cells on the screen, so a scroll or a key drops it.
 
 ```
 RUN    TITLE              STATE      STEPS  LAST

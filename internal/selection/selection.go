@@ -46,6 +46,11 @@ type Selection struct {
 	// line and from Left to its end on the last. A Right of zero means the
 	// end of each line.
 	Left, Right int
+	// Margin[i], when it is larger than Left, is the left bound of line i:
+	// the cells of a decoration at the start of the line, such as a quote
+	// bar, that a selection neither copies nor draws over. A line past the
+	// end of Margin uses Left.
+	Margin []int
 
 	anchor, head Point
 	dragging     bool
@@ -77,10 +82,9 @@ func (s *Selection) Drag(p Point) {
 // copied.
 func (s *Selection) Release() { s.dragging = false }
 
-// Clear drops the selection.
+// Clear drops the selection. It keeps the bounds: Left, Right, and Margin.
 func (s *Selection) Clear() {
-	left, right := s.Left, s.Right
-	*s = Selection{Left: left, Right: right}
+	*s = Selection{Left: s.Left, Right: s.Right, Margin: s.Margin}
 }
 
 // Dragging reports whether the left button is down.
@@ -109,6 +113,9 @@ func (s Selection) span(line int) (lo, hi int, ok bool) {
 		return 0, 0, false
 	}
 	lo, hi = s.Left, s.Right
+	if line >= 0 && line < len(s.Margin) {
+		lo = max(lo, s.Margin[line])
+	}
 	if hi <= 0 {
 		hi = int(^uint(0) >> 1)
 	}
