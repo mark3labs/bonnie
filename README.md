@@ -181,7 +181,8 @@ bonnie chat --addr 127.0.0.1:8080
 Chat uses the full terminal width and an alternate-screen transcript. Use
 Page Up/Down or the mouse wheel to scroll. New output follows the bottom only
 when you are already there. Ctrl+Home goes to the first output; Ctrl+End goes
-to the latest output. Enter sends a message; Shift+Enter adds a new line.
+to the latest output. Enter sends a message; Shift+Enter adds a new line. The
+input grows to show up to 8 lines; longer text scrolls inside it.
 Drag over the transcript to select text; release the button to copy it. A
 wrapped paragraph is copied as one line. The copy uses OSC 52, so the
 terminal must support it (kitty, WezTerm, iTerm2, Ghostty, Alacritty,

@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Chat copies a wrapped paragraph as one line, and a drag past the edge of the
   transcript scrolls it. In `bonnie runs` a selection stays inside the main
   panel.
+- The `bonnie chat` and `bonnie dev` input grows with its text, up to 8 rows
+  or half of a short screen, so a multi-line paste shows every line. Longer
+  text scrolls inside the input.
 
 ### Fixed
 

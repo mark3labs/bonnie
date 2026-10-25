@@ -200,13 +200,26 @@ type Model struct {
 func New(client Client, ctx context.Context, address string) Model {
 	ta := textarea.New()
 	ta.Placeholder = "Type a message or /help…"
-	ta.Prompt = "❯ "
+	// The prompt marks where the message starts; the rows below it, when
+	// the input grows, are indented to line up with the first.
+	ta.SetPromptFunc(2, func(p textarea.PromptInfo) string {
+		if p.LineNumber == 0 {
+			return "❯ "
+		}
+		return "  "
+	})
 	ta.SetVirtualCursor(false)
 	ta.MaxWidth = 0
 	ta.SetWidth(80)
 	ta.ShowLineNumbers = false
 	ta.CharLimit = 0
 	ta.KeyMap.InsertNewline.SetKeys("shift+enter", "alt+enter", "ctrl+m")
+	// The input grows with its text, up to maxInputRows; layout sets
+	// MaxHeight. MaxContentHeight is the textarea's own limit on lines.
+	// Without it, the textarea takes MaxHeight as that limit too, and
+	// shift+enter would stop at the last row that shows.
+	ta.DynamicHeight = true
+	ta.MaxContentHeight = maxInputLines
 	focusCmd := ta.Focus()
 
 	m := Model{
@@ -267,6 +280,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	next, cmd := m.update(msg)
 	result := next.(Model)
+	result.fitTranscript()
 	result.syncViewport()
 	return result, cmd
 }
@@ -989,21 +1003,53 @@ func (m *Model) toolEntry(callID, name string) int {
 	return -1
 }
 
-// layout reserves fixed rows for the header, status, input, and help.
+const (
+	// maxInputRows is the most rows the input grows to. Text longer than
+	// that scrolls inside the input.
+	maxInputRows = 8
+	// maxInputLines is the most lines the input holds: the textarea's own
+	// limit for a paste.
+	maxInputLines = 10000
+)
+
+// layout reserves fixed rows for the header, status, and help, gives the
+// input the rows its text needs, and gives the rest to the transcript.
 func (m *Model) layout() {
 	w := m.textWidth()
-	h := m.height
-	if h <= 0 {
-		h = 24
-	}
 	bottom := m.viewport.AtBottom()
+	// The input may take at most half of the rows that are not the header,
+	// status, or help, so a short terminal keeps a transcript.
+	m.input.MaxHeight = min(max(1, (m.screenHeight()-4)/2), maxInputRows)
+	// SetWidth also wraps the text again and sets the input's height.
 	m.input.SetWidth(w)
-	m.input.SetHeight(1)
 	m.viewport.SetWidth(w)
-	m.viewport.SetHeight(max(0, h-5))
 	m.viewport.FillHeight = true
+	m.fitTranscript()
 	m.syncViewport()
 	if bottom {
+		m.viewport.GotoBottom()
+	}
+}
+
+// screenHeight is the height of the terminal, or 24 before the first size.
+func (m *Model) screenHeight() int {
+	if m.height <= 0 {
+		return 24
+	}
+	return m.height
+}
+
+// fitTranscript gives the transcript the rows that the input does not use.
+// The input grows and shrinks with its text, as a key press, a paste, or a
+// send changes it; a reader at the bottom stays there.
+func (m *Model) fitTranscript() {
+	rows := max(0, m.screenHeight()-4-m.input.Height())
+	if m.viewport.Height() == rows {
+		return
+	}
+	bottom := m.viewport.AtBottom()
+	m.viewport.SetHeight(rows)
+	if bottom && !m.sel.Dragging() {
 		m.viewport.GotoBottom()
 	}
 }

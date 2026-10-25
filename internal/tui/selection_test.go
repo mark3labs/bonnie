@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // clipboardText runs cmd and returns the text it puts on the clipboard.
@@ -215,5 +216,72 @@ func TestPasteGoesToTheInput(t *testing.T) {
 	}
 	if c.started || c.ensured > 0 || len(m.entries) > 0 {
 		t.Error("the paste sent a message")
+	}
+}
+
+// The input grows with its text, so a multi-line paste shows every line. The
+// transcript gives up the rows, and gets them back after the send.
+func TestInputGrowsWithItsText(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(&fakeClient{})
+	rows := m.viewport.Height()
+	next, _ := m.Update(tea.PasteMsg{Content: "line one\nline two\nline three"})
+	m = next.(Model)
+	if got := m.input.Height(); got != 3 {
+		t.Fatalf("input height = %d; want 3, one row for each line", got)
+	}
+	if got := m.viewport.Height(); got != rows-2 {
+		t.Errorf("transcript height = %d; want %d", got, rows-2)
+	}
+	view := m.View().Content
+	for _, line := range []string{"line one", "line two", "line three"} {
+		if !strings.Contains(view, line) {
+			t.Errorf("the input does not show %q", line)
+		}
+	}
+	// One prompt marks the one message; the other rows line up under it.
+	if n := strings.Count(ansi.Strip(view), "❯ line"); n != 1 {
+		t.Errorf("the input shows %d prompts; want 1", n)
+	}
+	if lines := strings.Count(view, "\n") + 1; lines > m.height {
+		t.Errorf("the view is %d lines; the screen is %d", lines, m.height)
+	}
+
+	m.input.Reset()
+	next, _ = m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	m = next.(Model)
+	if m.input.Height() != 1 || m.viewport.Height() != rows {
+		t.Errorf("after a reset: input %d rows, transcript %d; want 1 and %d", m.input.Height(), m.viewport.Height(), rows)
+	}
+}
+
+// The input stops growing at maxInputRows, and at half of a short screen.
+// The text past that scrolls in the input: none of it is lost, and
+// shift+enter still adds lines.
+func TestInputGrowsToALimit(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(&fakeClient{})
+	paste := strings.TrimSuffix(strings.Repeat("line\n", 20), "\n")
+	next, _ := m.Update(tea.PasteMsg{Content: paste})
+	m = next.(Model)
+	if got := m.input.Height(); got != maxInputRows {
+		t.Errorf("input height = %d; want %d", got, maxInputRows)
+	}
+	next, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModShift})
+	m = next.(Model)
+	if got := m.input.LineCount(); got != 21 {
+		t.Errorf("input has %d lines; want 21", got)
+	}
+	if got := m.input.Value(); got != paste+"\n" {
+		t.Errorf("input lost text: %q", got)
+	}
+
+	next, _ = m.Update(tea.WindowSizeMsg{Width: 80, Height: 12})
+	m = next.(Model)
+	if got := m.input.Height(); got != 4 {
+		t.Errorf("on 12 rows, input height = %d; want 4", got)
+	}
+	if lines := strings.Count(m.View().Content, "\n") + 1; lines > 12 {
+		t.Errorf("the view is %d lines on a screen of 12", lines)
 	}
 }
