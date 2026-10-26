@@ -1524,6 +1524,13 @@ Stated plainly, because the failure modes are not obvious:
   after the model answers and before the record is written, the next call
   asks again. `Agent.Decide` has no run and writes no record. The startup
   check proves that Kit can call the model, not that its credentials work.
+- **The model database refresh changes a shared cache.** `update models`
+  writes Kit's per-user cache outside every sandbox, and other agents of that
+  user read it on their next load. Use only trusted catalog sources. A
+  cancellation or an output error does not undo an update that Kit committed.
+  Running agents must restart to use it.
+- **Mouse copy needs OSC 52.** A terminal without OSC 52 (GNOME Terminal) does
+  not get the selection, except inside tmux. Use Shift+drag there.
 - **The mark3labs modules are publicly fetchable.** A scaffolded module runs
   `go mod tidy` and resolves `bonnie` and `kit` from the proxy; no `GOPRIVATE`.
   To author an agent needs Go on your machine. The binary that `bonnie build`
