@@ -112,7 +112,7 @@ func install(t *testing.T, baseURL, path string, args ...string) (string, int) {
 	if err != nil {
 		t.Fatalf("resolve script: %v", err)
 	}
-	cmd := exec.Command("bash", append([]string{script, "--no-checks"}, args...)...)
+	cmd := exec.Command("bash", append([]string{script}, args...)...)
 	cmd.Env = []string{
 		"PATH=" + path,
 		"HOME=" + t.TempDir(),
@@ -163,6 +163,13 @@ func TestInstallVerifiesAndInstallsTheBinary(t *testing.T) {
 	// Only the binary is installed, not the LICENSE and README beside it.
 	if _, err := os.Stat(filepath.Join(binDir, "README.md")); err == nil {
 		t.Errorf("README.md was installed into the bin directory")
+	}
+	// The script installs the binary only. It does not examine the sandbox,
+	// the provider keys, or Go: `bonnie` reports those when it starts.
+	for _, s := range []string{"Landlock", "provider key", "Go is not installed"} {
+		if strings.Contains(out, s) {
+			t.Errorf("output contains a host check (%q):\n%s", s, out)
+		}
 	}
 }
 

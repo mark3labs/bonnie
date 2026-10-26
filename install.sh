@@ -7,7 +7,7 @@
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/mark3labs/bonnie/master/install.sh | bash
 #   curl -fsSL https://raw.githubusercontent.com/mark3labs/bonnie/master/install.sh | bash -s -- --version v0.7.0
-#   bash install.sh [--bin-dir <dir>] [--version <tag>] [--no-checks]
+#   bash install.sh [--bin-dir <dir>] [--version <tag>]
 #
 # Environment:
 #   BONNIE_INSTALL_DIR   Same as --bin-dir.
@@ -43,7 +43,6 @@ RELEASES_URL="${BONNIE_RELEASES_URL:-https://github.com/${REPO}/releases}"
 API_URL="https://api.github.com/repos/${REPO}/releases/latest"
 VERSION="${BONNIE_VERSION:-}"   # empty = latest release
 BIN_DIR="${BONNIE_INSTALL_DIR:-}" # empty = auto-detect
-RUN_CHECKS=true
 
 usage() {
   cat <<EOF
@@ -52,7 +51,6 @@ Usage: install.sh [options]
 Options:
   --bin-dir <dir>   Directory to install bonnie into (default: ~/.local/bin)
   --version <tag>   Release tag to install, e.g. v0.7.0 (default: latest)
-  --no-checks       Skip the host checks (Landlock, provider key, Go)
   -h, --help        Show this help
 
 BONNIE supports Linux on amd64 and arm64 only.
@@ -68,7 +66,6 @@ while [ $# -gt 0 ]; do
     --version)
       [ $# -ge 2 ] || die "--version needs a value"
       VERSION="$2"; shift 2 ;;
-    --no-checks) RUN_CHECKS=false; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "Unknown option: $1 (see --help)" ;;
   esac
@@ -179,9 +176,7 @@ install_from_release() {
   success "Installed ${BIN_NAME} ${tag} → ${bin_dir}/${BIN_NAME}"
 }
 
-# ── Host checks ──────────────────────────────────────────────────────────────
-# Warnings only. The binary is installed either way; these tell the user
-# what `bonnie` needs before it will start a run.
+# ── PATH ─────────────────────────────────────────────────────────────────────
 check_path() {
   case ":${PATH}:" in
     *":$1:"*) ;;
@@ -191,41 +186,6 @@ check_path() {
       printf '\n    %sexport PATH="%s:$PATH"%s\n' "${BOLD}" "$1" "${RESET}"
       ;;
   esac
-}
-
-check_landlock() {
-  local lsm=/sys/kernel/security/lsm
-  if [ -r "$lsm" ]; then
-    if grep -qw landlock "$lsm"; then
-      success "Landlock is enabled (default sandbox is available)"
-    else
-      echo ""
-      warn "Landlock is not enabled in this kernel. The default sandbox cannot start."
-      echo "    Use a kernel 5.13+ with Landlock, or run with --sandbox docker or microsandbox."
-    fi
-  else
-    echo ""
-    warn "Could not read ${lsm}. BONNIE needs a Linux kernel 5.13+ with Landlock enabled,"
-    echo "    or --sandbox docker or microsandbox."
-  fi
-}
-
-check_provider_key() {
-  if [ -n "${ANTHROPIC_API_KEY:-}" ] || [ -n "${OPENAI_API_KEY:-}" ] || [ -n "${GEMINI_API_KEY:-}" ]; then
-    success "A provider key is set"
-  else
-    echo ""
-    warn "No provider key is set. Export one, or write it to a .env file:"
-    printf '\n    %sexport ANTHROPIC_API_KEY=sk-ant-...%s   # or OPENAI_API_KEY, or GEMINI_API_KEY\n' "${BOLD}" "${RESET}"
-  fi
-}
-
-check_go() {
-  if ! command -v go >/dev/null 2>&1; then
-    echo ""
-    warn "Go is not installed. 'bonnie init', 'dev', and 'build' need Go 1.27+ to author an agent."
-    echo "    A binary made by 'bonnie build' does not need Go."
-  fi
 }
 
 # ── Main ─────────────────────────────────────────────────────────────────────
@@ -248,11 +208,6 @@ main() {
   install_from_release "$VERSION" "$platform" "$bin_dir"
 
   check_path "$bin_dir"
-  if [ "$RUN_CHECKS" = true ]; then
-    check_landlock
-    check_provider_key
-    check_go
-  fi
 
   echo ""
   success "Done. Run '${BIN_NAME} --help' to start."

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `install.sh` installs the binary only. It no longer examines Landlock,
+  provider keys, or Go; `bonnie` reports a missing prerequisite when it
+  starts. The `--no-checks` flag is removed.
+
 ## [0.35.0] — 2026-10-26
 
 **Operator commands refresh the model database, and the terminal interfaces
