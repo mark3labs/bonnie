@@ -76,6 +76,26 @@ indefinitely**, **reachable over HTTP**. State the limits from the current
 
 ## History
 
+### `v0.35.0`, 2026-10-26 — publication verified
+
+- [x] Before tagging, `task release-check` and `task release-snapshot` pass at
+      `cc97d96`; `task check` passes at `5b4a3cf`.
+- [x] No `replace` directive is committed in framework or example modules.
+- [x] `test`, `examples`, and `lint` pass on master at tagged commit
+      `5b4a3cf1c5050682bef5c567c1251ffc3d70e2da` (CI run `40351913863`).
+- [x] The dated changelog section states the claims, the current limits, and
+      new limits for the model database refresh and mouse copy;
+      `scripts/release-notes.sh v0.35.0` extracts it.
+- [x] Annotated tag pushed; release run `40353499303` passes. Both downloaded
+      archive checksums verify. The static amd64 binary prints `bonnie 0.35.0`,
+      refuses `--sandbox none` naming alternatives, and has `update`.
+- [x] All three examples pin v0.35.0 after publication; `task examples` passes.
+
+**Version choice.** MINOR under the pre-1.0 convention: `WithUpdateCommand`
+and the `update models` command group are added, and the terminal interfaces
+gain mouse selection. No exported symbol is removed. The Kit pin moves to
+`v0.137.0`.
+
 ### `v0.34.0`, 2026-10-23 — publication verified
 
 - [x] Before tagging, `task release-check` and `task release-snapshot` pass at

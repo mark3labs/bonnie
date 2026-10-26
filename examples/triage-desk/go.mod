@@ -3,8 +3,8 @@ module triage-desk
 go 1.27.0
 
 require (
-	github.com/mark3labs/bonnie v0.34.0
-	github.com/mark3labs/kit v0.136.0
+	github.com/mark3labs/bonnie v0.35.0
+	github.com/mark3labs/kit v0.137.0
 )
 
 require (
