@@ -139,7 +139,7 @@ Tree instructions, skills, and generated tools do not automatically reach the cu
 
 ## Command configuration
 
-These scalar options replace earlier values. All five commands are enabled by
+These scalar options replace earlier values. These commands are enabled by
 default in `Serve`; they do not affect `Run`.
 
 | Exact API | Behavior |
