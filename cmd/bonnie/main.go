@@ -55,6 +55,7 @@ durable runs.
 
 Commands:
   auth     manage provider login credentials
+  update   refresh the shared model database
   serve    serve a generic agent over HTTP
   dev      run an agent tree with hot reload and the built-in TUI
   chat     interact with a running agent in a terminal
@@ -70,7 +71,7 @@ Planned:
 			return cmd.Help()
 		},
 	}
-	root.AddCommand(agentcmd.NewAuthCommand(), newServeCmd(), newRunsCmd(), newSchedulesCmd(), newSandboxCmd(), newInitCmd(), newBuildCmd(), newDevCmd(), newChatCmd(), newVersionCmd())
+	root.AddCommand(agentcmd.NewUpdateCommand(), agentcmd.NewAuthCommand(), newServeCmd(), newRunsCmd(), newSchedulesCmd(), newSandboxCmd(), newInitCmd(), newBuildCmd(), newDevCmd(), newChatCmd(), newVersionCmd())
 	return root
 }
 
