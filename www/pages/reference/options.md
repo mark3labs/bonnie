@@ -139,11 +139,12 @@ Tree instructions, skills, and generated tools do not automatically reach the cu
 
 ## Command configuration
 
-These scalar options replace earlier values. All five commands are enabled by
+These scalar options replace earlier values. These commands are enabled by
 default in `Serve`; they do not affect `Run`.
 
 | Exact API | Behavior |
 | --- | --- |
+| `WithUpdateCommand(enabled bool)` | Controls the default-enabled `update models [source]` group. Does not restrict filesystem access or shared cache reads. Disable before adding a custom `update` command with `WithCommand`. Later options win. |
 | `WithAuthCommand(enabled bool)` | Controls provider `auth login/status/logout`. Does not prevent stored credential loading. |
 | `WithChatCommand(enabled bool)` | Controls terminal `chat` against a running HTTP server. |
 | `WithRunsCommand(enabled bool)` | Controls local `runs list/show/inspect`. Does not restrict journal access. |

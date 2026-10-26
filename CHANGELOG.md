@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `bonnie update models [source]` and compiled agents refresh Kit's shared model
+  database through its public SDK. `WithUpdateCommand(false)` disables the group.
+
 - `examples/triage-desk` routes a sample support inbox with a decision model:
   keyed, journalled routing in a tool, and the `decide` tool for the model.
 - `bonnie chat`, `bonnie dev`, and `bonnie runs` select text with the mouse.

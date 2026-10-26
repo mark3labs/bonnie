@@ -45,6 +45,7 @@ type ChannelFunc func(*runtime.Runner) (Channel, error)
 type config struct {
 	commands            []func(*cobra.Command, *Agent)
 	noAuthCommand       bool
+	noUpdateCommand     bool
 	noChatCommand       bool
 	noRunsCommand       bool
 	noSchedulesCommand  bool
@@ -136,6 +137,13 @@ func WithCommand(fn func(*cobra.Command, *Agent)) Option {
 // stored credentials or remove their dependencies from the binary.
 func WithAuthCommand(enabled bool) Option {
 	return func(c *config) { c.noAuthCommand = !enabled }
+}
+
+// WithUpdateCommand controls the update command group in [Agent.Serve].
+// It is enabled by default. Disable it before adding a replacement with
+// [WithCommand]. This does not restrict filesystem access or shared cache reads.
+func WithUpdateCommand(enabled bool) Option {
+	return func(c *config) { c.noUpdateCommand = !enabled }
 }
 
 // WithChatCommand controls the chat command in [Agent.Serve]. It is enabled

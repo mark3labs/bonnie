@@ -44,7 +44,7 @@ Layout:
 | `agent/` | agent-tree scaffold and code generation |
 | `sandbox/` | tool sandboxes: local, exec, docker, landlock, microsandbox |
 | `internal/` | shared TUI, operator commands, inspector, test helpers |
-| `cmd/bonnie/` | CLI (`init`, `dev`, `chat`, `serve`, `build`, `runs`, `schedules`, `sandbox`, `auth`, `version`) |
+| `cmd/bonnie/` | CLI (`init`, `dev`, `chat`, `serve`, `build`, `runs`, `schedules`, `sandbox`, `auth`, `update`, `version`) |
 | `examples/` | `github-bot`, `slack-bot`: agent trees, each its own module (see below) |
 | `scripts/` | build and release scripts, with Go tests |
 | `www/` | documentation site and Open Graph image generator |

@@ -297,6 +297,7 @@ seed files. It serves on a host that has no Go and no BONNIE installation.
 The agent binary also includes its operator commands:
 
 ```bash
+./my-agent update models             # refresh the shared model database
 ./my-agent auth login openai          # log in with ChatGPT/Codex
 ./my-agent auth status
 ./my-agent auth logout openai
@@ -317,7 +318,7 @@ accepts `--journal` to select another local journal. Inspection works when
 the server is stopped. No command starts a server except the default action
 and `serve`.
 
-Use `WithAuthCommand(false)`, `WithChatCommand(false)`, `WithRunsCommand(false)`,
+Use `WithUpdateCommand(false)`, `WithAuthCommand(false)`, `WithChatCommand(false)`, `WithRunsCommand(false)`,
 `WithSchedulesCommand(false)`, or `WithVersionCommand(false)` in `main.go`
 to disable individual commands. These options control command availability,
 not access to stored credentials, HTTP routes, or journal files, and do not
@@ -1164,9 +1165,47 @@ implemented are in the godoc of
 [package `channel`](https://pkg.go.dev/github.com/mark3labs/bonnie/channel)
 and each adapter below it.
 
+## Model database refresh
+
+Both `bonnie update models [source]` and `./my-agent update models [source]`
+refresh Kit's shared model database. They need no server, provider key, or Kit
+executable. Rebuild an existing agent once with this Bonnie version to add the
+command; later catalog updates do not need a new binary.
+
+```sh
+bonnie update models
+bonnie update models https://example.com/models.json
+bonnie update models ./models.json
+bonnie update models embedded
+```
+
+With no source, Kit uses `KIT_MODELS_URL`, then
+`https://models.dev/api.json?type=all`. Explicit HTTP(S) URLs download a catalog;
+other sources load a local JSON file. HTTP work has a 30-second limit and honors
+earlier cancellation. `embedded` removes the cache, also when it is already
+absent. It restores the embedded catalog on the next registry load.
+
+On Linux, the shared cache is `$XDG_DATA_HOME/kit/providers.json`, defaulting to
+`~/.local/share/kit/providers.json`. Imports and resets affect subsequent loads
+by Kit and other compatible agents for that user. Restart running agents to use
+the model database: existing registries do not reload. Counts describe the
+imported catalog, including model types that are not chat models, not the merged
+registry. This command does not update binaries or restart servers.
+
+Use only trusted catalog sources. This explicit host operation is outside an
+agent run's sandbox. Cancellation or a reporting error cannot undo an update
+already committed by Kit; an output error can occur after the cache changed.
+
+`update` alone displays help without changing storage. Compiled agents enable
+the group by default. Use `WithUpdateCommand(false)` to remove it before adding
+a custom `update` group with `WithCommand`. Later options win. Disabling the
+command does not restrict filesystem access or prevent Kit from reading the
+shared cache. `Agent.Run` does not register commands.
+
 ## CLI
 
 ```
+bonnie update models [source]  Refresh the shared model database
 bonnie auth     Manage provider login credentials
 bonnie init     Scaffold an agent tree
 bonnie dev      Run an agent tree with hot reload and the built-in TUI

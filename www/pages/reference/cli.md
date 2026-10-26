@@ -111,6 +111,43 @@ flag. `bonnie chat` does not accept Iroh tickets. Pairing is programmatic;
 there is no built-in `bonnie pair` command. See [Iroh](/channels/iroh) for
 peer approval, stable keys, and the Go client.
 
+## Model database refresh
+
+Both `bonnie update models [source]` and `./my-agent update models [source]`
+refresh Kit's shared model database. They need no server, provider key, or Kit
+executable. Rebuild an existing agent once with this Bonnie version to add the
+command; later catalog updates do not need a new binary.
+
+```sh
+bonnie update models
+bonnie update models https://example.com/models.json
+bonnie update models ./models.json
+bonnie update models embedded
+```
+
+With no source, Kit uses `KIT_MODELS_URL`, then
+`https://models.dev/api.json?type=all`. Explicit HTTP(S) URLs download a catalog;
+other sources load a local JSON file. HTTP work has a 30-second limit and honors
+earlier cancellation. `embedded` removes the cache, also when it is already
+absent. It restores the embedded catalog on the next registry load.
+
+On Linux, the shared cache is `$XDG_DATA_HOME/kit/providers.json`, defaulting to
+`~/.local/share/kit/providers.json`. Imports and resets affect subsequent loads
+by Kit and other compatible agents for that user. Restart running agents to use
+the model database: existing registries do not reload. Counts describe the
+imported catalog, including model types that are not chat models, not the merged
+registry. This command does not update binaries or restart servers.
+
+Use only trusted catalog sources. This explicit host operation is outside an
+agent run's sandbox. Cancellation or a reporting error cannot undo an update
+already committed by Kit; an output error can occur after the cache changed.
+
+`update` alone displays help without changing storage. Compiled agents enable
+the group by default. Use `WithUpdateCommand(false)` to remove it before adding
+a custom `update` group with `WithCommand`. Later options win. Disabling the
+command does not restrict filesystem access or prevent Kit from reading the
+shared cache. `Agent.Run` does not register commands.
+
 ## Provider login
 
 Both the CLI and compiled agents include `auth login openai`, `auth status`, and
@@ -124,7 +161,7 @@ not check environment keys or token validity. See [Installation](/installation#p
 
 ## Compiled-agent commands
 
-By default, compiled agents include `serve`, `auth login/status/logout`, `chat`,
+By default, compiled agents include `update models [source]`, `serve`, `auth login/status/logout`, `chat`,
 `runs` (the console and its subcommands), `schedules list/show/history/trigger`, and `version`.
 With no subcommand, the binary serves the agent; explicit `serve` has the same action and flags.
 Other commands do not start a server. Help and version do not require a model
@@ -132,7 +169,7 @@ or open storage. `chat` and `schedules` use the configured HTTP address; `runs`
 uses the configured local journal and accepts `--journal`, and sends its actions
 to the configured HTTP address.
 
-Disable operator commands with `WithAuthCommand(false)`, `WithChatCommand(false)`,
+Disable operator commands with `WithUpdateCommand(false)`, `WithAuthCommand(false)`, `WithChatCommand(false)`,
 `WithRunsCommand(false)`, `WithSchedulesCommand(false)`, or `WithVersionCommand(false)`.
 This does not restrict stored credentials, files or HTTP routes, or remove
 command dependencies. Disable a built-in before registering the same name.

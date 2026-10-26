@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
 )
 
 // Deployed commands must use the agent defaults without starting its runtime.
@@ -15,7 +17,7 @@ func TestPackagedCommands(t *testing.T) {
 	t.Parallel()
 	journal := filepath.Join(t.TempDir(), "journal")
 	a := New(WithJournal(journal), WithAddr(":9090"), WithInstructions("missing.md"))
-	for _, args := range [][]string{{"auth", "--help"}, {"auth", "login", "openai", "--help"}, {"auth", "status", "--help"}, {"auth", "logout", "openai", "--help"}, {"chat", "--help"}, {"runs", "list", "--help"}, {"runs", "show", "--help"}, {"runs", "inspect", "--help"}, {"schedules", "list", "--help"}, {"schedules", "show", "--help"}, {"schedules", "history", "--help"}, {"schedules", "trigger", "--help"}, {"serve", "--help"}, {"version"}} {
+	for _, args := range [][]string{{"update", "--help"}, {"update", "models", "--help"}, {"auth", "--help"}, {"auth", "login", "openai", "--help"}, {"auth", "status", "--help"}, {"auth", "logout", "openai", "--help"}, {"chat", "--help"}, {"runs", "list", "--help"}, {"runs", "show", "--help"}, {"runs", "inspect", "--help"}, {"schedules", "list", "--help"}, {"schedules", "show", "--help"}, {"schedules", "history", "--help"}, {"schedules", "trigger", "--help"}, {"serve", "--help"}, {"version"}} {
 		cmd := a.serveCommand(flag.NewFlagSet(t.Name(), flag.ContinueOnError))
 		var out bytes.Buffer
 		cmd.SetOut(&out)
@@ -68,7 +70,7 @@ func TestExplicitServe(t *testing.T) {
 // Code options remove commands but do not affect the default serve action.
 func TestPackagedCommandsDisabled(t *testing.T) {
 	t.Parallel()
-	a := New(WithAuthCommand(false), WithChatCommand(false), WithRunsCommand(false), WithSchedulesCommand(false), WithVersionCommand(false))
+	a := New(WithUpdateCommand(false), WithAuthCommand(false), WithChatCommand(false), WithRunsCommand(false), WithSchedulesCommand(false), WithVersionCommand(false))
 	cmd := a.serveCommand(flag.NewFlagSet(t.Name(), flag.ContinueOnError))
 	commands := cmd.Commands()
 	if len(commands) != 1 || commands[0].Name() != "serve" || cmd.RunE == nil {
@@ -110,6 +112,40 @@ func TestPackagedAuthCommandOption(t *testing.T) {
 	}
 }
 
+// The update option must remove only update and permit a later option to enable it.
+func TestPackagedUpdateCommandOption(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		opts []Option
+		want bool
+	}{
+		{"default", nil, true},
+		{"disabled", []Option{WithUpdateCommand(false)}, false},
+		{"enabled again", []Option{WithUpdateCommand(false), WithUpdateCommand(true)}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cmd := New(tc.opts...).serveCommand(flag.NewFlagSet(t.Name(), flag.ContinueOnError))
+			found := false
+			for _, child := range cmd.Commands() {
+				if child.Name() == "update" {
+					found = true
+				}
+			}
+			if found != tc.want {
+				t.Fatalf("update present = %v, want %v", found, tc.want)
+			}
+			for _, name := range []string{"auth", "chat", "runs", "schedules", "version", "serve"} {
+				child, _, err := cmd.Find([]string{name})
+				if err != nil || child.Name() != name {
+					t.Fatalf("%s command changed: %v", name, err)
+				}
+			}
+		})
+	}
+}
+
 // Local inspection works without agent instructions or model credentials.
 func TestPackagedRunsUsesJournal(t *testing.T) {
 	t.Parallel()
@@ -127,5 +163,43 @@ func TestPackagedRunsUsesJournal(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(journal, "journal.db")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A host can replace the group after disabling the built-in.
+func TestPackagedUpdateReplacement(t *testing.T) {
+	t.Parallel()
+	replacement := &cobra.Command{Use: "update", Short: "custom"}
+	a := New(WithUpdateCommand(false), WithCommand(func(root *cobra.Command, _ *Agent) { root.AddCommand(replacement) }))
+	root := a.serveCommand(flag.NewFlagSet(t.Name(), flag.ContinueOnError))
+	got, _, err := root.Find([]string{"update"})
+	if err != nil || got != replacement {
+		t.Fatalf("replacement: %v", err)
+	}
+}
+
+// Updating shared data must not prepare agent resources.
+func TestPackagedUpdateSDK(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	journal := filepath.Join(t.TempDir(), "unused-journal")
+	file := filepath.Join(t.TempDir(), "models.json")
+	if err := os.WriteFile(file, []byte(`{"bonnie-packaged-test":{"models":{"m":{"id":"m","name":"Fixture"}}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a := New(WithInstructions("missing.md"), WithJournal(journal), WithAgentFactory(stubFactory))
+	for _, source := range []string{file, "embedded"} {
+		cmd := a.serveCommand(flag.NewFlagSet(t.Name(), flag.ContinueOnError))
+		var out bytes.Buffer
+		cmd.SetOut(&out)
+		cmd.SetArgs([]string{"update", "models", source})
+		if err := cmd.ExecuteContext(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(out.String(), "Restart running agents") {
+			t.Fatal(out.String())
+		}
+	}
+	if _, err := os.Stat(journal); !os.IsNotExist(err) {
+		t.Fatalf("journal opened: %v", err)
 	}
 }
