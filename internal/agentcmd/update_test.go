@@ -13,6 +13,7 @@ import (
 	kit "github.com/mark3labs/kit/pkg/kit"
 )
 
+// TestUpdateSources checks exact source and caller-context forwarding.
 func TestUpdateSources(t *testing.T) {
 	t.Parallel()
 	for _, source := range []string{"", "https://example.com/a?token=secret", "a path/models.json", "embedded"} {
@@ -44,6 +45,7 @@ func TestUpdateSources(t *testing.T) {
 	}
 }
 
+// TestUpdateResults checks status reporting and error identity without I/O.
 func TestUpdateResults(t *testing.T) {
 	t.Parallel()
 	failure := errors.New("failure")
@@ -113,6 +115,7 @@ type updateFailWriter struct{ err error }
 
 func (w updateFailWriter) Write([]byte) (int, error) { return 0, w.err }
 
+// TestUpdateNoAction guards help and validation against update side effects.
 func TestUpdateNoAction(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {

@@ -14,6 +14,7 @@ func NewUpdateCommand() *cobra.Command {
 	return newUpdateCommand(kit.UpdateModels)
 }
 
+// newUpdateCommand keeps presentation tests independent of storage and transport.
 func newUpdateCommand(update func(context.Context, kit.UpdateModelsOptions) (kit.UpdateModelsResult, error)) *cobra.Command {
 	parent := &cobra.Command{
 		Use: "update", Short: "Update shared agent data", Args: cobra.NoArgs,

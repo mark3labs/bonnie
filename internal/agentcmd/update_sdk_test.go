@@ -30,6 +30,7 @@ func TestUpdateLookupProcess(t *testing.T) {
 	}
 }
 
+// TestUpdatePublicSDK checks transport outcomes and catalog use in fresh processes.
 func TestUpdatePublicSDK(t *testing.T) {
 	// Environment changes and SDK cache operations must remain serial.
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
