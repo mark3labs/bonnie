@@ -17,6 +17,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `fantasy-in-tests-only` is now `no-fantasy`, which denies the import in
   every file. The earlier statement that Kit does not alias the types of
   `LanguageModel` was wrong for this pin.
+- **The Nix package installs the newest release, not `master`.** `flake.nix`
+  pins a `bonnie-release` input to a tag, and `nix/bonnie.nix` builds that
+  source with its version (it reported `0.7.0` before). The installed `msb`
+  comes from the same release. The dev shell still uses the working tree. A
+  new `nix-release-pin` job in `release.yml` moves the pin, `flake.lock`, and
+  `vendorHash` after each tag, with `scripts/bump-flake-release-pin.sh` and
+  `scripts/update-flake-vendor-hash.sh`. The Nix build no longer runs the
+  tests: CI tested the release, and the Nix sandbox has no network for the
+  tests that build an agent module.
 
 ## [0.36.0] — 2026-10-28
 

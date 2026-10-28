@@ -1,51 +1,40 @@
-# The BONNIE CLI.
+# The BONNIE CLI, built from the release that flake.nix pins.
 {
   lib,
   buildGoModule,
   makeWrapper,
   microsandbox,
+  # The source tree of the pinned release (inputs.bonnie-release), and its
+  # version without the "v".
+  src,
+  version,
 }:
 
-buildGoModule (finalAttrs: {
+buildGoModule {
   pname = "bonnie";
-  version = "0.7.0";
+  inherit src version;
 
-  src = lib.cleanSourceWith {
-    src = ../.;
-    filter =
-      path: type:
-      let
-        base = baseNameOf path;
-      in
-      !(builtins.elem base [
-        ".github"
-        ".kit"
-        ".bonnie"
-        "docs"
-        "examples"
-        "result"
-      ]);
-  };
-
-  # Refresh with:
-  #   nix build .#bonnie.goModules --rebuild
-  # or set this to lib.fakeHash and read the hash Nix prints.
+  # Fetch the modules in a fixed-output derivation and vendor them for the
+  # build. The hash pins the module tree of the pinned release, so it has to
+  # change with every release that ships different dependencies. The
+  # `nix-release-pin` job refreshes it after each release; refresh it by hand
+  # with:
+  #
+  #   scripts/update-flake-vendor-hash.sh
   vendorHash = "sha256-i0EyO1XBpUKCmBaHI6nl3nnctNHUFz69HL6WZpXecZ8=";
 
   subPackages = [ "cmd/bonnie" ];
 
-  # These tests build a separate agent module. Its dependencies are not in
-  # this package's vendor output, and the Nix build has no network access.
-  checkFlags = [
-    "-skip=^(TestDevRestartCompletesParkedRun|TestBuildOutputServesEmbeddedInstructions|TestDevLoopCancellationReapsChild)$"
-  ];
+  # CI tested this release before it was tagged. The Nix sandbox also has no
+  # network, and several cmd/bonnie tests build a separate agent module.
+  doCheck = false;
 
   env.CGO_ENABLED = 0;
 
   ldflags = [
     "-s"
     "-w"
-    "-X main.version=${finalAttrs.version}"
+    "-X main.version=${version}"
   ];
 
   nativeBuildInputs = [ makeWrapper ];
@@ -64,4 +53,4 @@ buildGoModule (finalAttrs: {
     mainProgram = "bonnie";
     platforms = lib.platforms.linux;
   };
-})
+}

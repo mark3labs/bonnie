@@ -1,5 +1,22 @@
 {
   "nodes": {
+    "bonnie-release": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1793195803,
+        "narHash": "sha256-Ux4WPw+FNyNR7aS3GT6YtKOwzkHJEZRLIw8PDQKRAGo=",
+        "owner": "mark3labs",
+        "repo": "bonnie",
+        "rev": "2fa36683276a00ee16fd01bea7cdd47e50cd4c36",
+        "type": "github"
+      },
+      "original": {
+        "owner": "mark3labs",
+        "ref": "v0.36.0",
+        "repo": "bonnie",
+        "type": "github"
+      }
+    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1793110635,
@@ -18,6 +35,7 @@
     },
     "root": {
       "inputs": {
+        "bonnie-release": "bonnie-release",
         "nixpkgs": "nixpkgs"
       }
     }

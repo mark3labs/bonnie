@@ -30,6 +30,13 @@ indefinitely**, **reachable over HTTP**. State the limits from the current
    this cannot happen before the tag is on the proxy.
    `TestExamplesGoModIsAUserGoMod` allows a pin one release behind for this
    window, and fails at the next release if the step was forgotten.
+7. Check that the `nix-release-pin` job pushed `chore(nix): pin flake to
+   vX.Y.Z [skip ci]` to `master`. It moves the `bonnie-release` input in
+   `flake.nix`, `flake.lock`, and `vendorHash` in `nix/bonnie.nix`, so
+   `nix profile add github:mark3labs/bonnie` installs the new release. The job
+   may fail without turning the release red. Then do it by hand:
+   `scripts/bump-flake-release-pin.sh vX.Y.Z`, `nix flake lock`,
+   `scripts/update-flake-vendor-hash.sh`, and commit the three files.
 
 ### Every box must be confirmed
 
@@ -42,6 +49,8 @@ indefinitely**, **reachable over HTTP**. State the limits from the current
 - [ ] Tag pushed and artifacts published
 - [ ] A downloaded binary prints the injected version
 - [ ] The examples are pinned to the new tag and `task examples` passes
+- [ ] The flake pins the new tag, and `nix run github:mark3labs/bonnie --
+      version` prints it
 
 ## Watch for
 
