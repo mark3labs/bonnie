@@ -42,7 +42,7 @@ It needs a GitHub App and a public URL. See
 ## self-contained-agent
 
 The customer FAQ assistant of a computer repair shop, as an agent that needs
-nothing outside its own process: Qwen3-1.7B, run on the CPU by Kronk, answers
+nothing outside its own process: LFM2.5-2.6B, run on the CPU by Kronk, answers
 from `context/faq.md`. It is the reference for a custom model provider, and it
 needs no provider key and no GPU.
 

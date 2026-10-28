@@ -10,8 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `examples/self-contained-agent`: the customer FAQ assistant of a computer
-  repair shop. Its model, Qwen3-1.7B, runs on the CPU in the agent's process
-  with Kronk. It registers fantasy's Kronk provider with Kit as a custom
+  repair shop. Its model, LiquidAI's LFM2.5-2.6B, runs on the CPU in the
+  agent's process with Kronk. It registers fantasy's Kronk provider with Kit as a custom
   provider. It needs no provider key and no GPU.
 
 ### Changed
