@@ -75,7 +75,10 @@ func TestExplicitSuspensionAndStaleAnswer(t *testing.T) {
 	}
 	defer func() { _ = c.Shutdown(context.Background()) }()
 	cli := client.New("http://logical", client.WithHTTPClient(&http.Client{Transport: transport(t, b, "suspend")}), client.WithBearerToken("operator"))
-	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	// The first real Kit in a process costs about two seconds under -race, and
+	// more when the full suite loads the machine. A 3s budget failed Start with
+	// "context deadline exceeded" in go test ./...; this bound only stops a hang.
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	run, err := cli.Start(ctx, "question", "deploy")
 	if err != nil {
