@@ -19,7 +19,7 @@ Build an agent once. Keep its conversation after a process stops. Wait days for 
 
 ## Start in five minutes
 
-First, [download and verify a release binary](/installation#install-a-release-binary). Installation also has an optional download-and-review installer path. These commands assume the CLI is installed and on `PATH`.
+First, follow the [manual release installation](/installation#install-a-release-binary). Installation also has an optional download-and-review installer path. The commands below assume the CLI is installed and on `PATH`.
 
 ```bash
 export ANTHROPIC_API_KEY=your-provider-key

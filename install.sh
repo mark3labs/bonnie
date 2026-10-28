@@ -6,9 +6,9 @@
 #
 # Usage:
 #   Download: curl -fsSLO https://raw.githubusercontent.com/mark3labs/bonnie/master/install.sh
-#   Review with less install.sh or an editor. Execute only after review:
-#   bash install.sh [--bin-dir <dir>] [--version <tag>]
-#   bash install.sh --version v0.35.0 --bin-dir "$HOME/.local/bin"
+#   Review with less install.sh or an editor before execution.
+#   Execute only after review: bash install.sh [--bin-dir <dir>] [--version <tag>]
+#   Example: bash install.sh --version v0.35.0 --bin-dir "$HOME/.local/bin"
 #   The URL tracks master; --version selects the binary, not the script revision.
 #
 # Environment:
