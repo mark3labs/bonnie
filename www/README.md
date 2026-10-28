@@ -72,6 +72,31 @@ Pull requests build and validate the site without deploying it. Deployments
 need only the built-in `GITHUB_TOKEN`; no personal token or DNS credential is
 needed in the workflow.
 
+## Safe Browsing owner follow-up
+
+[Issue #61](https://github.com/mark3labs/bonnie/issues/61) reports a Google Safe
+Browsing warning. The install instructions now put manual release download and
+SHA-256 verification first, with separate script download, review, and execution
+steps. Google has not confirmed the cause of the warning. These changes do not
+prove safety or guarantee removal of the warning.
+
+After merge and the normal Pages deployment, a maintainer must:
+
+- [ ] Inspect `/`, `/installation`, and `/installation/` on the published site.
+      Confirm that the install instructions are current and that code highlighting
+      keeps script download, review, and execution in separate blocks.
+- [ ] Check generated search content, `llms.txt`, and `llms-full.txt` for stale
+      install instructions.
+- [ ] Have a verified site owner request review in Search Console under
+      **Security Issues**. Record the issue link and summarize the instruction
+      changes without claiming a confirmed classifier cause.
+- [ ] Check the public Safe Browsing status after review and record the result
+      in the issue. Do not store account data or screenshots with private Search
+      Console information.
+
+Deployment and the Search Console review are owner actions, not part of the
+local documentation build.
+
 ## Connect go-bonnie.dev
 
 Configure the domain on the repository that publishes this site, not on Kit.
