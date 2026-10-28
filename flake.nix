@@ -113,6 +113,13 @@
             env = {
               # Use the Go from this shell. Never download a toolchain.
               GOTOOLCHAIN = "local";
+              # Pure-Go FFI packages (jupiterrider/ffi, purego) dlopen these at
+              # runtime; Nix-built binaries only search RUNPATH and LD_LIBRARY_PATH.
+              # On Linux, examples/self-contained-agent also loads Kronk's
+              # prebuilt llama.cpp, which links libstdc++.
+              LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath (
+                [ pkgs.libffi ] ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.stdenv.cc.cc.lib ]
+              );
             };
 
             shellHook = ''

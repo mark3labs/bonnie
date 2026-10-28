@@ -64,8 +64,10 @@ func LinkToCheckout(t *testing.T, root string) {
 //
 // GOFLAGS=-mod=mod lets the build write the tree's go.sum. A scaffolded go.mod
 // carries no sums, and the default readonly mode refuses rather than add them.
-// Every module it needs is already in the cache, because this repository
-// requires the same ones, so no network call is made.
+// A scaffolded tree needs only modules this repository requires, so they are
+// already in the cache and no network call is made. An example tree can pin a
+// module that BONNIE does not require (examples/self-contained-agent pins
+// Kronk); the first build on a machine downloads that pinned version once.
 //
 // -ldflags=-w omits DWARF from a binary a test links. Go never caches a link,
 // so each test that builds a binary pays for the link in full, and for a tree

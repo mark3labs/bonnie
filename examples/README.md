@@ -39,6 +39,21 @@ bonnie dev --addr 127.0.0.1:8081 --tui=false
 It needs a GitHub App and a public URL. See
 [github-bot/README.md](github-bot/README.md) for how to make the App by hand.
 
+## self-contained-agent
+
+The customer FAQ assistant of a computer repair shop, as an agent that needs
+nothing outside its own process: Qwen3-1.7B, run on the CPU by Kronk, answers
+from `context/faq.md`. It is the reference for a custom model provider, and it
+needs no provider key and no GPU.
+
+```bash
+cd examples/self-contained-agent
+bonnie dev
+```
+
+The first turn downloads the model (1 GB). It needs libffi on the host.
+See [self-contained-agent/README.md](self-contained-agent/README.md).
+
 ## slack-bot
 
 An agent that lives in Slack: mention it in a channel, reply in a thread it

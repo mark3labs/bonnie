@@ -219,6 +219,12 @@ func TestExamplesDocumentTheCLI(t *testing.T) {
 // module `go build ./...` cannot see. Only bonnie is redirected; kit and
 // the rest resolve through BONNIE's own go.mod, from the module cache.
 //
+// The new go.mod keeps the tree's other direct requirements (see
+// [treeRequires]). A tree can import a module that BONNIE does not require
+// (self-contained-agent imports Kronk). Without its pin, -mod=mod resolves that
+// module at its latest version from the proxy, so the test would build a
+// version that the tree does not use.
+//
 // It compiles and does not link (see [treetest.Compile]). The link cost about
 // 4 s per tree and proves nothing that the compile does not: the CI
 // `examples` job links each tree with `bonnie build`, as a user does.
@@ -233,6 +239,9 @@ func TestExamplesBuildAgainstThisCheckout(t *testing.T) {
 			dst := filepath.Join(t.TempDir(), name)
 			copyTree(t, name, dst)
 			gomod := "module " + name + "\n\ngo 1.27.0\n"
+			if reqs := treeRequires(t, name); len(reqs) > 0 {
+				gomod += "\nrequire (\n\t" + strings.Join(reqs, "\n\t") + "\n)\n"
+			}
 			if err := os.WriteFile(filepath.Join(dst, "go.mod"), []byte(gomod), 0o644); err != nil {
 				t.Fatal(err)
 			}
@@ -249,6 +258,43 @@ func TestExamplesBuildAgainstThisCheckout(t *testing.T) {
 			}
 		})
 	}
+}
+
+// treeRequires returns the direct requirements in an example's go.mod, as
+// "path version" lines, without bonnie: [treetest.LinkToCheckout] adds bonnie
+// and redirects it to this checkout. An "// indirect" requirement is left
+// out; the direct ones and BONNIE's go.mod select the rest.
+func treeRequires(t *testing.T, name string) []string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(name, "go.mod"))
+	if err != nil {
+		t.Fatalf("examples/%s: %v", name, err)
+	}
+	// One requirement: on its own "require" line, or a line in a block.
+	line := regexp.MustCompile(`^(?:require\s+)?(\S+)\s+(v\S+)\s*$`)
+	var out []string
+	inBlock := false
+	for l := range strings.Lines(string(raw)) {
+		l = strings.TrimSpace(l)
+		switch {
+		case strings.HasPrefix(l, "require ("):
+			inBlock = true
+			continue
+		case inBlock && l == ")":
+			inBlock = false
+			continue
+		case !inBlock && !strings.HasPrefix(l, "require "):
+			continue
+		case strings.Contains(l, "// indirect"):
+			continue
+		}
+		m := line.FindStringSubmatch(l)
+		if m == nil || m[1] == "github.com/mark3labs/bonnie" {
+			continue
+		}
+		out = append(out, m[1]+" "+m[2])
+	}
+	return out
 }
 
 // copyTree copies an example's authored files, without go.mod and go.sum
