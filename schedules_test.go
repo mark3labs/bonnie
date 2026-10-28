@@ -270,7 +270,9 @@ func TestScheduleSlackDeliveryUsesThread(t *testing.T) {
 		t.Fatalf("Slack scheduled posts = %v, want neutral root and reply in its thread", got)
 	}
 	cancel()
-	<-done
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
 }
 
 func waitScheduleHTTP(t *testing.T, c *http.Client, base string) {

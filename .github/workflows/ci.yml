@@ -78,4 +78,4 @@ jobs:
           # golangci-lint is lower than the targeted Go version". v2.1.0 is
           # built with go1.24 against a go.mod that asks for 1.27, so it could
           # never run. Raise this pin whenever the go.mod version moves.
-          version: v2.14.0
+          version: v2.15.0

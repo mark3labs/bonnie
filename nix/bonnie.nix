@@ -30,7 +30,7 @@ buildGoModule (finalAttrs: {
   # Refresh with:
   #   nix build .#bonnie.goModules --rebuild
   # or set this to lib.fakeHash and read the hash Nix prints.
-  vendorHash = "sha256-9QhrTTa46y2XSCn+BK2BhG9OKd6QFSntqhSbXw6GY+Q=";
+  vendorHash = "sha256-i0EyO1XBpUKCmBaHI6nl3nnctNHUFz69HL6WZpXecZ8=";
 
   subPackages = [ "cmd/bonnie" ];
 

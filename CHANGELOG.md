@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `install.sh` installs the binary only. It no longer examines Landlock,
   provider keys, or Go; `bonnie` reports a missing prerequisite when it
   starts. The `--no-checks` flag is removed.
+- The Kit pin is `v0.139.0`. Kit `v0.139.0` and fantasy `v0.45.5` need
+  Go 1.27.2, thus `go.mod` now asks for `go 1.27.2`. Other dependencies are
+  at their newest release. templ stays at `v0.3.1070`, because
+  `shadcn-templ` v2.0.0-beta.15 does not compile with templ `v0.3.1100`.
 
 ## [0.35.0] — 2026-10-26
 

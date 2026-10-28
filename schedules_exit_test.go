@@ -52,7 +52,6 @@ func TestScheduleRunReconcileErrorDoesNotDeadlock(t *testing.T) {
 		}
 	case <-time.After(shutdown):
 		cancel()
-		<-done
-		t.Fatal("Run did not return within the shutdown timeout")
+		t.Fatalf("Run did not return within the shutdown timeout; after cancel it returned %v", <-done)
 	}
 }

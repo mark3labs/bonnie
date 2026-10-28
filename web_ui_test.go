@@ -104,7 +104,10 @@ func TestWebLiveCleanShutdown(t *testing.T) {
 		cancel()
 		if !stopped {
 			select {
-			case <-done:
+			case err := <-done:
+				if err != nil {
+					t.Errorf("agent shutdown: %v", err)
+				}
 			case <-time.After(10 * time.Second):
 				t.Error("agent did not stop")
 			}

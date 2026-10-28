@@ -58,7 +58,10 @@ func serveForTest(t *testing.T, opts ...Option) (string, string) {
 		http.DefaultClient.CloseIdleConnections()
 		cancel()
 		select {
-		case <-done:
+		case err := <-done:
+			if err != nil {
+				t.Errorf("agent shutdown: %v", err)
+			}
 		case <-time.After(10 * time.Second):
 			t.Error("the agent did not stop")
 		}
