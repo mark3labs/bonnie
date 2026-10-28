@@ -69,24 +69,44 @@ As a library:
 go get github.com/mark3labs/bonnie
 ```
 
-As a CLI, with the install script. It downloads the release binary for your
-platform, verifies its SHA-256 checksum, and installs it. The default
-directory is `~/.local/bin`:
+As a CLI, download a Linux amd64 or arm64 archive and its SHA-256 checksum
+file from the same [GitHub release](https://github.com/mark3labs/bonnie/releases).
+Follow [Installation](https://go-bonnie.dev/installation#install-a-release-binary)
+for the full download, verification, and installation procedure. Verify before
+extracting or executing; install only `bonnie`. Checksums show agreement with
+the published manifest, not an independent publisher signature or proof of safety.
+
+Alternatively, download and review the
+[installer source](https://github.com/mark3labs/bonnie/blob/master/install.sh).
+It downloads a release and refuses a binary whose checksum it cannot verify.
+It selects the first existing writable directory from `~/.local/bin`, `~/bin`,
+and `/usr/local/bin`; otherwise, it creates `~/.local/bin`. It does not configure
+Go, provider credentials, or sandbox prerequisites.
+
+Download the script (this URL tracks `master`):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mark3labs/bonnie/master/install.sh | bash
+curl -fsSLO https://raw.githubusercontent.com/mark3labs/bonnie/master/install.sh
 ```
 
-The script refuses a binary that it cannot verify. To pin a release or to
-choose the directory, give the options after `bash -s --`:
+Review it with `less` or an editor:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mark3labs/bonnie/master/install.sh \
-  | bash -s -- --version v0.7.0 --bin-dir /usr/local/bin
+less install.sh
 ```
 
-The script also tells you when the host has no Landlock, no provider key, or
-no Go. It does not change the host for these.
+Execute only after review:
+
+```bash
+bash install.sh
+```
+
+To select a binary release and destination instead (`--version` does not pin
+the script revision):
+
+```bash
+bash install.sh --version v0.35.0 --bin-dir "$HOME/.local/bin"
+```
 
 As a CLI, from source:
 

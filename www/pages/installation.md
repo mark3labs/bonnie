@@ -17,20 +17,70 @@ macOS and Windows are not supported BONNIE hosts. A compiled agent does not need
 
 ## Install a release binary
 
-The installer downloads the platform binary, verifies its SHA-256 checksum, and installs it in `~/.local/bin` by default:
+Download a Linux archive and its checksum file from the same [GitHub release](https://github.com/mark3labs/bonnie/releases). Verify the archive before you extract or execute it. Install only the `bonnie` executable. A checksum verifies agreement with the published manifest. It is not an independent publisher signature or proof of safety.
+
+This Bash example uses release `v0.35.0` for Linux amd64. Set `arch=arm64` for Linux arm64. To use another published tag, select it from Releases and change `version`; the archive and checksum file must use the same version.
+
+Required tools: `bash`, `curl`, `sha256sum`, `awk`, `tar`, `install`, and `mktemp`, plus the standard `mkdir` and `rm` commands.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mark3labs/bonnie/master/install.sh | bash
+(
+  set -eu
+  version=0.35.0
+  arch=amd64
+  archive="bonnie_${version}_linux_${arch}.tar.gz"
+  checksums="bonnie_${version}_checksums.txt"
+  base="https://github.com/mark3labs/bonnie/releases/download/v${version}"
+  work=$(mktemp -d)
+  trap 'rm -rf "$work"' EXIT
+  cd "$work"
+
+  curl -fsSLO "${base}/${archive}"
+  curl -fsSLO "${base}/${checksums}"
+  awk -v archive="$archive" '
+    $2 == archive { count++; entry = $0 }
+    END {
+      if (count != 1) exit 1
+      print entry
+    }
+  ' "$checksums" > selected-checksum.txt
+  sha256sum --check selected-checksum.txt
+
+  tar -xzf "$archive" bonnie
+  mkdir -p "$HOME/.local/bin"
+  install -m 0755 bonnie "$HOME/.local/bin/bonnie"
+)
 ```
 
-Ensure `~/.local/bin` is in `PATH`. To choose a release and destination:
+Ensure `$HOME/.local/bin` is in `PATH`, then run `bonnie version`.
+
+### Optional: download and review the installer
+
+The [installer source](https://github.com/mark3labs/bonnie/blob/master/install.sh) downloads a release archive and refuses to install a binary whose checksum it cannot verify. It selects the first existing writable directory from `~/.local/bin`, `~/bin`, and `/usr/local/bin`; otherwise, it creates `~/.local/bin`. It does not configure Go, credentials, or sandbox prerequisites.
+
+Download the script to a local file. This URL tracks `master`; `--version` selects the binary release, not the script revision.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mark3labs/bonnie/master/install.sh \
-  | bash -s -- --version v0.17.0 --bin-dir "$HOME/.local/bin"
+curl -fsSLO https://raw.githubusercontent.com/mark3labs/bonnie/master/install.sh
 ```
 
-Choose a tag from [Releases](https://github.com/mark3labs/bonnie/releases). Review the script before execution if your installation policy requires it. The installer reports missing Go, provider keys, or Landlock support; it does not configure the host for you.
+Review the file with `less` or an editor:
+
+```bash
+less install.sh
+```
+
+Execute it only after review:
+
+```bash
+bash install.sh
+```
+
+To select a release and destination instead:
+
+```bash
+bash install.sh --version v0.35.0 --bin-dir "$HOME/.local/bin"
+```
 
 ## Install from source
 

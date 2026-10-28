@@ -1,9 +1,9 @@
 package scripts_test
 
-// These tests guard install.sh at the repository root. A user runs it as
-// `curl ... | bash`, so a mistake reaches a user's machine before anyone
-// sees it. The tests serve a fake release over HTTP and point the script at
-// it with BONNIE_RELEASES_URL, so no test touches GitHub.
+// These tests guard install.sh at the repository root. A user downloads and
+// reviews the script before running the local file with Bash. The tests serve
+// a fake release over HTTP and point the script at it with BONNIE_RELEASES_URL,
+// so no test touches GitHub.
 
 import (
 	"archive/tar"

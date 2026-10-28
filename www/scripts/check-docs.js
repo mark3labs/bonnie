@@ -10,7 +10,31 @@ function files(dir) {
     return entry.isDirectory() ? files(path) : [path];
   });
 }
+// This guard covers documentation examples, not general shell syntax.
+function hasRemoteShellPipeline(text) {
+  const normalized = text.replace(/\\\r?\n\s*(?:#\s*)?/g, " ");
+  return /\b(?:curl|wget)\b[^\n|]*\|\s*(?:ba)?sh\b/.test(normalized);
+}
+
+for (const text of [
+  "curl -fsSL https://example.com/install.sh | bash",
+  "curl -fsSL https://example.com/install.sh \\\n  | bash -s -- --version v0.35.0",
+  "wget -qO- https://example.com/install.sh | sh -s --",
+  "wget -qO- https://example.com/install.sh \\\n  | bash",
+]) assert(hasRemoteShellPipeline(text), `Missed remote shell pipeline: ${text}`);
+for (const text of [
+  "curl -fsSLO https://example.com/install.sh\nless install.sh\nbash install.sh",
+  "wget https://example.com/install.sh\nbash install.sh",
+  "curl -s localhost:8080/bonnie/v1/runs -d '{}'",
+]) assert(!hasRemoteShellPipeline(text), `False remote shell pipeline: ${text}`);
+
 const pages = files("pages").filter((path) => path.endsWith(".md"));
+for (const path of [...pages, "../README.md", "../install.sh"]) {
+  const text = readFileSync(path, "utf8");
+  // Limit the installer scan to its comment preamble, not runtime code.
+  const examples = path === "../install.sh" ? text.split(/^set -/m)[0] : text;
+  assert(!hasRemoteShellPipeline(examples), `Remote download piped to shell: ${path}`);
+}
 const ids = new Set(pages.map((path) => relative("pages", path).replace(/\.md$/, "")));
 const navigation = config.navigation.flatMap((group) => group.pages);
 assert.equal(new Set(navigation).size, navigation.length, "Duplicate navigation page");

@@ -19,8 +19,9 @@ Build an agent once. Keep its conversation after a process stops. Wait days for 
 
 ## Start in five minutes
 
+First, [download and verify a release binary](/installation#install-a-release-binary). Installation also has an optional download-and-review installer path. These commands assume the CLI is installed and on `PATH`.
+
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mark3labs/bonnie/master/install.sh | bash
 export ANTHROPIC_API_KEY=your-provider-key
 bonnie init my-agent --model anthropic/claude-sonnet-4-5
 cd my-agent
