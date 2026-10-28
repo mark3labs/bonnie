@@ -113,6 +113,30 @@ func TestTranscriptWrapsToTheWidth(t *testing.T) {
 	}
 }
 
+// TestTranscriptWrapsReasoningAndQuestions: reasoning and question entries
+// had a MaxWidth(100) style, which truncated each line past 100 cells. The
+// viewport must wrap them as it wraps assistant text, and keep every word.
+func TestTranscriptWrapsReasoningAndQuestions(t *testing.T) {
+	t.Parallel()
+	for _, kind := range []entryKind{kindReasoning, kindQuestion} {
+		m := newTestModel(&fakeClient{})
+		next, _ := m.Update(tea.WindowSizeMsg{Width: 200, Height: 30})
+		m = next.(Model)
+		m.commit(kind, strings.Repeat("word ", 100))
+		m.syncViewport()
+		words := 0
+		for _, row := range m.rows.Rows {
+			if w := ansi.StringWidth(row); w > 200 {
+				t.Errorf("kind %d: row is %d cells wide; want at most 200", kind, w)
+			}
+			words += strings.Count(row, "word")
+		}
+		if words != 100 {
+			t.Errorf("kind %d: wrapped transcript holds %d of 100 words", kind, words)
+		}
+	}
+}
+
 // TestFinishAssistantInvalidatesCache: the durable final response replaces
 // the streamed draft, so any cached render of the draft must go.
 func TestFinishAssistantInvalidatesCache(t *testing.T) {

@@ -4,6 +4,11 @@ import "charm.land/lipgloss/v2"
 
 // styles holds the lipgloss styles for the TUI. Kept in one place so the
 // whole surface is coherent and easy to restyle.
+//
+// A transcript style must not set MaxWidth: MaxWidth truncates, and the
+// viewport already wraps the whole transcript to the terminal width (see
+// [Model.syncViewport]). A cap of 100 cells cut off each long reasoning and
+// question line.
 var styles = struct {
 	header         lipgloss.Style
 	user           lipgloss.Style
@@ -22,13 +27,13 @@ var styles = struct {
 }{
 	header:         lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("205")).MaxWidth(100),
 	user:           lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true),
-	question:       lipgloss.NewStyle().Foreground(lipgloss.Color("227")).Bold(true).MaxWidth(100),
+	question:       lipgloss.NewStyle().Foreground(lipgloss.Color("227")).Bold(true),
 	toolMarker:     lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Bold(true),
 	toolName:       lipgloss.NewStyle().Foreground(lipgloss.Color("81")).Bold(true),
 	toolArgs:       lipgloss.NewStyle().Foreground(lipgloss.Color("250")),
 	toolResultMark: lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Bold(true),
 	toolResult:     lipgloss.NewStyle().Foreground(lipgloss.Color("248")),
-	reasoning:      lipgloss.NewStyle().Foreground(lipgloss.Color("243")).Italic(true).Faint(true).MaxWidth(100),
+	reasoning:      lipgloss.NewStyle().Foreground(lipgloss.Color("243")).Italic(true).Faint(true),
 	status:         lipgloss.NewStyle().Foreground(lipgloss.Color("247")).Faint(true),
 	err:            lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true),
 	spinner:        lipgloss.NewStyle().Foreground(lipgloss.Color("205")),

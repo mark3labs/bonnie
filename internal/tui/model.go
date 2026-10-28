@@ -875,7 +875,7 @@ func (m *Model) appendAssistant(chunk string) {
 
 // appendReasoning streams a reasoning chunk into a dim entry.
 func (m *Model) appendReasoning(chunk string) {
-	// Reasoning is shown collapsed as a single dim line; fold chunks.
+	// Fold chunks into one dim entry; the viewport wraps it to the width.
 	if len(m.entries) > 0 && m.entries[len(m.entries)-1].kind == kindReasoning {
 		m.entries[len(m.entries)-1].text += chunk
 	} else {
