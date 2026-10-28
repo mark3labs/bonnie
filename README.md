@@ -69,24 +69,46 @@ As a library:
 go get github.com/mark3labs/bonnie
 ```
 
-As a CLI, with the install script. It downloads the release binary for your
-platform, verifies its SHA-256 checksum, and installs it. The default
-directory is `~/.local/bin`:
+As a CLI, download the Linux amd64 or arm64 archive and checksum file from
+[Releases](https://github.com/mark3labs/bonnie/releases). Verify SHA-256 before
+extracting or executing the binary. Follow the full
+[manual installation procedure](https://go-bonnie.dev/installation#install-a-release-binary).
+A checksum confirms agreement with the published manifest, not an independent
+publisher signature or proof of safety.
+
+Alternatively, download and review the
+[installer source](https://github.com/mark3labs/bonnie/blob/master/install.sh).
+It downloads the release binary and refuses one whose checksum it cannot verify.
+It selects the first existing writable directory from `~/.local/bin`, `~/bin`,
+and `/usr/local/bin`, or creates `~/.local/bin` if none qualifies.
+
+Download the script:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mark3labs/bonnie/master/install.sh | bash
+curl -fsSLO https://raw.githubusercontent.com/mark3labs/bonnie/master/install.sh
 ```
 
-The script refuses a binary that it cannot verify. To pin a release or to
-choose the directory, give the options after `bash -s --`:
+Inspect it with `less` or an editor:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/mark3labs/bonnie/master/install.sh \
-  | bash -s -- --version v0.7.0 --bin-dir /usr/local/bin
+less install.sh
 ```
 
-The script also tells you when the host has no Landlock, no provider key, or
-no Go. It does not change the host for these.
+Execute only after review:
+
+```bash
+bash install.sh
+```
+
+The URL tracks `master`; `--version` selects the binary release, not the script
+revision. To pin a release and choose a directory after review:
+
+```bash
+bash install.sh --version v0.35.0 --bin-dir "$HOME/.local/bin"
+```
+
+Ensure the install directory is in `PATH`, then run `bonnie version`.
+The script does not configure Go, provider credentials, or sandbox prerequisites.
 
 As a CLI, from source:
 

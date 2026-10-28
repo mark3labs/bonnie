@@ -11,6 +11,44 @@ function files(dir) {
   });
 }
 const pages = files("pages").filter((path) => path.endsWith(".md"));
+// This is a documentation regression guard, not a general shell parser.
+function hasDownloadToShell(text) {
+  const normalized = text.replace(/\\\r?\n\s*(?:#\s*)?/g, " ");
+  return /\b(?:curl|wget)\b[^\n|]*\|\s*(?:(?:sudo|env)\s+(?:[^\s|]+\s+)*?)?(?:\/[^\s|]+\/)?(?:sh|bash)\b/.test(normalized);
+}
+for (const example of [
+  "curl -fsSL https://example.com/install.sh | bash",
+  "curl -fsSL https://example.com/install.sh | sudo bash",
+  "wget -qO- https://example.com/install.sh | sudo -u root bash -s --",
+  "curl -fsSL https://example.com/install.sh | env bash",
+  "curl -fsSL https://example.com/install.sh | /bin/bash",
+  "wget -qO- https://example.com/install.sh | /usr/bin/sh -s --",
+  "curl -fsSL https://example.com/install.sh | sudo /bin/bash",
+  "curl -fsSL https://example.com/install.sh \\\n  | bash -s -- --version v0.35.0",
+  "wget -qO- https://example.com/install.sh | sh -s --",
+  "wget -qO- https://example.com/install.sh \\\n  | bash",
+]) assert(hasDownloadToShell(example), `Missed remote pipeline: ${example}`);
+for (const example of [
+  "curl -fsSLO https://example.com/install.sh\nless install.sh\nbash install.sh",
+  "wget https://example.com/install.sh\nbash install.sh",
+  "curl -s localhost:8080/bonnie/v1/runs -d '{}'",
+]) assert(!hasDownloadToShell(example), `Rejected local workflow: ${example}`);
+
+function installerPreamble(text) {
+  const preamble = text.match(/^#![^\n]*\n(?:#[^\n]*\n|[ \t]*\n)*/)?.[0] ?? "";
+  assert.match(preamble, /^# Usage:/m, "Missing installer usage preamble: ../install.sh");
+  return preamble;
+}
+const preambleFixture = "#!/bin/bash\n\n# Usage:\n# curl URL | bash\nset -eu\n";
+assert(hasDownloadToShell(installerPreamble(preambleFixture)));
+assert.throws(() => installerPreamble("#!/bin/bash\nset -eu\n"), /Missing installer usage/);
+const installPreamble = installerPreamble(readFileSync("../install.sh", "utf8"));
+for (const [path, text] of [
+  ...pages.map((path) => [path, readFileSync(path, "utf8")]),
+  ["../README.md", readFileSync("../README.md", "utf8")],
+  ["../install.sh", installPreamble],
+]) assert(!hasDownloadToShell(text), `Remote download piped to shell: ${path}`);
+
 const ids = new Set(pages.map((path) => relative("pages", path).replace(/\.md$/, "")));
 const navigation = config.navigation.flatMap((group) => group.pages);
 assert.equal(new Set(navigation).size, navigation.length, "Duplicate navigation page");

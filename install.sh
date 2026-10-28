@@ -5,9 +5,11 @@
 # against the release's checksum file, and installs it.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/mark3labs/bonnie/master/install.sh | bash
-#   curl -fsSL https://raw.githubusercontent.com/mark3labs/bonnie/master/install.sh | bash -s -- --version v0.7.0
-#   bash install.sh [--bin-dir <dir>] [--version <tag>]
+#   Download: curl -fsSLO https://raw.githubusercontent.com/mark3labs/bonnie/master/install.sh
+#   Review with less install.sh or an editor before execution.
+#   Execute only after review: bash install.sh [--bin-dir <dir>] [--version <tag>]
+#   Example: bash install.sh --version v0.35.0 --bin-dir "$HOME/.local/bin"
+#   The URL tracks master; --version selects the binary, not the script revision.
 #
 # Environment:
 #   BONNIE_INSTALL_DIR   Same as --bin-dir.
