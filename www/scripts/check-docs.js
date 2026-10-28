@@ -14,13 +14,16 @@ const pages = files("pages").filter((path) => path.endsWith(".md"));
 // This is a documentation regression guard, not a general shell parser.
 function hasDownloadToShell(text) {
   const normalized = text.replace(/\\\r?\n\s*(?:#\s*)?/g, " ");
-  return /\b(?:curl|wget)\b[^\n|]*\|\s*(?:(?:sudo|env)\s+(?:[^\s|]+\s+)*?)?(?:sh|bash)\b/.test(normalized);
+  return /\b(?:curl|wget)\b[^\n|]*\|\s*(?:(?:sudo|env)\s+(?:[^\s|]+\s+)*?)?(?:\/[^\s|]+\/)?(?:sh|bash)\b/.test(normalized);
 }
 for (const example of [
   "curl -fsSL https://example.com/install.sh | bash",
   "curl -fsSL https://example.com/install.sh | sudo bash",
   "wget -qO- https://example.com/install.sh | sudo -u root bash -s --",
   "curl -fsSL https://example.com/install.sh | env bash",
+  "curl -fsSL https://example.com/install.sh | /bin/bash",
+  "wget -qO- https://example.com/install.sh | /usr/bin/sh -s --",
+  "curl -fsSL https://example.com/install.sh | sudo /bin/bash",
   "curl -fsSL https://example.com/install.sh \\\n  | bash -s -- --version v0.35.0",
   "wget -qO- https://example.com/install.sh | sh -s --",
   "wget -qO- https://example.com/install.sh \\\n  | bash",
