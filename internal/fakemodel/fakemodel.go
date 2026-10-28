@@ -11,12 +11,11 @@
 //
 // # Test code only
 //
-// A provider factory must return a fantasy.LanguageModel, and Kit aliases the
-// interface but not the types its methods take, so this package imports
-// charm.land/fantasy. BONNIE's shipped code must never do that. The exported
-// API names only kit types, so a test that uses it does not import fantasy
-// either, and depguard in .golangci.yml refuses an import of this package
-// from any file that is not a _test.go file.
+// A provider factory returns a kit.LLMLanguageModel. Kit aliases that
+// interface and each type its methods take, so this package names kit types
+// only. It is still for tests only: a scripted model in a shipped binary
+// answers users with a script. depguard in .golangci.yml refuses an import of
+// this package from any file that is not a _test.go file.
 //
 // [runtime.Agent]: github.com/mark3labs/bonnie/runtime.Agent
 package fakemodel
@@ -30,8 +29,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-
-	"charm.land/fantasy"
 
 	kit "github.com/mark3labs/kit/pkg/kit"
 )
@@ -165,7 +162,7 @@ func (m *Model) factory(context.Context, *kit.ProviderConfig, string) (*kit.Prov
 // answer records call and its context, and returns the next reply, with a call ID for each
 // tool call. The IDs are unique across the model's life, because a replayed
 // conversation that repeats an ID is a defect a provider would reject.
-func (m *Model) answer(ctx context.Context, call fantasy.Call) (Reply, []string, error) {
+func (m *Model) answer(ctx context.Context, call kit.LLMCall) (Reply, []string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -194,58 +191,58 @@ func (m *Model) answer(ctx context.Context, call fantasy.Call) (Reply, []string,
 	return reply, ids, nil
 }
 
-func finishReason(r Reply) fantasy.FinishReason {
+func finishReason(r Reply) kit.LLMFinishReason {
 	if len(r.Calls) > 0 {
-		return fantasy.FinishReasonToolCalls
+		return kit.FinishReasonToolCalls
 	}
-	return fantasy.FinishReasonStop
+	return kit.FinishReasonStop
 }
 
-var usage = fantasy.Usage{InputTokens: 1, OutputTokens: 1, TotalTokens: 2}
+var usage = kit.LLMUsage{InputTokens: 1, OutputTokens: 1, TotalTokens: 2}
 
-// languageModel adapts [Model] to fantasy.LanguageModel. It is unexported so
-// fantasy does not appear in this package's API.
+// languageModel adapts [Model] to kit.LLMLanguageModel. It is unexported,
+// because a test needs only [Model.Option].
 type languageModel struct{ m *Model }
 
-var _ fantasy.LanguageModel = languageModel{}
+var _ kit.LLMLanguageModel = languageModel{}
 
-func (l languageModel) Generate(ctx context.Context, call fantasy.Call) (*fantasy.Response, error) {
+func (l languageModel) Generate(ctx context.Context, call kit.LLMCall) (*kit.LLMResponse, error) {
 	reply, ids, err := l.m.answer(ctx, call)
 	if err != nil {
 		return nil, err
 	}
-	var content fantasy.ResponseContent
+	var content kit.LLMResponseContent
 	if reply.Text != "" {
-		content = append(content, fantasy.TextContent{Text: reply.Text})
+		content = append(content, kit.LLMTextContent{Text: reply.Text})
 	}
 	for i, c := range reply.Calls {
-		content = append(content, fantasy.ToolCallContent{ToolCallID: ids[i], ToolName: c.Name, Input: c.Input})
+		content = append(content, kit.LLMToolCallContent{ToolCallID: ids[i], ToolName: c.Name, Input: c.Input})
 	}
-	return &fantasy.Response{Content: content, FinishReason: finishReason(reply), Usage: usage}, nil
+	return &kit.LLMResponse{Content: content, FinishReason: finishReason(reply), Usage: usage}, nil
 }
 
-func (l languageModel) Stream(ctx context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
+func (l languageModel) Stream(ctx context.Context, call kit.LLMCall) (kit.LLMStreamResponse, error) {
 	reply, ids, err := l.m.answer(ctx, call)
 	if err != nil {
 		return nil, err
 	}
-	var parts []fantasy.StreamPart
+	var parts []kit.LLMStreamPart
 	if reply.Text != "" {
 		parts = append(parts,
-			fantasy.StreamPart{Type: fantasy.StreamPartTypeTextStart, ID: "text"},
-			fantasy.StreamPart{Type: fantasy.StreamPartTypeTextDelta, ID: "text", Delta: reply.Text},
-			fantasy.StreamPart{Type: fantasy.StreamPartTypeTextEnd, ID: "text"},
+			kit.LLMStreamPart{Type: kit.LLMStreamPartTypeTextStart, ID: "text"},
+			kit.LLMStreamPart{Type: kit.LLMStreamPartTypeTextDelta, ID: "text", Delta: reply.Text},
+			kit.LLMStreamPart{Type: kit.LLMStreamPartTypeTextEnd, ID: "text"},
 		)
 	}
 	for i, c := range reply.Calls {
-		parts = append(parts, fantasy.StreamPart{
-			Type: fantasy.StreamPartTypeToolCall, ID: ids[i], ToolCallName: c.Name, ToolCallInput: c.Input,
+		parts = append(parts, kit.LLMStreamPart{
+			Type: kit.LLMStreamPartTypeToolCall, ID: ids[i], ToolCallName: c.Name, ToolCallInput: c.Input,
 		})
 	}
-	parts = append(parts, fantasy.StreamPart{
-		Type: fantasy.StreamPartTypeFinish, FinishReason: finishReason(reply), Usage: usage,
+	parts = append(parts, kit.LLMStreamPart{
+		Type: kit.LLMStreamPartTypeFinish, FinishReason: finishReason(reply), Usage: usage,
 	})
-	return iter.Seq[fantasy.StreamPart](func(yield func(fantasy.StreamPart) bool) {
+	return iter.Seq[kit.LLMStreamPart](func(yield func(kit.LLMStreamPart) bool) {
 		for _, p := range parts {
 			if !yield(p) {
 				return
@@ -254,11 +251,11 @@ func (l languageModel) Stream(ctx context.Context, call fantasy.Call) (fantasy.S
 	}), nil
 }
 
-func (languageModel) GenerateObject(context.Context, fantasy.ObjectCall) (*fantasy.ObjectResponse, error) {
+func (languageModel) GenerateObject(context.Context, kit.LLMObjectCall) (*kit.LLMObjectResponse, error) {
 	return nil, errors.New("fakemodel: structured output is not scripted")
 }
 
-func (languageModel) StreamObject(context.Context, fantasy.ObjectCall) (fantasy.ObjectStreamResponse, error) {
+func (languageModel) StreamObject(context.Context, kit.LLMObjectCall) (kit.LLMObjectStreamResponse, error) {
 	return nil, errors.New("fakemodel: structured output is not scripted")
 }
 

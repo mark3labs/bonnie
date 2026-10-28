@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"charm.land/fantasy"
+	kit "github.com/mark3labs/kit/pkg/kit"
 
 	"github.com/mark3labs/bonnie/runtime"
 )
@@ -30,7 +30,7 @@ func TestListFilesUsesDirectoryNamespace(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			res, err := tool.Run(context.Background(), fantasy.ToolCall{Input: string(data)})
+			res, err := tool.Run(context.Background(), kit.LLMToolCall{Input: string(data)})
 			if err != nil || res.IsError {
 				t.Fatalf("list_files: %v, %+v", err, res)
 			}
@@ -79,7 +79,7 @@ func TestListFilesHostMappedBackends(t *testing.T) {
 				{`{"path":"dir; touch injected"}`, "quoted-marker.txt"},
 				{`{"path":"-la"}`, "option-marker.txt"},
 			} {
-				res, err := tool.Run(ctx, fantasy.ToolCall{Input: tc.input})
+				res, err := tool.Run(ctx, kit.LLMToolCall{Input: tc.input})
 				if err != nil || res.IsError || !strings.Contains(res.Content, tc.want) {
 					t.Fatalf("list_files(%s): %v, %+v", tc.input, err, res)
 				}

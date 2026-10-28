@@ -54,16 +54,15 @@ Layout:
 **BONNIE imports the public Kit SDK only: `github.com/mark3labs/kit/pkg/kit`.**
 
 - Never import `github.com/mark3labs/kit/internal/...`, also not in a test.
-- Never import `charm.land/fantasy` in code BONNIE ships. Kit re-exports each
+- Never import `charm.land/fantasy`, also not in a test. Kit re-exports each
   model type as an alias (`kit.LLMMessage`, `kit.LLMToolCallPart`,
-  `kit.LLMToolResultOutputContentText`).
-- **Test code may import `fantasy`**: a `_test.go` file, and
-  `internal/fakemodel`. A scripted model for a real Kit
-  (`kit.WithProvider`) must implement `fantasy.LanguageModel`, and Kit does
-  not alias the types that interface takes. Thus `fantasy` is a direct
-  requirement in `go.mod`, not `// indirect`. Prefer `internal/fakemodel`
-  to a new `fantasy` import: its API names only `kit` types. Shipped code
-  must never import `internal/fakemodel`.
+  `kit.LLMToolResultOutputContentText`). This includes
+  `kit.LLMLanguageModel` and each type its methods take (`kit.LLMCall`,
+  `kit.LLMResponse`, `kit.LLMStreamResponse`, ...), so a scripted model for
+  a real Kit (`kit.WithProvider`) needs `kit` types only. `fantasy` is
+  `// indirect` in `go.mod`.
+- To script a model in a test, use `internal/fakemodel`. Shipped code must
+  never import it.
 - Do not vendor Kit, copy internal code, or merge the two repositories.
 
 If Kit exports a type but not a helper for it, write the small helper in
@@ -89,7 +88,7 @@ not see an edit from an editor, a different tool, or a dependency bump. Do not
 delete the `depguard` rule because the extension exists. There is no
 `boundary` CI job any more: `depguard` denies both paths by prefix whatever
 the module layout, so the job added nothing. Three `depguard` rules carry the
-boundary: `public-kit-api-only` (every file), `fantasy-in-tests-only` and
+boundary: `public-kit-api-only` and `no-fantasy` (every file), and
 `fakemodel-in-tests-only` (every file that is not test code).
 
 ## Setup commands
@@ -328,8 +327,8 @@ here: the TUI talks to the wire the channel exposes, never to Kit internals.
 - Write what changed and why, not the process you followed.
 - Branch from `master`.
 - Run `task check` before each commit.
-- Make sure no new import of `kit/internal/*` exists, and no import of
-  `charm.land/fantasy` or `internal/fakemodel` outside test code.
+- Make sure no new import of `kit/internal/*` or `charm.land/fantasy` exists,
+  and no import of `internal/fakemodel` outside test code.
 - Complete each box in the PR template.
 - Release steps are in [`docs/RELEASE.md`](docs/RELEASE.md). Keep
   `CHANGELOG.md` current.

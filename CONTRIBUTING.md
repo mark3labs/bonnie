@@ -4,8 +4,8 @@
 
 **BONNIE imports only `github.com/mark3labs/kit/pkg/kit`.**
 
-Never import `github.com/mark3labs/kit/internal/...`, also not in a test.
-Never import `charm.land/fantasy` in code BONNIE ships.
+Never import `github.com/mark3labs/kit/internal/...` or `charm.land/fantasy`,
+also not in a test.
 
 This rule is not optional. It separates BONNIE from Kit's internal changes.
 
@@ -17,12 +17,11 @@ Kit re-exports every model type BONNIE needs as an alias:
 
 Name fantasy directly and you pin BONNIE to Kit's own transitive dependency.
 
-**Test code is the one exception.** A `_test.go` file, and the test-only
-package `internal/fakemodel`, may import `fantasy`. A scripted model for a
-real Kit (`kit.WithProvider`) must implement `fantasy.LanguageModel`, and Kit
-does not alias the types that interface takes. Thus `fantasy` is a direct
-requirement in `go.mod`. Use `internal/fakemodel` in preference to a new
-`fantasy` import. Shipped code must never import `internal/fakemodel`.
+This also applies to a scripted model for a real Kit (`kit.WithProvider`).
+Kit aliases `fantasy.LanguageModel` as `kit.LLMLanguageModel`, and each type
+its methods take (`kit.LLMCall`, `kit.LLMResponse`, ...). To script a model in
+a test, use the test-only package `internal/fakemodel`. Shipped code must
+never import `internal/fakemodel`.
 
 ### Enforcement layers
 
@@ -39,7 +38,7 @@ authority:
    compiler already rejects internal imports at build time.
 
 3. **depguard in .golangci.yml** — **the authority.** It denies
-   `kit/internal` in every file, and `fantasy` and `internal/fakemodel` in
+   `kit/internal` and `fantasy` in every file, and `internal/fakemodel` in
    every file that is not test code, whatever the module layout. The CI
    `lint` job runs it on every change whatever wrote that change. Do not
    remove this rule because the extension exists.

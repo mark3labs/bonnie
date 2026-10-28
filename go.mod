@@ -5,7 +5,6 @@ go 1.27.2
 require (
 	charm.land/bubbles/v2 v2.2.1
 	charm.land/bubbletea/v2 v2.1.1
-	charm.land/fantasy v0.45.5
 	charm.land/lipgloss/v2 v2.0.6
 	github.com/a-h/templ v0.3.1070
 	github.com/axadrn/shadcn-templ/v2 v2.0.0-beta.15
@@ -39,6 +38,7 @@ require (
 )
 
 require (
+	charm.land/fantasy v0.45.5 // indirect
 	cloud.google.com/go v0.123.0 // indirect
 	cloud.google.com/go/auth v0.24.1 // indirect
 	cloud.google.com/go/auth/oauth2adapt v0.3.0 // indirect

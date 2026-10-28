@@ -3,10 +3,10 @@
 // Package main holds BONNIE's public-API-boundary guard, a Kit extension.
 //
 // BONNIE uses the public Kit SDK only: github.com/mark3labs/kit/pkg/kit.
-// A direct import of github.com/mark3labs/kit/internal/... breaks that rule
-// everywhere. A direct import of charm.land/fantasy breaks it in the code
-// BONNIE ships; a test, and the test-only package internal/fakemodel, may
-// import fantasy to build a scripted model for a real Kit. This extension
+// A direct import of github.com/mark3labs/kit/internal/... or of
+// charm.land/fantasy breaks that rule everywhere, tests included: Kit aliases
+// each fantasy type BONNIE needs. Shipped code must also not import the
+// test-only package internal/fakemodel. This extension
 // refuses the `write` and `edit` tool calls that would add a forbidden
 // import, so the violation never reaches the disk and the agent gets told why
 // in the same turn.
@@ -57,15 +57,14 @@ var forbidden = []struct {
 		reason: "BONNIE's shipped code names Kit model types through the aliases in " +
 			"github.com/mark3labs/kit/pkg/kit (kit.LLMMessage, kit.LLMToolCallPart, ...), " +
 			"never through fantasy directly. A direct import pins BONNIE to Kit's own " +
-			"transitive dependency and breaks the moment Kit moves it. Only test code " +
-			"may import fantasy: a _test.go file, or internal/fakemodel.",
-		testOK: true,
+			"transitive dependency and breaks the moment Kit moves it. Tests too: Kit " +
+			"aliases fantasy.LanguageModel and each type its methods take.",
 	},
 	{
 		prefix: "github.com/mark3labs/bonnie/internal/fakemodel",
-		reason: "internal/fakemodel imports charm.land/fantasy, so it is for tests " +
-			"only. Import it from a _test.go file; shipped code must not reach " +
-			"fantasy through it.",
+		reason: "internal/fakemodel is a scripted model for tests only. Import it " +
+			"from a _test.go file; a shipped binary must never answer users from a " +
+			"script.",
 		testOK: true,
 	},
 }

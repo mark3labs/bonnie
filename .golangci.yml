@@ -23,28 +23,22 @@ linters:
                 github.com/mark3labs/kit/pkg/kit. If something you need is not
                 exported, raise it upstream rather than reaching in.
 
-        # fantasy is Kit's model layer. The code BONNIE ships names its types
-        # through the aliases in kit/pkg/kit only. Test code may import it,
-        # because a scripted model for a real Kit (kit.WithProvider) must
-        # implement fantasy.LanguageModel and Kit does not alias the types
-        # that takes. internal/fakemodel is that model: test-only code in a
-        # non-test file, so it is exempt by path, and the next rule keeps
-        # shipped code from importing it.
-        fantasy-in-tests-only:
+        # fantasy is Kit's model layer. BONNIE names its types through the
+        # aliases in kit/pkg/kit only, tests included: Kit aliases
+        # fantasy.LanguageModel and each type its methods take, so even a
+        # scripted model for a real Kit (internal/fakemodel) needs no direct
+        # import.
+        no-fantasy:
           list-mode: lax
-          files:
-            - $all
-            - "!$test"
-            - "!**/internal/fakemodel/*.go"
           deny:
             - pkg: charm.land/fantasy
               desc: >-
                 BONNIE names Kit types through the aliases in
-                github.com/mark3labs/kit/pkg/kit, never through fantasy
-                directly. Kit owns the model layer; a direct fantasy import
-                pins BONNIE to Kit's transitive dependency and breaks the
-                moment Kit changes it. Only a _test.go file or
-                internal/fakemodel may import it.
+                github.com/mark3labs/kit/pkg/kit (kit.LLMMessage,
+                kit.LLMLanguageModel, ...), never through fantasy directly.
+                Kit owns the model layer; a direct fantasy import pins BONNIE
+                to Kit's transitive dependency and breaks the moment Kit
+                changes it.
 
         fakemodel-in-tests-only:
           list-mode: lax
@@ -54,9 +48,9 @@ linters:
           deny:
             - pkg: github.com/mark3labs/bonnie/internal/fakemodel
               desc: >-
-                internal/fakemodel imports charm.land/fantasy and exists for
-                tests. Import it from a _test.go file only, so fantasy never
-                reaches a package BONNIE ships.
+                internal/fakemodel is a scripted model for tests. Import it
+                from a _test.go file only; a shipped binary must never answer
+                users from a script.
 
         flaky-in-tests-only:
           list-mode: lax

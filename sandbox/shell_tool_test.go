@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"charm.land/fantasy"
+	kit "github.com/mark3labs/kit/pkg/kit"
 )
 
 type shellToolSandbox struct {
@@ -66,7 +66,7 @@ func TestShellTool(t *testing.T) {
 				return &Result{Stdout: "ran", ExitCode: tc.exitCode}, tc.commandErr
 			}}
 			tool := Tools(func(context.Context) (Sandbox, error) { return sb, nil })[0]
-			got, err := tool.Run(context.Background(), fantasy.ToolCall{Input: `{"command":"echo hi","dir":"sub dir"}`})
+			got, err := tool.Run(context.Background(), kit.LLMToolCall{Input: `{"command":"echo hi","dir":"sub dir"}`})
 			if err != nil {
 				t.Fatalf("Run: %v", err)
 			}
@@ -110,7 +110,7 @@ func TestShellTool(t *testing.T) {
 		}}
 		tool := Tools(func(context.Context) (Sandbox, error) { return sb, nil })[0]
 		for range 2 {
-			if _, err := tool.Run(context.Background(), fantasy.ToolCall{Input: `{"command":"true"}`}); err != nil {
+			if _, err := tool.Run(context.Background(), kit.LLMToolCall{Input: `{"command":"true"}`}); err != nil {
 				t.Fatal(err)
 			}
 		}

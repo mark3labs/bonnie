@@ -9,8 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"charm.land/fantasy"
-
 	kit "github.com/mark3labs/kit/pkg/kit"
 )
 
@@ -256,7 +254,7 @@ func TestDecideToolCallIDAndNoDecider(t *testing.T) {
 		_, err := s.Decide(ctx, (&scriptedDecider{}).decide, DecisionCall{Request: decisionRequest("x")})
 		return kit.TextResult("ok"), err
 	})
-	if _, err := tool.Run(context.Background(), fantasy.ToolCall{ID: "call-7", Name: "probe", Input: "{}"}); err != nil {
+	if _, err := tool.Run(context.Background(), kit.LLMToolCall{ID: "call-7", Name: "probe", Input: "{}"}); err != nil {
 		t.Fatal(err)
 	}
 	if got := decisionRecords(t, j, "run"); len(got) != 1 || got[0].ToolCallID != "call-7" {

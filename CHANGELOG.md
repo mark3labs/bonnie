@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **No BONNIE code imports `charm.land/fantasy`, also not a test.** Kit
+  `v0.139.0` aliases `fantasy.LanguageModel` as `kit.LLMLanguageModel`, and
+  each type its methods take (`kit.LLMCall`, `kit.LLMResponse`,
+  `kit.LLMStreamResponse`, ...). `internal/fakemodel` and the tests now use
+  these aliases. `fantasy` is `// indirect` in `go.mod`. The `depguard` rule
+  `fantasy-in-tests-only` is now `no-fantasy`, which denies the import in
+  every file. The earlier statement that Kit does not alias the types of
+  `LanguageModel` was wrong for this pin.
+
 ## [0.36.0] — 2026-10-28
 
 **An agent can run its model on the CPU, and `bonnie dev` keeps its output

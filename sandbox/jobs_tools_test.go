@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"charm.land/fantasy"
 	kit "github.com/mark3labs/kit/pkg/kit"
 )
 
@@ -123,7 +122,7 @@ func TestJobToolValidationDoesNotOpenSandbox(t *testing.T) {
 	t.Parallel()
 	opened := false
 	tool := shellStatusTool(func(context.Context) (Sandbox, error) { opened = true; return nil, nil })
-	response, err := tool.Run(context.Background(), fantasy.ToolCall{Input: `{"job_id":"invalid"}`})
+	response, err := tool.Run(context.Background(), kit.LLMToolCall{Input: `{"job_id":"invalid"}`})
 	if err != nil {
 		t.Fatal(err)
 	}

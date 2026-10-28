@@ -14,8 +14,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"charm.land/fantasy"
-
 	"github.com/mark3labs/bonnie/internal/fakemodel"
 	"github.com/mark3labs/bonnie/runtime"
 	kit "github.com/mark3labs/kit/pkg/kit"
@@ -27,7 +25,7 @@ func runSandboxTool(t *testing.T, ctx context.Context, tool kit.Tool, input any,
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := tool.Run(ctx, fantasy.ToolCall{Input: string(data)})
+	result, err := tool.Run(ctx, kit.LLMToolCall{Input: string(data)})
 	if err != nil || result.IsError != wantError {
 		t.Fatalf("tool(%s) = %+v, %v; wantError %v", data, result, err, wantError)
 	}
@@ -432,7 +430,7 @@ func TestEditWriteGateAndCancellation(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		result, err := edit.Run(context.Background(), fantasy.ToolCall{Input: `{"path":"x","old_text":"a","new_text":"b"}`})
+		result, err := edit.Run(context.Background(), kit.LLMToolCall{Input: `{"path":"x","old_text":"a","new_text":"b"}`})
 		if result.IsError && err == nil {
 			err = errors.New(result.Content)
 		}
@@ -441,7 +439,7 @@ func TestEditWriteGateAndCancellation(t *testing.T) {
 	<-sb.entered
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
-	result, err := write.Run(ctx, fantasy.ToolCall{Input: `{"path":"x","content":"c"}`})
+	result, err := write.Run(ctx, kit.LLMToolCall{Input: `{"path":"x","content":"c"}`})
 	if err != nil || !result.IsError {
 		t.Fatalf("waiting write: %+v %v", result, err)
 	}

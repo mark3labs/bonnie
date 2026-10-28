@@ -32,7 +32,6 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/fantasy"
 	kit "github.com/mark3labs/kit/pkg/kit"
 
 	"github.com/mark3labs/bonnie"
@@ -44,13 +43,13 @@ const greetTool = "package greet\n\nimport (\n\t\"context\"\n\n\tkit \"github.co
 
 type script struct{}
 
-func lastUserText(msgs []fantasy.Message) string {
+func lastUserText(msgs []kit.LLMMessage) string {
 	for i := len(msgs) - 1; i >= 0; i-- {
-		if msgs[i].Role != fantasy.MessageRoleUser {
+		if msgs[i].Role != kit.LLMRoleUser {
 			continue
 		}
 		for _, p := range msgs[i].Content {
-			if t, ok := p.(fantasy.TextPart); ok {
+			if t, ok := p.(kit.LLMTextPart); ok {
 				return t.Text
 			}
 		}
@@ -58,8 +57,8 @@ func lastUserText(msgs []fantasy.Message) string {
 	return ""
 }
 
-func endsWithToolResult(msgs []fantasy.Message) bool {
-	return len(msgs) > 0 && msgs[len(msgs)-1].Role == fantasy.MessageRoleTool
+func endsWithToolResult(msgs []kit.LLMMessage) bool {
+	return len(msgs) > 0 && msgs[len(msgs)-1].Role == kit.LLMRoleTool
 }
 
 type reply struct {
@@ -67,11 +66,11 @@ type reply struct {
 	tool, args string
 }
 
-func (script) answer(call fantasy.Call) reply {
+func (script) answer(call kit.LLMCall) reply {
 	system := ""
-	if len(call.Prompt) > 0 && call.Prompt[0].Role == fantasy.MessageRoleSystem {
+	if len(call.Prompt) > 0 && call.Prompt[0].Role == kit.LLMRoleSystem {
 		for _, p := range call.Prompt[0].Content {
-			if t, ok := p.(fantasy.TextPart); ok {
+			if t, ok := p.(kit.LLMTextPart); ok {
 				system += t.Text
 			}
 		}
@@ -99,39 +98,39 @@ func (script) answer(call fantasy.Call) reply {
 	}
 }
 
-func (s script) Generate(_ context.Context, call fantasy.Call) (*fantasy.Response, error) {
+func (s script) Generate(_ context.Context, call kit.LLMCall) (*kit.LLMResponse, error) {
 	r := s.answer(call)
-	finish := fantasy.FinishReasonStop
-	var content fantasy.ResponseContent
+	var finish kit.LLMFinishReason = kit.FinishReasonStop
+	var content kit.LLMResponseContent
 	if r.text != "" {
-		content = append(content, fantasy.TextContent{Text: r.text})
+		content = append(content, kit.LLMTextContent{Text: r.text})
 	}
 	if r.tool != "" {
-		finish = fantasy.FinishReasonToolCalls
-		content = append(content, fantasy.ToolCallContent{ToolCallID: fmt.Sprintf("call_%d", time.Now().UnixNano()), ToolName: r.tool, Input: r.args})
+		finish = kit.FinishReasonToolCalls
+		content = append(content, kit.LLMToolCallContent{ToolCallID: fmt.Sprintf("call_%d", time.Now().UnixNano()), ToolName: r.tool, Input: r.args})
 	}
-	return &fantasy.Response{Content: content, FinishReason: finish, Usage: fantasy.Usage{InputTokens: 1, OutputTokens: 1, TotalTokens: 2}}, nil
+	return &kit.LLMResponse{Content: content, FinishReason: finish, Usage: kit.LLMUsage{InputTokens: 1, OutputTokens: 1, TotalTokens: 2}}, nil
 }
 
-func (s script) Stream(ctx context.Context, call fantasy.Call) (fantasy.StreamResponse, error) {
+func (s script) Stream(ctx context.Context, call kit.LLMCall) (kit.LLMStreamResponse, error) {
 	resp, err := s.Generate(ctx, call)
 	if err != nil {
 		return nil, err
 	}
-	var parts []fantasy.StreamPart
+	var parts []kit.LLMStreamPart
 	for _, c := range resp.Content {
 		switch c := c.(type) {
-		case fantasy.TextContent:
+		case kit.LLMTextContent:
 			parts = append(parts,
-				fantasy.StreamPart{Type: fantasy.StreamPartTypeTextStart, ID: "text"},
-				fantasy.StreamPart{Type: fantasy.StreamPartTypeTextDelta, ID: "text", Delta: c.Text},
-				fantasy.StreamPart{Type: fantasy.StreamPartTypeTextEnd, ID: "text"})
-		case fantasy.ToolCallContent:
-			parts = append(parts, fantasy.StreamPart{Type: fantasy.StreamPartTypeToolCall, ID: c.ToolCallID, ToolCallName: c.ToolName, ToolCallInput: c.Input})
+				kit.LLMStreamPart{Type: kit.LLMStreamPartTypeTextStart, ID: "text"},
+				kit.LLMStreamPart{Type: kit.LLMStreamPartTypeTextDelta, ID: "text", Delta: c.Text},
+				kit.LLMStreamPart{Type: kit.LLMStreamPartTypeTextEnd, ID: "text"})
+		case kit.LLMToolCallContent:
+			parts = append(parts, kit.LLMStreamPart{Type: kit.LLMStreamPartTypeToolCall, ID: c.ToolCallID, ToolCallName: c.ToolName, ToolCallInput: c.Input})
 		}
 	}
-	parts = append(parts, fantasy.StreamPart{Type: fantasy.StreamPartTypeFinish, FinishReason: resp.FinishReason, Usage: resp.Usage})
-	return iter.Seq[fantasy.StreamPart](func(yield func(fantasy.StreamPart) bool) {
+	parts = append(parts, kit.LLMStreamPart{Type: kit.LLMStreamPartTypeFinish, FinishReason: resp.FinishReason, Usage: resp.Usage})
+	return iter.Seq[kit.LLMStreamPart](func(yield func(kit.LLMStreamPart) bool) {
 		for _, p := range parts {
 			if !yield(p) {
 				return
@@ -140,11 +139,11 @@ func (s script) Stream(ctx context.Context, call fantasy.Call) (fantasy.StreamRe
 	}), nil
 }
 
-func (script) GenerateObject(context.Context, fantasy.ObjectCall) (*fantasy.ObjectResponse, error) {
+func (script) GenerateObject(context.Context, kit.LLMObjectCall) (*kit.LLMObjectResponse, error) {
 	return nil, errors.New("not scripted")
 }
 
-func (script) StreamObject(context.Context, fantasy.ObjectCall) (fantasy.ObjectStreamResponse, error) {
+func (script) StreamObject(context.Context, kit.LLMObjectCall) (kit.LLMObjectStreamResponse, error) {
 	return nil, errors.New("not scripted")
 }
 
@@ -190,10 +189,6 @@ func TestDevSelfModificationCrossesARestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	treetest.LinkToCheckout(t, root)
-	if err := os.WriteFile(filepath.Join(root, "go.mod"), append(must(os.ReadFile(filepath.Join(root, "go.mod"))), []byte("\nrequire charm.land/fantasy v0.0.0\n")...), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	pinFantasy(t, root)
 
 	var log syncBuffer
 	// Port 0: the dev loop's walk from 8080 races the other tests that
@@ -254,33 +249,5 @@ func TestDevSelfModifyOverlay(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, selfModifyFile)); !os.IsNotExist(err) {
 		t.Fatalf("the overlay wrote into the tree: %v", err)
-	}
-}
-
-func must(b []byte, err error) []byte {
-	if err != nil {
-		panic(err)
-	}
-	return b
-}
-
-// pinFantasy replaces the placeholder fantasy require with the version this
-// checkout uses, so the tree resolves it from the module cache.
-func pinFantasy(t *testing.T, root string) {
-	t.Helper()
-	mod := must(os.ReadFile(filepath.Join(treetest.Root(), "go.mod")))
-	version := ""
-	for line := range strings.SplitSeq(string(mod), "\n") {
-		if f := strings.Fields(line); len(f) >= 2 && f[0] == "charm.land/fantasy" {
-			version = f[1]
-		}
-	}
-	if version == "" {
-		t.Fatal("no fantasy version in go.mod")
-	}
-	path := filepath.Join(root, "go.mod")
-	body := strings.Replace(string(must(os.ReadFile(path))), "charm.land/fantasy v0.0.0", "charm.land/fantasy "+version, 1)
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
 	}
 }
