@@ -19,7 +19,7 @@ macOS and Windows are not supported BONNIE hosts. A compiled agent does not need
 
 Download a Linux archive and its checksum file from the same [GitHub release](https://github.com/mark3labs/bonnie/releases). Verify the archive before you extract or execute it. Install only the `bonnie` executable. A checksum confirms agreement with the published manifest; it is not an independent publisher signature or proof of safety.
 
-This Bash example uses `v0.35.0` for Linux amd64. For Linux arm64, set `arch=arm64`. To use another published tag, select it from Releases and change `version`; the archive and checksum file must use that same version. Required tools are `bash`, `curl`, `sha256sum`, `awk`, `tar`, `install`, and `mktemp`, plus the standard `mkdir` and `rm` commands.
+This Bash example uses `v0.35.0` for Linux amd64. For Linux arm64, set `arch=arm64`. To use another published tag, select it from Releases and set `version` without the leading `v` (for example, `0.35.1`). The release URL adds the `v` prefix; archive and checksum names use `version` unchanged. Required tools are `bash`, `curl`, `sha256sum`, `awk`, `tar`, `install`, and `mktemp`, plus the standard `mkdir` and `rm` commands.
 
 ```bash
 (
