@@ -16,11 +16,11 @@
 // agent's root for files — and bonnie_gen.go is the wiring `bonnie dev` and
 // `bonnie build` regenerate. Everything else is an option below.
 //
-// The model is Qwen3-1.7B, from Hugging Face, run by Kronk
+// The model is LiquidAI's LFM2.5-2.6B, from Hugging Face, run by Kronk
 // (github.com/ardanlabs/kronk) on llama.cpp, through fantasy's Kronk
 // provider. kronk.go registers it with Kit: Kit gets a model for
 // "kronk/<source>" from it. The first turn downloads llama.cpp and the model
-// (about 1 GB) under ~/.kronk, then loads the model. Later turns and later
+// (about 1.7 GB) under ~/.kronk, then loads the model. Later turns and later
 // starts use the files on disk.
 package main
 
@@ -33,27 +33,27 @@ import (
 	kit "github.com/mark3labs/kit/pkg/kit"
 )
 
-// modelSource is the model Kronk downloads, by its ID in the Kronk catalog:
-// Qwen3-1.7B, quantized to Q4_K_M (about 1 GB). It is the model Kronk tests
-// tool calls with, so its tool calls go through Kronk's Qwen parser.
-const modelSource = "unsloth/Qwen3-1.7B-Q4_K_M"
+// modelSource is the model Kronk downloads: LFM2.5-2.6B from LiquidAI's GGUF
+// repository on Hugging Face, quantized to Q4_K_M (about 1.7 GB). LiquidAI
+// trained it for tool use; its tool calls go through Kronk's LFM parser.
+//
+// It is a reasoning model, and its chat template has no switch to turn the
+// reasoning off. Kronk keeps the reasoning out of the answer. A template that
+// skips the reasoning does not make a turn faster: the model then writes the
+// reasoning into the answer.
+const modelSource = "LiquidAI/LFM2.5-2.6B-GGUF:Q4_K_M"
 
-// contextWindow is the context window in tokens: 32k, the length the model
-// was trained for. A smaller value uses less memory.
+// contextWindow is the context window in tokens. The model takes up to 128k;
+// 32k holds the prompt, faq.md and a long conversation, and uses less memory.
 const contextWindow = 32_768
 
-// chatTemplate turns off Qwen3's thinking mode, so the model answers without
-// reasoning first. On the CPU, the reasoning tokens were most of each turn:
-// with it off, a turn takes about half the time.
-var chatTemplate = model.D{"enable_thinking": false}
-
-// samplingDefaults are the settings the model card recommends for
-// non-thinking mode. A value in the call replaces each one; Kronk fills the
-// fields that are zero.
+// samplingDefaults are the settings the model card recommends. The low
+// temperature keeps the answers close to the text of faq.md. A value in the
+// call replaces each one; Kronk fills the fields that are zero.
 var samplingDefaults = model.Params{
-	Temperature: 0.7,
-	TopP:        0.8,
-	TopK:        20,
+	Temperature:   0.1,
+	TopK:          50,
+	RepeatPenalty: 1.1,
 }
 
 func main() {
@@ -72,7 +72,6 @@ func main() {
 		bonnie.WithKit(kit.WithProvider(providerName, kronkProvider(
 			fkronk.WithDefaultParams(samplingDefaults),
 			fkronk.WithContextWindow(contextWindow),
-			fkronk.WithChatTemplateKwargs(chatTemplate),
 		))),
 
 		// A tool call, for example read_file on faq.md, runs in a sandbox

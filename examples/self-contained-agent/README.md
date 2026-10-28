@@ -2,7 +2,9 @@
 
 The customer FAQ assistant of a computer repair shop, as an agent that needs
 nothing outside its own process: no provider key, no model server, and no
-GPU. The model is [Qwen3-1.7B](https://huggingface.co/Qwen/Qwen3-1.7B).
+GPU. The model is LiquidAI's
+[LFM2.5-2.6B](https://huggingface.co/LiquidAI/LFM2.5-2.6B), which LiquidAI
+trained for tool use.
 [Kronk](https://github.com/ardanlabs/kronk) runs it on the CPU, in the agent's
 own process, with llama.cpp. The shop's facts (opening hours, services and
 prices, warranty, payment, contact) are in `context/faq.md`.
@@ -10,8 +12,12 @@ prices, warranty, payment, contact) are in `context/faq.md`.
 It is also a reference for a **custom model provider**. `kronk.go` registers
 [fantasy's Kronk provider](https://github.com/charmbracelet/fantasy/tree/main/providers/kronk)
 with Kit under the name `kronk`, and `main.go` selects the model
-`kronk/unsloth/Qwen3-1.7B-Q4_K_M`. Kit gives the part after `kronk/` to the
-provider, and the provider downloads and loads that model.
+`kronk/LiquidAI/LFM2.5-2.6B-GGUF:Q4_K_M`. Kit gives the part after `kronk/`
+to the provider, and the provider downloads and loads that model.
+
+The model has its own license, the
+[LFM Open License](https://huggingface.co/LiquidAI/LFM2.5-2.6B/blob/main/LICENSE),
+not Apache 2.0. Read it before you use the model in a product.
 
 ## This directory is an agent tree
 
@@ -38,7 +44,7 @@ run and manage it with the `bonnie` CLI, the same way as your own agent:
   `dnf install libffi`, or `brew install libffi`). On NixOS, use the
   repository's dev shell (`nix develop`), which also supplies the `libstdc++`
   that llama.cpp needs.
-- About 1.2 GB of disk space under `~/.kronk` and a network connection for
+- About 2 GB of disk space under `~/.kronk` and a network connection for
   the first start.
 
 ## Run it
@@ -55,12 +61,13 @@ Read faq.md and tell me the Saturday opening hours.
 ```
 
 **The first turn is slow.** The provider loads the model the first time Kit
-asks for it. On the first start, it also downloads llama.cpp and the 1 GB
+asks for it. On the first start, it also downloads llama.cpp and the 1.7 GB
 model into `~/.kronk`. Kronk's log, with the download progress, is in
 `.bonnie/kronk.log` (`tail -f .bonnie/kronk.log`), not in the terminal, where
 it would print over the `bonnie dev` interface. Later turns use the loaded
-model. On a laptop CPU, an answer that reads `faq.md` takes about 10–20
-seconds, because the model runs once to call the tool and once to answer.
+model. On a laptop CPU, an answer that reads `faq.md` takes about 20–30
+seconds, because the model runs once to call the tool and once to answer, and
+it reasons before each.
 Later starts load the model from disk and download nothing.
 
 Or serve it and speak to it over HTTP:
@@ -90,9 +97,12 @@ GPU library, so the agent runs the same on each machine. To use a GPU, remove
 that line: Kronk then detects CUDA, ROCm, Vulkan or Metal, and the host must
 supply the libraries for that backend.
 
-**No reasoning.** Qwen3 reasons before it answers by default. On the CPU, the
-reasoning was most of each turn, so `main.go` turns it off
-(`enable_thinking: false`), which halves the time of a turn.
+**The model always reasons.** LFM2.5-2.6B reasons before each answer, and its
+chat template has no switch to turn that off. Kronk keeps the reasoning out
+of the answer. A custom template that starts the answer with an empty
+`<think></think>` does not help: the model then writes its reasoning into the
+answer, and the turn is not faster. The reasoning is most of the tokens in a
+turn.
 
 **No FAQ data is in the prompt.** At the start of a turn, the model gets
 `instructions.md`, a note about the channel, and the question. The facts
@@ -102,13 +112,14 @@ reach it only as the result of a `read_file` call on `faq.md`.
 facts from the FAQ. Write the tool call out like that: when the prompt
 described the call in words only, the model called the tool much less often.
 
-**A small model does not always use its tools.** In a test of five plain
-questions, asked twice, the model read `faq.md` in 7 of 10 turns, and each
-of those answers was correct. In the other turns, it answered without the
-tool and invented the facts, or it wrote the tool call as plain JSON text,
-which is not run. When the question itself says to read `faq.md`, it does.
-For a reliable FAQ agent, put the FAQ text in `instructions.md`, or use a
-larger model.
+**It uses its tool, but not always the style.** In a test of 26 questions,
+the model read `faq.md` in each turn, and each answer had the correct
+facts. For a greeting, it did not call the tool. It follows the style rules
+in `instructions.md` less well: answers often start with "According to the
+FAQ", use bold text, or add a sentence that was not asked for. A question
+that faq.md does not answer directly, such as a request to book an
+appointment, gets a longer answer and a longer turn. For short answers every
+time, use a larger model.
 
 **The sandbox gets the library path.** A tool call runs in a sandbox process
 that starts from a clean environment, and that process is this binary, which
@@ -128,12 +139,13 @@ bonnie runs --journal .bonnie
 
 Change `modelSource` in `main.go`. Kronk takes:
 
-- a model ID from the Kronk catalog: `unsloth/Qwen3-0.6B-Q8_0`
+- a model ID from the Kronk catalog: `unsloth/Qwen3-1.7B-Q4_K_M`
 - a Hugging Face GGUF repository and a quantization:
-  `LiquidAI/LFM2.5-1.2B-Instruct-GGUF:Q4_K_M`
+  `LiquidAI/LFM2.5-2.6B-GGUF:Q4_K_M`
 - the URL of a `.gguf` file on Hugging Face
 
-Set `samplingDefaults`, `contextWindow` and `chatTemplate` to the values in
-that model's card. The model must be one that the llama.cpp in the pinned
-Kronk release can load, and its tool calls must be in a format that Kronk
-parses.
+Set `samplingDefaults` and `contextWindow` to the values in that model's
+card. If the model has a switch in its chat template, for example Qwen3's
+`enable_thinking`, set it with `fkronk.WithChatTemplateKwargs`. The model
+must be one that the llama.cpp in the pinned Kronk release can load, and its
+tool calls must be in a format that Kronk parses.
