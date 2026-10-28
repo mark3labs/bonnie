@@ -1,17 +1,27 @@
 package main
 
 import (
+	"io"
 	"net"
 	"os"
 	"strings"
 	"testing"
 )
 
+// TestDevTUIChildOutputIsNotTerminalFile: with the TUI, the loop's messages
+// and the child's output go into the transcript. A write to the terminal
+// lands across the TUI screen, which each hot reload did.
 func TestDevTUIChildOutputIsNotTerminalFile(t *testing.T) {
 	t.Parallel()
 	d := newDevServer(t.TempDir(), devOpts{tui: true})
 	if _, ok := d.log.(*os.File); ok {
 		t.Fatal("TUI child writes directly to a terminal file")
+	}
+	if d.logs == nil || d.log != io.Writer(d.logs) {
+		t.Fatal("TUI dev output does not go to the transcript")
+	}
+	if d := newDevServer(t.TempDir(), devOpts{}); d.log != io.Writer(os.Stderr) {
+		t.Fatal("dev without the TUI does not write to stderr")
 	}
 }
 

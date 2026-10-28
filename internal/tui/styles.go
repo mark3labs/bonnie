@@ -21,6 +21,7 @@ var styles = struct {
 	reasoning      lipgloss.Style
 	status         lipgloss.Style
 	err            lipgloss.Style
+	log            lipgloss.Style
 	spinner        lipgloss.Style
 	cursor         lipgloss.Style
 	selection      lipgloss.Style
@@ -36,6 +37,7 @@ var styles = struct {
 	reasoning:      lipgloss.NewStyle().Foreground(lipgloss.Color("243")).Italic(true).Faint(true),
 	status:         lipgloss.NewStyle().Foreground(lipgloss.Color("247")).Faint(true),
 	err:            lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Bold(true),
+	log:            lipgloss.NewStyle().Foreground(lipgloss.Color("244")),
 	spinner:        lipgloss.NewStyle().Foreground(lipgloss.Color("205")),
 	cursor:         lipgloss.NewStyle().Foreground(lipgloss.Color("205")),
 	// Reverse video reads on any terminal theme, as a terminal's own

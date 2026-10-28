@@ -83,16 +83,28 @@ func ChatURL(addr string) string {
 // RunTUIClient opens the terminal interface with c until the user quits or
 // ctx is canceled. address is the conversation key for the run.
 // It does not start a server.
-func RunTUIClient(ctx context.Context, c tui.Client, address string) error {
-	return runTUIClient(ctx, c, address, false)
+//
+// logs, when not nil, shows its lines in the transcript while the interface
+// runs. Route every other writer to the terminal through it: a direct write
+// lands across the screen.
+func RunTUIClient(ctx context.Context, c tui.Client, address string, logs *tui.LogWriter) error {
+	return runTUI(ctx, c, address, false, logs)
 }
 
 func runTUIClient(ctx context.Context, c tui.Client, target string, byID bool) error {
+	return runTUI(ctx, c, target, byID, nil)
+}
+
+func runTUI(ctx context.Context, c tui.Client, target string, byID bool, logs *tui.LogWriter) error {
 	model := tui.New(c, ctx, target)
 	if byID {
 		model = tui.NewRun(c, ctx, target)
 	}
 	p := tea.NewProgram(model, tea.WithContext(ctx))
+	if logs != nil {
+		logs.Attach(p)
+		defer logs.Detach()
+	}
 	if _, err := p.Run(); err != nil {
 		return fmt.Errorf("bonnie: chat: %w", err)
 	}

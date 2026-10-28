@@ -23,6 +23,7 @@ import (
 	"github.com/mark3labs/bonnie"
 	"github.com/mark3labs/bonnie/agent"
 	"github.com/mark3labs/bonnie/client"
+	"github.com/mark3labs/bonnie/internal/tui"
 )
 
 // devOpts carries the parsed flags of `bonnie dev`.
@@ -131,11 +132,15 @@ type devServer struct {
 	// and reused on every restart, so the TUI stays connected.
 	served string
 
-	// log carries the child's output. It is os.Stderr for a real dev run.
+	// log carries the loop's messages, the go build output, and the child's
+	// output. It is os.Stderr for a dev run without the TUI, and logs with
+	// it. Never write to os.Stderr directly: with the TUI, a direct write
+	// lands across the transcript.
 	// env overrides the environment child builds inherit, so a hermetic test
 	// can point the child at a local checkout.
-	log io.Writer
-	env []string
+	log  io.Writer
+	logs *tui.LogWriter
+	env  []string
 
 	// compile, when non-nil, replaces the `go build` of the tree. It is nil
 	// for a real dev run. A test of the loop's process lifecycle sets it to
@@ -157,11 +162,15 @@ type devServer struct {
 
 func newDevServer(root string, o devOpts) *devServer {
 	log := io.Writer(os.Stderr)
+	var logs *tui.LogWriter
 	if o.tui {
-		// Give the child a pipe, not the terminal file itself. The child still
-		// writes through to stderr, but terminal-detection code cannot send
-		// capability queries whose replies would enter the TUI.
-		log = io.MultiWriter(os.Stderr)
+		// The TUI owns the terminal, so the loop's messages and the child's
+		// output go into its transcript, not across the screen. The child
+		// also gets a pipe, not the terminal file itself, so
+		// terminal-detection code cannot send capability queries whose
+		// replies would enter the TUI.
+		logs = tui.NewLogWriter(os.Stderr)
+		log = logs
 	}
 	return &devServer{
 		root:          root,
@@ -172,6 +181,7 @@ func newDevServer(root string, o devOpts) *devServer {
 		web:           o.web,
 		selfModify:    !o.noSelfModify,
 		log:           log,
+		logs:          logs,
 		ready:         make(chan struct{}),
 	}
 }
@@ -248,11 +258,11 @@ func (d *devServer) run(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case <-debounce.C:
-			fmt.Fprintln(os.Stderr, "bonnie: dev: change detected, rebuilding")
+			_, _ = fmt.Fprintln(d.log, "bonnie: dev: change detected, rebuilding")
 			if err := d.restart(); err != nil {
 				// A change that does not build must not take the serving
 				// child down. Keep it running and keep watching.
-				fmt.Fprintf(os.Stderr, "bonnie: dev: %v\n", err)
+				_, _ = fmt.Fprintf(d.log, "bonnie: dev: %v\n", err)
 				continue
 			}
 		case ev, ok := <-w.Events:
@@ -310,7 +320,7 @@ func (d *devServer) restart() error {
 			beforeStop()
 		}
 		if err := stopGracefully(old, d.shutdown); err != nil {
-			fmt.Fprintf(os.Stderr, "bonnie: dev: stopping previous child: %v\n", err)
+			_, _ = fmt.Fprintf(d.log, "bonnie: dev: stopping previous child: %v\n", err)
 		}
 	}
 
@@ -333,8 +343,8 @@ func (d *devServer) build() error {
 	build := exec.Command("go", append(args, ".")...)
 	build.Dir = d.root
 	build.Env = d.env
-	build.Stdout = os.Stderr
-	build.Stderr = os.Stderr
+	build.Stdout = d.log
+	build.Stderr = d.log
 	if err := build.Run(); err != nil {
 		return fmt.Errorf("bonnie: dev: go build: %w", err)
 	}
@@ -376,7 +386,7 @@ func (d *devServer) selfModifyOverlay() (string, error) {
 	if err := list.Run(); err != nil {
 		if !d.selfModifyNoted {
 			d.selfModifyNoted = true
-			fmt.Fprintln(os.Stderr, "bonnie: dev: self-modification is off: the tree's bonnie version has no selfmod package")
+			_, _ = fmt.Fprintln(d.log, "bonnie: dev: self-modification is off: the tree's bonnie version has no selfmod package")
 		}
 		return "", nil
 	}
@@ -434,7 +444,7 @@ func (d *devServer) start() error {
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("bonnie: dev: start child: %w", err)
 	}
-	fmt.Fprintf(os.Stderr, "bonnie: dev: started child (pid %d) on %s\n", cmd.Process.Pid, addr)
+	_, _ = fmt.Fprintf(d.log, "bonnie: dev: started child (pid %d) on %s\n", cmd.Process.Pid, addr)
 	d.mu.Lock()
 	d.child = cmd
 	d.mu.Unlock()
@@ -606,7 +616,7 @@ func runDev(root string, o devOpts) error {
 			d.mu.Lock()
 			d.beforeStop = c.CloseStreams
 			d.mu.Unlock()
-			if err := runTUIClient(ctx, c, tuiAddress(d.root)); err != nil {
+			if err := runTUIClient(ctx, c, tuiAddress(d.root), d.logs); err != nil {
 				return err
 			}
 			return nil

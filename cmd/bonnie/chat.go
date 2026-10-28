@@ -16,8 +16,8 @@ func newChatCmd() *cobra.Command {
 }
 
 // runTUIClient lets dev supply its client to the shared terminal interface.
-func runTUIClient(ctx context.Context, c tui.Client, address string) error {
-	return agentcmd.RunTUIClient(ctx, c, address)
+func runTUIClient(ctx context.Context, c tui.Client, address string, logs *tui.LogWriter) error {
+	return agentcmd.RunTUIClient(ctx, c, address, logs)
 }
 
 func chatURL(addr string) string {

@@ -24,6 +24,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   at their newest release. templ stays at `v0.3.1070`, because
   `shadcn-templ` v2.0.0-beta.15 does not compile with templ `v0.3.1100`.
 
+### Fixed
+
+- `bonnie dev` with the TUI no longer prints its messages across the
+  screen. The loop's rebuild messages, the `go build` output, and the
+  child's startup and shutdown lines now show in the transcript as dim
+  lines. Lines written before the TUI starts are kept and shown when it
+  starts. After the TUI closes, output goes to stderr again.
+
 ## [0.35.0] — 2026-10-26
 
 **Operator commands refresh the model database, and the terminal interfaces

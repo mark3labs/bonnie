@@ -32,6 +32,9 @@ const (
 	kindTool
 	kindReasoning
 	kindError
+	// kindLog is a line of process output, such as the dev loop's rebuild
+	// messages and the child's startup banner. See [LogWriter].
+	kindLog
 )
 
 // entry is one line of the transcript. An assistant entry may be "open" while
@@ -295,6 +298,10 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.width, m.height = msg.Width, msg.Height
 		m.layout()
+		return m, nil
+
+	case logMsg:
+		m.commitLog(msg.lines)
 		return m, nil
 
 	case spinnerMsg:
@@ -953,6 +960,21 @@ func (m *Model) commit(kind entryKind, text string) {
 	m.entries = append(m.entries, entry{kind: kind, text: text})
 }
 
+// commitLog adds process output to the transcript. A streaming entry must
+// stay last, because each chunk is added to the last entry, so the lines go
+// in front of it.
+func (m *Model) commitLog(lines []string) {
+	if len(lines) == 0 {
+		return
+	}
+	e := entry{kind: kindLog, text: strings.Join(lines, "\n")}
+	if n := len(m.entries); n > 0 && m.entries[n-1].streamed {
+		m.entries = slices.Insert(m.entries, n-1, e)
+		return
+	}
+	m.entries = append(m.entries, e)
+}
+
 func (m *Model) commitError(text string) {
 	m.entries = append(m.entries, entry{kind: kindError, text: text})
 }
@@ -1203,6 +1225,8 @@ func (m *Model) transcript() string {
 			b.WriteString(styles.reasoning.Render(e.text))
 		case kindError:
 			b.WriteString(styles.err.Render(e.text))
+		case kindLog:
+			b.WriteString(styles.log.Render(e.text))
 		default:
 			b.WriteString(styles.status.Render(e.text))
 		}
