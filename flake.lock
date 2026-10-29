@@ -3,16 +3,16 @@
     "bonnie-release": {
       "flake": false,
       "locked": {
-        "lastModified": 1793195803,
-        "narHash": "sha256-Ux4WPw+FNyNR7aS3GT6YtKOwzkHJEZRLIw8PDQKRAGo=",
+        "lastModified": 1793279201,
+        "narHash": "sha256-DMUxO7xsANv9q7QWNZdg0FbvsPVl7uoNCgwKkDeslK0=",
         "owner": "mark3labs",
         "repo": "bonnie",
-        "rev": "2fa36683276a00ee16fd01bea7cdd47e50cd4c36",
+        "rev": "0cd5ccade48cdadc7a16739d0f7544fb087c8722",
         "type": "github"
       },
       "original": {
         "owner": "mark3labs",
-        "ref": "v0.36.0",
+        "ref": "v0.37.0",
         "repo": "bonnie",
         "type": "github"
       }
