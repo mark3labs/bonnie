@@ -24,6 +24,39 @@ Build regenerates tool wiring, embeds instructions, skills, and context files, a
 
 Pin released dependencies and inspect `go.mod` and `go.sum`. Do not ship local replacement directives. Test any custom dependencies against the CGO-free build. Never embed secrets in instructions, skills, or context files.
 
+### Dynamically linked agents
+
+Most agents build to a static binary. An agent that loads a C library at run time, for example through [purego](https://github.com/ebitengine/purego), is dynamically linked also with CGO disabled. `examples/self-contained-agent` is such an agent: it loads libffi and llama.cpp. A dynamically linked binary names a program loader (the ELF interpreter), and the kernel must find that file on the host.
+
+For a Linux target, `bonnie build` names the standard loader of the target architecture:
+
+| GOARCH | Loader |
+| --- | --- |
+| `amd64` | `/lib64/ld-linux-x86-64.so.2` |
+| `arm64` | `/lib/ld-linux-aarch64.so.1` |
+| `arm` | `/lib/ld-linux.so.3` |
+| `386` | `/lib/ld-linux.so.2` |
+| `riscv64` | `/lib/ld-linux-riscv64-lp64d.so.1` |
+
+These are the loaders that upstream Go names. When the build host has only the musl loader, `bonnie build` uses the musl one, as upstream Go does. Each glibc distribution has the standard loader, so the binary runs on Debian, Ubuntu, Fedora, Arch, and others. It also needs the libraries the agent loads, for example `libffi.so.8`.
+
+Without this, the loader path comes from the Go toolchain. The Go toolchain from nixpkgs names a loader in `/nix/store`, and a binary built with it stops on other hosts:
+
+```text
+-bash: ./self-contained-agent: cannot execute: required file not found
+```
+
+Check a binary with `file ./report-agent` or `readelf -l ./report-agent | grep interpreter`.
+
+A NixOS host has no file at the standard path unless [nix-ld](https://github.com/nix-community/nix-ld) is enabled (`programs.nix-ld.enable = true;`). To run the binary on a NixOS host without nix-ld, do one of these:
+
+- Build on that host with `bonnie build --native-loader`. The binary then names the host's Nix loader, and runs only on hosts with that exact store path.
+- Change the loader of an existing binary: `patchelf --set-interpreter "$(cat $NIX_CC/nix-support/dynamic-linker)" ./report-agent`.
+
+To set a different loader, set `GO_LDSO` in the environment of `bonnie build`. `bonnie build` keeps it.
+
+Musl distributions such as Alpine use a different C library. A glibc agent that loads libraries at run time needs a glibc host or base image.
+
 The target still needs the selected sandbox's prerequisites. Landlock needs a compatible kernel and host shell. Docker needs its CLI, daemon, and images. Microsandbox needs a working runtime and the verified Linux KVM setup. See [Sandboxes](/guides/sandboxes).
 
 ## Set stable storage and an address
