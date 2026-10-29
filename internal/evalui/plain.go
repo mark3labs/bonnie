@@ -56,6 +56,11 @@ func WritePlain(w io.Writer, s Snapshot) error {
 			}
 		}
 	}
+	if s.Err != "" {
+		// go test failed although each eval passed, for example a parent
+		// test that failed in its cleanup. The exit code is not 0, so say why.
+		p.printf("\ngo test failed: %s\n", s.Err)
+	}
 	p.printf("\n%s\n", Totals(s.Counts()))
 	if s.Dir != "" {
 		p.printf("saved: %s\n", s.Dir)

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -616,5 +617,28 @@ func TestModelCarried(t *testing.T) {
 	}
 	if runTime("20261029-200000-2") != "20:00:00" || runTime("other") != "other" {
 		t.Error("runTime")
+	}
+}
+
+// When go test fails although each eval passed, the plain table says why.
+func TestWritePlainShowsGoTestError(t *testing.T) {
+	t.Parallel()
+	s := NewSession("id", t.TempDir(), "")
+	for _, line := range events(t,
+		testEvent{Action: "run", Package: "p", Test: "TestParent"},
+		testEvent{Action: "run", Package: "p", Test: "TestParent/case"},
+		testEvent{Action: "pass", Package: "p", Test: "TestParent/case"},
+		testEvent{Action: "fail", Package: "p", Test: "TestParent"},
+		testEvent{Action: "fail", Package: "p"},
+	) {
+		s.Feed(line)
+	}
+	s.Finish(errors.New("exit status 1"))
+	var out bytes.Buffer
+	if err := WritePlain(&out, s.Snapshot()); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "go test failed: exit status 1") || !strings.Contains(out.String(), "evals: 1 passed, 0 failed") {
+		t.Fatalf("output:\n%s", out.String())
 	}
 }

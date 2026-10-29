@@ -3,6 +3,7 @@ package eval
 import (
 	"errors"
 	"fmt"
+	"math"
 )
 
 // Kinds of [Score].
@@ -111,6 +112,11 @@ func (s *Score) Label(name string) *Score {
 // marks the eval "scored", and fails it in strict mode or after [Score.Gate].
 func (s *Score) AtLeast(min float64) *Score {
 	s.e.tb.Helper()
+	if math.IsNaN(min) {
+		// Every comparison with NaN is false, so the bound would pass.
+		s.fail(fmt.Errorf("threshold %v is not a number", min))
+		return s
+	}
 	s.min = &min
 	s.check()
 	return s
@@ -120,6 +126,10 @@ func (s *Score) AtLeast(min float64) *Score {
 // marks the eval "scored", and fails it in strict mode or after [Score.Gate].
 func (s *Score) AtMost(max float64) *Score {
 	s.e.tb.Helper()
+	if math.IsNaN(max) {
+		s.fail(fmt.Errorf("threshold %v is not a number", max))
+		return s
+	}
 	s.max = &max
 	s.check()
 	return s
