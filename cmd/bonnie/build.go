@@ -18,7 +18,7 @@ type buildOpts struct {
 	output string
 
 	// nativeLoader keeps the Go toolchain's own ELF interpreter. See
-	// loaderEnv.
+	// loaderArgs.
 	nativeLoader bool
 
 	// env overrides the environment the go build inherits. It is test-only
@@ -103,13 +103,16 @@ func runBuild(root string, o buildOpts) error {
 	}
 
 	env := staticBuildEnv(o.env)
+	args := []string{"build", "-o", output}
 	if !o.nativeLoader {
-		if env, err = loaderEnv(root, env); err != nil {
+		ldflags, err := loaderArgs(root, env)
+		if err != nil {
 			return err
 		}
+		args = append(args, ldflags...)
 	}
 
-	build := exec.Command("go", "build", "-o", output, ".")
+	build := exec.Command("go", append(args, ".")...)
 	build.Dir = root
 	build.Env = env
 	build.Stdout = os.Stderr
@@ -182,8 +185,9 @@ var linuxLoaders = map[string]struct{ glibc, musl string }{
 	"mips64le": {"/lib64/ld64.so.1", ""},
 }
 
-// loaderEnv sets GO_LDSO to the standard ELF interpreter of the target, so a
-// dynamically linked agent runs on a host other than the build host.
+// loaderArgs returns the go build arguments that name the standard ELF
+// interpreter of the target, so a dynamically linked agent runs on a host
+// other than the build host.
 //
 // A Go toolchain can be built with its own default interpreter. The Go
 // toolchain from nixpkgs names a loader in /nix/store, and a binary that
@@ -191,16 +195,25 @@ var linuxLoaders = map[string]struct{ glibc, musl string }{
 // file not found". A tree is dynamically linked when it loads a C library at
 // run time through purego, also with CGO disabled
 // (examples/self-contained-agent does this), so CGO_ENABLED=0 alone does not
-// prevent it. A static binary has no interpreter, and GO_LDSO has no effect.
+// prevent it. A static binary has no interpreter, and the flag has no effect.
+//
+// The loader goes to the linker as -I, which wins over the toolchain default
+// in each toolchain. Setting GO_LDSO for the build does not do that: upstream
+// cmd/link reads only the value baked in when the toolchain was built, and
+// only the nixpkgs linker is patched to read the environment.
+//
+// A -ldflags on the go command line replaces the one in GOFLAGS, so the -I is
+// added to the GOFLAGS value, not put in its place. When that value already
+// has a -I, the caller chose the loader, and loaderArgs returns nothing.
 //
 // The choice copies upstream cmd/link: the glibc loader, or the musl loader
-// when the build host has only the musl one. A GO_LDSO that the caller sets
-// is kept. A target that is not Linux, or a GOARCH not in linuxLoaders, keeps
-// the toolchain default.
-func loaderEnv(root string, env []string) ([]string, error) {
-	for _, item := range env {
-		if strings.HasPrefix(item, "GO_LDSO=") {
-			return env, nil
+// when the build host has only the musl one. A target that is not Linux, or a
+// GOARCH not in linuxLoaders, keeps the toolchain default.
+func loaderArgs(root string, env []string) ([]string, error) {
+	ldflags := goflagsLdflags(env)
+	for _, f := range splitQuoted(ldflags) {
+		if f == "-I" || strings.HasPrefix(f, "-I=") || f == "--I" || strings.HasPrefix(f, "--I=") {
+			return nil, nil
 		}
 	}
 	cmd := exec.Command("go", "env", "GOOS", "GOARCH")
@@ -216,9 +229,60 @@ func loaderEnv(root string, env []string) ([]string, error) {
 	}
 	ldso := linuxLoader(target[0], target[1], fileExists)
 	if ldso == "" {
-		return env, nil
+		return nil, nil
 	}
-	return append(env, "GO_LDSO="+ldso), nil
+	return []string{"-ldflags=" + strings.TrimSpace(ldflags+" -I "+ldso)}, nil
+}
+
+// goflagsLdflags returns the linker flags of the last -ldflags in the GOFLAGS
+// of env, or "". A pattern prefix ("all=-w") is dropped: the flags are only
+// for the link of the main package, which each pattern that cmd/go accepts in
+// GOFLAGS matches.
+func goflagsLdflags(env []string) string {
+	var goflags string
+	for _, item := range env {
+		if v, ok := strings.CutPrefix(item, "GOFLAGS="); ok {
+			goflags = v
+		}
+	}
+	var ldflags string
+	for _, f := range splitQuoted(goflags) {
+		name, v, ok := strings.Cut(f, "=")
+		if !ok || strings.TrimLeft(name, "-") != "ldflags" {
+			continue
+		}
+		if pattern, flags, found := strings.Cut(v, "="); found && !strings.HasPrefix(pattern, "-") {
+			v = flags
+		}
+		ldflags = v
+	}
+	return ldflags
+}
+
+// splitQuoted splits s into fields at spaces, as cmd/go splits GOFLAGS and
+// -ldflags (cmd/internal/quoted): a field that starts with ' or " runs to the
+// matching quote, which is removed.
+func splitQuoted(s string) []string {
+	var out []string
+	for {
+		s = strings.TrimLeft(s, " \t\n\r")
+		if s == "" {
+			return out
+		}
+		if q := s[0]; q == '\'' || q == '"' {
+			if end := strings.IndexByte(s[1:], q); end >= 0 {
+				out = append(out, s[1:1+end])
+				s = s[2+end:]
+				continue
+			}
+		}
+		end := strings.IndexAny(s, " \t\n\r")
+		if end < 0 {
+			return append(out, s)
+		}
+		out = append(out, s[:end])
+		s = s[end:]
+	}
 }
 
 // linuxLoader returns the standard ELF interpreter for goos and goarch, or ""

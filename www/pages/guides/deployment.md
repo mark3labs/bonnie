@@ -53,7 +53,7 @@ A NixOS host has no file at the standard path unless [nix-ld](https://github.com
 - Build on that host with `bonnie build --native-loader`. The binary then names the host's Nix loader, and runs only on hosts with that exact store path.
 - Change the loader of an existing binary: `patchelf --set-interpreter "$(cat $NIX_CC/nix-support/dynamic-linker)" ./report-agent`.
 
-To set a different loader, set `GO_LDSO` in the environment of `bonnie build`. `bonnie build` keeps it.
+To set a different loader, give the linker `-I` in `GOFLAGS`, for example `GOFLAGS=-ldflags=-I=/opt/glibc/lib/ld-linux-x86-64.so.2 bonnie build`. `bonnie build` keeps it. Other linker flags in `GOFLAGS` are also kept: `bonnie build` adds its `-I` to them.
 
 Musl distributions such as Alpine use a different C library. A glibc agent that loads libraries at run time needs a glibc host or base image.
 

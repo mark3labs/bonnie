@@ -14,10 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dynamically linked, also with `CGO_ENABLED=0`. With the Go toolchain from
   nixpkgs, the binary named a loader in `/nix/store` and stopped on other
   hosts with `cannot execute: required file not found`. For a Linux target,
-  `bonnie build` now sets `GO_LDSO` to the loader that upstream Go names for
-  the target `GOARCH` (`/lib64/ld-linux-x86-64.so.2` on amd64), or the musl
-  one on a host that has only musl. A `GO_LDSO` that the caller sets is kept.
-  A static binary does not change.
+  `bonnie build` now passes the linker `-I` with the loader that upstream Go
+  names for the target `GOARCH` (`/lib64/ld-linux-x86-64.so.2` on amd64), or
+  the musl one on a host that has only musl. `-I` wins over the toolchain
+  default in each toolchain; `GO_LDSO` in the build environment does not,
+  because only the nixpkgs linker reads it. The `-I` is added to the
+  `-ldflags` in `GOFLAGS`, and a `-I` there is kept. A static binary does not
+  change.
 
 ### Added
 

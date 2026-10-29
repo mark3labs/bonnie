@@ -45,14 +45,6 @@ func interpreter(t *testing.T, path string) string {
 	return ""
 }
 
-// withoutGoLdso removes GO_LDSO from env. A GO_LDSO in the test process is a
-// caller override, and it would win over the selection under test.
-func withoutGoLdso(env []string) []string {
-	return slices.DeleteFunc(env, func(item string) bool {
-		return strings.HasPrefix(item, "GO_LDSO=")
-	})
-}
-
 // dynlinkTree is a hermetic tree that links dynamically.
 func dynlinkTree(t *testing.T) string {
 	t.Helper()
@@ -74,16 +66,27 @@ func dynlinkTree(t *testing.T) string {
 // a Debian host with "cannot execute: required file not found". The binary
 // must name the loader of the target's glibc (or musl) system, whatever the
 // toolchain default is.
+//
+// treetest.BuildEnv sets GOFLAGS=-ldflags=-w. The binary must also have no
+// DWARF: the -I that bonnie build adds must not replace the GOFLAGS -ldflags.
 func TestBuildUsesStandardLoader(t *testing.T) {
 	t.Parallel()
 	root := dynlinkTree(t)
 	bin := filepath.Join(root, "agent")
-	if err := runBuild(root, buildOpts{output: bin, env: withoutGoLdso(treetest.BuildEnv())}); err != nil {
+	if err := runBuild(root, buildOpts{output: bin, env: treetest.BuildEnv()}); err != nil {
 		t.Fatalf("runBuild: %v", err)
 	}
 	want := linuxLoader("linux", runtime.GOARCH, fileExists)
 	if got := interpreter(t, bin); got != want {
 		t.Errorf("interpreter = %q, want %q", got, want)
+	}
+	f, err := elf.Open(bin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	if f.Section(".debug_info") != nil {
+		t.Error("binary has DWARF: the -ldflags=-w in GOFLAGS was lost")
 	}
 }
 
@@ -93,7 +96,7 @@ func TestBuildNativeLoaderKeepsToolchainDefault(t *testing.T) {
 	t.Parallel()
 	root := dynlinkTree(t)
 	bin := filepath.Join(root, "agent")
-	env := withoutGoLdso(treetest.BuildEnv())
+	env := treetest.BuildEnv()
 	if err := runBuild(root, buildOpts{output: bin, nativeLoader: true, env: env}); err != nil {
 		t.Fatalf("runBuild: %v", err)
 	}
@@ -132,37 +135,50 @@ func TestLinuxLoader(t *testing.T) {
 	}
 }
 
-// TestLoaderEnv proves the target comes from the build environment, not from
-// the host, and that a GO_LDSO the caller sets wins.
-func TestLoaderEnv(t *testing.T) {
+// TestLoaderArgs proves the target comes from the build environment, not
+// from the host, that the GOFLAGS linker flags are kept, and that a -I the
+// caller sets wins.
+func TestLoaderArgs(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	base := withoutGoLdso(staticBuildEnv(nil))
-
-	env, err := loaderEnv(dir, append(slices.Clone(base), "GOOS=linux", "GOARCH=arm64"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Contains(env, "GO_LDSO=/lib/ld-linux-aarch64.so.1") {
-		t.Errorf("arm64 target: GO_LDSO not set to the aarch64 loader: %q", env[len(env)-1])
-	}
-
-	env, err = loaderEnv(dir, append(slices.Clone(base), "GOOS=darwin", "GOARCH=arm64"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, item := range env {
-		if strings.HasPrefix(item, "GO_LDSO=") {
-			t.Errorf("darwin target: unexpected %s", item)
+	base := slices.DeleteFunc(staticBuildEnv(nil), func(item string) bool {
+		return strings.HasPrefix(item, "GOFLAGS=")
+	})
+	for _, tc := range []struct {
+		name string
+		env  []string
+		want []string
+	}{
+		{"arm64 target", []string{"GOOS=linux", "GOARCH=arm64"},
+			[]string{"-ldflags=-I /lib/ld-linux-aarch64.so.1"}},
+		{"darwin target", []string{"GOOS=darwin", "GOARCH=arm64"}, nil},
+		{"GOFLAGS ldflags kept", []string{"GOOS=linux", "GOARCH=arm64", "GOFLAGS=-mod=mod '-ldflags=-s -w'"},
+			[]string{"-ldflags=-s -w -I /lib/ld-linux-aarch64.so.1"}},
+		{"caller -I wins", []string{"GOOS=linux", "GOARCH=arm64", "GOFLAGS=-ldflags=-I=/opt/ld.so"}, nil},
+	} {
+		got, err := loaderArgs(dir, append(slices.Clone(base), tc.env...))
+		if err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		if !slices.Equal(got, tc.want) {
+			t.Errorf("%s: loaderArgs = %q, want %q", tc.name, got, tc.want)
 		}
 	}
+}
 
-	own := append(slices.Clone(base), "GOOS=linux", "GOARCH=amd64", "GO_LDSO=/opt/ld.so")
-	env, err = loaderEnv(dir, own)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Equal(env, own) {
-		t.Errorf("caller GO_LDSO changed the environment: %q", env)
+func TestGoflagsLdflags(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ goflags, want string }{
+		{"", ""},
+		{"-mod=mod", ""},
+		{"-ldflags=-w", "-w"},
+		{"--ldflags=-w", "-w"},
+		{"-ldflags=all=-w", "-w"},
+		{`-mod=mod "-ldflags=-s -w"`, "-s -w"},
+		{"-ldflags=-w -ldflags=-s", "-s"},
+	} {
+		if got := goflagsLdflags([]string{"GOFLAGS=" + tc.goflags}); got != tc.want {
+			t.Errorf("goflagsLdflags(%q) = %q, want %q", tc.goflags, got, tc.want)
+		}
 	}
 }
