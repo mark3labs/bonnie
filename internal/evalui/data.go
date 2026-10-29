@@ -289,18 +289,40 @@ func (s *Session) pkgOutput(pkg, out string) {
 	s.pending[pkg] = append(s.pending[pkg], out)
 }
 
-// pkgFail keeps the output of a package that failed with no eval of its own,
-// for example a build failure or a panic in init.
+// pkgFail keeps the output of a failed package. With no eval of its own,
+// for example after a build failure or a panic in init, it keeps all of
+// it. With evals, it keeps the package's own lines without the go test
+// framing, for example an error that TestMain printed after m.Run, so the
+// report says why the package failed although its evals passed.
 func (s *Session) pkgFail(pkg string) {
+	ran := false
 	for _, r := range s.Results {
 		if r.Package == pkg && !r.Carried() {
-			return
+			ran = true
+			break
 		}
 	}
-	s.Build = append(s.Build, "FAIL "+pkg)
+	var lines []string
 	for _, o := range s.pending[pkg] {
-		s.Build = append(s.Build, strings.TrimRight(o, "\n"))
+		o = strings.TrimRight(o, "\n")
+		if ran && pkgFraming(o) {
+			continue
+		}
+		lines = append(lines, o)
 	}
+	if ran && len(lines) == 0 {
+		return
+	}
+	s.Build = append(s.Build, "FAIL "+pkg)
+	s.Build = append(s.Build, lines...)
+}
+
+// pkgFraming reports whether a package output line is go test's own
+// summary, not output of the code under test.
+func pkgFraming(line string) bool {
+	t := strings.TrimSpace(line)
+	return t == "" || t == "PASS" || t == "FAIL" || strings.HasPrefix(t, "ok ") ||
+		strings.HasPrefix(t, "FAIL\t") || strings.HasPrefix(t, "coverage:")
 }
 
 // cut decodes the JSON after prefix in a log line.

@@ -683,3 +683,35 @@ func TestFinishKeepsParentOutputWithFailedEval(t *testing.T) {
 		}
 	}
 }
+
+// A package that fails after its evals pass, for example from TestMain,
+// keeps its own output without the go test framing. A package whose output
+// is only framing adds nothing.
+func TestPkgFailKeepsOwnOutput(t *testing.T) {
+	t.Parallel()
+	for _, own := range []bool{true, false} {
+		s := NewSession("id", t.TempDir(), "")
+		evs := []testEvent{
+			{Action: "run", Package: "p", Test: "TestA"},
+			{Action: "pass", Package: "p", Test: "TestA"},
+			{Action: "output", Package: "p", Output: "PASS\n"},
+		}
+		if own {
+			evs = append(evs, testEvent{Action: "output", Package: "p", Output: "TestMain: close the test database: disk full\n"})
+		}
+		evs = append(evs,
+			testEvent{Action: "output", Package: "p", Output: "FAIL\tp\t0.012s\n"},
+			testEvent{Action: "fail", Package: "p"})
+		for _, line := range events(t, evs...) {
+			s.Feed(line)
+		}
+		s.Finish(errors.New("exit status 1"))
+		build := strings.Join(s.Snapshot().Build, "\n")
+		if own && build != "FAIL p\nTestMain: close the test database: disk full" {
+			t.Errorf("own output: build = %q", build)
+		}
+		if !own && build != "" {
+			t.Errorf("framing only: build = %q", build)
+		}
+	}
+}
