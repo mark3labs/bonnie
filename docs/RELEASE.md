@@ -85,6 +85,38 @@ indefinitely**, **reachable over HTTP**. State the limits from the current
 
 ## History
 
+### `v0.37.0`, 2026-10-29 — publication verified
+
+- [x] Before tagging, `task check`, `task release-check`, and
+      `task release-snapshot` pass at `0cd5cca`. The static amd64 snapshot
+      binary runs.
+- [x] No `replace` directive is committed in framework or example modules.
+- [x] `test`, `examples`, and `lint` pass on master at tagged commit
+      `0cd5ccade48cdadc7a16739d0f7544fb087c8722` (CI run `40878969458`).
+- [x] The dated changelog section states the claims, the current limits, and
+      new limits for evals and the dynamic-binary loader;
+      `scripts/release-notes.sh v0.37.0` extracts it.
+- [x] Annotated tag pushed; release run `40880840342` passes, including
+      `nix-release-pin` (`eef8870`). Both downloaded archive checksums verify.
+      The static amd64 binary prints `bonnie 0.37.0`, refuses
+      `--sandbox none` naming alternatives, and has `eval`.
+- [x] All four examples pin v0.37.0 after publication; `task examples` passes.
+
+**Version choice.** MINOR under the pre-1.0 convention: package `eval`,
+`bonnie eval`, and `bonnie build --native-loader` are added. No exported
+symbol is removed.
+
+**Order.** The examples still pinned `v0.35.0`, because the pin step after
+`v0.36.0` was not done. The release commit moved them to `v0.36.0`, so that
+`TestExamplesGoModIsAUserGoMod` passed with the new heading. The local shell
+had Go 1.27.1, and `v0.36.0` needs 1.27.2. The release steps ran in
+`nix develop` (Go 1.27.3).
+
+**Validation limits.** CI excludes the Chromium live-state and end-to-end
+tests. The arm64 binary, live-model behavior, and an eval against a live
+model were not executed. `nix run github:mark3labs/bonnie -- version` was not
+run.
+
 ### `v0.35.0`, 2026-10-26 — publication verified
 
 - [x] Before tagging, `task release-check` and `task release-snapshot` pass at
