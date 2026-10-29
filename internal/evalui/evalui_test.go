@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -209,10 +210,25 @@ func TestStore(t *testing.T) {
 		}
 		ids = append(ids, id)
 	}
-	// Two runs in the same second get different IDs.
+	// Two runs in the same second get different IDs, which keep their
+	// order when sorted, also past nine.
 	twin, _, err := NewRun(root, start)
-	if err != nil || twin != ids[0]+"-2" {
+	if err != nil || twin != ids[0]+"-002" {
 		t.Fatalf("twin = %q, %v", twin, err)
+	}
+	other := t.TempDir()
+	var same []string
+	for range 11 {
+		id, _, err := NewRun(other, start)
+		if err != nil {
+			t.Fatal(err)
+		}
+		same = append(same, id)
+	}
+	sorted := slices.Clone(same)
+	slices.Sort(sorted)
+	if !slices.Equal(sorted, same) {
+		t.Fatalf("IDs in creation order %q sort as %q", same, sorted)
 	}
 	loaded, err := Load(filepath.Join(root, ids[2]))
 	if err != nil || loaded.Snapshot().ID != ids[2] || len(loaded.Snapshot().Evals) != 1 {
@@ -615,7 +631,7 @@ func TestModelCarried(t *testing.T) {
 			t.Errorf("screen does not contain %q:\n%s", want, view)
 		}
 	}
-	if runTime("20261029-200000-2") != "20:00:00" || runTime("other") != "other" {
+	if runTime("20261029-200000-002") != "20:00:00" || runTime("other") != "other" {
 		t.Error("runTime")
 	}
 }
@@ -697,7 +713,16 @@ func TestPkgFailKeepsOwnOutput(t *testing.T) {
 			{Action: "output", Package: "p", Output: "PASS\n"},
 		}
 		if own {
-			evs = append(evs, testEvent{Action: "output", Package: "p", Output: "TestMain: close the test database: disk full\n"})
+			// The second line starts like go test's coverage summary, but is
+			// a diagnostic of the code under test.
+			evs = append(evs,
+				testEvent{Action: "output", Package: "p", Output: "TestMain: close the test database: disk full\n"},
+				testEvent{Action: "output", Package: "p", Output: "coverage: could not save report\n"},
+				testEvent{Action: "output", Package: "p", Output: "ok then\n"})
+		} else {
+			evs = append(evs,
+				testEvent{Action: "output", Package: "p", Output: "coverage: 81.2% of statements\n"},
+				testEvent{Action: "output", Package: "p", Output: "ok  \tp\t0.012s\n"})
 		}
 		evs = append(evs,
 			testEvent{Action: "output", Package: "p", Output: "FAIL\tp\t0.012s\n"},
@@ -707,7 +732,7 @@ func TestPkgFailKeepsOwnOutput(t *testing.T) {
 		}
 		s.Finish(errors.New("exit status 1"))
 		build := strings.Join(s.Snapshot().Build, "\n")
-		if own && build != "FAIL p\nTestMain: close the test database: disk full" {
+		if own && build != "FAIL p\nTestMain: close the test database: disk full\ncoverage: could not save report\nok then" {
 			t.Errorf("own output: build = %q", build)
 		}
 		if !own && build != "" {

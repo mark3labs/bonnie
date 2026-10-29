@@ -790,7 +790,7 @@ func oneLine(s string, n int) string {
 }
 
 // runTime renders the start time in a run ID ("20261029-120000", or
-// "20261029-120000-2" for a second run in that second) as "12:00:00".
+// "20261029-120000-002" for a second run in that second) as "12:00:00".
 // Another ID is shown as it is.
 func runTime(id string) string {
 	const layout = "20060102-150405"

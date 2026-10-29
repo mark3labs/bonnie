@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -317,12 +318,17 @@ func (s *Session) pkgFail(pkg string) {
 	s.Build = append(s.Build, lines...)
 }
 
+// coverageLine is the coverage summary that go test prints with -cover.
+var coverageLine = regexp.MustCompile(`^coverage: [0-9.]+% of statements`)
+
 // pkgFraming reports whether a package output line is go test's own
-// summary, not output of the code under test.
+// summary, not output of the code under test. It matches only the exact
+// forms go test prints, so a diagnostic that starts with the same word,
+// such as "coverage: could not save report", is kept.
 func pkgFraming(line string) bool {
 	t := strings.TrimSpace(line)
-	return t == "" || t == "PASS" || t == "FAIL" || strings.HasPrefix(t, "ok ") ||
-		strings.HasPrefix(t, "FAIL\t") || strings.HasPrefix(t, "coverage:")
+	return t == "" || t == "PASS" || t == "FAIL" || strings.HasPrefix(line, "ok  \t") ||
+		strings.HasPrefix(line, "FAIL\t") || coverageLine.MatchString(t)
 }
 
 // cut decodes the JSON after prefix in a log line.
@@ -481,7 +487,9 @@ func NewRun(root string, now time.Time) (id, dir string, err error) {
 	for i := 1; i < 1000; i++ {
 		id = base
 		if i > 1 {
-			id = fmt.Sprintf("%s-%d", base, i)
+			// Padded, so the IDs keep their time order when sorted:
+			// "-010" sorts after "-009", where "-10" would sort before "-9".
+			id = fmt.Sprintf("%s-%03d", base, i)
 		}
 		dir = filepath.Join(root, id)
 		err := os.Mkdir(dir, 0o755)
