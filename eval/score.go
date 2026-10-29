@@ -112,9 +112,8 @@ func (s *Score) Label(name string) *Score {
 // marks the eval "scored", and fails it in strict mode or after [Score.Gate].
 func (s *Score) AtLeast(min float64) *Score {
 	s.e.tb.Helper()
-	if math.IsNaN(min) {
-		// Every comparison with NaN is false, so the bound would pass.
-		s.fail(fmt.Errorf("threshold %v is not a number", min))
+	if err := finite(min); err != nil {
+		s.fail(err)
 		return s
 	}
 	s.min = &min
@@ -126,13 +125,23 @@ func (s *Score) AtLeast(min float64) *Score {
 // marks the eval "scored", and fails it in strict mode or after [Score.Gate].
 func (s *Score) AtMost(max float64) *Score {
 	s.e.tb.Helper()
-	if math.IsNaN(max) {
-		s.fail(fmt.Errorf("threshold %v is not a number", max))
+	if err := finite(max); err != nil {
+		s.fail(err)
 		return s
 	}
 	s.max = &max
 	s.check()
 	return s
+}
+
+// finite rejects a threshold that is not a finite number. Every comparison
+// with NaN is false, so a NaN bound would pass, and JSON cannot encode an
+// infinite bound, so its report would be lost.
+func finite(bound float64) error {
+	if math.IsNaN(bound) || math.IsInf(bound, 0) {
+		return fmt.Errorf("threshold %v is not a finite number", bound)
+	}
+	return nil
 }
 
 // Gate makes the thresholds of the score a gate: a miss fails the eval. It

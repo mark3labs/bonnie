@@ -121,7 +121,7 @@ A `*Score` is a value from 0 to 1. Its threshold methods return the score, so th
 | `Err()` | Why the score has no value, or nil |
 | `Passed()` | True when there is a value and it meets each threshold |
 
-A missed soft threshold fails the test only in strict mode. A missed gate always fails. A score with an error fails the test when the score is made.
+A threshold that is not a finite number (NaN or ±Inf) fails the score. A missed soft threshold fails the test only in strict mode. A missed gate always fails. A score with an error fails the test when the score is made.
 
 `e.Score(label, value) *Score` records a value that the eval computed. A value that is not from 0 to 1 gives a failed score.
 

@@ -620,7 +620,8 @@ func TestModelCarried(t *testing.T) {
 	}
 }
 
-// When go test fails although each eval passed, the plain table says why.
+// When go test fails although each eval passed, the plain table says why:
+// the parent test's own output and the go test error.
 func TestWritePlainShowsGoTestError(t *testing.T) {
 	t.Parallel()
 	s := NewSession("id", t.TempDir(), "")
@@ -628,6 +629,7 @@ func TestWritePlainShowsGoTestError(t *testing.T) {
 		testEvent{Action: "run", Package: "p", Test: "TestParent"},
 		testEvent{Action: "run", Package: "p", Test: "TestParent/case"},
 		testEvent{Action: "pass", Package: "p", Test: "TestParent/case"},
+		testEvent{Action: "output", Package: "p", Test: "TestParent", Output: "    parent_test.go:9: cleanup failed: disk full\n"},
 		testEvent{Action: "fail", Package: "p", Test: "TestParent"},
 		testEvent{Action: "fail", Package: "p"},
 	) {
@@ -637,6 +639,10 @@ func TestWritePlainShowsGoTestError(t *testing.T) {
 	var out bytes.Buffer
 	if err := WritePlain(&out, s.Snapshot()); err != nil {
 		t.Fatal(err)
+	}
+	// The parent's own failure is kept, so the report says what failed.
+	if !strings.Contains(out.String(), "FAIL TestParent") || !strings.Contains(out.String(), "cleanup failed: disk full") {
+		t.Fatalf("the parent failure is not shown:\n%s", out.String())
 	}
 	if !strings.Contains(out.String(), "go test failed: exit status 1") || !strings.Contains(out.String(), "evals: 1 passed, 0 failed") {
 		t.Fatalf("output:\n%s", out.String())

@@ -339,6 +339,14 @@ func (s *Session) Finish(err error) {
 	// when no eval did.
 	if err != nil && !failed {
 		s.Err = err.Error()
+		// The failure is then in a parent test, which the evals do not
+		// show: keep its output, so the report says what failed.
+		for _, r := range s.Results {
+			if r.Parent && r.Status == StatusFail && !r.Carried() {
+				s.Build = append(s.Build, "FAIL "+r.Name)
+				s.Build = append(s.Build, r.Failure()...)
+			}
+		}
 	}
 }
 

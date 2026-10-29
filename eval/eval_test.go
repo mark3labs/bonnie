@@ -547,14 +547,18 @@ func TestGateBeforeThreshold(t *testing.T) {
 		// A NaN bound would make every comparison false, so the gate would pass.
 		e.Score("nan-min", 0.5).AtLeast(math.NaN()).Gate()
 		e.Score("nan-max", 0.5).Gate().AtMost(math.NaN())
+		// JSON cannot encode an infinite bound, so its report would be lost.
+		e.Score("inf-min", 0.5).AtLeast(math.Inf(-1))
+		e.Score("inf-max", 0.5).AtMost(math.Inf(1))
 		early = r.errors()
 	})
-	if len(early) != 3 || !strings.Contains(early[0], `"missed" is 0.900`) ||
-		!strings.Contains(early[1], `"nan-min": threshold NaN is not a number`) || !strings.Contains(early[2], `"nan-max": threshold NaN`) {
+	if len(early) != 5 || !strings.Contains(early[0], `"missed" is 0.900`) ||
+		!strings.Contains(early[1], `"nan-min": threshold NaN is not a finite number`) || !strings.Contains(early[2], `"nan-max": threshold NaN`) ||
+		!strings.Contains(early[3], `"inf-min": threshold -Inf is not a finite number`) || !strings.Contains(early[4], `"inf-max": threshold +Inf`) {
 		t.Fatalf("errors before the eval ended = %q", early)
 	}
 	errs := r.errors()
-	if len(errs) != 4 || !strings.Contains(errs[3], `score "bare": Gate needs AtLeast or AtMost`) {
+	if len(errs) != 6 || !strings.Contains(errs[5], `score "bare": Gate needs AtLeast or AtMost`) {
 		t.Fatalf("errors = %q", errs)
 	}
 	status := map[string]string{}
@@ -567,7 +571,7 @@ func TestGateBeforeThreshold(t *testing.T) {
 			status[rep.Label] = rep.Status
 		}
 	}
-	want := map[string]string{"met": StatusPassed, "under": StatusPassed, "missed": StatusFailed, "bare": StatusFailed, "nan-min": StatusFailed, "nan-max": StatusFailed}
+	want := map[string]string{"met": StatusPassed, "under": StatusPassed, "missed": StatusFailed, "bare": StatusFailed, "nan-min": StatusFailed, "nan-max": StatusFailed, "inf-min": StatusFailed, "inf-max": StatusFailed}
 	if !reflect.DeepEqual(status, want) {
 		t.Fatalf("statuses = %v, want %v", status, want)
 	}
