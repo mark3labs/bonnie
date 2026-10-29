@@ -297,6 +297,7 @@ func (e *T) finish() {
 		}
 	}
 	for _, s := range e.scores {
+		s.finalize()
 		r := s.report(e.tb.Name(), e.cfg.strict)
 		b, err := json.Marshal(r)
 		if err != nil {

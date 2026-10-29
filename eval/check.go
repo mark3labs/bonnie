@@ -61,13 +61,14 @@ func Equals(want string) Matcher {
 }
 
 // Matches matches a string that the regular expression pattern matches.
-// An invalid pattern matches nothing.
+// An invalid pattern matches nothing, also under [Not]: a check that cannot
+// run must fail, never pass.
 func Matches(pattern string) Matcher {
 	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return invalidMatcher{why: fmt.Sprintf("invalid pattern %q: %v", pattern, err)}
+	}
 	return MatcherFunc(func(s string) (bool, string) {
-		if err != nil {
-			return false, fmt.Sprintf("invalid pattern %q: %v", pattern, err)
-		}
 		if re.MatchString(s) {
 			return true, ""
 		}
@@ -75,8 +76,18 @@ func Matches(pattern string) Matcher {
 	})
 }
 
-// Not matches a string that m does not match.
+// invalidMatcher is a matcher that cannot run, for example one with an
+// invalid pattern. It matches nothing, and [Not] does not invert it.
+type invalidMatcher struct{ why string }
+
+func (m invalidMatcher) Match(string) (bool, string) { return false, m.why }
+
+// Not matches a string that m does not match. When m cannot run, for
+// example [Matches] with an invalid pattern, Not matches nothing too.
 func Not(m Matcher) Matcher {
+	if bad, ok := m.(invalidMatcher); ok {
+		return bad
+	}
 	return MatcherFunc(func(s string) (bool, string) {
 		if ok, _ := m.Match(s); ok {
 			return false, fmt.Sprintf("%s matches, and must not", short(s))

@@ -1,6 +1,7 @@
 package eval
 
 import (
+	"errors"
 	"fmt"
 )
 
@@ -125,17 +126,25 @@ func (s *Score) AtMost(max float64) *Score {
 }
 
 // Gate makes the thresholds of the score a gate: a miss fails the eval. It
-// needs [Score.AtLeast] or [Score.AtMost], before or after it.
+// needs [Score.AtLeast] or [Score.AtMost], before or after it. A gate that
+// still has no threshold when the eval ends fails the eval.
 func (s *Score) Gate() *Score {
 	s.e.tb.Helper()
 	s.gate = true
-	if s.min == nil && s.max == nil && s.err == nil {
-		s.e.tb.Errorf("bonnie: eval: score %q: Gate needs AtLeast or AtMost", s.label)
-		s.failed = true
-		return s
-	}
 	s.check()
 	return s
+}
+
+// errGateWithoutThreshold is the error of a gate with no threshold.
+var errGateWithoutThreshold = errors.New("Gate needs AtLeast or AtMost")
+
+// finalize fails a gate that has no threshold. The eval calls it when it
+// ends, because Gate can come before the threshold.
+func (s *Score) finalize() {
+	s.e.tb.Helper()
+	if s.gate && s.min == nil && s.max == nil && s.err == nil {
+		s.fail(errGateWithoutThreshold)
+	}
 }
 
 // Passed reports whether the score has a value that meets each threshold.

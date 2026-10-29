@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"reflect"
 	goruntime "runtime"
 	"slices"
 	"strings"
@@ -458,6 +459,9 @@ func TestMatchers(t *testing.T) {
 		{Matches(`(`), "anything", false},
 		{Not(Contains("x")), "abc", true},
 		{Not(Contains("a")), "abc", false},
+		// A check that cannot run fails, also when it is negated.
+		{Not(Matches(`(`)), "anything", false},
+		{Not(Not(Matches(`(`))), "anything", false},
 	} {
 		if got, _ := tc.m.Match(tc.s); got != tc.want {
 			t.Errorf("match %q = %v, want %v", tc.s, got, tc.want)
@@ -525,3 +529,41 @@ type namedTB struct {
 }
 
 func (n namedTB) Name() string { return n.name }
+
+// Gate can come before the threshold. A gate with no threshold when the
+// eval ends fails the eval and is reported as failed.
+func TestGateBeforeThreshold(t *testing.T) {
+	t.Parallel()
+	r := &recorder{}
+	var early []string
+	t.Run("eval", func(t *testing.T) {
+		r.TB = t
+		e := New(r, testAgent(t, fakemodel.New()), WithStrict(false))
+		e.Score("met", 0.9).Gate().AtLeast(0.8)
+		e.Score("under", 0.1).Gate().AtMost(0.2)
+		e.Score("missed", 0.9).Gate().AtLeast(0.95)
+		e.Score("bare", 0.5).Gate()
+		early = r.errors()
+	})
+	if len(early) != 1 || !strings.Contains(early[0], `"missed" is 0.900`) {
+		t.Fatalf("errors before the eval ended = %q", early)
+	}
+	errs := r.errors()
+	if len(errs) != 2 || !strings.Contains(errs[1], `score "bare": Gate needs AtLeast or AtMost`) {
+		t.Fatalf("errors = %q", errs)
+	}
+	status := map[string]string{}
+	for _, line := range r.logs {
+		if rest, ok := strings.CutPrefix(line, ReportPrefix); ok {
+			var rep Report
+			if err := json.Unmarshal([]byte(rest), &rep); err != nil {
+				t.Fatal(err)
+			}
+			status[rep.Label] = rep.Status
+		}
+	}
+	want := map[string]string{"met": StatusPassed, "under": StatusPassed, "missed": StatusFailed, "bare": StatusFailed}
+	if !reflect.DeepEqual(status, want) {
+		t.Fatalf("statuses = %v, want %v", status, want)
+	}
+}

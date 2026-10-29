@@ -142,7 +142,7 @@ Each `bonnie eval` is kept in the tree's journal directory, in `.bonnie/evals/<i
 - `results.json`: each eval, its status, its output and its scores.
 - `journals/<test name>/`: the journal of each eval, with its sandbox working files. Open it with `bonnie runs --journal <dir>`, or press `o` in the interface.
 
-`bonnie eval show` opens the newest saved run in the interface again, and `bonnie eval show --id <id>` opens an older one. `bonnie eval list` lists the saved runs. `bonnie eval` keeps the newest 10 runs; change this with `--keep`, and `--keep 0` keeps each run. A run can hold the files that the agent wrote, so do not commit `.bonnie/` to version control.
+`bonnie eval show` opens the newest saved run in the interface again, and `bonnie eval show --id <id>` opens an older one. `bonnie eval list` lists the saved runs. `bonnie eval` keeps the newest 10 runs; change this with `--keep`, and `--keep 0` keeps each run. A run folder without `results.json` is removed only when it is more than a day old: a newer one can be the run of another `bonnie eval` in the same tree, which saves its results when it ends. A run can hold the files that the agent wrote, so do not commit `.bonnie/` to version control.
 
 `go test -tags eval ./...` also runs the evals, with the normal `go test` output. The score reports are then log lines that start with `bonnie-eval: `, and you see them with `-v` or when a test fails.
 

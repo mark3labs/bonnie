@@ -482,9 +482,17 @@ func List(root string) ([]string, error) {
 	return ids, nil
 }
 
-// Prune removes the saved runs under root except the newest keep. A run
-// directory without results, for example one that a crash left, is removed
-// too, except current. A keep of 0 or less keeps each run.
+// unsavedGrace is how long Prune keeps a run directory with no results. A
+// run writes its results only when it ends, so a recent directory without
+// them can be the active run of another `bonnie eval` in the same tree.
+// One older than this is what a crash left.
+const unsavedGrace = 24 * time.Hour
+
+// Prune removes the saved runs under root except the newest keep, and the
+// runs they carry results from. A run directory without results is removed
+// when it is older than a day, which is what a crash leaves; a newer one
+// can belong to a run of another process, so it stays. current always
+// stays. A keep of 0 or less keeps each run.
 func Prune(root, current string, keep int) error {
 	if keep <= 0 {
 		return nil
@@ -524,6 +532,13 @@ func Prune(root, current string, keep int) error {
 	for _, e := range entries {
 		if !e.IsDir() || e.Name() == current || saved[e.Name()] {
 			continue
+		}
+		if _, listed := saved[e.Name()]; !listed {
+			// No results: a run in progress, or one that a crash left.
+			info, err := e.Info()
+			if err != nil || time.Since(info.ModTime()) < unsavedGrace {
+				continue
+			}
 		}
 		if err := os.RemoveAll(filepath.Join(root, e.Name())); err != nil {
 			errs = append(errs, err)

@@ -227,8 +227,52 @@ func TestStore(t *testing.T) {
 	if want := []string{ids[3], ids[2], ids[0]}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("after prune = %v, want %v", got, want)
 	}
-	if _, err := os.Stat(filepath.Join(root, twin)); !os.IsNotExist(err) {
-		t.Fatalf("a run with no results was kept: %v", err)
+	// The twin has no results and is new: it can be the active run of
+	// another bonnie eval, so it stays.
+	if _, err := os.Stat(filepath.Join(root, twin)); err != nil {
+		t.Fatalf("a new run with no results was removed: %v", err)
+	}
+}
+
+// Prune removes a run directory with no results only when it is old
+// enough to be what a crash left. A newer one can belong to a concurrent
+// bonnie eval that has not saved yet.
+func TestPruneKeepsActiveRuns(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	now := time.Now()
+	_, active, err := NewRun(root, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(active, "journals", "TestA"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, crashed, err := NewRun(root, now.Add(-48*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := now.Add(-2 * unsavedGrace)
+	if err := os.Chtimes(crashed, old, old); err != nil {
+		t.Fatal(err)
+	}
+	id, dir, err := NewRun(root, now.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := NewSession(id, dir, "")
+	s.Finish(nil)
+	if err := s.Save(); err != nil {
+		t.Fatal(err)
+	}
+	if err := Prune(root, id, 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(active, "journals", "TestA")); err != nil {
+		t.Fatalf("the active run of another process was removed: %v", err)
+	}
+	if _, err := os.Stat(crashed); !os.IsNotExist(err) {
+		t.Fatalf("an old run with no results was kept: %v", err)
 	}
 }
 

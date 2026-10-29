@@ -103,7 +103,7 @@ type MatcherFunc func(s string) (ok bool, why string)
 | `Contains(sub)` | A string that contains `sub` |
 | `ContainsFold(sub)` | The same, with case ignored |
 | `Equals(want)` | A string equal to `want`, with white space at the ends ignored |
-| `Matches(pattern)` | A string the regular expression matches. An invalid pattern matches nothing. |
+| `Matches(pattern)` | A string the regular expression matches. An invalid pattern matches nothing, also under `Not`, so a check that cannot run fails. |
 | `Not(m)` | A string that `m` does not match |
 
 ## Scores
@@ -114,7 +114,7 @@ A `*Score` is a value from 0 to 1. Its threshold methods return the score, so th
 | --- | --- |
 | `AtLeast(min)` | Soft threshold: the value must be `min` or more |
 | `AtMost(max)` | Soft threshold: the value must be `max` or less |
-| `Gate()` | Makes the thresholds a gate. It needs `AtLeast` or `AtMost`, before or after it. |
+| `Gate()` | Makes the thresholds a gate. It needs `AtLeast` or `AtMost`, before or after it; a gate that has no threshold when the eval ends fails the eval. |
 | `Label(name)` | Names the score in the report |
 | `Value()` | The value; 0 when the score has an error |
 | `Reason()` | The judge's reason, when there is one |
