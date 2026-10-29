@@ -45,6 +45,14 @@ func interpreter(t *testing.T, path string) string {
 	return ""
 }
 
+// withoutGoLdso removes GO_LDSO from env. A GO_LDSO in the test process is a
+// caller override, and it would win over the selection under test.
+func withoutGoLdso(env []string) []string {
+	return slices.DeleteFunc(env, func(item string) bool {
+		return strings.HasPrefix(item, "GO_LDSO=")
+	})
+}
+
 // dynlinkTree is a hermetic tree that links dynamically.
 func dynlinkTree(t *testing.T) string {
 	t.Helper()
@@ -70,7 +78,7 @@ func TestBuildUsesStandardLoader(t *testing.T) {
 	t.Parallel()
 	root := dynlinkTree(t)
 	bin := filepath.Join(root, "agent")
-	if err := runBuild(root, buildOpts{output: bin, env: treetest.BuildEnv()}); err != nil {
+	if err := runBuild(root, buildOpts{output: bin, env: withoutGoLdso(treetest.BuildEnv())}); err != nil {
 		t.Fatalf("runBuild: %v", err)
 	}
 	want := linuxLoader("linux", runtime.GOARCH, fileExists)
@@ -85,7 +93,7 @@ func TestBuildNativeLoaderKeepsToolchainDefault(t *testing.T) {
 	t.Parallel()
 	root := dynlinkTree(t)
 	bin := filepath.Join(root, "agent")
-	env := treetest.BuildEnv()
+	env := withoutGoLdso(treetest.BuildEnv())
 	if err := runBuild(root, buildOpts{output: bin, nativeLoader: true, env: env}); err != nil {
 		t.Fatalf("runBuild: %v", err)
 	}
@@ -129,7 +137,7 @@ func TestLinuxLoader(t *testing.T) {
 func TestLoaderEnv(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	base := staticBuildEnv(nil)
+	base := withoutGoLdso(staticBuildEnv(nil))
 
 	env, err := loaderEnv(dir, append(slices.Clone(base), "GOOS=linux", "GOARCH=arm64"))
 	if err != nil {

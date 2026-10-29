@@ -65,7 +65,7 @@ bonnie build --output bin/report-agent
 ./bin/report-agent --help
 ```
 
-Most trees give a static binary. A tree that loads a C library at run time, for example through purego, gives a dynamically linked binary. For a Linux target, `bonnie build` sets `GO_LDSO` to the standard loader of the target architecture, for example `/lib64/ld-linux-x86-64.so.2` for amd64, so the binary runs on each glibc distribution. A `GO_LDSO` in your environment is kept. `--native-loader` keeps the toolchain default instead. See [Dynamically linked agents](/guides/deployment#dynamically-linked-agents).
+Most trees give a static binary. A tree that loads a C library at run time, for example through purego, gives a dynamically linked binary. For a Linux target, `bonnie build` sets `GO_LDSO` to the standard loader of the target architecture, for example `/lib64/ld-linux-x86-64.so.2` for amd64. A glibc distribution can run the binary when it also has the libraries the agent loads, such as `libffi.so.8`. When the build host has only the musl loader, `bonnie build` names the musl loader instead. A `GO_LDSO` in your environment is kept. `--native-loader` keeps the toolchain default instead. See [Dynamically linked agents](/guides/deployment#dynamically-linked-agents).
 
 See [Deployment](/guides/deployment) for persistent storage and host requirements.
 
