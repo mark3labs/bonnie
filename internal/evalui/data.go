@@ -339,13 +339,19 @@ func (s *Session) Finish(err error) {
 	// when no eval did.
 	if err != nil && !failed {
 		s.Err = err.Error()
-		// The failure is then in a parent test, which the evals do not
-		// show: keep its output, so the report says what failed.
-		for _, r := range s.Results {
-			if r.Parent && r.Status == StatusFail && !r.Carried() {
-				s.Build = append(s.Build, "FAIL "+r.Name)
-				s.Build = append(s.Build, r.Failure()...)
-			}
+	}
+	// A parent test is not an eval, so the reports do not show it. Keep
+	// the output of a failed one: its own log lines, for example a cleanup
+	// that failed, whether an eval failed too or not. A parent that failed
+	// only because a subtest did has no lines of its own; it is named only
+	// when no eval explains the failure.
+	for _, r := range s.Results {
+		if !r.Parent || r.Status != StatusFail || r.Carried() {
+			continue
+		}
+		if lines := r.Failure(); len(lines) > 0 || !failed {
+			s.Build = append(s.Build, "FAIL "+r.Name)
+			s.Build = append(s.Build, lines...)
 		}
 	}
 }

@@ -648,3 +648,38 @@ func TestWritePlainShowsGoTestError(t *testing.T) {
 		t.Fatalf("output:\n%s", out.String())
 	}
 }
+
+// A failed parent test's own lines are kept also when a subtest failed. A
+// parent that failed only because of its subtest adds nothing.
+func TestFinishKeepsParentOutputWithFailedEval(t *testing.T) {
+	t.Parallel()
+	for _, own := range []bool{true, false} {
+		s := NewSession("id", t.TempDir(), "")
+		evs := []testEvent{
+			{Action: "run", Package: "p", Test: "TestParent"},
+			{Action: "run", Package: "p", Test: "TestParent/case"},
+			{Action: "output", Package: "p", Test: "TestParent/case", Output: "    case_test.go:3: check failed\n"},
+			{Action: "fail", Package: "p", Test: "TestParent/case"},
+			{Action: "output", Package: "p", Test: "TestParent", Output: "--- FAIL: TestParent (0.00s)\n"},
+		}
+		if own {
+			evs = append(evs, testEvent{Action: "output", Package: "p", Test: "TestParent", Output: "    parent_test.go:9: cleanup failed: disk full\n"})
+		}
+		evs = append(evs, testEvent{Action: "fail", Package: "p", Test: "TestParent"}, testEvent{Action: "fail", Package: "p"})
+		for _, line := range events(t, evs...) {
+			s.Feed(line)
+		}
+		s.Finish(errors.New("exit status 1"))
+		snap := s.Snapshot()
+		build := strings.Join(snap.Build, "\n")
+		if own && (!strings.Contains(build, "FAIL TestParent") || !strings.Contains(build, "cleanup failed: disk full")) {
+			t.Errorf("the parent's own failure is not kept: %q", build)
+		}
+		if !own && build != "" {
+			t.Errorf("a parent with no lines of its own added %q", build)
+		}
+		if snap.Err != "" || snap.Counts().Failed != 1 {
+			t.Errorf("own=%v: err %q, counts %+v", own, snap.Err, snap.Counts())
+		}
+	}
+}
