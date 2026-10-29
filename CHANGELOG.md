@@ -26,6 +26,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`bonnie build --native-loader`** keeps the Go toolchain's own loader, for
   a binary that runs on a NixOS host without nix-ld.
+- **Evals: package `eval` and `bonnie eval`.** An eval is a Go test in an
+  agent tree (`*_eval_test.go`, `//go:build eval`). `eval.New` opens the real
+  agent in process on a temporary journal. `Send`, `Respond` and `Restart`
+  drive one run; `Restart` opens a new runtime that shares only the journal.
+  Run checks on `eval.Turn` (`Succeeded`, `Suspended`, `CalledTool`,
+  `CalledToolWith`, `NotCalledTool`, `NoFailedTools`, `MaxSteps`) and
+  `e.Check` with matchers are gates, and read the journal. A `Score` is soft
+  by default: `AtLeast`/`AtMost` set a threshold, `Gate` makes it fatal, and
+  strict mode (`--strict`, `BONNIE_EVAL_STRICT`) makes each miss fatal. The
+  recommended judge is a decision model (`Judge`, `JudgeAll` with `Bool`,
+  `Rubric` and `Choice` questions); `JudgeLLM` asks a chat model for a score
+  and a reason. `turn.Decided` grades the agent's own decision records. A
+  judgment with no model fails the eval. `bonnie eval` generates the wiring,
+  runs `go test -tags eval -json`, prints each eval and score, and fails on a
+  tree with no evals. Tool stubs and remote targets are not included.
+- **`bonnie eval` has a terminal interface, and keeps each run.** On a
+  terminal it shows the evals live, then each score, failure and
+  conversation; `o` opens an eval's journal in the run console. `--tui=false`,
+  `--json`, or output that is not a terminal give the plain table. Each run
+  is saved in `.bonnie/evals/<id>` with each eval's journal
+  (`BONNIE_EVAL_DIR`); `bonnie eval show` and `bonnie eval list` read them,
+  and `--keep` (default 10) limits how many are kept. In the interface, `r`
+  reruns the selected eval and `R` each failed eval, as a new saved run that
+  names the run it came from. A rerun keeps the whole suite: it replaces only
+  the results of the evals it runs, marks the others with the run that made
+  them, and counts the whole suite. Prune keeps a run that a kept run
+  carries results from. A rerun runs `go test` once for each package
+  and parent test with an anchored `-run` pattern, because one pattern
+  cannot name subtests of two parents without their cross product.
+- **`bonnie init` writes `main.go` with a `newAgent` function** that `main`
+  serves and each eval calls, so an eval tests the options the binary ships.
+  An existing tree keeps working; move the `bonnie.New` call into `newAgent`
+  before you write evals.
 
 ### Changed
 

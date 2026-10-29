@@ -138,6 +138,10 @@ agent.Serve()
 
 Each call is journalled with the key `tool:<tool call ID>`, and the tool is replay-safe. If a call is interrupted after its answer was journalled, recovery returns the stored answer and does not ask the model again.
 
+## Judge evals
+
+A decision model is also the recommended judge for [evals](/guides/evals). `e.Judge` in package `eval` asks typed questions about a turn and turns each answer into a score from 0 to 1. `turn.Decided(id)` grades a decision the agent made itself, from its `decision` record. The judge model is separate from `WithDecisionModel`, so the agent does not grade its own work.
+
 ## Test without a provider
 
 `WithDecider` replaces the provider call. Calls in a run are still journalled:

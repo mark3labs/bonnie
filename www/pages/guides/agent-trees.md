@@ -79,12 +79,18 @@ package main
 import "github.com/mark3labs/bonnie"
 
 func main() {
-    bonnie.New(
+    newAgent().Serve()
+}
+
+func newAgent() *bonnie.Agent {
+    return bonnie.New(
         bonnie.WithModel("anthropic/claude-sonnet-4-5"),
         bonnie.WithName("report-agent"),
-    ).Serve()
+    )
 }
 ```
+
+The options are in `newAgent`, not in `main`, so each [eval](/guides/evals) builds the same agent that the binary serves. A tree made before this shape calls `bonnie.New(...).Serve()` in `main`; that still works, but move the call into `newAgent` before you write evals.
 
 Do not repeat the tree's prompt, skills, or context paths in options without a specific need. `WithSystemPrompt` overrides the instructions file. `WithAgentFactory` is a different execution path: the custom factory owns the agent and does not automatically receive the tree's instructions, skills, or generated tools.
 

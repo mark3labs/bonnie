@@ -7,7 +7,7 @@ description: BONNIE commands, exact flags and defaults, compiled-agent flags, an
 
 The developer CLI and a compiled agent are different executables. `bonnie serve` is a generic host with no tree. `bonnie dev` and `bonnie build` run the configuration in a tree's `main.go`. A compiled tree calls `bonnie.New(...).Serve()` and has its own smaller flag set.
 
-Use `bonnie --help` and `bonnie COMMAND --help` for command help. `bonnie version` and `bonnie --version` report the CLI version. `eval` is planned, not an implemented command.
+Use `bonnie --help` and `bonnie COMMAND --help` for command help. `bonnie version` and `bonnie --version` report the CLI version.
 
 See [Agent Trees](/guides/agent-trees) for the development sequence and [Options](/reference/options) for code configuration.
 
@@ -48,6 +48,53 @@ Changes to code, instructions, skills, and module files cause regeneration and r
 The dev build gives the agent the `modify_agent` tool from package `selfmod`: ask the agent to change its own instructions, tools, skills, or context files. The tool is added with `go build -overlay`, so no file is written to the tree and `bonnie build` never includes it. The child gets `BONNIE_DEV_ROOT`, the absolute tree root. See [Self-Modification](/guides/self-modification).
 
 The dev restart timeout is not a new root option in the child. Set `WithShutdownTimeout` in code when you need to change the child's own drain period.
+
+## `bonnie eval [dir]`
+
+Runs the evals of the tree in `dir`, default `.`, and reports each eval and each score. An eval is a Go test in a file that ends in `_eval_test.go` and starts with `//go:build eval`. See [Evals](/guides/evals).
+
+`eval` generates `bonnie_gen.go` as `build` does, then runs `go test -tags eval -json ./...` in the tree. The machine needs Go. On a terminal it opens the eval interface, which shows the evals live and then their scores, failures, and conversations. With `--tui=false`, `--json`, or output that is not a terminal, it prints a plain table. The exit code is 0 only when each eval passes its gates. A tree with no evals is an error. A build failure in the tree is shown as build output.
+
+Each run is saved in `.bonnie/evals/<id>` under the tree: `results.json` and the journal of each eval. The environment of `go test` has `BONNIE_EVAL_DIR` set to the run's `journals` directory.
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--run` | empty | Run only the evals whose names match this regular expression (`go test -run`) |
+| `--strict` | `false` | Fail an eval when a score misses a soft threshold; sets `BONNIE_EVAL_STRICT=1` |
+| `--judge` | empty | Decision model of the judge, as `provider/model`; sets `BONNIE_EVAL_JUDGE` |
+| `--llm-judge` | empty | Chat model of the language-model judge; sets `BONNIE_EVAL_LLM_JUDGE` |
+| `--count` | `1` | Run each eval this many times |
+| `--parallel` | `0` | Maximum evals that run at the same time; `0` uses the `go test` default (GOMAXPROCS) |
+| `--timeout` | `30m0s` | Fail when the evals take longer |
+| `--json` | `false` | Print each score as one JSON line (an `eval.Report`) in place of the table; turns off the interface |
+| `--tui` | `true` | Show the eval interface on a terminal; `--tui=false` prints the plain table |
+| `--keep` | `10` | Saved runs to keep in `.bonnie/evals`; `0` keeps each run |
+
+An eval sets its own judge with `eval.WithJudge` or `eval.WithLLMJudge`, and that takes precedence over the flags.
+
+```bash
+bonnie eval --judge openrouter/typesafe/jev-1.14
+bonnie eval --run TestRefund --count 5
+bonnie eval --strict --json > scores.jsonl
+```
+
+In the interface, `↑` `↓` select an eval, `tab` moves the focus, `1` `2` `3` show the scores, the conversation and the test output, `f` shows only failed evals, `o` opens the eval's journal in the run console, `r` runs the selected eval again, `R` runs each failed eval again, and `q` quits. While evals run, a second `q` stops them.
+
+A rerun is a new saved run with the same flags. It starts with the results of the run before it, and replaces only the results of the evals it runs, so it shows, saves and counts the whole suite. A carried result is marked with the run that made it (`(from <id>)` in the plain table). A rerun runs `go test` once for each package and parent test, with an anchored `-run` pattern, so it runs exactly the evals that it names. The command prints the last run when you quit, and exits with the result of the whole suite.
+
+### `bonnie eval show [dir]`
+
+Opens a saved run in the eval interface: the newest one, or the one that `--id` names. `r` and `R` rerun evals of that run with its settings (`--strict`, the judges, `--count`). With `--tui=false` it prints the plain table, and with `--json` the score lines.
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--id` | empty | ID of the saved run; default is the newest |
+| `--tui` | `true` | Show the run in the interface on a terminal |
+| `--json` | `false` | Print each score as one JSON line |
+
+### `bonnie eval list [dir]`
+
+Lists the saved runs, newest first, with the number of evals that passed and failed.
 
 ## `bonnie build [dir]`
 

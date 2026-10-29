@@ -48,8 +48,9 @@ func TestScaffoldIsTheDefaultLayout(t *testing.T) {
 				t.Fatal(err)
 			}
 			if !strings.Contains(string(main), "bonnie.New(") ||
-				!strings.Contains(string(main), ").Serve()") {
-				t.Fatalf("main.go does not build and serve an agent: %s", main)
+				!strings.Contains(string(main), "newAgent().Serve()") ||
+				!strings.Contains(string(main), "func newAgent() *bonnie.Agent") {
+				t.Fatalf("main.go does not build the agent in newAgent and serve it: %s", main)
 			}
 			wantModel := `bonnie.WithModel("` + model + `")`
 			if model == "" {
@@ -64,7 +65,8 @@ func TestScaffoldIsTheDefaultLayout(t *testing.T) {
 
 // The minimum a user writes is one call. A scaffold that grows boilerplate
 // back is a scaffold that has started to copy the framework into user space,
-// where it drifts.
+// where it drifts. The call is in newAgent, so the evals of package eval
+// build the same agent that main serves; that is the only addition.
 func TestScaffoldedMainIsOneCall(t *testing.T) {
 	t.Parallel()
 	dir := filepath.Join(t.TempDir(), "my-agent")
@@ -83,7 +85,8 @@ func TestScaffoldedMainIsOneCall(t *testing.T) {
 		}
 		code++
 	}
-	// package, import block (3), func main, bonnie.New(, ).Serve(), }
+	// package, import block (3), func main() {, newAgent().Serve(), },
+	// func newAgent() {, return bonnie.New(, ), }
 	if code > 12 {
 		t.Fatalf("the scaffolded main.go carries %d lines of code; it is meant to be one call:\n%s", code, b)
 	}
