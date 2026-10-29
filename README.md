@@ -1563,6 +1563,11 @@ Stated plainly, because the failure modes are not obvious:
   Running agents must restart to use it.
 - **Mouse copy needs OSC 52.** A terminal without OSC 52 (GNOME Terminal) does
   not get the selection, except inside tmux. Use Shift+drag there.
+- **Evals call live models and run real tools.** `bonnie eval` sends real
+  requests to the agent's model and to the judge, which can cost money. Judge
+  calls are not journalled. There are no tool stubs: an eval runs the agent's
+  own tools in its sandbox. `.bonnie/evals` keeps each eval's full journal;
+  protect it.
 - **The mark3labs modules are publicly fetchable.** A scaffolded module runs
   `go mod tidy` and resolves `bonnie` and `kit` from the proxy; no `GOPRIVATE`.
   To author an agent needs Go on your machine. The binary that `bonnie build`
