@@ -8,7 +8,7 @@
 // same way as your own agent:
 //
 //	bonnie dev                           serve with hot reload and a terminal
-//	bonnie build                         one static binary
+//	bonnie build                         one binary, dynamically linked
 //	bonnie runs list --journal .bonnie   inspect the durable runs
 //
 // This file is yours; BONNIE never rewrites it. The tree's data lives at its
