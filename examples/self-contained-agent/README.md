@@ -47,6 +47,15 @@ run and manage it with the `bonnie` CLI, the same way as your own agent:
 - About 2 GB of disk space under `~/.kronk` and a network connection for
   the first start.
 
+## Ship it
+
+`bonnie build` makes one binary. Kronk loads libffi and llama.cpp at run time,
+so the binary is dynamically linked, not static. On Linux it names the
+standard loader (`/lib64/ld-linux-x86-64.so.2` on amd64), so you can copy it
+to each glibc distribution that has libffi. On a NixOS host without nix-ld,
+build it there with `bonnie build --native-loader`. See
+[Dynamically linked agents](https://go-bonnie.dev/guides/deployment#dynamically-linked-agents).
+
 ## Run it
 
 ```bash
