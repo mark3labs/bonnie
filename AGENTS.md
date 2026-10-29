@@ -39,12 +39,13 @@ Layout:
 | `presence/` | agent presence records; memory and NATS KV registries |
 | `schedule/` | durable cron jobs |
 | `observe/` | OpenTelemetry tracing of turns (`runtime.Observer`); `observe/langfuse` adapter |
+| `eval/` | evals: drive an agent in a Go test and grade it with run checks and judges (`bonnie eval`) |
 | `selfmod/` | self-modification tools: `Local` (`bonnie dev`) and `Remote` (draft pull request) |
 | `web/` | optional operator web UI (templ) |
 | `agent/` | agent-tree scaffold and code generation |
 | `sandbox/` | tool sandboxes: local, exec, docker, landlock, microsandbox |
 | `internal/` | shared TUI, operator commands, inspector, test helpers |
-| `cmd/bonnie/` | CLI (`init`, `dev`, `chat`, `serve`, `build`, `runs`, `schedules`, `sandbox`, `auth`, `update`, `version`) |
+| `cmd/bonnie/` | CLI (`init`, `dev`, `chat`, `serve`, `build`, `eval`, `runs`, `schedules`, `sandbox`, `auth`, `update`, `version`) |
 | `examples/` | `github-bot`, `slack-bot`: agent trees, each its own module (see below) |
 | `scripts/` | build and release scripts, with Go tests |
 | `www/` | documentation site and Open Graph image generator |
@@ -203,7 +204,7 @@ CGO_ENABLED=0 go build ./...
 ## Architecture notes
 
 ```
-L4  CLI, evals, traces                 CLI implemented; evals planned
+L4  CLI, evals, traces                 CLI and evals (eval/) implemented
 L3  channel/    inbound transports     http, chat, slack, discord, telegram,
                                        github, nats, iroh, natsapi implemented
 L2  discovery   agent/ tree + codegen  default layout, init, codegen, dev,
@@ -307,6 +308,27 @@ compiles every tree against the checkout, because `./...` does not reach a
 nested module. The CI `examples` job builds each tree as a user does: with
 `bonnie build` against its pinned release. Do not weaken the guard to make an
 example easier to write; change the example.
+
+### Evals are Go tests
+
+Package `eval` drives an agent in process (`Agent.WithRuntime`) and grades
+it. An eval is a test in an agent tree, in a `*_eval_test.go` file with
+`//go:build eval`, so `go test ./...` never calls a live model. `bonnie eval`
+runs `go test -tags eval -json` and reads the score lines.
+
+- The checks read the journal, never a parsed stream.
+- The decision model is the recommended judge; a chat model is the second.
+  A judge never falls back to the agent's own `WithDecisionModel`, and a
+  judgment that cannot ask a model fails the eval. It never skips.
+- Judge calls are not journalled. They grade the run; they are not part of it.
+- `cmd/bonnie` and `internal/evalui` do not import `eval`, because `eval`
+  imports `testing`. `internal/evalui` copies the record shapes and the
+  variable names; `TestNamesMatchEval` keeps the copies equal.
+- `bonnie eval` keeps each run in `.bonnie/evals/<id>`: `results.json` and
+  each eval's journal (`BONNIE_EVAL_DIR`). The interface (`internal/evalui`)
+  is the default on a terminal; it opens a journal in `internal/runsui`.
+- A scaffolded `main.go` builds the agent in `newAgent`, so an eval tests the
+  options the binary ships.
 
 ### Terminal rendering
 

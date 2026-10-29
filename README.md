@@ -173,7 +173,7 @@ bonnie dev
 ```
 
 `bonnie init` writes `instructions.md` (the system prompt), `main.go` (the one
-call you own), `bonnie_gen.go` (the generated wiring), `go.mod`, and the seed
+call you own, in `newAgent`), `bonnie_gen.go` (the generated wiring), `go.mod`, and the seed
 directories `skills/` and `context/`. It copies authored context files into each
 run; it does not add them to the prompt. With `--tools` it also writes a sample
 tool at `tools/echo/tool.go`. It never replaces a file: if one file exists, it
@@ -186,9 +186,14 @@ package main
 import "github.com/mark3labs/bonnie"
 
 func main() {
-	bonnie.New(
+	newAgent().Serve()
+}
+
+// newAgent builds the agent. Evals build the same agent with it.
+func newAgent() *bonnie.Agent {
+	return bonnie.New(
 		bonnie.WithModel("anthropic/claude-sonnet-4-5"),
-	).Serve()
+	)
 }
 ```
 
@@ -1232,6 +1237,7 @@ bonnie auth     Manage provider login credentials
 bonnie init     Scaffold an agent tree
 bonnie dev      Run an agent tree with hot reload and the built-in TUI
 bonnie build    Compile an agent tree into one static binary
+bonnie eval     Run the evals of an agent tree and report the scores
 bonnie serve    Mount the HTTP channel and serve durable runs, with no tree
 bonnie chat     Interact with an agent over the HTTP channel in a terminal
 bonnie runs     Inspect and manage durable runs
@@ -1250,6 +1256,10 @@ bonnie dev my-agent --dry-run      print the discovery plan, build nothing
 
 bonnie build my-agent              one static binary at ./my-agent
 bonnie build my-agent --output bin/agent
+
+bonnie eval my-agent --judge openrouter/typesafe/jev-1.14
+bonnie eval my-agent --strict      a missed soft threshold fails, for CI
+bonnie eval show my-agent          open the newest saved run again
 
 bonnie chat --addr 127.0.0.1:8080
 bonnie chat --addr 127.0.0.1:8080 --run <run-id>

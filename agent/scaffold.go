@@ -207,6 +207,10 @@ func pinVersion(v string) string {
 // the agent's root for files, .bonnie is the journal, and tools/ is wired by
 // codegen into bonnie_gen.go.
 //
+// The call is in newAgent, not in main, so an eval (package eval) builds the
+// same agent that main serves. An eval that built its own agent would test
+// options the binary does not ship.
+//
 // Everything that is not a file in the tree is an option here. The commented
 // lines are the ones an author reaches for first, so the file doubles as the
 // menu.
@@ -228,7 +232,14 @@ import (
 )
 
 func main() {
-	bonnie.New(
+	newAgent().Serve()
+}
+
+// newAgent builds the agent. main serves it, and each eval in a
+// *_eval_test.go file builds its own with it, so an eval tests the agent
+// this binary ships. The bonnie eval command runs them.
+func newAgent() *bonnie.Agent {
+	return bonnie.New(
 %s
 
 		// Every tool call runs in a sandbox. The default is landlock, which
@@ -246,7 +257,7 @@ func main() {
 		//	bonnie.WithDiscord(discord.Config{}),
 		//	bonnie.WithTelegram(telegram.Config{Username: "mybot"}),
 		//	bonnie.WithGitHub(github.Config{BotName: "mybot"}),
-	).Serve()
+	)
 }
 `, modelLine)
 }

@@ -60,18 +60,16 @@ Commands:
   dev      run an agent tree with hot reload and the built-in TUI
   chat     interact with a running agent in a terminal
   build    compile an agent tree into one static binary
+  eval     run the evals of an agent tree and report the scores
   init     scaffold a new agent tree
   runs     inspect durable runs
-  sandbox  manage run sandboxes
-
-Planned:
-  eval     Run evals against a local or remote agent`,
+  sandbox  manage run sandboxes`,
 		Version: buildVersion(),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return cmd.Help()
 		},
 	}
-	root.AddCommand(agentcmd.NewUpdateCommand(), agentcmd.NewAuthCommand(), newServeCmd(), newRunsCmd(), newSchedulesCmd(), newSandboxCmd(), newInitCmd(), newBuildCmd(), newDevCmd(), newChatCmd(), newVersionCmd())
+	root.AddCommand(agentcmd.NewUpdateCommand(), agentcmd.NewAuthCommand(), newServeCmd(), newRunsCmd(), newSchedulesCmd(), newSandboxCmd(), newInitCmd(), newBuildCmd(), newEvalCmd(), newDevCmd(), newChatCmd(), newVersionCmd())
 	return root
 }
 
