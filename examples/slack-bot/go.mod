@@ -3,7 +3,7 @@ module slack-bot
 go 1.27.2
 
 require (
-	github.com/mark3labs/bonnie v0.37.0
+	github.com/mark3labs/bonnie v0.38.0
 	github.com/mark3labs/kit v0.139.0
 )
 
