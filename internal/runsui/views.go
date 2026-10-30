@@ -652,7 +652,11 @@ func recordDetail(rec runtime.Record) string {
 		}
 	case runtime.RecordStep:
 		req := suspendOf(rec)
-		return req.Prompt + " · " + rec.Text
+		text := req.Prompt + " · " + rec.Text
+		if model := runtime.StepModel(rec); model != "" {
+			text += " · " + model
+		}
+		return text
 	case runtime.RecordDecision:
 		if d, err := runtime.DecodeDecisionRecord(rec); err == nil {
 			return d.Model + " · " + decisionSummary(d)

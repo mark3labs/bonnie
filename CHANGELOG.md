@@ -13,6 +13,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   assistant with `lookup_order` and `issue_refund`, and evals that use a
   dataset, run checks, a `Choice` and a `Bool` judge, `JudgeAll` on the
   transcript, the language-model judge, and an approval across `Restart`.
+- **Each step record names its model.** The `step` payload adds `model`,
+  the `provider/model` that Kit reports for the step, and
+  `runtime.StepModel` reads it. The payload keeps its `kind` and `prompt`,
+  so a reader that decodes a `SuspendRequest` is not changed. An older step
+  record has no model.
+- **`bonnie runs` shows the model.** Overview names the model of the latest
+  step, and the Trace and Journal tabs name the model of each step. Before,
+  the Overview line showed only a model change in the middle of a run.
+- **`bonnie eval` shows the models.** The Scores tab names the agent's model,
+  from the steps in the eval's journal, and the model of each decision and
+  language-model judge. The Conversation tab names the agent's model.
+- **The `bonnie eval` interface takes the mouse.** A click selects an eval or
+  a tab and moves the focus, the wheel scrolls the panel under the pointer,
+  and a drag over the detail copies its text, as in `bonnie runs`.
 
 ### Changed
 

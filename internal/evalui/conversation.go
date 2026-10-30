@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	kit "github.com/mark3labs/kit/pkg/kit"
@@ -17,18 +18,32 @@ type entry struct {
 	text string
 }
 
-// loadConversation reads the conversation of the eval whose journal is dir.
-func loadConversation(ctx context.Context, dir string) ([]entry, error) {
+// loadConversation reads the conversation of the eval whose journal is dir,
+// and the models that served the agent's steps.
+func loadConversation(ctx context.Context, dir string) ([]entry, []string, error) {
 	j, err := runtime.OpenSQLiteJournal(dir)
 	if err != nil {
-		return nil, fmt.Errorf("open journal: %w", err)
+		return nil, nil, fmt.Errorf("open journal: %w", err)
 	}
 	defer func() { _ = j.Close() }()
 	recs, err := j.Replay(ctx, RunID)
 	if err != nil {
-		return nil, fmt.Errorf("read journal: %w", err)
+		return nil, nil, fmt.Errorf("read journal: %w", err)
 	}
-	return conversation(recs), nil
+	return conversation(recs), stepModels(recs), nil
+}
+
+// stepModels returns each model that served a step of the agent, in the
+// order of first use. A journal from before the step records named their
+// model gives none.
+func stepModels(recs []runtime.Record) []string {
+	var out []string
+	for _, rec := range recs {
+		if m := runtime.StepModel(rec); m != "" && !slices.Contains(out, m) {
+			out = append(out, m)
+		}
+	}
+	return out
 }
 
 // conversation turns journal records into entries. Tool calls, results and

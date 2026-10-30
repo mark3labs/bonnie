@@ -2,6 +2,7 @@ package runsui
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
@@ -237,5 +238,49 @@ func TestSortAndFilter(t *testing.T) {
 	}
 	if !matchText(runs[1], "alp FAIL") || matchText(runs[1], "alpha waiting") {
 		t.Error("text filter must match every word, in any case")
+	}
+}
+
+// Each step names the model that served it. The run shows the latest one,
+// the trace puts it on the step's chat span, and the journal line shows it.
+// A step from before BONNIE recorded the model shows none.
+func TestStepsNameTheirModel(t *testing.T) {
+	t.Parallel()
+	b := newBuilder(t, "run-m")
+	stepWith := func(n int, model string) *journalBuilder {
+		return b.add(runtime.Record{Kind: runtime.RecordStep, Text: "stop",
+			Payload: b.payload(map[string]string{"kind": "step", "prompt": fmt.Sprintf("step %d", n), "model": model})})
+	}
+	b.state(runtime.RunPending).turn("T1", "").state(runtime.RunRunning).
+		message("user", kit.LLMTextPart{Text: "hi"})
+	stepWith(1, "anthropic/claude-sonnet-4-5")
+	b.message("assistant", kit.LLMTextPart{Text: "hello"})
+	stepWith(2, "openrouter/qwen/qwen3")
+	b.state(runtime.RunCompleted)
+
+	r := Summarize("run-m", runtime.RunCompleted, b.recs)
+	if r.Model != "openrouter/qwen/qwen3" {
+		t.Fatalf("run model = %q, want the latest step's", r.Model)
+	}
+	tr := BuildTrace(r, r.Turns[0], t0.Add(time.Hour))
+	for name, want := range map[string]string{"chat · step 1": "anthropic/claude-sonnet-4-5", "chat · step 2": "openrouter/qwen/qwen3"} {
+		if !hasAttr(spanNamed(t, tr, name), "model", want) {
+			t.Errorf("%s has no model %q: %v", name, want, spanNamed(t, tr, name).Attrs)
+		}
+	}
+	var line string
+	for _, rec := range b.recs {
+		if rec.Kind == runtime.RecordStep {
+			line = recordDetail(rec)
+			break
+		}
+	}
+	if line != "step 1 · stop · anthropic/claude-sonnet-4-5" {
+		t.Errorf("journal detail = %q", line)
+	}
+
+	old := sampleRun(t)
+	if r := Summarize("run-1", runtime.RunWaiting, old.recs); r.Model != "" {
+		t.Errorf("a run with no step model shows %q", r.Model)
 	}
 }

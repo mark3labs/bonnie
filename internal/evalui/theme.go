@@ -39,6 +39,9 @@ var (
 	sPurple = lipgloss.NewStyle().Foreground(colorPurple)
 	sKey    = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
 	sReason = lipgloss.NewStyle().Foreground(colorMuted).Italic(true)
+	// sSelection marks text selected with the mouse, as internal/runsui
+	// does.
+	sSelection = lipgloss.NewStyle().Reverse(true)
 )
 
 // resultColor is the color of an eval status.

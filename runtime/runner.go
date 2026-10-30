@@ -162,9 +162,10 @@ func attachCheckpoints(k *kit.Kit, s *Session) {
 			Kind:      RecordStep,
 			Timestamp: now(),
 			Text:      e.FinishReason,
-			Payload: encodeSuspend(SuspendRequest{
+			Payload: encodeStep(stepPayload{
 				Kind:   "step",
 				Prompt: fmt.Sprintf("step %d", e.StepNumber),
+				Model:  e.Model,
 			}),
 		})
 	})

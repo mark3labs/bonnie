@@ -247,6 +247,9 @@ func BuildTrace(r Run, turn Turn, now time.Time) Trace {
 			}
 		case runtime.RecordStep:
 			openChat(rec.Seq)
+			if model := runtime.StepModel(rec); model != "" {
+				chat.Attrs = append([]Attr{{"model", model}}, chat.Attrs...)
+			}
 			flush(rec.Timestamp, rec.Text)
 			cursor = rec.Timestamp
 		case runtime.RecordSuspend:

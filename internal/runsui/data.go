@@ -46,7 +46,9 @@ type Run struct {
 	Origin  string
 	Caller  string
 	Sandbox string
-	Model   string
+	// Model is the "provider/model" of the latest step, or of the latest
+	// model change. It is "" for a run from before steps named their model.
+	Model string
 
 	Created time.Time
 	Updated time.Time
@@ -185,6 +187,9 @@ func Summarize(id string, state runtime.RunState, recs []runtime.Record) Run {
 			r.Steps++
 			if open != nil {
 				open.Steps++
+			}
+			if model := runtime.StepModel(rec); model != "" {
+				r.Model = model
 			}
 		case kindToolIntent:
 			var in struct {

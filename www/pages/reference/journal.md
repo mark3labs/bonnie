@@ -92,7 +92,7 @@ For a store without `StepJournal`, Session falls back to individual Append calls
 | `RecordTurn` | `turn` | Durable turn identity; an optional payload holds the turn's W3C trace context |
 | `RecordCancel` | `cancel` | Turn-scoped cancellation command |
 | `RecordMessage` | `message` | Lossless conversation message |
-| `RecordStep` | `step` | Finished-step checkpoint |
+| `RecordStep` | `step` | Finished-step checkpoint; the payload names the `provider/model` that served the step (`StepModel`) |
 | `RecordSuspend` | `suspend` | Saved request for external input |
 | `RecordResume` | `resume` | Input that released suspension |
 | `RecordCompaction` | `compaction` | Saved context compaction |

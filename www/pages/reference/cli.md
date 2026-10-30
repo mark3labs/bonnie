@@ -261,7 +261,7 @@ The read commands open the journal directly and work with the server stopped. Al
 | `runs clear <run-id>` | `--addr`, `--token` | Drops the conversation from the model's context |
 | `runs compact <run-id>` | `--addr`, `--token` | Summarises older messages now |
 
-The console lists runs and the turns of the selected run, with Overview, Conversation, Trace, and Journal tabs. It refreshes every second. Without a reachable server, or with `--read-only`, it is read only. Press `?` for its keys.
+The console lists runs and the turns of the selected run, with Overview, Conversation, Trace, and Journal tabs. Overview names the model of the latest step, and each step on the Trace and Journal tabs names its model; a run that an older release journalled shows none. It refreshes every second. Without a reachable server, or with `--read-only`, it is read only. Press `?` for its keys.
 
 Reserved `bonnie.*` bookkeeping runs are hidden from list output. In `runs list --json`, `turns` counts turns and `steps` counts `RecordStep` records. Raw records can contain private prompts, tool input, and media payloads.
 

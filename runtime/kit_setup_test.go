@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"slices"
 	"testing"
@@ -60,6 +61,9 @@ func TestKitAgentWithSetup(t *testing.T) {
 		for _, rec := range recs {
 			if rec.Kind == RecordStep {
 				steps++
+				if got, want := StepModel(rec), fakemodel.Provider+"/"+fakemodel.ModelName; got != want {
+					t.Fatalf("step model = %q, want %q", got, want)
+				}
 			}
 		}
 		if steps != 2 {
@@ -109,5 +113,25 @@ func TestKitAgentConstructionFailureSkipsSetup(t *testing.T) {
 	a, err := factory(context.Background(), NewSession("failure", NewMemoryJournal()))
 	if a != nil || err == nil || called {
 		t.Fatalf("agent = %v, error = %v, setup called = %v", a, err, called)
+	}
+}
+
+// A step record names the model that served it, and an older step record
+// without one still decodes, as a SuspendRequest and with no model.
+func TestStepModel(t *testing.T) {
+	t.Parallel()
+	rec := Record{Kind: RecordStep, Payload: encodeStep(stepPayload{Kind: "step", Prompt: "step 1", Model: "anthropic/claude"})}
+	if got := StepModel(rec); got != "anthropic/claude" {
+		t.Fatalf("StepModel = %q", got)
+	}
+	var req SuspendRequest
+	if err := json.Unmarshal(rec.Payload, &req); err != nil || req.Kind != "step" || req.Prompt != "step 1" {
+		t.Fatalf("payload as SuspendRequest = %+v, %v", req, err)
+	}
+	old := Record{Kind: RecordStep, Payload: encodeSuspend(SuspendRequest{Kind: "step", Prompt: "step 1"})}
+	for _, r := range []Record{old, {Kind: RecordStep}, {Kind: RecordMessage, Payload: rec.Payload}} {
+		if got := StepModel(r); got != "" {
+			t.Errorf("StepModel(%s) = %q, want empty", r.Kind, got)
+		}
 	}
 }

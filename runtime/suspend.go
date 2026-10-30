@@ -108,3 +108,36 @@ func encodeSuspend(s SuspendRequest) json.RawMessage {
 	}
 	return b
 }
+
+// stepPayload is the durable form of a [RecordStep] payload. Kind and Prompt
+// keep the [SuspendRequest] shape that the step records had before the
+// model was added, so a reader that decodes a SuspendRequest still works.
+type stepPayload struct {
+	Kind   string `json:"kind"`
+	Prompt string `json:"prompt"`
+	// Model is the "provider/model" that served the step, as Kit reports it
+	// in [kit.StepFinishEvent].
+	Model string `json:"model,omitempty"`
+}
+
+func encodeStep(p stepPayload) json.RawMessage {
+	b, err := json.Marshal(p)
+	if err != nil {
+		return nil
+	}
+	return b
+}
+
+// StepModel returns the "provider/model" that served the agent step rec
+// records. It returns "" when rec is not a [RecordStep], and for a step
+// record written before BONNIE recorded the model.
+func StepModel(rec Record) string {
+	if rec.Kind != RecordStep || len(rec.Payload) == 0 {
+		return ""
+	}
+	var p stepPayload
+	if json.Unmarshal(rec.Payload, &p) != nil {
+		return ""
+	}
+	return p.Model
+}

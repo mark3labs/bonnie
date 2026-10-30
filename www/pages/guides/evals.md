@@ -104,6 +104,9 @@ On a terminal, it opens the eval interface. The evals show as they run: a spinne
 | `r` | Run the selected eval again |
 | `R` | Run each failed eval again |
 | `q` | Quit. While evals still run, the first `q` asks, and a second `q` stops them. |
+| Mouse | Click an eval to select it, or a tab to show it. The wheel scrolls the panel under the pointer. Drag over the detail to copy its text. |
+
+The Scores tab names the models: the agent's, from the steps in the eval's journal, and each judge's, from its scores. The Conversation tab names the agent's model at the top. An agent built against an older BONNIE release does not record its model, so its evals show only the judges.
 
 A rerun happens in the same screen and keeps the whole suite on it. The evals that you rerun show a spinner at once, also while `go test` builds the tests, and then get a new result. The others keep their result from the earlier run, muted, with the time of that run; their detail says which run made them. The totals and the exit code are those of the whole suite, so you can fix, press `R`, and repeat until the header shows PASS.
 

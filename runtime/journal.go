@@ -121,7 +121,9 @@ const (
 //     parts, so a replay that reads Text alone silently drops the rest.
 //   - [RecordCompaction]: the compaction metadata.
 //   - [RecordModelChange]: the provider and model.
-//   - [RecordSuspend] and [RecordStep]: the [SuspendRequest].
+//   - [RecordSuspend]: the [SuspendRequest].
+//   - [RecordStep]: the step number in the [SuspendRequest] shape, and the
+//     model that served the step (see [StepModel]).
 //   - [RecordRepair]: the entry IDs a torn-write repair dropped.
 //   - [RecordSandbox]: the backend and sandbox ID, and whether the sandbox
 //     was seen to be gone.

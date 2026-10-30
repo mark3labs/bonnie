@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
@@ -13,6 +15,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/mark3labs/bonnie/internal/runsui"
+	"github.com/mark3labs/bonnie/internal/selection"
 	"github.com/mark3labs/bonnie/runtime"
 )
 
@@ -135,11 +138,14 @@ type tickMsg struct{}
 type conversationMsg struct {
 	dir     string
 	entries []entry
+	models  []string
 	err     error
 }
 
 type conversationState struct {
 	entries []entry
+	// models served the agent's steps, in the order of first use.
+	models  []string
 	err     error
 	loading bool
 }
@@ -166,14 +172,29 @@ type model struct {
 	// rerun starts a rerun, or is nil. starting is true while it starts.
 	rerun    RerunFunc
 	starting bool
-	// notice is a message for the footer, shown until the next key.
-	notice string
+	// notice is a message for the footer, shown until the next key. It is
+	// an error unless noticeOK is set.
+	notice   string
+	noticeOK bool
 	// confirmStop is true after one q while evals run.
 	confirmStop bool
 	out         outcome
 
 	width, height int
+
+	// textSel is a mouse selection in the detail text. Its lines are lines
+	// of detailLines, so it stays on its text while the detail scrolls;
+	// a key, a wheel, or another eval drops it.
+	textSel selection.Selection
+	// pressAt is where the left button went down in the detail text. A
+	// press that does not drag is a click, run on release.
+	pressAt tea.Mouse
 }
+
+// rect is a screen region, for mouse hit tests.
+type rect struct{ x, y, w, h int }
+
+func (r rect) has(x, y int) bool { return x >= r.x && x < r.x+r.w && y >= r.y && y < r.y+r.h }
 
 func newModel(ctx context.Context, s *Session, selected string) model {
 	m := model{
@@ -267,8 +288,8 @@ func (m model) loadConversation() tea.Cmd {
 	m.convs[r.Journal] = &conversationState{loading: true}
 	ctx, dir := m.ctx, r.Journal
 	return func() tea.Msg {
-		entries, err := loadConversation(ctx, dir)
-		return conversationMsg{dir: dir, entries: entries, err: err}
+		entries, models, err := loadConversation(ctx, dir)
+		return conversationMsg{dir: dir, entries: entries, models: models, err: err}
 	}
 }
 
@@ -301,29 +322,200 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.clamp()
 		return m, tea.Batch(m.waitChange(), m.loadConversation())
 	case conversationMsg:
-		m.convs[msg.dir] = &conversationState{entries: msg.entries, err: msg.err}
+		m.convs[msg.dir] = &conversationState{entries: msg.entries, models: msg.models, err: msg.err}
 		m.clamp()
 		return m, nil
 	case tea.KeyPressMsg:
+		m.textSel.Clear()
 		return m.key(msg)
+	case tea.MouseClickMsg:
+		return m.press(msg.Mouse())
+	case tea.MouseMotionMsg:
+		return m.drag(msg.Mouse())
+	case tea.MouseReleaseMsg:
+		return m.release()
 	case tea.MouseWheelMsg:
-		step := 3
-		if msg.Mouse().Button == tea.MouseWheelUp {
-			step = -3
-		}
-		if m.focus == focusList && msg.Mouse().X < m.listWidth() {
-			m.move(step / 3)
-			return m, m.loadConversation()
-		}
-		m.scroll(step)
-		return m, nil
+		m.textSel.Clear()
+		return m.wheel(msg.Mouse())
 	}
 	return m, nil
 }
 
+// layout returns the screen regions of the list and the detail panels. It
+// mirrors render: a region that is not on the screen is empty.
+func (m model) layout() (list, detail rect) {
+	bodyH := max(3, m.height-2)
+	if m.width < 80 {
+		if m.focus == focusDetail {
+			return rect{}, rect{0, 1, m.width, bodyH}
+		}
+		return rect{0, 1, m.width, bodyH}, rect{}
+	}
+	lw := m.listWidth()
+	return rect{0, 1, lw, bodyH}, rect{lw, 1, m.width - lw, bodyH}
+}
+
+// detailBody is the region of the detail text: the detail panel without its
+// border, the tab row, and the margin of one cell that each line has.
+func (m model) detailBody() rect {
+	_, d := m.layout()
+	if d.w == 0 {
+		return rect{}
+	}
+	return rect{d.x + 2, d.y + 2, max(0, d.w-4), max(0, d.h-3)}
+}
+
+// click selects the eval under the mouse, or the tab, and moves the focus to
+// the panel it is in.
+func (m model) click(ms tea.Mouse) (tea.Model, tea.Cmd) {
+	list, detail := m.layout()
+	x, y := ms.X, ms.Y
+	switch {
+	case list.has(x, y):
+		m.focus = focusList
+		rows := list.h - 2
+		top := scrollTo(m.sel, m.top, rows, len(m.items))
+		if i := top + y - list.y - 1; y > list.y && y < list.y+list.h-1 && i < len(m.items) && i != m.sel {
+			m.sel, m.top, m.detailTop = i, top, 0
+			m.selName = m.selectedName()
+		}
+	case detail.has(x, y):
+		m.focus = focusDetail
+		if y == detail.y+1 {
+			if t, ok := tabAt(x - detail.x - 2); ok {
+				m.tab, m.detailTop = t, 0
+			}
+		}
+	default:
+		return m, nil
+	}
+	m.clamp()
+	return m, m.loadConversation()
+}
+
+// tabAt returns the tab whose label covers cell x of the tab row, counted
+// from the first label. It mirrors detailPanel.
+func tabAt(x int) (tab, bool) {
+	at := 0
+	for t := range tabCount {
+		w := ansi.StringWidth(fmt.Sprintf("%d %s", t+1, t))
+		if x >= at && x < at+w {
+			return t, true
+		}
+		at += w + ansi.StringWidth("  │  ")
+	}
+	return 0, false
+}
+
+// selPoint maps a screen cell to a point of the detail text.
+func (m model) selPoint(x, y int) selection.Point {
+	b := m.detailBody()
+	return selection.Point{Line: m.detailTop + y - b.y, Col: x - b.x}
+}
+
+// press starts a selection when the left button goes down on the detail
+// text. Anywhere else it is a click.
+func (m model) press(ms tea.Mouse) (tea.Model, tea.Cmd) {
+	m.textSel.Clear()
+	if ms.Button != tea.MouseLeft {
+		return m, nil
+	}
+	b := m.detailBody()
+	if !b.has(ms.X, ms.Y) {
+		return m.click(ms)
+	}
+	m.pressAt = ms
+	m.textSel.Press(m.selPoint(ms.X, ms.Y))
+	return m, nil
+}
+
+// drag extends the selection, held inside the detail text. A drag above or
+// below it scrolls one row for each motion event, so a selection can be
+// longer than the panel.
+func (m model) drag(ms tea.Mouse) (tea.Model, tea.Cmd) {
+	if !m.textSel.Dragging() {
+		return m, nil
+	}
+	b := m.detailBody()
+	switch {
+	case ms.Y < b.y:
+		m.scroll(-1)
+	case ms.Y >= b.y+b.h:
+		m.scroll(1)
+	}
+	x := min(max(ms.X, b.x), b.x+b.w-1)
+	y := min(max(ms.Y, b.y), b.y+b.h-1)
+	m.textSel.Drag(m.selPoint(x, y))
+	return m, nil
+}
+
+// release ends the drag and copies the selection. A press that never moved
+// is a click.
+func (m model) release() (tea.Model, tea.Cmd) {
+	if !m.textSel.Dragging() {
+		return m, nil
+	}
+	m.textSel.Release()
+	if m.textSel.Empty() {
+		m.textSel.Clear()
+		return m.click(m.pressAt)
+	}
+	lines := m.detailLines(m.detailBody().w)
+	plain := make([]string, len(lines))
+	for i, l := range lines {
+		plain[i] = ansi.Strip(l)
+	}
+	text := m.textSel.Text(plain, nil)
+	if text == "" {
+		m.textSel.Clear()
+		return m, nil
+	}
+	m.notice, m.noticeOK = fmt.Sprintf("copied %d characters", utf8.RuneCountInString(text)), true
+	return m, selection.Copy(text)
+}
+
+// wheel scrolls the panel under the mouse: the list moves the selection,
+// the detail scrolls its text.
+func (m model) wheel(ms tea.Mouse) (tea.Model, tea.Cmd) {
+	step := 1
+	if ms.Button == tea.MouseWheelUp {
+		step = -1
+	}
+	list, detail := m.layout()
+	switch {
+	case list.has(ms.X, ms.Y):
+		m.move(step)
+		m.clamp()
+		return m, m.loadConversation()
+	case detail.has(ms.X, ms.Y):
+		m.scroll(3 * step)
+	}
+	return m, nil
+}
+
+// highlight draws the selection over the cells of the detail text.
+func (m model) highlight(frame string) string {
+	b := m.detailBody()
+	lines := strings.Split(frame, "\n")
+	top, bottom := b.y, min(len(lines), b.y+b.h)
+	if b.w == 0 || top >= bottom {
+		return frame
+	}
+	cells := make([]string, 0, bottom-top)
+	for _, l := range lines[top:bottom] {
+		cells = append(cells, ansi.Cut(l, b.x, b.x+b.w))
+	}
+	cells = m.textSel.Highlight(cells, m.detailTop, sSelection)
+	for i, c := range cells {
+		l := lines[top+i]
+		lines[top+i] = ansi.Cut(l, 0, b.x) + c + ansi.Cut(l, b.x+b.w, ansi.StringWidth(l))
+	}
+	return strings.Join(lines, "\n")
+}
+
 func (m model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	k := msg.String()
-	m.notice = ""
+	m.notice, m.noticeOK = "", false
 	if k != "q" {
 		m.confirmStop = false
 	}
@@ -459,7 +651,11 @@ func (m model) View() tea.View {
 		v.SetContent("starting evals…")
 		return v
 	}
-	v.SetContent(m.render())
+	frame := m.render()
+	if !m.textSel.Empty() {
+		frame = m.highlight(frame)
+	}
+	v.SetContent(frame)
 	return v
 }
 
@@ -537,6 +733,8 @@ func (m model) footer(w int) string {
 	switch {
 	case m.confirmStop:
 		return fit(" "+sYellow.Render("Evals are still running. Press q again to stop them, or any other key to continue."), w)
+	case m.notice != "" && m.noticeOK:
+		return fit(" "+sGreen.Render(m.notice), w)
 	case m.notice != "":
 		return fit(" "+sRed.Render(m.notice), w)
 	case m.starting:
@@ -696,6 +894,7 @@ func (m model) scoreLines(r Result, w int) []string {
 		head += sMuted.Render(fmt.Sprintf("  ·  %d turns", r.Turns))
 	}
 	out := []string{"", head}
+	out = append(out, m.modelLines(r, w)...)
 	if r.Carried() {
 		out = append(out, sMuted.Render("From run "+r.Run+": this rerun did not run it. Press r to run it again."))
 	}
@@ -763,7 +962,44 @@ func (m model) conversationLines(r Result, w int) []string {
 	case len(st.entries) == 0:
 		return []string{"", sMuted.Render("The journal has no conversation.")}
 	}
-	return append([]string{""}, renderConversation(st.entries, w)...)
+	out := []string{""}
+	if len(st.models) > 0 {
+		out = append(out, sMuted.Render("model ")+sText.Render(strings.Join(st.models, ", ")), "")
+	}
+	return append(out, renderConversation(st.entries, w)...)
+}
+
+// modelLines name the models of the eval: the agent's, from its journal,
+// and each judge's, from the reports. A model that is not known is left
+// out, so an eval with no journal and no judge shows none.
+func (m model) modelLines(r Result, w int) []string {
+	var judges, llms []string
+	for _, rep := range r.Reports {
+		switch {
+		case rep.Model == "":
+		case rep.Kind == "llm" && !slices.Contains(llms, rep.Model):
+			llms = append(llms, rep.Model)
+		case rep.Kind == "judge" && !slices.Contains(judges, rep.Model):
+			judges = append(judges, rep.Model)
+		}
+	}
+	var agent []string
+	if st := m.convs[r.Journal]; r.Journal != "" && st != nil {
+		agent = st.models
+	}
+	var out []string
+	for _, l := range []struct {
+		label  string
+		models []string
+	}{{"agent", agent}, {"judge", judges}, {"llm judge", llms}} {
+		if len(l.models) > 0 {
+			out = append(out, fit(sMuted.Render(fmt.Sprintf("%-10s", l.label))+sText.Render(strings.Join(l.models, ", ")), w))
+		}
+	}
+	if len(out) > 0 {
+		out = append([]string{""}, out...)
+	}
+	return out
 }
 
 // scrollTo keeps sel inside a window of rows that starts at top.
