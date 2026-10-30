@@ -1865,6 +1865,7 @@ and shipped with `bonnie build` — the same shape as your own agent.
 | [`examples/github-bot`](examples/github-bot) | a durable agent on GitHub: issues, pull requests, review threads |
 | [`examples/slack-bot`](examples/slack-bot) | a durable agent in Slack: threads, controls, a live activity indicator |
 | [`examples/triage-desk`](examples/triage-desk) | a support triage agent that routes tickets with a decision model; no outside service needed |
+| [`examples/refund-desk`](examples/refund-desk) | a refund assistant with evals that grade it (`bonnie eval`); no outside service needed |
 
 ```bash
 cd examples/github-bot

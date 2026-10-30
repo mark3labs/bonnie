@@ -228,6 +228,10 @@ func TestExamplesDocumentTheCLI(t *testing.T) {
 // It compiles and does not link (see [treetest.Compile]). The link cost about
 // 4 s per tree and proves nothing that the compile does not: the CI
 // `examples` job links each tree with `bonnie build`, as a user does.
+//
+// The vet has the eval build tag, so it also compiles each *_eval_test.go
+// file. Without the tag an eval is never compiled, and an API change in
+// package eval breaks it with no test to report it.
 func TestExamplesBuildAgainstThisCheckout(t *testing.T) {
 	t.Parallel()
 	if testing.Short() {
@@ -250,11 +254,11 @@ func TestExamplesBuildAgainstThisCheckout(t *testing.T) {
 			env := append(treetest.BuildEnv(), "GOWORK=off")
 			treetest.Compile(t, dst, env)
 
-			vet := exec.Command("go", "vet", "./...")
+			vet := exec.Command("go", "vet", "-tags", "eval", "./...")
 			vet.Dir = dst
 			vet.Env = env
 			if out, err := vet.CombinedOutput(); err != nil {
-				t.Fatalf("examples/%s: go vet against this checkout: %v\n%s", name, err, out)
+				t.Fatalf("examples/%s: go vet -tags eval against this checkout: %v\n%s", name, err, out)
 			}
 		})
 	}

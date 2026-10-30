@@ -9,6 +9,7 @@ the `bonnie` CLI:
 | `bonnie dev` | serve the tree with hot reload |
 | `bonnie build` | compile the tree into one static binary |
 | `bonnie runs list` | show the durable runs in the tree's journal |
+| `bonnie eval` | run the tree's evals and report the scores |
 
 Each tree's `go.mod` pins a released BONNIE, so an example runs as a user
 gets it. `go test ./examples/` in this repository also compiles every tree
@@ -38,6 +39,22 @@ bonnie dev --addr 127.0.0.1:8081 --tui=false
 
 It needs a GitHub App and a public URL. See
 [github-bot/README.md](github-bot/README.md) for how to make the App by hand.
+
+## refund-desk
+
+The refund assistant of a small shop, with evals that grade it. It is the
+reference for `bonnie eval`: a dataset, run checks that read the journal,
+decision and language-model judges, and an approval that survives a restart.
+It needs no outside service.
+
+```bash
+cd examples/refund-desk
+bonnie dev
+bonnie eval --judge openrouter/typesafe/jev-1.14 --llm-judge anthropic/claude-sonnet-4-5
+```
+
+It needs a chat model key and judge models. See
+[refund-desk/README.md](refund-desk/README.md).
 
 ## self-contained-agent
 

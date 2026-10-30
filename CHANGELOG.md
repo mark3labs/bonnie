@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`examples/refund-desk`**, the reference for `bonnie eval`: a refund
+  assistant with `lookup_order` and `issue_refund`, and evals that use a
+  dataset, run checks, a `Choice` and a `Bool` judge, `JudgeAll` on the
+  transcript, the language-model judge, and an approval across `Restart`.
+
+### Changed
+
+- `task examples` and `TestExamplesBuildAgainstThisCheckout` vet each tree
+  with the `eval` build tag, so an example's `*_eval_test.go` files compile
+  against the checkout and the pinned release. Before, no check compiled
+  them.
+
 ## [0.37.0] — 2026-10-29
 
 **An agent tree can grade its agent with evals.** This is a MINOR release

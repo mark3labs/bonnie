@@ -159,11 +159,13 @@ tasks:
         # The trees are independent modules, and most of each build is a
         # link that uses about one core, so build them all at once. Each tree
         # gets its own binary and log: a shared output path would race, and
-        # interleaved output hides which tree failed.
+        # interleaved output hides which tree failed. The vet has the eval
+        # tag, so it compiles each tree's *_eval_test.go files too; it calls
+        # no model.
         pids=""
         for d in examples/*/; do
           d=${d%/}; n=$(basename "$d")
-          (cd "$d" && GOWORK=off "$cli" build --output "$cli-example-$n" && GOWORK=off go vet ./...) \
+          (cd "$d" && GOWORK=off "$cli" build --output "$cli-example-$n" && GOWORK=off go vet -tags eval ./...) \
             > "$cli-example-$n.log" 2>&1 &
           pids="$pids $!:$d:$n"
         done
