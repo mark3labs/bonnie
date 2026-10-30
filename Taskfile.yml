@@ -157,26 +157,35 @@ tasks:
         set -e
         cli="$PWD/{{.OUTPUT_DIR}}/{{.BINARY}}"
         # The trees are independent modules, and most of each build is a
-        # link that uses about one core, so build them all at once. Each tree
-        # gets its own binary and log: a shared output path would race, and
-        # interleaved output hides which tree failed. The vet has the eval
-        # tag, so it compiles each tree's *_eval_test.go files too; it calls
-        # no model.
+        # link that uses about one core, so build EXAMPLES_JOBS trees at once
+        # (default 2). Do not build them all at once: with five trees the
+        # hosted runner ran out of memory and killed the job (exit 143) with
+        # no error in any log. Each tree gets its own binary and log: a
+        # shared output path would race, and interleaved output hides which
+        # tree failed. The vet has the eval tag, so it compiles each tree's
+        # *_eval_test.go files too; it calls no model.
+        jobs=${EXAMPLES_JOBS:-2}
+        failed=0
         pids=""
+        reap() {
+          p=${pids%% *}; pids=${pids#* }; [ "$pids" = "$p" ] && pids=""
+          # rd and rn, not d and n: a function shares the loop's variables.
+          pid=${p%%:*}; rest=${p#*:}; rd=${rest%%:*}; rn=${rest#*:}
+          if wait "$pid"; then st=ok; else st=FAILED; failed=1; fi
+          echo "== $rd ($st)"
+          cat "$cli-example-$rn.log"
+          rm -f "$cli-example-$rn" "$cli-example-$rn.log"
+        }
+        running=0
         for d in examples/*/; do
           d=${d%/}; n=$(basename "$d")
+          if [ "$running" -ge "$jobs" ]; then reap; running=$((running - 1)); fi
           (cd "$d" && GOWORK=off "$cli" build --output "$cli-example-$n" && GOWORK=off go vet -tags eval ./...) \
             > "$cli-example-$n.log" 2>&1 &
-          pids="$pids $!:$d:$n"
+          pids="${pids:+$pids }$!:$d:$n"
+          running=$((running + 1))
         done
-        failed=0
-        for p in $pids; do
-          pid=${p%%:*}; rest=${p#*:}; d=${rest%%:*}; n=${rest#*:}
-          if wait "$pid"; then st=ok; else st=FAILED; failed=1; fi
-          echo "== $d ($st)"
-          cat "$cli-example-$n.log"
-          rm -f "$cli-example-$n" "$cli-example-$n.log"
-        done
+        while [ -n "$pids" ]; do reap; done
         [ "$failed" = 0 ]
         # bonnie build regenerates bonnie_gen.go and go build refuses a go.sum
         # that is missing an entry, so a clean tree proves the committed files
