@@ -15,7 +15,7 @@
     # Keep the `# nix:bonnie-release-tag` marker on the url line:
     # scripts/bump-flake-release-pin.sh matches on it.
     bonnie-release = {
-      url = "github:mark3labs/bonnie/v0.37.0"; # nix:bonnie-release-tag
+      url = "github:mark3labs/bonnie/v0.38.0"; # nix:bonnie-release-tag
       flake = false;
     };
   };
@@ -34,7 +34,7 @@
       # It cannot be derived from the input: a `flake = false` input arrives in
       # the outputs as a bare store path, so the tag in the url is not visible
       # here.
-      version = "0.37.0"; # nix:bonnie-release-version
+      version = "0.38.0"; # nix:bonnie-release-version
 
       # microsandbox ships releases for these three targets only.
       systems = [
