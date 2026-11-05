@@ -237,3 +237,17 @@ Definitions and revisions are code. Each definition requires exactly one of `Pro
 `Prepare` and `Run` execute on the host, outside the agent sandbox. Both must respect context cancellation and be safe to repeat if their results were not saved. `Fire.ID` stays stable across retries; use it to prevent repeated external effects. BONNIE does not guarantee exactly-once execution.
 
 Prepared dispatches and delivery progress are durable, but delivery is at least once. The scheduler takes a journal-directory lock; this is not a general distributed run lock. See [Scheduling](/guides/scheduling).
+
+## Durable Go workflows
+
+| Option | Behavior |
+| --- | --- |
+| `WithWorkflows(definitions ...workflow.Workflow)` | Registers immutable workflow versions. `Agent.Run` starts a service only when definitions are present. It shares the agent journal and stops before the journal closes. |
+| `WithWorkflowSetup(fn func(context.Context, *workflow.Service) error)` | Receives the configured service before its execution loop starts. Use it to admit work or connect application handlers. Requires `WithWorkflows`; do not wait for results in setup. |
+
+Workflows need no model or Kit types. Typed `Define`, `Start`, `Step`, and
+`Wait` functions provide saved results, idempotent admission, and durable
+signals. `Sleep` saves its deadline. Unsafe interrupted actions block for
+reconciliation; retries require explicit repeat-safe configuration. One
+service owns the journal namespace; there are no distributed claims. See
+[the workflow guide](/guides/workflows).

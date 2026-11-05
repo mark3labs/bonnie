@@ -1946,3 +1946,11 @@ messages, explicit suspension answers and cursor-based NDJSON streams. This is
 separate from NATS task/result delivery, not a shared worker queue. API credentials
 and restrictive broker ACLs are required; access is operator-wide, not per-run
 ownership. See [NATS API setup, protocol and durability limits](docs/NATS_API.md).
+
+### Durable Go workflows
+
+Package [`workflow`](https://pkg.go.dev/github.com/mark3labs/bonnie/workflow)
+executes typed Go workflow functions with saved steps, durable timers,
+signals, and explicit repeat-safe retries. It uses the existing journal and
+needs no model. See [Durable workflows](docs/WORKFLOWS.md) for the API,
+root `WithWorkflows` integration, recovery rules, and single-owner limits.

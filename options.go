@@ -1,6 +1,7 @@
 package bonnie
 
 import (
+	"context"
 	"fmt"
 	"maps"
 	"net"
@@ -25,6 +26,7 @@ import (
 	"github.com/mark3labs/bonnie/runtime"
 	"github.com/mark3labs/bonnie/sandbox"
 	"github.com/mark3labs/bonnie/schedule"
+	"github.com/mark3labs/bonnie/workflow"
 	kit "github.com/mark3labs/kit/pkg/kit"
 )
 
@@ -95,6 +97,8 @@ type config struct {
 	webUI               bool
 	noHumanInput        bool
 	auth                bonniehttp.Authenticator
+	workflows           []workflow.Workflow
+	workflowSetup       []func(context.Context, *workflow.Service) error
 	schedules           []schedule.Definition
 	scheduleClock       bool
 	scheduleClockSet    bool
@@ -650,4 +654,21 @@ func WithNATSAPI(cfg natsapi.Config) Option {
 // It rejects web UI, injected listeners, and channels with TCP routes.
 func WithHTTPListenerDisabled() Option {
 	return func(c *config) { c.noHTTPListener = true }
+}
+
+// WithWorkflows registers immutable workflow versions. Agent.Run starts a
+// workflow service only when at least one definition is registered. It uses
+// the agent's journal and stops before that journal closes. Workflow runs do
+// not use a model or a runtime.Agent implementation.
+func WithWorkflows(definitions ...workflow.Workflow) Option {
+	return func(c *config) { c.workflows = append(c.workflows, definitions...) }
+}
+
+// WithWorkflowSetup receives the workflow service before its execution loop
+// starts, after the listener is bound and all channels have started. Use it
+// to admit work or connect application handlers to the service.
+// It requires WithWorkflows. Each callback must return promptly; it must not
+// wait for workflow results. A setup error stops Agent.Run.
+func WithWorkflowSetup(fn func(context.Context, *workflow.Service) error) Option {
+	return func(c *config) { c.workflowSetup = append(c.workflowSetup, fn) }
 }

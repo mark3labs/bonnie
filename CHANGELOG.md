@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Durable Go workflows in package `workflow`: typed definitions and handles,
+  idempotent admission, saved steps, explicit repeat-safe retries, durable
+  timers and signals, cancellation, and unknown-outcome reconciliation. Runs
+  recover through the existing journal without a model or Kit types. Root
+  `WithWorkflows` and `WithWorkflowSetup` options share the agent journal and
+  start a service only when configured, after channel startup succeeds. Setup
+  callbacks are validated before use, and setup failures drain active callbacks.
+  See `docs/WORKFLOWS.md` for immutable
+  version rules, JSON limits, and the single-owner contract.
+
 - `auth login <provider>` stores an API key for any provider in Kit's model
   database, in the CLI and in each compiled agent. The key comes from a hidden
   prompt or from standard input (`--api-key-stdin`), never from an argument.

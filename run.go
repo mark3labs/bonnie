@@ -203,6 +203,16 @@ func (a *Agent) Run(ctx context.Context) (runErr error) {
 		}
 	}
 
+	// Start workflows only after the listener and channels are ready. Stop
+	// them before channel cleanup, runner drain, and journal close. A workflow
+	// service failure cancels the context used by the serving loops below.
+	workflowCtx, stopWorkflows, err := c.startWorkflows(ctx, journal)
+	if err != nil {
+		return err
+	}
+	ctx = workflowCtx
+	defer func() { runErr = errors.Join(runErr, stopWorkflows()) }()
+
 	var presenceErr <-chan error
 	if c.presence != nil {
 		presenceChannels := append([]Channel(nil), channels...)
