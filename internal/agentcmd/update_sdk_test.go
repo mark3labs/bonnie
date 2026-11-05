@@ -34,12 +34,18 @@ func TestUpdateLookupProcess(t *testing.T) {
 func TestUpdatePublicSDK(t *testing.T) {
 	// Environment changes and SDK cache operations must remain serial.
 	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	// The child has no fixed time limit of its own; `go test -timeout` stops a
+	// hung child and dumps the goroutines. A fixed 20-second limit failed CI
+	// again and again: the child printed PASS and was then killed. Under -race
+	// the child is slow to start on a loaded runner, and before it exits the
+	// race runtime sleeps for atexit_sleep_ms (1000 ms by default), once for
+	// each lookup. GORACE removes that sleep; the child's race reports are
+	// not changed.
+	gorace := strings.TrimSpace(os.Getenv("GORACE") + " atexit_sleep_ms=0")
 	lookup := func(want bool) {
 		t.Helper()
-		ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
-		defer cancel()
-		cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestUpdateLookupProcess$")
-		cmd.Env = append(os.Environ(), "BONNIE_UPDATE_LOOKUP=1", fmt.Sprintf("BONNIE_UPDATE_FOUND=%v", want))
+		cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^TestUpdateLookupProcess$")
+		cmd.Env = append(os.Environ(), "BONNIE_UPDATE_LOOKUP=1", fmt.Sprintf("BONNIE_UPDATE_FOUND=%v", want), "GORACE="+gorace)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("lookup: %v: %s", err, out)
 		}
