@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `auth login <provider>` stores an API key for any provider in Kit's model
+  database, in the CLI and in each compiled agent. The key comes from a hidden
+  prompt or from standard input (`--api-key-stdin`), never from an argument.
+  `--region` stores the region of an `amazon-bedrock` key.
+  `auth login openai --api-key-stdin` stores an OpenAI API key; without the
+  flag, `auth login openai` is still ChatGPT/Codex OAuth.
+
 ## [0.38.0] — 2026-10-30
 
 **Each step names its model, and `bonnie eval` has a reference example.**

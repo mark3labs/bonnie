@@ -127,17 +127,26 @@ Do not commit credential files. Do not put credentials in `context/`, skills, pr
 
 ### Provider login
 
-For OpenAI ChatGPT/Codex subscription OAuth instead of an API key:
+Store a provider API key, or log in to OpenAI ChatGPT/Codex with OAuth:
 
 ```bash
-bonnie auth login openai
+bonnie auth login anthropic                                # API key, hidden prompt
+printenv GROQ_API_KEY | bonnie auth login groq --api-key-stdin
+bonnie auth login amazon-bedrock --region eu-central-1
+bonnie auth login openai                                   # ChatGPT/Codex OAuth
 bonnie auth status
 bonnie auth logout openai
 ```
 
+A stored key takes precedence over the provider's environment variable. The
+key comes from a hidden prompt or from standard input, never from an argument.
+`auth login openai --api-key-stdin` stores an OpenAI API key instead of OAuth.
+GitHub Copilot uses OAuth only: use `kit auth login copilot`.
+
 Compiled agents include the same commands by default. Credentials are shared
-with Kit. This is not general OpenAI API OAuth, HTTP bearer authentication, or
-MCP authentication. Login prints a browser URL. The browser must reach
+with Kit, so a key stored with `kit auth login` also works. These commands are
+not HTTP bearer authentication or MCP authentication. OpenAI login is not
+general OpenAI API OAuth. It prints a browser URL. The browser must reach
 `localhost:1455` on the login host; forward loopback port 1455 for a remote
 host. There is no manual code-entry fallback, and login ends after at most
 five minutes. Status reports stored credentials only, not environment keys or
