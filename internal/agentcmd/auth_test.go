@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+
 	kit "github.com/mark3labs/kit/pkg/kit"
 )
 
@@ -71,7 +73,7 @@ func TestAuthLoginErrors(t *testing.T) {
 func TestAuthValidationAndCancellation(t *testing.T) {
 	t.Parallel()
 	for _, args := range [][]string{
-		{"login"}, {"login", "openai", "extra"}, {"login", "anthropic"},
+		{"login"}, {"login", "openai", "extra"}, {"login", "openai", "--region", "us-east-1"},
 		{"logout"}, {"status", "extra"},
 	} {
 		if err := executeCommand(t.Context(), newAuthCommand(authActions{}), io.Discard, args...); err == nil {
@@ -80,7 +82,7 @@ func TestAuthValidationAndCancellation(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	for _, args := range [][]string{{"login", "openai"}, {"status"}, {"logout", "openai"}} {
+	for _, args := range [][]string{{"login", "openai"}, {"login", "groq", "--api-key-stdin"}, {"status"}, {"logout", "openai"}} {
 		if err := executeCommand(ctx, newAuthCommand(authActions{}), io.Discard, args...); !errors.Is(err, context.Canceled) {
 			t.Fatalf("%v: %v", args, err)
 		}
@@ -144,11 +146,146 @@ func TestAuthLogout(t *testing.T) {
 	}
 }
 
-// The real public SDK must reject unsupported login before any browser interaction.
+// The real public SDK must reject Copilot and unknown providers before it
+// reads a key or starts a browser login. Kit's model database names Copilot
+// "github-copilot"; both spellings must reach the same refusal.
 func TestAuthPublicSDKUnsupported(t *testing.T) {
 	t.Parallel()
-	err := executeCommand(t.Context(), NewAuthCommand(), io.Discard, "login", "copilot")
-	if err == nil || !strings.Contains(err.Error(), "only openai") {
-		t.Fatalf("unsupported login: %v", err)
+	for _, provider := range []string{"copilot", "github-copilot"} {
+		err := executeCommand(t.Context(), NewAuthCommand(), io.Discard, "login", provider)
+		if err == nil || !strings.Contains(err.Error(), "OAuth only") {
+			t.Fatalf("%s login: %v", provider, err)
+		}
+	}
+	err := executeCommand(t.Context(), NewAuthCommand(), io.Discard, "login", "no-such-provider")
+	if err == nil || !strings.Contains(err.Error(), "unknown provider") {
+		t.Fatalf("unknown login: %v", err)
+	}
+}
+
+// fakeProviders answers like Kit's model database for the IDs the tests use.
+// "bedrock" is an alias whose ID is "amazon-bedrock", as in Kit.
+func fakeProviders(name string) *kit.ProviderInfo {
+	switch name {
+	case "anthropic":
+		return &kit.ProviderInfo{ID: "anthropic", Name: "Anthropic"}
+	case "openai":
+		return &kit.ProviderInfo{ID: "openai", Name: "OpenAI"}
+	case "groq":
+		return &kit.ProviderInfo{ID: "groq", Name: "Groq"}
+	case "amazon-bedrock", "bedrock":
+		return &kit.ProviderInfo{ID: "amazon-bedrock", Name: "Amazon Bedrock"}
+	case "copilot", "github-copilot":
+		return &kit.ProviderInfo{ID: "github-copilot", Name: "GitHub Copilot"}
+	}
+	return nil
+}
+
+type storedKey struct{ provider, key, region string }
+
+// keyActions records each stored key. The OAuth login fails the test: an
+// API-key login must never start a browser flow, also for openai.
+func keyActions(t *testing.T, stored *[]storedKey, prompted string) authActions {
+	return authActions{
+		login: func(context.Context, string, kit.LoginOptions) error {
+			t.Error("API-key login started OAuth")
+			return nil
+		},
+		provider: fakeProviders,
+		setKey: func(provider, key, region string) error {
+			*stored = append(*stored, storedKey{provider, key, region})
+			return nil
+		},
+		prompt: func(_ *cobra.Command, title string) (string, error) {
+			if prompted == "" {
+				return "", errNoKeyInput
+			}
+			if !strings.HasSuffix(title, "API key") {
+				t.Errorf("prompt title: %q", title)
+			}
+			return prompted, nil
+		},
+	}
+}
+
+// A key from standard input or the hidden prompt is trimmed and stored under
+// Kit's provider ID. The key never reaches the output.
+func TestAuthLoginAPIKey(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name   string
+		args   []string
+		stdin  string
+		prompt string
+		want   storedKey
+	}{
+		{"stdin", []string{"login", "groq", "--api-key-stdin"}, "  gsk-secret\n", "", storedKey{"groq", "gsk-secret", ""}},
+		{"prompt", []string{"login", "Anthropic"}, "", " sk-ant-secret ", storedKey{"anthropic", "sk-ant-secret", ""}},
+		{"openai key", []string{"login", "openai", "--api-key-stdin"}, "sk-secret", "", storedKey{"openai", "sk-secret", ""}},
+		{"bedrock alias and region", []string{"login", "bedrock", "--api-key-stdin", "--region", "eu-central-1"}, "br-secret", "", storedKey{"amazon-bedrock", "br-secret", "eu-central-1"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var stored []storedKey
+			cmd := newAuthCommand(keyActions(t, &stored, tc.prompt))
+			cmd.SetIn(strings.NewReader(tc.stdin))
+			var out bytes.Buffer
+			if err := executeCommand(t.Context(), cmd, &out, tc.args...); err != nil {
+				t.Fatal(err)
+			}
+			if len(stored) != 1 || stored[0] != tc.want {
+				t.Fatalf("stored %+v, want %+v", stored, tc.want)
+			}
+			if !strings.Contains(out.String(), "API key saved") || strings.Contains(out.String(), "secret") {
+				t.Fatalf("output: %q", out.String())
+			}
+		})
+	}
+}
+
+// A refused API-key login stores nothing and does not report success.
+func TestAuthLoginAPIKeyErrors(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, stdin, prompt, want string
+		args                      []string
+	}{
+		{"unknown provider", "k", "", "unknown provider", []string{"login", "nope", "--api-key-stdin"}},
+		{"copilot", "k", "", "OAuth only", []string{"login", "copilot", "--api-key-stdin"}},
+		{"region on other provider", "k", "", "amazon-bedrock only", []string{"login", "groq", "--api-key-stdin", "--region", "us-east-1"}},
+		{"empty stdin", " \n", "", "empty", []string{"login", "groq", "--api-key-stdin"}},
+		{"empty prompt", "", "  ", "empty", []string{"login", "groq"}},
+		{"no terminal", "piped-key", "", "--api-key-stdin", []string{"login", "groq"}},
+		{"too long", strings.Repeat("k", maxAPIKeyBytes+1), "", "longer than", []string{"login", "groq", "--api-key-stdin"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var stored []storedKey
+			cmd := newAuthCommand(keyActions(t, &stored, tc.prompt))
+			cmd.SetIn(strings.NewReader(tc.stdin))
+			var out bytes.Buffer
+			err := executeCommand(t.Context(), cmd, &out, tc.args...)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error: %v, want %q", err, tc.want)
+			}
+			if len(stored) != 0 || strings.Contains(out.String(), "saved") {
+				t.Fatalf("stored %+v, output %q", stored, out.String())
+			}
+		})
+	}
+
+	var stored []storedKey
+	actions := keyActions(t, &stored, "")
+	actions.setKey = func(string, string, string) error { return io.ErrUnexpectedEOF }
+	cmd := newAuthCommand(actions)
+	cmd.SetIn(strings.NewReader("k"))
+	var out bytes.Buffer
+	if err := executeCommand(t.Context(), cmd, &out, "login", "groq", "--api-key-stdin"); !errors.Is(err, io.ErrUnexpectedEOF) || strings.Contains(out.String(), "saved") {
+		t.Fatalf("store error: %v, output %q", err, out.String())
+	}
+	cmd = newAuthCommand(keyActions(t, &stored, ""))
+	cmd.SetIn(strings.NewReader("k"))
+	if err := executeCommand(t.Context(), cmd, failingWriter{}, "login", "groq", "--api-key-stdin"); !errors.Is(err, errWrite) {
+		t.Fatalf("output error: %v", err)
 	}
 }

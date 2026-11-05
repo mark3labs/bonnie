@@ -200,9 +200,17 @@ shared cache. `Agent.Run` does not register commands.
 
 ## Provider login
 
-Both the CLI and compiled agents include `auth login openai`, `auth status`, and
-`auth logout openai`. These manage Kit's shared stored model-provider credentials,
-not HTTP bearer tokens or MCP authentication. Login supports ChatGPT/Codex
+Both the CLI and compiled agents include `auth login <provider>`, `auth status`, and
+`auth logout <provider>`. These manage Kit's shared stored model-provider credentials,
+not HTTP bearer tokens or MCP authentication.
+
+`auth login <provider>` stores an API key for any provider in Kit's model
+database. It reads the key from a hidden prompt, or from standard input with
+`--api-key-stdin`; without a terminal it requires that flag. `--region` applies
+to `amazon-bedrock` only. A stored key takes precedence over the provider's
+environment variable. Copilot is refused: it uses OAuth only.
+
+`auth login openai` without `--api-key-stdin` runs ChatGPT/Codex
 subscription OAuth, not general OpenAI API OAuth. It prints a URL rather than
 opening a browser. The browser must reach `localhost:1455` on the login host;
 forward that loopback port for remote use. There is no manual code-entry fallback.

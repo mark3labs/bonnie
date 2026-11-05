@@ -326,6 +326,7 @@ The agent binary also includes its operator commands:
 ```bash
 ./my-agent update models             # refresh the shared model database
 ./my-agent auth login openai          # log in with ChatGPT/Codex
+./my-agent auth login anthropic       # store an API key (hidden prompt)
 ./my-agent auth status
 ./my-agent auth logout openai
 ./my-agent serve                      # same action as ./my-agent
@@ -1295,7 +1296,10 @@ which is when you need it.
 Use the shared `auth` command to manage Kit's provider credentials:
 
 ```bash
-bonnie auth login openai
+bonnie auth login openai                                   # ChatGPT/Codex OAuth
+bonnie auth login anthropic                                # API key, hidden prompt
+printenv GROQ_API_KEY | bonnie auth login groq --api-key-stdin
+bonnie auth login amazon-bedrock --region eu-central-1
 bonnie auth status
 bonnie auth logout openai
 ```
@@ -1305,10 +1309,23 @@ Compiled agents include the same commands: replace `bonnie` with
 `WithAuthCommand(false)` removes them from the compiled agent, but does not
 stop Kit from loading stored credentials.
 
-With Kit v0.127.0, only `openai` login is supported. This OAuth login is for
-OpenAI ChatGPT/Codex access, not the general OpenAI API. Use `OPENAI_API_KEY`
-for general API access. Stored credentials can take precedence over environment
-keys; remove stored OpenAI OAuth credentials if you want to switch to an API key.
+`auth login openai` is BONNIE's OAuth flow for OpenAI ChatGPT/Codex access,
+not the general OpenAI API. It is the only OAuth login in BONNIE, because Kit's
+SDK login (`kit.LoginProvider`) supports `openai` only.
+
+For other providers in Kit's model database that accept API keys,
+`auth login <provider>` stores an API key. The key comes from a hidden prompt,
+or from standard input with `--api-key-stdin`. It is never a command-line
+argument, so it does not reach shell history or the process list. A stored key
+takes precedence over the provider's environment variable. `--region` stores
+the AWS region with an `amazon-bedrock` key; without it, a rotated key keeps
+the stored region. `auth login openai --api-key-stdin` stores an OpenAI API key
+instead of OAuth. GitHub Copilot uses OAuth only; log in with
+`kit auth login copilot`. Keys stored with `kit auth login` are in the same
+store, and agents use them.
+
+Stored credentials can take precedence over environment keys; remove stored
+OpenAI OAuth credentials if you want to switch to an API key.
 Login does not select a model. Select an accessible OpenAI model in `main.go`:
 
 ```go

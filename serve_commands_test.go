@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+
+	kit "github.com/mark3labs/kit/pkg/kit"
 )
 
 // Deployed commands must use the agent defaults without starting its runtime.
@@ -17,7 +19,7 @@ func TestPackagedCommands(t *testing.T) {
 	t.Parallel()
 	journal := filepath.Join(t.TempDir(), "journal")
 	a := New(WithJournal(journal), WithAddr(":9090"), WithInstructions("missing.md"))
-	for _, args := range [][]string{{"update", "--help"}, {"update", "models", "--help"}, {"auth", "--help"}, {"auth", "login", "openai", "--help"}, {"auth", "status", "--help"}, {"auth", "logout", "openai", "--help"}, {"chat", "--help"}, {"runs", "list", "--help"}, {"runs", "show", "--help"}, {"runs", "inspect", "--help"}, {"schedules", "list", "--help"}, {"schedules", "show", "--help"}, {"schedules", "history", "--help"}, {"schedules", "trigger", "--help"}, {"serve", "--help"}, {"version"}} {
+	for _, args := range [][]string{{"update", "--help"}, {"update", "models", "--help"}, {"auth", "--help"}, {"auth", "login", "openai", "--help"}, {"auth", "login", "anthropic", "--help"}, {"auth", "status", "--help"}, {"auth", "logout", "openai", "--help"}, {"chat", "--help"}, {"runs", "list", "--help"}, {"runs", "show", "--help"}, {"runs", "inspect", "--help"}, {"schedules", "list", "--help"}, {"schedules", "show", "--help"}, {"schedules", "history", "--help"}, {"schedules", "trigger", "--help"}, {"serve", "--help"}, {"version"}} {
 		cmd := a.serveCommand(flag.NewFlagSet(t.Name(), flag.ContinueOnError))
 		var out bytes.Buffer
 		cmd.SetOut(&out)
@@ -109,6 +111,28 @@ func TestPackagedAuthCommandOption(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A compiled agent's auth login is the CLI's: it stores an API key in Kit's
+// shared store, where the agent's Kit reads it. Serial execution permits an
+// isolated XDG location.
+func TestPackagedAuthLoginStoresAPIKey(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	cmd := New().serveCommand(flag.NewFlagSet(t.Name(), flag.ContinueOnError))
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	cmd.SetIn(strings.NewReader("gsk-secret\n"))
+	cmd.SetArgs([]string{"auth", "login", "groq", "--api-key-stdin"})
+	if err := cmd.ExecuteContext(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if got := kit.GetProviderAPIKey("groq"); got != "gsk-secret" {
+		t.Fatalf("stored key: %q", got)
+	}
+	if strings.Contains(out.String(), "secret") {
+		t.Fatalf("output shows the key: %q", out.String())
 	}
 }
 
