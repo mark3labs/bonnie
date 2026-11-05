@@ -1309,19 +1309,23 @@ Compiled agents include the same commands: replace `bonnie` with
 `WithAuthCommand(false)` removes them from the compiled agent, but does not
 stop Kit from loading stored credentials.
 
-`auth login openai` is OAuth for OpenAI ChatGPT/Codex access, not the general
-OpenAI API. Kit supports OAuth login for `openai` only.
+`auth login openai` is BONNIE's OAuth flow for OpenAI ChatGPT/Codex access,
+not the general OpenAI API. It is the only OAuth login in BONNIE, because Kit's
+SDK login (`kit.LoginProvider`) supports `openai` only.
 
-For every other provider in Kit's model database, `auth login <provider>`
-stores an API key. The key comes from a hidden prompt, or from standard input
-with `--api-key-stdin`. It is never a command-line argument, so it does not
-reach shell history or the process list. A stored key takes precedence over
-the provider's environment variable. `--region` stores the AWS region with an
-`amazon-bedrock` key; without it, a rotated key keeps the stored region.
-`auth login openai --api-key-stdin` stores an OpenAI API key instead of OAuth.
-GitHub Copilot uses OAuth only; log in with `kit auth login copilot`.
-Keys stored with `kit auth login` are in the same store, and agents use them. Stored credentials can take precedence over environment
-keys; remove stored OpenAI OAuth credentials if you want to switch to an API key.
+For other providers in Kit's model database that accept API keys,
+`auth login <provider>` stores an API key. The key comes from a hidden prompt,
+or from standard input with `--api-key-stdin`. It is never a command-line
+argument, so it does not reach shell history or the process list. A stored key
+takes precedence over the provider's environment variable. `--region` stores
+the AWS region with an `amazon-bedrock` key; without it, a rotated key keeps
+the stored region. `auth login openai --api-key-stdin` stores an OpenAI API key
+instead of OAuth. GitHub Copilot uses OAuth only; log in with
+`kit auth login copilot`. Keys stored with `kit auth login` are in the same
+store, and agents use them.
+
+Stored credentials can take precedence over environment keys; remove stored
+OpenAI OAuth credentials if you want to switch to an API key.
 Login does not select a model. Select an accessible OpenAI model in `main.go`:
 
 ```go
