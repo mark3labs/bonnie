@@ -142,11 +142,11 @@ isolation. macOS and Windows are not supported — see [Limits](#limits).
 
 ### Development shell
 
-The flake also gives you a shell with Go 1.27, `golangci-lint`, `goreleaser`,
-and the microsandbox CLI:
+[devenv](https://devenv.sh) gives you a shell with Go 1.27, `golangci-lint`,
+`goreleaser`, and the microsandbox CLI. `devenv.nix` defines it:
 
 ```bash
-nix develop
+devenv shell
 go test -race ./...
 ```
 

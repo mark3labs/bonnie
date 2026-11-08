@@ -50,8 +50,8 @@
 
       # What a user installs comes from the pinned release, also `msb`: the
       # released CLI needs the microsandbox runtime its own installer pins
-      # (scripts/microsandbox_pin_test.go). The dev shell uses the working
-      # tree's recipe instead, so master can move the runtime first.
+      # (scripts/microsandbox_pin_test.go). The dev shell (devenv.nix) uses
+      # the working tree's recipe instead, so master can move the runtime first.
       releaseMicrosandbox = pkgs: pkgs.callPackage (bonnie-release + "/nix/microsandbox.nix") { };
     in
     {
@@ -118,60 +118,6 @@
         }
         // nixpkgs.lib.optionalAttrs isLinux {
           inherit (self.packages.${system}) bonnie;
-        }
-      );
-
-      devShells = forAllSystems (
-        pkgs:
-        let
-          microsandbox = pkgs.callPackage ./nix/microsandbox.nix { };
-        in
-        {
-          default = pkgs.mkShell {
-            name = "bonnie";
-
-            packages = [
-              # Toolchain. BONNIE targets the Go version in go.mod.
-              (goPackage pkgs)
-              pkgs.gopls # language server
-              pkgs.gotools # goimports
-              pkgs.go-tools # staticcheck
-              pkgs.delve # debugger
-
-              # The commands AGENTS.md documents.
-              pkgs.golangci-lint
-              pkgs.goreleaser
-              pkgs.go-task # task lint, task dev -- serve, ...
-
-              # The sandbox backend BONNIE drives as a subprocess.
-              microsandbox
-            ];
-
-            env = {
-              # Use the Go from this shell. Never download a toolchain.
-              GOTOOLCHAIN = "local";
-              # Pure-Go FFI packages (jupiterrider/ffi, purego) dlopen these at
-              # runtime; Nix-built binaries only search RUNPATH and LD_LIBRARY_PATH.
-              # On Linux, examples/self-contained-agent also loads Kronk's
-              # prebuilt llama.cpp, which links libstdc++.
-              LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath (
-                [ pkgs.libffi ] ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [ pkgs.stdenv.cc.cc.lib ]
-              );
-            };
-
-            shellHook = ''
-              # Stay quiet for `nix develop --command ...`, which CI uses.
-              if [ -n "''${PS1-}" ]; then
-                echo "BONNIE dev shell"
-                echo "  go          $(go version | cut -d' ' -f3)"
-                echo "  msb         $(msb --version 2>/dev/null || echo 'not runnable on this host')"
-                echo
-                echo "  build   go build ./..."
-                echo "  test    go test -race ./..."
-                echo "  lint    golangci-lint run"
-              fi
-            '';
-          };
         }
       );
 

@@ -11,7 +11,7 @@ The standard suite must not call a live model. Use deterministic agents or a rea
 
 ## Contributor setup
 
-Use Linux and Go 1.27. Work against the Kit version pinned in `go.mod`. Nix users can run `direnv allow` or `nix develop` for the project tools. Use `task` commands from `Taskfile.yml`.
+Use Linux and Go 1.27. Work against the Kit version pinned in `go.mod`. Nix users can run `direnv allow` or `devenv shell` for the project tools. Use `task` commands from `Taskfile.yml`.
 
 ```bash
 task build
@@ -53,7 +53,7 @@ Run `task check` before each commit and `task ci` before pushing. CI has test, l
 
 ## Avoid the module cache in file checks
 
-`.envrc` places GOPATH under `.direnv/`, inside the checkout. Do not run a raw recursive file walk such as `gofmt -l .`, bare `find`, or `grep -r` over the whole repository. That includes downloaded modules.
+The dev shell (`devenv.nix`) places GOPATH under `.direnv/`, inside the checkout. Do not run a raw recursive file walk such as `gofmt -l .`, bare `find`, or `grep -r` over the whole repository. That includes downloaded modules.
 
 Go's `./...` skips dot directories. For other file operations, ask Git:
 

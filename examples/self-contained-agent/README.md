@@ -42,7 +42,7 @@ run and manage it with the `bonnie` CLI, the same way as your own agent:
   command stops with `libffi.so.8: cannot open shared object file`. Most Linux
   systems have it. If yours does not, install it (`apt install libffi8`,
   `dnf install libffi`, or `brew install libffi`). On NixOS, use the
-  repository's dev shell (`nix develop`), which also supplies the `libstdc++`
+  repository's dev shell (`devenv shell`), which also supplies the `libstdc++`
   that llama.cpp needs.
 - About 2 GB of disk space under `~/.kronk` and a network connection for
   the first start.

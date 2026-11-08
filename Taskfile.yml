@@ -115,7 +115,7 @@ tasks:
   fmt-check:
     desc: Check formatting (fails if files need formatting)
     cmds:
-      # Ask git for the file list, never `gofmt -l .`: .envrc puts GOPATH in
+      # Ask git for the file list, never `gofmt -l .`: devenv.nix puts GOPATH in
       # .direnv/, so walking the tree reports the whole module cache.
       #
       # --others adds a file that is written but not staged yet, which

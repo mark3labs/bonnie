@@ -95,7 +95,7 @@ boundary: `public-kit-api-only` and `no-fantasy` (every file), and
 ## Setup commands
 
 Use `task` (see [`Taskfile.yml`](Taskfile.yml)). Nix users get the full tool
-set with `direnv allow` or `nix develop`.
+set with `direnv allow` or `devenv shell` (`devenv.nix`).
 
 - Build the binary: `task build`
 - Install the CLI: `task install`
@@ -131,7 +131,7 @@ task.
 
 ### Do not walk the tree with a raw file globber
 
-`.envrc` puts `GOPATH` in `.direnv/`, **inside the repository**. A command
+The dev shell (`devenv.nix`) puts `GOPATH` in `.direnv/`, **inside the repository**. A command
 that walks the working directory therefore reads the whole Go module cache:
 `gofmt -l .` reports thousands of vendored files, and `grep -r` and bare
 `find` are equally noisy.

@@ -16,6 +16,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `auth login openai --api-key-stdin` stores an OpenAI API key; without the
   flag, `auth login openai` is still ChatGPT/Codex OAuth.
 
+### Changed
+
+- **The development shell is [devenv](https://devenv.sh), not the flake.**
+  `devenv.nix` and `devenv.yaml` replace `devShells` in `flake.nix`; enter the
+  shell with `devenv shell`, or `direnv allow` through `.envrc`. The tools,
+  `GOPATH` under `.direnv/`, and `LD_LIBRARY_PATH` do not change. The flake
+  still supplies the packages, apps, and overlay that a user installs.
+
 ## [0.38.0] — 2026-10-30
 
 **Each step names its model, and `bonnie eval` has a reference example.**

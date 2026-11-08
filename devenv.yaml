@@ -1,0 +1,6 @@
+# Inputs of the development shell (devenv.nix). The flake has its own inputs
+# for the packages a user installs; this file does not affect them.
+inputs:
+  nixpkgs:
+    # go.mod asks for Go 1.27, which is in nixos-unstable.
+    url: github:NixOS/nixpkgs/nixos-unstable

@@ -8,8 +8,12 @@
 /result
 /result-*
 
-# direnv cache and the local .env it loads
+# direnv and devenv state, and the local .env direnv loads. .direnv/ also
+# holds GOPATH (devenv.nix).
 /.direnv/
+/.devenv/
+/.devenv.flake.nix
+/devenv.local.nix
 /.env
 
 # Credentials a live test writes: a channel's tokens or key and any env

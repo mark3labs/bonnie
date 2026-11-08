@@ -104,7 +104,7 @@ nix profile add github:mark3labs/bonnie
 nix run github:mark3labs/bonnie -- version
 ```
 
-The flake supplies BONNIE and the microsandbox CLI. In a source checkout, `nix develop` supplies the development tools. `direnv allow` loads the same shell through `.envrc`.
+The flake supplies BONNIE and the microsandbox CLI. In a source checkout, `devenv shell` ([devenv](https://devenv.sh)) supplies the development tools. `direnv allow` loads the same shell through `.envrc`.
 
 ## Configure a provider
 
