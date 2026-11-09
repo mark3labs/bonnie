@@ -36,6 +36,12 @@ for (const id of config.navigation.flatMap((group) => group.pages)) {
   }
   assert(html.includes('property="og:image:alt" content="BONNIE logo.'), `Missing OG image alt: ${id}`);
   assert(html.includes('name="twitter:image:alt" content="BONNIE logo.'), `Missing Twitter image alt: ${id}`);
+  // Safe Browsing (issue #61): the HTML must show readers' text without
+  // JavaScript, and must not hide page text from them.
+  assert(!/display:\s*none/.test(html), `Hidden content in served HTML: ${id}`);
+  assert(!html.includes('<div id="tome-root"></div>'), `Empty page body without JavaScript: ${id}`);
+  assert(html.includes(`<h1>${escapeAttribute(source.match(/^title: (.+)$/m)[1])}</h1>`), `Missing visible title: ${id}`);
+  assert(!html.includes("SearchAction"), `JSON-LD names a search URL that does not exist: ${id}`);
   for (const match of html.matchAll(/(?:src|href)="(\/assets\/[^"?#]+)"/g)) {
     assert(existsSync(`out${match[1]}`), `Missing asset: ${match[1]}`);
   }
@@ -43,6 +49,9 @@ for (const id of config.navigation.flatMap((group) => group.pages)) {
 for (const path of ["CNAME", ".nojekyll", "404.html", "logo.png", "quick-start.gif", "favicon.svg", "search.json", "sitemap.xml", "llms.txt", "llms-full.txt"]) {
   assert(existsSync(`out/${path}`), `Missing build output: ${path}`);
 }
+const notFound = readFileSync("out/404.html", "utf8");
+assert(notFound.includes("<h1>Page not found</h1>") && !/display:\s*none/.test(notFound), "404 page must say not found, visibly");
+assert(!notFound.includes('rel="canonical"'), "404 page must not claim a canonical URL");
 const card = readFileSync("out/og.png");
 assert.equal(card.subarray(0, 8).toString("hex"), "89504e470d0a1a0a", "Invalid OG PNG");
 assert.equal(card.readUInt32BE(16), 1200, "Incorrect OG image width");

@@ -4,12 +4,13 @@
   "type": "module",
   "scripts": {
     "dev": "tome dev",
-    "build": "tome build && node scripts/finalize-build.js",
+    "build": "tome build && bun scripts/finalize-build.js",
     "check": "node scripts/check-docs.js",
     "test": "bun run check && bun run build && node scripts/check-build.js"
   },
   "devDependencies": {
     "@tomehq/cli": "0.9.0",
+    "@tomehq/core": "0.9.0",
     "@tomehq/theme": "0.9.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1"

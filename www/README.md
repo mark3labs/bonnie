@@ -80,6 +80,16 @@ SHA-256 verification first, with separate script download, review, and execution
 steps. Google has not confirmed the cause of the warning. These changes do not
 prove safety or guarantee removal of the warning.
 
+Google cleared the site after a review, then flagged it again with no content
+change. Tome 0.9 served each page as an empty `#tome-root` plus the raw
+markdown in a `display:none` div: a blank page or hidden text to a scanner that
+does not run JavaScript, which is a cloaking pattern. `scripts/finalize-build.js`
+now writes the rendered page visibly into `#tome-root` (React replaces it on
+load), removes the hidden div, and removes the JSON-LD `SearchAction` for a
+`/search` URL that does not exist. `scripts/check-build.js` fails the build if
+hidden content or an empty body comes back. The build runs the finalize step
+with Bun, because Tome's `@tomehq/core` entry does not load in Node.
+
 After merge and the normal Pages deployment, a maintainer must:
 
 - [ ] Inspect `/`, `/installation`, and `/installation/` on the published site.

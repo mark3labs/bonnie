@@ -31,3 +31,11 @@ h1 { text-wrap: balance; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation: none !important; transition: none !important; }
 }
+/* Static page body served before the app loads (scripts/finalize-build.js). */
+.bonnie-static { max-width: 52rem; margin: 0 auto; padding: 1.5rem 1rem 3rem; font-family: "Space Grotesk", sans-serif; line-height: 1.6; }
+.bonnie-static a { color: #62e8ff; }
+.bonnie-static pre { overflow-x: auto; padding: 1rem; border-radius: 8px; background: #090e24; }
+.bonnie-static table { display: block; overflow-x: auto; border-collapse: collapse; }
+.bonnie-static th, .bonnie-static td { padding: 0.4rem 0.75rem; border: 1px solid #323d60; }
+.bonnie-static nav { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid #323d60; }
+.bonnie-static nav h2 { font-size: 1rem; }
