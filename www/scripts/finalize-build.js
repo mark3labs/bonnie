@@ -18,9 +18,17 @@ const staticNav = `<nav aria-label="Documentation">\n${config.navigation.map((gr
 const staticRoot = (body) => `<div id="tome-root"><div class="bonnie-static">\n<main>\n${body}\n</main>\n${staticNav}\n</div></div>`;
 const hiddenText = /<div data-pagefind-body style="display:none">[\s\S]*?<\/div>\s*(?=<\/body>)/;
 // Tome's JSON-LD names a /search?q= URL that does not exist on static hosting.
-const searchAction = /,"potentialAction":\{"@type":"SearchAction"[^}]*\}/;
+// Parse each block and delete the key; do not cut the text. A pattern that
+// stopped at the first "}" stopped inside "{search_term_string}" and left
+// invalid JSON, which Google Search Console reported as a parsing error.
+const jsonLd = /<script type="application\/ld\+json">([\s\S]*?)<\/script>/g;
+const withoutSearchAction = (html) => html.replace(jsonLd, (_, text) => {
+  const schema = JSON.parse(text);
+  if (schema.potentialAction?.["@type"] === "SearchAction") delete schema.potentialAction;
+  return `<script type="application/ld+json">${JSON.stringify(schema)}</script>`;
+});
 const withStaticBody = (html, body) => {
-  html = html.replace(hiddenText, "").replace(searchAction, "");
+  html = withoutSearchAction(html.replace(hiddenText, ""));
   if (!html.includes('<div id="tome-root"></div>')) throw new Error("finalize-build: missing empty #tome-root");
   return html.replace('<div id="tome-root"></div>', staticRoot(body));
 };
